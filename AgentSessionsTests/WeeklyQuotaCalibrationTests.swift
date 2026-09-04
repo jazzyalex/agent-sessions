@@ -127,6 +127,40 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(tracker.percentPointsPerDollar(now: end) ?? 0, 0.05, accuracy: 0.005)
     }
 
+    func testConsecutiveTicksBecomeOneRatioOfSumsCandidate() {
+        var tracker = WeeklyQuotaCalibrationTracker()
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(4 * 24 * 3600)
+        tracker.update(remainingPercent: 80, hasExactPercent: false, resetAt: reset,
+                       observedAt: t0, scope: scope(), ledger: ledger, now: t0)
+
+        var cumulativeOutput = 0.0
+        ledger.record(observations: [
+            WeeklyQuotaTokenObservation(logPath: "/pooled", capturedAt: t0, input: 0,
+                                        cachedInput: 0, output: 0, cacheCreation: 0,
+                                        modelSlug: "gpt-5.6")
+        ], priceTable: prices, now: t0)
+        for tick in 1...4 {
+            let at = t0.addingTimeInterval(Double(tick) * 10 * 60)
+            cumulativeOutput += Double(tick) * 100_000
+            ledger.record(observations: [
+                WeeklyQuotaTokenObservation(logPath: "/pooled", capturedAt: at, input: 0,
+                                            cachedInput: 0, output: cumulativeOutput,
+                                            cacheCreation: 0, modelSlug: "gpt-5.6")
+            ], priceTable: prices, now: at)
+            XCTAssertNotNil(tracker.update(
+                remainingPercent: 80 - Double(tick), hasExactPercent: false,
+                resetAt: reset, observedAt: at, scope: scope(), ledger: ledger, now: at))
+        }
+
+        // $20 total output spend for a 4pp drop. A median of the per-tick
+        // ratios would differ because each interval deliberately costs more.
+        XCTAssertEqual(tracker.percentPointsPerDollar(now: t0.addingTimeInterval(40 * 60)) ?? 0,
+                       4.0 / 20.0, accuracy: 0.0001)
+        XCTAssertEqual(tracker.conditioningPercentPoints(now: t0.addingTimeInterval(40 * 60)), 4)
+    }
+
     /// Acceptance test 1's real enabler: a >30-minute interval must still be
     /// accepted. Under the old burn-rate cap this was rejected, which is why
     /// Codex could never calibrate on an ordinary day.
@@ -257,30 +291,114 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
 
     // MARK: - Persistence
 
-    /// Acceptance tests 11 and 12: a scoped calibration survives a restart; an
-    /// unscoped one (Claude) never does.
-    func testOnlyScopedCalibrationSurvivesRestart() {
+    private func persistedCalibration(
+        scope calibrationScope: WeeklyQuotaCalibrationScope,
+        hasExactPercent: Bool,
+        model: String
+    ) throws -> (data: Data, ratio: Double) {
         var tracker = WeeklyQuotaCalibrationTracker()
         let ledger = WeeklyQuotaActivityLedger()
         let reset = t0.addingTimeInterval(4 * 24 * 3600)
-        tracker.update(remainingPercent: 80, hasExactPercent: false, resetAt: reset,
-                       observedAt: t0, scope: scope(), ledger: ledger, now: t0)
-        fillLedger(ledger, from: t0, minutes: 10, outputTokensPerMinute: 100_000)
+        tracker.update(remainingPercent: 80, hasExactPercent: hasExactPercent,
+                       resetAt: reset, observedAt: t0, scope: calibrationScope,
+                       ledger: ledger, now: t0)
+        fillLedger(ledger, from: t0, minutes: 10, outputTokensPerMinute: 100_000,
+                   model: model)
         let end = t0.addingTimeInterval(10 * 60)
-        tracker.update(remainingPercent: 79, hasExactPercent: false, resetAt: reset,
-                       observedAt: end, scope: scope(), ledger: ledger, now: end)
+        tracker.update(remainingPercent: 79, hasExactPercent: hasExactPercent,
+                       resetAt: reset, observedAt: end, scope: calibrationScope,
+                       ledger: ledger, now: end)
+        return (try XCTUnwrap(tracker.persistedData()),
+                try XCTUnwrap(tracker.percentPointsPerDollar(now: end)))
+    }
 
-        let data = tracker.persistedData()
-        XCTAssertNotNil(data)
+    /// Acceptance tests 11 and 12: a scoped calibration survives a restart; an
+    /// unscoped one (Claude) never does.
+    func testOnlyScopedCalibrationSurvivesRestart() throws {
+        let persisted = try persistedCalibration(
+            scope: scope(), hasExactPercent: false, model: "gpt-5.6")
+        let end = t0.addingTimeInterval(10 * 60)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 4)
         var restored = WeeklyQuotaCalibrationTracker()
-        restored.restore(from: data!, scope: scope(), now: end)
-        XCTAssertEqual(restored.percentPointsPerDollar(now: end),
-                       tracker.percentPointsPerDollar(now: end))
+        restored.restore(from: persisted.data, scope: scope(), now: end)
+        XCTAssertEqual(try XCTUnwrap(restored.percentPointsPerDollar(now: end)),
+                       persisted.ratio, accuracy: 0.000_001)
 
         // A different account must not adopt it.
         var otherAccount = WeeklyQuotaCalibrationTracker()
-        otherAccount.restore(from: data!, scope: scope(account: "acct-2"), now: end)
+        otherAccount.restore(from: persisted.data, scope: scope(account: "acct-2"), now: end)
         XCTAssertNil(otherAccount.percentPointsPerDollar(now: end))
+    }
+
+    func testLegacyCodexCalibrationIsRejectedAfterAccountingRevision() throws {
+        let persisted = try persistedCalibration(
+            scope: scope(), hasExactPercent: false, model: "gpt-5.6")
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        payload.removeValue(forKey: "activityAccountingRevision")
+        let legacy = try JSONSerialization.data(withJSONObject: payload)
+
+        var restored = WeeklyQuotaCalibrationTracker()
+        restored.restore(from: legacy, scope: scope(), now: t0.addingTimeInterval(10 * 60))
+        XCTAssertNil(restored.percentPointsPerDollar(now: t0.addingTimeInterval(10 * 60)))
+    }
+
+    func testRevisionTwoCodexCalibrationIsRejectedAfterDecoderCorrection() throws {
+        let persisted = try persistedCalibration(
+            scope: scope(), hasExactPercent: false, model: "gpt-5.6")
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        payload["activityAccountingRevision"] = 2
+        let revisionTwo = try JSONSerialization.data(withJSONObject: payload)
+
+        var restored = WeeklyQuotaCalibrationTracker()
+        restored.restore(
+            from: revisionTwo,
+            scope: scope(),
+            now: t0.addingTimeInterval(10 * 60)
+        )
+        XCTAssertNil(restored.percentPointsPerDollar(now: t0.addingTimeInterval(10 * 60)))
+    }
+
+    func testRevisionThreeCodexCalibrationIsRejectedAfterModelChronologyCorrection() throws {
+        let persisted = try persistedCalibration(
+            scope: scope(), hasExactPercent: false, model: "gpt-5.6")
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        payload["activityAccountingRevision"] = 3
+        let revisionThree = try JSONSerialization.data(withJSONObject: payload)
+
+        var restored = WeeklyQuotaCalibrationTracker()
+        restored.restore(
+            from: revisionThree,
+            scope: scope(),
+            now: t0.addingTimeInterval(10 * 60)
+        )
+        XCTAssertNil(restored.percentPointsPerDollar(now: t0.addingTimeInterval(10 * 60)))
+    }
+
+    func testLegacyClaudeCalibrationRemainsRevisionOneCompatible() throws {
+        let claudeScope = WeeklyQuotaCalibrationScope(
+            provider: "claude",
+            accountHash: WeeklyQuotaCalibrationScope.hashAccount("claude-account"),
+            sourceFamily: "oauth",
+            limitShape: "5h+weekly",
+            priceRevision: 1)
+        let persisted = try persistedCalibration(
+            scope: claudeScope, hasExactPercent: true, model: "claude-sonnet-5")
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 1)
+        payload.removeValue(forKey: "activityAccountingRevision")
+        let legacy = try JSONSerialization.data(withJSONObject: payload)
+
+        var restored = WeeklyQuotaCalibrationTracker()
+        let end = t0.addingTimeInterval(10 * 60)
+        restored.restore(from: legacy, scope: claudeScope, now: end)
+        XCTAssertEqual(try XCTUnwrap(restored.percentPointsPerDollar(now: end)),
+                       persisted.ratio, accuracy: 0.000_001)
     }
 
     func testUnscopedCalibrationIsNeverPersisted() {
@@ -375,6 +493,49 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         // The 2pp sliver must not displace the 72pp week.
         let served = store.percentPointsPerDollar(provider: "claude", now: t0) ?? 0
         XCTAssertEqual(served, 72.0 / 1073.0, accuracy: 0.002)
+    }
+
+    /// Four clean live integer ticks are still only 4pp of evidence. They must
+    /// not displace a 33pp historical measurement merely because their median is
+    /// available; that was the source of the inflated rate shown in the field.
+    func testSmallLiveSpanDoesNotDisplaceWellConditionedBootstrap() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let ledger = store.ledger(provider: "codex")
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(4 * 24 * 3600)
+        let liveScope = scope(account: nil)
+        var cumulativeOutput = 0.0
+
+        ledger.record(observations: [
+            WeeklyQuotaTokenObservation(logPath: "/live", capturedAt: t0, input: 0,
+                                        cachedInput: 0, output: 0, cacheCreation: 0,
+                                        modelSlug: "gpt-5.6")
+        ], priceTable: prices, now: t0)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: liveScope, now: t0)
+
+        for step in 1...4 {
+            let at = t0.addingTimeInterval(Double(step) * 10 * 60)
+            // $3.33 per point gives a live result near 0.30pp/$, deliberately
+            // far enough from the historical 0.214pp/$ to expose selection.
+            cumulativeOutput += 166_667
+            ledger.record(observations: [
+                WeeklyQuotaTokenObservation(logPath: "/live", capturedAt: at, input: 0,
+                                            cachedInput: 0, output: cumulativeOutput,
+                                            cacheCreation: 0, modelSlug: "gpt-5.6")
+            ], priceTable: prices, now: at)
+            store.observeQuota(provider: "codex", remainingPercent: 80 - Double(step),
+                               hasExactPercent: false, resetAt: reset, observedAt: at,
+                               scope: liveScope, now: at)
+        }
+
+        let now = t0.addingTimeInterval(40 * 60)
+        store.setBootstrapForTesting(provider: "codex", result: WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 33, dollars: 156.648, unpricedVolumeShare: 0,
+            windowStart: t0.addingTimeInterval(-604_800), resetsAt: reset, scannedAt: now))
+
+        XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: now) ?? 0,
+                       33.5 / 156.648, accuracy: 0.0001)
     }
 
     /// A weekly reset leaves the new window with nothing to divide by; the plan's
@@ -632,73 +793,48 @@ final class WeeklyQuotaDisplayTests: XCTestCase {
     }
 }
 
-/// The weekly row must not flicker between a number and "quiet" just because a
-/// provider went a few seconds without writing a usage record.
-final class WeeklyRateHoldTests: XCTestCase {
-    private let t0 = Date(timeIntervalSince1970: 4_000_000)
+/// Weekly rates use wall-clock consumption over a bounded five-minute window.
+/// A short completed turn therefore decays instead of being extrapolated at its
+/// peak for another 150 seconds.
+final class WeeklyRunwaySmoothingTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 5_000_000)
+    private let identity = RunwaySessionIdentity(
+        id: "s1", displayName: "S1", isGoal: false, logPaths: ["/s1"])
 
-    private func snapshot(rate: Double,
-                          confidence: RunwayAttributionConfidence) -> CodexRunwaySnapshot {
-        CodexRunwaySnapshot(
-            baseline: RunwayProviderBaseline(
-                source: .claude, remainingPercent: 80, resetAt: t0.addingTimeInterval(604_800),
-                currentRunoutAt: t0.addingTimeInterval(86_400), observedAt: t0,
-                windowMinutes: 10080, rateUnit: .weeklyPercentPerHour),
-            rows: [RunwayPauseImpactRow(id: "s1", displayName: "S1", isGoal: false,
-                                        deadline: .unavailable, gainedSeconds: 0,
-                                        displayRate: rate, confidence: confidence)],
-            burstSummary: nil)
+    func testCodexWaitsOneMinuteThenDecaysBurstAcrossFiveMinutes() {
+        let samples = [
+            CodexRunwayTokenActivitySample(logPath: "/s1", capturedAt: t0,
+                                           totalTokens: 0, modelSlug: "gpt-5.6-sol"),
+            CodexRunwayTokenActivitySample(logPath: "/s1", capturedAt: t0.addingTimeInterval(10),
+                                           totalTokens: 600, output: 600,
+                                           modelSlug: "gpt-5.6-sol")
+        ]
+        XCTAssertNil(CodexRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: samples, now: t0.addingTimeInterval(10)))
+        XCTAssertEqual(CodexRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: samples, now: t0.addingTimeInterval(60))?.tokensPerSecond ?? 0,
+                       9.259_259, accuracy: 0.0001)
+        XCTAssertEqual(CodexRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: samples, now: t0.addingTimeInterval(300))?.tokensPerSecond ?? 0,
+                       0.133_333, accuracy: 0.0001)
+        XCTAssertNil(CodexRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: samples, now: t0.addingTimeInterval(301)))
     }
 
-    func testBridgesAShortGapInUsageRecords() {
-        let hold = RunwayWeeklyRateHold()
-        _ = RunwaySnapshotAssembly.withWeeklyRateHold(snapshot(rate: 5, confidence: .direct),
-                                                      hold: hold, now: t0)
-        // Provider goes quiet mid-turn: the row would otherwise read "quiet".
-        let bridged = RunwaySnapshotAssembly.withWeeklyRateHold(
-            snapshot(rate: 0, confidence: .direct), hold: hold, now: t0.addingTimeInterval(40))
-        XCTAssertEqual(bridged?.rows.first?.displayRate ?? 0, 5, accuracy: 0.0001)
-    }
-
-    func testStopsHoldingOnceTheSessionGenuinelyStops() {
-        let hold = RunwayWeeklyRateHold()
-        _ = RunwaySnapshotAssembly.withWeeklyRateHold(snapshot(rate: 5, confidence: .direct),
-                                                      hold: hold, now: t0)
-        let expired = RunwaySnapshotAssembly.withWeeklyRateHold(
-            snapshot(rate: 0, confidence: .direct),
-            hold: hold,
-            now: t0.addingTimeInterval(RunwayWeeklyRateHold.window + 10))
-        XCTAssertEqual(expired?.rows.first?.displayRate ?? -1, 0)
-    }
-
-    /// A finished or unestimable session is stating something definite; the hold
-    /// must never paper over it with a stale number.
-    func testDoesNotOverrideIdleOrUnavailableRows() {
-        let hold = RunwayWeeklyRateHold()
-        _ = RunwaySnapshotAssembly.withWeeklyRateHold(snapshot(rate: 5, confidence: .direct),
-                                                      hold: hold, now: t0)
-        for confidence in [RunwayAttributionConfidence.idle, .unsupported, .waiting] {
-            let result = RunwaySnapshotAssembly.withWeeklyRateHold(
-                snapshot(rate: 0, confidence: confidence), hold: hold, now: t0.addingTimeInterval(10))
-            XCTAssertEqual(result?.rows.first?.displayRate ?? -1, 0, "\(confidence) must stay as-is")
-            XCTAssertEqual(result?.rows.first?.confidence, confidence)
-        }
-    }
-
-    /// Other units share the assembly path and must be untouched.
-    func testLeavesNonWeeklySnapshotsAlone() {
-        let hold = RunwayWeeklyRateHold()
-        let tokens = CodexRunwaySnapshot(
-            baseline: RunwayProviderBaseline(
-                source: .codex, remainingPercent: 80, resetAt: t0.addingTimeInterval(604_800),
-                currentRunoutAt: t0.addingTimeInterval(86_400), observedAt: t0,
-                windowMinutes: 300, rateUnit: .tokensPerHour),
-            rows: [RunwayPauseImpactRow(id: "s1", displayName: "S1", isGoal: false,
-                                        deadline: .unavailable, gainedSeconds: 0,
-                                        displayRate: 0, confidence: .direct)],
-            burstSummary: nil)
-        let result = RunwaySnapshotAssembly.withWeeklyRateHold(tokens, hold: hold, now: t0)
-        XCTAssertEqual(result?.rows.first?.displayRate ?? -1, 0)
+    func testClaudeWaitsOneMinuteThenDecaysBurstAcrossFiveMinutes() {
+        let sample = ClaudeRunwayTokenActivitySample(
+            logPath: "/s1", capturedAt: t0.addingTimeInterval(10), tokens: 600,
+            turnStartedAt: t0, output: 600, modelSlug: "claude-sonnet-5")
+        XCTAssertNil(ClaudeRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: [sample], now: t0.addingTimeInterval(10)))
+        XCTAssertEqual(ClaudeRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: [sample], now: t0.addingTimeInterval(60))?.tokensPerSecond ?? 0,
+                       9.259_259, accuracy: 0.0001)
+        XCTAssertEqual(ClaudeRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: [sample], now: t0.addingTimeInterval(300))?.tokensPerSecond ?? 0,
+                       0.133_333, accuracy: 0.0001)
+        XCTAssertNil(ClaudeRunwayTokenActivityParser.weeklyActivity(
+            identity: identity, samples: [sample], now: t0.addingTimeInterval(311)))
     }
 }
 

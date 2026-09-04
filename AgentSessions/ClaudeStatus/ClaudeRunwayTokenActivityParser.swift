@@ -55,6 +55,8 @@ enum ClaudeRunwayTokenActivityParser {
     /// skip the provisional rather than emit a fake near-zero rate.
     static let provisionalMinTurnDuration: TimeInterval = 2
     static let provisionalMaxTurnDuration: TimeInterval = 120
+    static let weeklyWindow: TimeInterval = 5 * 60
+    static let weeklyMinimumCoverage: TimeInterval = 60
 
     private static let sampleCache = RunwayFileParseCache<[ClaudeRunwayTokenActivitySample]>()
 
@@ -191,6 +193,31 @@ enum ClaudeRunwayTokenActivityParser {
         }
     }
 
+    static func weeklyProfile(identities: [RunwaySessionIdentity],
+                              now: Date = Date())
+        -> (activities: [RunwaySessionActivity], measuringIDs: Set<String>) {
+        var activities: [RunwaySessionActivity] = []
+        var measuringIDs: Set<String> = []
+        for identity in identities {
+            let paths = identity.logPaths.map { recentSamples(fromLogPath: $0, now: now) }
+            let pathActivities = paths.compactMap {
+                weeklyActivity(identity: identity, samples: $0, now: now)
+            }
+            if !pathActivities.isEmpty {
+                activities.append(RunwaySessionActivity(
+                    identity: identity,
+                    tokensPerSecond: pathActivities.reduce(0) { $0 + $1.tokensPerSecond },
+                    sampleStart: pathActivities.map(\.sampleStart).min() ?? now,
+                    sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now,
+                    components: pathActivities.flatMap(\.components)
+                ))
+            } else if paths.contains(where: { weeklyEvidenceIsMeasuring($0, now: now) }) {
+                measuringIDs.insert(identity.id)
+            }
+        }
+        return (activities, measuringIDs)
+    }
+
     /// Session token-rate plus whether it rests *only* on a provisional
     /// single-turn estimate (no contributing path has formed a real two-sample
     /// burst yet). `burns` uses the flag to keep an unverified provisional rate
@@ -312,7 +339,8 @@ enum ClaudeRunwayTokenActivityParser {
                              outputPerSecond: c.outputPerSecond * scale,
                              cacheCreationPerSecond: c.cacheCreationPerSecond * scale,
                              cacheCreation1hPerSecond: c.cacheCreation1hPerSecond * scale,
-                             speed: c.speed)
+                             speed: c.speed,
+                             contextInputTokens: c.contextInputTokens)
     }
 
     /// Accumulator for one burst's tokens within a single (model, speed) slice.
@@ -417,6 +445,52 @@ enum ClaudeRunwayTokenActivityParser {
             }
         }
         return nil
+    }
+
+    private static func weeklyEvidenceIsMeasuring(_ samples: [ClaudeRunwayTokenActivitySample],
+                                                   now: Date) -> Bool {
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        guard let first = samples.first(where: { $0.capturedAt >= cutoff }) else { return false }
+        let start = max(cutoff, first.turnStartedAt ?? first.capturedAt)
+        return now.timeIntervalSince(start) < weeklyMinimumCoverage
+    }
+
+    static func weeklyActivity(identity: RunwaySessionIdentity,
+                               samples: [ClaudeRunwayTokenActivitySample],
+                               now: Date) -> RunwaySessionActivity? {
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        let recent = samples.filter { $0.capturedAt >= cutoff && $0.capturedAt <= now }
+        guard let first = recent.first, let last = recent.last else { return nil }
+        let start = max(cutoff, first.turnStartedAt ?? first.capturedAt)
+        let coverage = now.timeIntervalSince(start)
+        guard coverage >= weeklyMinimumCoverage, coverage <= weeklyWindow else { return nil }
+        let normalization = coverage - (coverage * coverage) / (2 * weeklyWindow)
+        guard normalization > 0 else { return nil }
+
+        let weighted = recent.compactMap { sample -> (sample: ClaudeRunwayTokenActivitySample, weight: Double)? in
+            let weight = max(0, 1 - now.timeIntervalSince(sample.capturedAt) / weeklyWindow)
+            return weight > 0 ? (sample, weight) : nil
+        }
+        let components = weighted.map { item in
+            RunwayModelComponent(
+                modelSlug: item.sample.modelSlug,
+                inputPerSecond: item.sample.input * item.weight / normalization,
+                cachedInputPerSecond: item.sample.cacheRead * item.weight / normalization,
+                outputPerSecond: item.sample.output * item.weight / normalization,
+                cacheCreationPerSecond: item.sample.cacheCreation5m * item.weight / normalization,
+                cacheCreation1hPerSecond: item.sample.cacheCreation1h * item.weight / normalization,
+                speed: item.sample.speed
+            )
+        }
+        let total = weighted.reduce(0) { $0 + $1.sample.tokens * $1.weight }
+        guard total > 0 else { return nil }
+        return RunwaySessionActivity(
+            identity: identity,
+            tokensPerSecond: total / normalization,
+            sampleStart: start,
+            sampleEnd: last.capturedAt,
+            components: components
+        )
     }
 
     /// Returns this line's timestamp (for turn-start tracking, regardless of

@@ -68,9 +68,9 @@ struct WeeklyQuotaTokenObservation: Equatable, Sendable {
     let modelSlug: String?
 }
 
-/// One already-incremental usage record. Claude reports `message.usage` per call
-/// rather than as a running total, so its activity arrives as events instead of
-/// cumulative counters.
+/// One already-incremental usage record. Claude reports `message.usage` per call;
+/// Codex cumulative counters are split at each recorded request boundary so its
+/// long-context tier can be priced without merging requests.
 struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let logPath: String
     let capturedAt: Date
@@ -84,6 +84,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let modelSlug: String?
     /// Billing tier from `usage.speed`; fast mode doubles Opus rates.
     let speed: RunwaySpeedTier
+    let contextInputTokens: Double?
 
     init(logPath: String,
          capturedAt: Date,
@@ -93,7 +94,8 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
          cacheCreation: Double,
          cacheCreation1h: Double = 0,
          modelSlug: String?,
-         speed: RunwaySpeedTier = .standard) {
+         speed: RunwaySpeedTier = .standard,
+         contextInputTokens: Double? = nil) {
         self.logPath = logPath
         self.capturedAt = capturedAt
         self.input = input
@@ -103,6 +105,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
         self.cacheCreation1h = cacheCreation1h
         self.modelSlug = modelSlug
         self.speed = speed
+        self.contextInputTokens = contextInputTokens
     }
 }
 
@@ -196,8 +199,7 @@ final class WeeklyQuotaActivityLedger {
         buckets.removeAll { $0.at < cutoff }
     }
 
-    /// Bank already-incremental usage records (Claude's `message.usage` is per-call,
-    /// not a running total, so there is no delta to take). Deduplicated by
+    /// Bank already-incremental usage records. Deduplicated by
     /// path+timestamp because the parser re-reads an overlapping tail every cycle
     /// and double-counting would silently deflate the calibration.
     func recordIncremental(events: [WeeklyQuotaTokenEvent],
@@ -219,7 +221,8 @@ final class WeeklyQuotaActivityLedger {
             // Same poison flag as an unknown model when the record's billing tier has
             // no rates: the calibration must not be built on a knowingly halved cost.
             guard let price = priceTable.price(forModel: event.modelSlug),
-                  let rates = price.rates(for: event.speed) else {
+                  let rates = price.rates(for: event.speed,
+                                          contextInputTokens: event.contextInputTokens) else {
                 hadUnpriced = true
                 continue
             }
@@ -290,7 +293,6 @@ struct WeeklyQuotaCalibrationTracker {
     /// Claude's OAuth path supplies fractional percent, so it can learn sooner.
     static let minimumDropExact: Double = 0.25
     static let maximumAge: TimeInterval = 7 * 24 * 60 * 60
-    static let retainedCount = 5
     /// Above this the calibration is contaminated, not the session extraordinary.
     static let maximumDisplayablePercentPerHour: Double = 999
 
@@ -310,15 +312,19 @@ struct WeeklyQuotaCalibrationTracker {
 
     var currentScope: WeeklyQuotaCalibrationScope? { scope }
 
-    /// Median pp-per-dollar across the retained set — one contaminated tick cannot
-    /// move it. `nil` until something has been accepted.
+    /// Total quota movement represented by the current contiguous live span.
+    func conditioningPercentPoints(now: Date) -> Double {
+        accepted
+            .filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
+            .last?.dropPercentPoints ?? 0
+    }
+
+    /// One ratio of aggregate quota movement to aggregate priced dollars. Adjacent
+    /// integer ticks share endpoint quantization error, so treating them as
+    /// independent ratios and taking a median would give tiny intervals equal vote.
     func percentPointsPerDollar(now: Date) -> Double? {
-        let fresh = accepted.filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
-        guard !fresh.isEmpty else { return nil }
-        let sorted = fresh.map(\.percentPointsPerDollar).sorted()
-        let mid = sorted.count / 2
-        if sorted.count % 2 == 1 { return sorted[mid] }
-        return (sorted[mid - 1] + sorted[mid]) / 2
+        accepted.last(where: { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge })?
+            .percentPointsPerDollar
     }
 
     var acceptedCount: Int { accepted.count }
@@ -408,12 +414,10 @@ struct WeeklyQuotaCalibrationTracker {
             return nil
         }
 
-        accepted.append(calibration)
-        accepted = accepted
-            .filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
-            .suffix(Self.retainedCount)
-            .map { $0 }
-        anchor = Anchor(remainingPercent: remainingPercent, observedAt: observedAt, resetAt: resetAt)
+        // Keep the original anchor so later ticks expand this same live span. The
+        // newest aggregate replaces the prior aggregate; overlapping tick ratios
+        // are never retained as if they were independent observations.
+        accepted = [calibration]
         return calibration
     }
 
@@ -423,25 +427,48 @@ struct WeeklyQuotaCalibrationTracker {
     // exposes no account identity) stays in memory for the life of the process, so
     // it cannot survive a possible account switch.
 
+    /// Version 1 predates record-family-specific activity accounting. Codex's v1
+    /// samples may have mixed per-request and cumulative counters. Version 2 could
+    /// also drop a whole ordinary tail when its first byte split a UTF-8 scalar;
+    /// version 3 preserved those records but could assign a later model switch to
+    /// leading token records. Version 4 preserves record and model chronology.
+    /// No older denominator may survive the parser corrections. Claude already
+    /// supplied incremental events and remains compatible with v1.
+    private static let legacyActivityAccountingRevision = 1
+    private static let codexActivityAccountingRevision = 4
+
+    private static func activityAccountingRevision(for provider: String) -> Int {
+        provider == "codex"
+            ? codexActivityAccountingRevision
+            : legacyActivityAccountingRevision
+    }
+
     private struct Payload: Codable {
+        /// Optional so records written before the stamp decode as legacy revision 1.
+        let activityAccountingRevision: Int?
         let scope: WeeklyQuotaCalibrationScope
         let accepted: [WeeklyQuotaCalibration]
     }
 
     func persistedData() -> Data? {
         guard let scope, scope.isPersistable, !accepted.isEmpty else { return nil }
-        return try? JSONEncoder().encode(Payload(scope: scope, accepted: accepted))
+        return try? JSONEncoder().encode(Payload(
+            activityAccountingRevision: Self.activityAccountingRevision(for: scope.provider),
+            scope: scope,
+            accepted: accepted))
     }
 
     mutating func restore(from data: Data, scope expected: WeeklyQuotaCalibrationScope, now: Date) {
         guard expected.isPersistable,
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              (payload.activityAccountingRevision ?? Self.legacyActivityAccountingRevision)
+                == Self.activityAccountingRevision(for: expected.provider),
               payload.scope == expected else { return }
         scope = expected
         firstObservedAt = nil
         accepted = payload.accepted
             .filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
-            .suffix(Self.retainedCount)
+            .suffix(1)
             .map { $0 }
     }
 }
@@ -646,22 +673,27 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
 
     /// Conversion for this provider, or nil while uncalibrated.
     ///
-    /// Order matters. Two or more accepted live ticks beat the bootstrap: they
-    /// median out, and the tracker rejects intervals with no local activity, so
-    /// they are structurally clean of another device's usage in a way a historical
-    /// scan can never be. But ONE tick does not — a single 1pp reading carries up
-    /// to ±50% quantization error, while a bootstrap over 20pp carries ~±2.5%.
+    /// Prefer the measurement with the better-conditioned quota numerator. A live
+    /// sample is structurally cleaner than a historical scan, but two integer 1pp
+    /// ticks are still much noisier than (for example) a 33pp bootstrap. Once the
+    /// live span reaches 10pp it is good enough to represent the current quota
+    /// regime directly; before then it must cover at least as many points as the
+    /// bootstrap it would replace.
     func percentPointsPerDollar(provider: String, now: Date) -> Double? {
         lock.lock(); defer { lock.unlock() }
         let tracker = trackers[provider]
-        if (tracker?.acceptedCount ?? 0) >= 2, let live = tracker?.percentPointsPerDollar(now: now) {
-            return live
-        }
+        let live = tracker?.percentPointsPerDollar(now: now)
+        let livePoints = tracker?.conditioningPercentPoints(now: now) ?? 0
         if let bootstrap = bestConditionedBootstrap(provider: provider, now: now) {
+            let requiredLivePoints = min(
+                Self.wellConditionedPercentPoints,
+                bootstrap.usedPercentPoints
+            )
+            if livePoints >= requiredLivePoints, let live { return live }
             return freshenedBootstrapRatio(provider: provider, bootstrap: bootstrap, now: now)
                 ?? bootstrap.calibratedPercentPointsPerDollar
         }
-        return tracker?.percentPointsPerDollar(now: now)
+        return live
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger

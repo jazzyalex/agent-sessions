@@ -1118,23 +1118,18 @@ struct AgentCockpitHUDView: View {
 
                 Spacer(minLength: 0)
 
-                // Narrows before it deletes. Standard is ~30pt tighter than
-                // Enlarged, so the first rung down only drops the runway group's
-                // *presentation* half — the drawer toggle stays. Buttons are
-                // removed only on the bottom rungs, which normal widths never
-                // reach.
-                //
-                // The text-size toggle is deliberately the last thing to go: it
-                // is the only in-window control that returns you to Enlarged, so
-                // shedding it on the way down was a one-way trap out of Standard.
+                // Keep the runway controls intact before shedding the probe. The
+                // Wk/Hr/$/tk selector changes what the drawer reports, so it must
+                // not be the first control displaced by another toolbar button.
+                // Text size lives in Quota Meter Settings instead of competing
+                // for this width.
                 //
                 // Chrome and pin survive to the last rung; the destinations zone
                 // sits outside ViewThatFits and never drops.
                 ViewThatFits(in: .horizontal) {
-                    limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: true)
-                    limitsToolbarCluster(showRunway: runwayControlAvailable, showRunwayPresentation: false, showFontSize: true)
-                    limitsToolbarCluster(showRunway: false, showFontSize: true)
-                    limitsToolbarCluster(showRunway: false, showFontSize: false)
+                    limitsToolbarCluster(showRunway: runwayControlAvailable, showProbe: true)
+                    limitsToolbarCluster(showRunway: runwayControlAvailable, showProbe: false)
+                    limitsToolbarCluster(showRunway: false, showProbe: false)
 
                     Color.clear
                         .frame(width: 0, height: 1)
@@ -1170,20 +1165,6 @@ struct AgentCockpitHUDView: View {
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
         .help("Open Quota Meter settings")
-    }
-
-    /// Quick Standard ⇄ Enlarged text-size toggle for the Quota Meter. Highlights when
-    /// Enlarged so it doubles as a status indicator; one tap flips the font and the
-    /// window resizes once to hug the new content width.
-    private var cockpitFontSizeButton: some View {
-        Button {
-            quotaMeterEnlarged.toggle()
-        } label: {
-            Image(systemName: "textformat.size")
-                .font(.system(size: 11, weight: .medium))
-        }
-        .buttonStyle(HUDIconButtonStyle(isOn: quotaMeterEnlarged, tint: nil))
-        .help(quotaMeterEnlarged ? "Switch to Standard text size" : "Switch to Enlarged text size")
     }
 
     /// The toolbar's own visibility control. Load-bearing: with no context menu,
@@ -1398,24 +1379,18 @@ struct AgentCockpitHUDView: View {
     /// shed — it is the only way back from `.onDemand`, so it outranks even the
     /// runway controls when width runs short.
     private func limitsToolbarCluster(showRunway: Bool,
-                                      showRunwayPresentation: Bool = true,
-                                      showFontSize: Bool) -> some View {
+                                      showProbe: Bool) -> some View {
         HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
             if showRunway {
-                runwayGroup(showPresentation: showRunwayPresentation)
+                runwayGroup(showPresentation: true)
             }
             // This selector never sheds: it is the in-window route for restoring
             // a provider after the user hides its section.
             cockpitProviderVisibilityButton
-            cockpitProbeButton
-            // Presentation pair: how the window renders itself, as opposed to
-            // what it reports.
-            HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
-                if showFontSize {
-                    cockpitFontSizeButton
-                }
-                cockpitChromeButton
+            if showProbe {
+                cockpitProbeButton
             }
+            cockpitChromeButton
             toolbarHairline
             cockpitPinButton
         }

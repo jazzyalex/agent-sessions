@@ -279,6 +279,9 @@ struct RunwayModelComponent: Equatable, Sendable {
     let cacheCreation1hPerSecond: Double
     /// Billing tier this slice was served at, taken from the record's `usage.speed`.
     let speed: RunwaySpeedTier
+    /// Total input tokens in this request. Some providers switch the entire
+    /// request to a higher price tier above a context threshold.
+    let contextInputTokens: Double?
 
     init(modelSlug: String?,
          inputPerSecond: Double,
@@ -286,7 +289,8 @@ struct RunwayModelComponent: Equatable, Sendable {
          outputPerSecond: Double,
          cacheCreationPerSecond: Double,
          cacheCreation1hPerSecond: Double = 0,
-         speed: RunwaySpeedTier = .standard) {
+         speed: RunwaySpeedTier = .standard,
+         contextInputTokens: Double? = nil) {
         self.modelSlug = modelSlug
         self.inputPerSecond = inputPerSecond
         self.cachedInputPerSecond = cachedInputPerSecond
@@ -294,6 +298,7 @@ struct RunwayModelComponent: Equatable, Sendable {
         self.cacheCreationPerSecond = cacheCreationPerSecond
         self.cacheCreation1hPerSecond = cacheCreation1hPerSecond
         self.speed = speed
+        self.contextInputTokens = contextInputTokens
     }
 
     var totalPerSecond: Double {
@@ -358,7 +363,8 @@ struct RunwaySessionActivity: Equatable, Sendable {
          cacheCreationPerSecond: Double = 0,
          cacheCreation1hPerSecond: Double = 0,
          modelSlug: String? = nil,
-         speed: RunwaySpeedTier = .standard) {
+         speed: RunwaySpeedTier = .standard,
+         contextInputTokens: Double? = nil) {
         self.init(identity: identity,
                   tokensPerSecond: tokensPerSecond,
                   sampleStart: sampleStart,
@@ -369,7 +375,8 @@ struct RunwaySessionActivity: Equatable, Sendable {
                                                     outputPerSecond: outputPerSecond,
                                                     cacheCreationPerSecond: cacheCreationPerSecond,
                                                     cacheCreation1hPerSecond: cacheCreation1hPerSecond,
-                                                    speed: speed)])
+                                                    speed: speed,
+                                                    contextInputTokens: contextInputTokens)])
     }
 }
 
@@ -526,9 +533,14 @@ enum CodexRunwaySnapshotLoader {
     static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
+                let scannerRetention = request.baseline.rateUnit == .weeklyPercentPerHour
+                    ? CodexRunwayTokenActivityParser.weeklyWindow
+                    : CodexRunwayRecentSessionScanner.maximumActiveSampleAge
                 let scannerIdentities = CodexRunwayRecentSessionScanner.identities(
                     root: request.recentSessionsRoot,
-                    now: request.now
+                    now: request.now,
+                    activeSampleAge: scannerRetention,
+                    completionGrace: scannerRetention
                 )
                 let identities = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
                 // Once-per-cycle prune: keep only the small in-window path set so
@@ -542,13 +554,19 @@ enum CodexRunwaySnapshotLoader {
                     identities: identities,
                     now: request.now
                 )
+                let weeklyProfile = request.baseline.rateUnit == .weeklyPercentPerHour
+                    ? CodexRunwayTokenActivityParser.weeklyProfile(
+                        identities: identities,
+                        now: request.now
+                    )
+                    : (activities: [], measuringIDs: Set<String>())
                 // Bank this cycle's priced activity for weekly calibration. Done on
                 // EVERY cycle regardless of the selected unit: the ledger's bucket
                 // timeline is also the poll-continuity record, so skipping cycles
                 // while the user is on 5h would make the next weekly interval look
                 // like a sleep gap and be rejected.
-                WeeklyQuotaCalibrationStore.shared.ledger(provider: "codex").record(
-                    observations: CodexRunwayTokenActivityParser.ledgerObservations(
+                WeeklyQuotaCalibrationStore.shared.ledger(provider: "codex").recordIncremental(
+                    events: CodexRunwayTokenActivityParser.ledgerEvents(
                         identities: identities,
                         now: request.now
                     ),
@@ -623,7 +641,7 @@ enum CodexRunwaySnapshotLoader {
                     } else if let calibration = request.weeklyPercentPointsPerDollar,
                               let weekly = CodexRunwayCalculator.weeklyEstimatedSnapshot(
                                   baseline: request.baseline,
-                                  activities: activities,
+                                  activities: weeklyProfile.activities,
                                   priceTable: RunwayPriceTable.shared,
                                   percentPointsPerDollar: calibration,
                                   maxRows: request.maxRows
@@ -634,7 +652,7 @@ enum CodexRunwaySnapshotLoader {
                     } else if request.weeklyPercentPointsPerDollar != nil {
                         // Calibrated, but nothing currently priceable.
                         core = nil
-                        weeklyUnavailableIDs = Set(activities.map(\.identity.id))
+                        weeklyUnavailableIDs = Set(weeklyProfile.activities.map(\.identity.id))
                     } else {
                         // Not calibrated yet — every row waits on the clock.
                         core = nil
@@ -668,7 +686,8 @@ enum CodexRunwaySnapshotLoader {
                     snapshot: withUnavailable,
                     activeIdentities: pendingIdentities,
                     maxRows: request.maxRows,
-                    pendingConfidence: weeklyPendingConfidence
+                    pendingConfidence: weeklyPendingConfidence,
+                    waitingIDs: weeklyProfile.measuringIDs
                 )
                 // Aggregate token throughput (fine-grained, window-independent) — an
                 // honest "burning" signal for a limit line with no run-out to show.
@@ -689,8 +708,7 @@ enum CodexRunwaySnapshotLoader {
                 if stableTokensPerSecond > 0, !request.identities.isEmpty {
                     snapshot?.aggregateTokensPerHour = stableTokensPerSecond * 3600
                 }
-                continuation.resume(returning: RunwaySnapshotAssembly.withWeeklyRateHold(
-                    snapshot, hold: .shared, now: request.now))
+                continuation.resume(returning: snapshot)
             }
         }
     }
@@ -847,40 +865,12 @@ enum RunwaySnapshotAssembly {
     /// with no current activity genuinely estimates to zero, which is an honest
     /// "flat" rather than an open question. Leaving it `.waiting` there put a
     /// spinning clock next to a session that was simply idle between turns.
-    /// Applies `RunwayWeeklyRateHold` to a finished weekly snapshot: banks every
-    /// freshly measured rate, and fills a row that momentarily has none with its
-    /// own recent value instead of showing "flat".
-    static func withWeeklyRateHold(_ snapshot: CodexRunwaySnapshot?,
-                                   hold: RunwayWeeklyRateHold,
-                                   now: Date) -> CodexRunwaySnapshot? {
-        guard let snapshot, snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return snapshot }
-        let rows = snapshot.rows.map { row -> RunwayPauseImpactRow in
-            if row.displayRate > 0 {
-                hold.record(id: row.id, rate: row.displayRate, now: now)
-                return row
-            }
-            // Only bridge a row that is otherwise reporting a measured zero. A
-            // finished session (.idle) and an unestimable one (.unsupported) are
-            // saying something definite and must not be overwritten.
-            guard row.confidence == .direct, let heldRate = hold.resolve(id: row.id, now: now) else { return row }
-            return RunwayPauseImpactRow(
-                id: row.id,
-                displayName: row.displayName,
-                isGoal: row.isGoal,
-                deadline: row.deadline,
-                gainedSeconds: row.gainedSeconds,
-                displayRate: heldRate,
-                confidence: .mixed
-            )
-        }
-        return CodexRunwaySnapshot(baseline: snapshot.baseline, rows: rows, burstSummary: snapshot.burstSummary)
-    }
-
     static func withPendingRows(baseline: RunwayProviderBaseline,
                                 snapshot: CodexRunwaySnapshot?,
                                 activeIdentities: [RunwaySessionIdentity],
                                 maxRows: Int,
-                                pendingConfidence: RunwayAttributionConfidence = .waiting) -> CodexRunwaySnapshot? {
+                                pendingConfidence: RunwayAttributionConfidence = .waiting,
+                                waitingIDs: Set<String> = []) -> CodexRunwaySnapshot? {
         guard maxRows > 0 else { return snapshot }
         let existing = snapshot ?? CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
         let representedIDs = Set(existing.rows.map(\.id))
@@ -914,7 +904,9 @@ enum RunwaySnapshotAssembly {
                 displayRate: 0,
                 // Idle sessions show a calm "—"; still-working ones use the
                 // caller's pending state (see `pendingConfidence`).
-                confidence: identity.isIdle ? .idle : pendingConfidence
+                confidence: identity.isIdle
+                    ? .idle
+                    : (waitingIDs.contains(identity.id) ? .waiting : pendingConfidence)
             )
         }
         let (visible, overflow) = RunwayOverflowRule.split(candidates, maxRows: maxRows)
@@ -958,47 +950,6 @@ enum RunwaySnapshotAssembly {
                 order: min(lhs.order, rhs.order)
             )
         }
-    }
-}
-
-/// Per-session hold for the weekly `%/h` rate.
-///
-/// Providers only emit a usage record per assistant message, and the activity
-/// parsers require a sample within ~30s. A turn spent thinking or running a long
-/// tool therefore reads as "no activity", which collapsed a live session's weekly
-/// row to "flat" and then back to a number seconds later — a flicker with no basis
-/// in what the session was actually doing.
-///
-/// Weekly is a slow quantity (a few percent per hour), so a short gap in records
-/// is noise, not a change in burn. This bridges it, mirroring the existing
-/// `RunwayAggregateBurnHold` used for the "burning" chip. Pure TTL: a held rate
-/// survives at most `window` seconds past its last real measurement, so a session
-/// that genuinely stops does go flat — just not on a 30-second hair trigger.
-final class RunwayWeeklyRateHold: @unchecked Sendable {
-    static let shared = RunwayWeeklyRateHold()
-    static let window: TimeInterval = 150
-
-    private var held: [String: (rate: Double, at: Date)] = [:]
-    private let lock = NSLock()
-
-    func record(id: String, rate: Double, now: Date) {
-        lock.lock(); defer { lock.unlock() }
-        held[id] = (rate, now)
-    }
-
-    func resolve(id: String, now: Date) -> Double? {
-        lock.lock(); defer { lock.unlock() }
-        guard let entry = held[id] else { return nil }
-        guard now.timeIntervalSince(entry.at) <= Self.window else {
-            held[id] = nil
-            return nil
-        }
-        return entry.rate
-    }
-
-    func resetForTesting() {
-        lock.lock(); defer { lock.unlock() }
-        held.removeAll()
     }
 }
 
@@ -1260,7 +1211,8 @@ enum CodexRunwayCalculator {
             // AND a slice served at a billing tier the model has no rates for — a
             // fast-mode record priced at standard would understate it by half.
             guard let p = priceTable.price(forModel: component.modelSlug),
-                  let rates = p.rates(for: component.speed) else { return nil }
+                  let rates = p.rates(for: component.speed,
+                                      contextInputTokens: component.contextInputTokens) else { return nil }
             perSecond += rates.dollars(input: component.inputPerSecond,
                                        cachedInput: component.cachedInputPerSecond,
                                        output: component.outputPerSecond,
@@ -1698,6 +1650,8 @@ enum CodexRunwayRecentSessionScanner {
 
     static func identities(root: URL? = nil,
                            now: Date = Date(),
+                           activeSampleAge: TimeInterval = maximumActiveSampleAge,
+                           completionGrace: TimeInterval = maximumGoalCompletionGrace,
                            fileManager: FileManager = .default) -> [RunwaySessionIdentity] {
         let rootURL = root ?? URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".codex/sessions", isDirectory: true)
@@ -1734,7 +1688,16 @@ enum CodexRunwayRecentSessionScanner {
         // window is recomputed below. Prune to the files actually read this cycle.
         fileCache.retain(paths: Set(readEntries.map { $0.url.path }))
         let recentCandidates = readEntries
-            .compactMap { candidate(for: $0.url, now: now, threadNames: threadNames, signature: $0.signature) }
+            .compactMap {
+                candidate(
+                    for: $0.url,
+                    now: now,
+                    activeSampleAge: activeSampleAge,
+                    completionGrace: completionGrace,
+                    threadNames: threadNames,
+                    signature: $0.signature
+                )
+            }
         return Array(mergeParentCandidates(recentCandidates).prefix(maximumFiles))
     }
 
@@ -1748,7 +1711,12 @@ enum CodexRunwayRecentSessionScanner {
     static func resetFileCacheForTesting() { fileCache.removeAllForTesting() }
     #endif
 
-    private static func candidate(for url: URL, now: Date, threadNames: [String: String], signature: RunwayFileSignature) -> RecentSessionCandidate? {
+    private static func candidate(for url: URL,
+                                  now: Date,
+                                  activeSampleAge: TimeInterval,
+                                  completionGrace: TimeInterval,
+                                  threadNames: [String: String],
+                                  signature: RunwayFileSignature) -> RecentSessionCandidate? {
         let parse = fileCache.value(path: url.path, signature: signature) {
             // Self-qualified: the unqualified name would bind to the local
             // `metadata` below and cycle the type checker.
@@ -1762,7 +1730,12 @@ enum CodexRunwayRecentSessionScanner {
            CodexProbeConfig.isProbeWorkingDirectory(cwd) {
             return nil
         }
-        let isActive = hasActiveTail(from: parse.activeTailLines, now: now)
+        let isActive = hasActiveTail(
+            from: parse.activeTailLines,
+            now: now,
+            activeSampleAge: activeSampleAge,
+            completionGrace: completionGrace
+        )
         let fallbackID = url.deletingPathExtension().lastPathComponent
         let id = metadata.sessionID ?? fallbackID
         let customTitle = [metadata.parentSessionID, metadata.sessionID]
@@ -1882,7 +1855,10 @@ enum CodexRunwayRecentSessionScanner {
     /// The `capturedAt ?? now` fallback and the age windows are the only
     /// `now`-dependencies, so a session advances active→idle→gone as time passes
     /// with the disk unchanged.
-    private static func hasActiveTail(from lines: [CodexScannerActiveTailLine], now: Date) -> Bool {
+    private static func hasActiveTail(from lines: [CodexScannerActiveTailLine],
+                                      now: Date,
+                                      activeSampleAge: TimeInterval,
+                                      completionGrace: TimeInterval) -> Bool {
         var latestWorkSampleAt: Date?
         var latestCompletionAt: Date?
         for line in lines.reversed() {
@@ -1897,10 +1873,10 @@ enum CodexRunwayRecentSessionScanner {
         }
         guard let latestWorkSampleAt else { return false }
         let workAge = now.timeIntervalSince(latestWorkSampleAt)
-        guard workAge <= maximumActiveSampleAge else { return false }
+        guard workAge <= activeSampleAge else { return false }
         if let latestCompletionAt,
            latestCompletionAt >= latestWorkSampleAt {
-            return now.timeIntervalSince(latestCompletionAt) <= maximumGoalCompletionGrace
+            return now.timeIntervalSince(latestCompletionAt) <= completionGrace
         }
         return true
     }
@@ -2078,100 +2054,216 @@ private struct CodexRawTokenLine: Sendable {
     }
 }
 
+/// Bytes-derived token/context parse. `trailingModel` deliberately survives a
+/// context-only tail: the next appended token must inherit the new model even
+/// when a multi-megabyte tool record pushes that context out of the small tail.
+private struct CodexRawTokenParse: Sendable {
+    var lines: [CodexRawTokenLine]
+    var trailingModel: String?
+
+    static let empty = CodexRawTokenParse(lines: [], trailingModel: nil)
+
+    func appending(_ other: CodexRawTokenParse) -> CodexRawTokenParse {
+        CodexRawTokenParse(
+            lines: lines + other.lines,
+            trailingModel: other.trailingModel ?? trailingModel
+        )
+    }
+
+    func prepending(_ earlier: CodexRawTokenParse) -> CodexRawTokenParse {
+        var resolvedLater = lines
+        if let carriedModel = earlier.trailingModel {
+            for index in resolvedLater.indices where resolvedLater[index].modelSlug == nil {
+                resolvedLater[index] = resolvedLater[index].withModelSlug(carriedModel)
+            }
+        }
+        return CodexRawTokenParse(
+            lines: earlier.lines + resolvedLater,
+            trailingModel: trailingModel ?? earlier.trailingModel
+        )
+    }
+}
+
+/// One coherent suffix of an append-only Codex JSONL file. Every field is a
+/// fact about file bytes; a caller's `now` is used only to decide whether this
+/// artifact needs to be extended farther backward.
+private struct CodexWeeklyHistoryArtifact: Sendable {
+    let signature: RunwayFileSignature
+    let device: UInt64
+    let inode: UInt64
+    let scanStart: UInt64
+    let leadingFragment: Data
+    let completeParse: CodexRawTokenParse
+    let trailingFragment: Data
+    let trailingFragmentIsTruncated: Bool
+    let suffixGuard: Data
+}
+
+/// Per-path serialization keeps an append racing a refresh from corrupting the
+/// history while allowing unrelated session files to parse concurrently.
+private final class CodexWeeklyHistoryBox: @unchecked Sendable {
+    let lock = NSLock()
+    var artifact: CodexWeeklyHistoryArtifact?
+}
+
+private final class CodexWeeklyHistoryStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var boxes: [String: CodexWeeklyHistoryBox] = [:]
+
+    func box(for path: String) -> CodexWeeklyHistoryBox {
+        lock.lock(); defer { lock.unlock() }
+        if let box = boxes[path] { return box }
+        let box = CodexWeeklyHistoryBox()
+        boxes[path] = box
+        return box
+    }
+
+    func retain(paths: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        boxes = boxes.filter { paths.contains($0.key) }
+    }
+
+    #if DEBUG
+    func removeAllForTesting() {
+        lock.lock(); defer { lock.unlock() }
+        boxes.removeAll()
+    }
+    #endif
+}
+
 enum CodexRunwayTokenActivityParser {
     /// Upper bound on the backward hunt for a `turn_context`. Past this we give up
     /// and the session goes unpriced (dropped from $, still shown in tk/h) rather
     /// than risk pricing it at a guessed model.
     static let modelScanCap = 64 * 1024 * 1024
-    /// Overlap re-read when scanning newly-appended bytes, so a `turn_context` that
-    /// straddles the previous scan frontier isn't split into two unparseable halves.
-    static let modelScanOverlap = 64 * 1024
     static let maximumSampleAge: TimeInterval = 75
     static let minimumPairInterval: TimeInterval = 10
     static let maximumPairInterval: TimeInterval = 30 * 60
+    /// `Wk` describes sustained quota consumption, not the latest turn's peak.
+    /// Average over five minutes and withhold a number until at least one minute
+    /// of wall-clock coverage exists.
+    static let weeklyWindow: TimeInterval = 5 * 60
+    static let weeklyMinimumCoverage: TimeInterval = 60
+    /// Cold recovery is fail-safe and bounded: an unusually huge young session
+    /// may keep showing "measuring", but it cannot make the five-second HUD poll
+    /// read an arbitrarily large transcript into memory.
+    static let weeklyHistoryScanCap = 64 * 1024 * 1024
+    /// Only the adaptive Wk reader applies the structural type discriminator, and
+    /// only to records large enough for full JSON deserialization to be material.
+    private static let oversizedRecordThreshold = 64 * 1024
 
-    private static let sampleCache = RunwayFileParseCache<[CodexRawTokenLine]>()
+    private static let sampleCache = RunwayFileParseCache<CodexRawTokenParse>()
+    /// Wk rows need a deeper history than the ordinary 512 KiB activity/ledger
+    /// tail. This dedicated store also reuses append-only growth, so an image-heavy
+    /// transcript does not reread its multi-megabyte history every five seconds.
+    private static let weeklyHistoryStore = CodexWeeklyHistoryStore()
 
     #if DEBUG
+    private static let weeklyReadCounterLock = NSLock()
+    private static var weeklyPayloadBytesRead = 0
     static var sampleCacheMissCountForTesting: Int { sampleCache.missCount }
-    static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
+    static var weeklyPayloadBytesReadForTesting: Int {
+        weeklyReadCounterLock.lock(); defer { weeklyReadCounterLock.unlock() }
+        return weeklyPayloadBytesRead
+    }
+    static func resetSampleCacheForTesting() {
+        sampleCache.removeAllForTesting()
+        weeklyHistoryStore.removeAllForTesting()
+        weeklyReadCounterLock.lock()
+        weeklyPayloadBytesRead = 0
+        weeklyReadCounterLock.unlock()
+    }
     #endif
 
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 512 * 1024,
                               now: Date = Date()) -> [CodexRunwayTokenActivitySample] {
-        let raw: [CodexRawTokenLine]
+        let parsed: CodexRawTokenParse
         if let signature = RunwayFileSignature.read(path: path) {
-            raw = sampleCache.value(path: path, signature: signature) {
+            parsed = sampleCache.value(path: path, signature: signature) {
                 parseRawLines(fromLogPath: path, maxBytes: maxBytes)
             }
         } else {
-            raw = parseRawLines(fromLogPath: path, maxBytes: maxBytes)
+            parsed = parseRawLines(fromLogPath: path, maxBytes: maxBytes)
         }
-        return resolveModel(raw, path: path)
+        return parsed.lines
             .compactMap { finalize($0, now: now) }
             .sorted { $0.capturedAt < $1.capturedAt }
     }
 
-    /// Guarantee every sample carries the session model so `$` pricing never nils
-    /// out intermittently. `turn_context` is the sole model carrier and recurs per
-    /// turn, but the token tail (`maxBytes`) can miss it when one turn dumps more
-    /// than the window — then `raw` comes back all-nil and, under the "any unpriced
-    /// active model → whole provider falls back to tk/h" rule, the Codex runway
-    /// *flaps* between $ and tk/h as that session goes active/idle. Resolution order:
-    /// the tail's own model (cheapest, also refreshes the cache) → a per-path cache
-    /// (a session is single-model, so once known it stays known) → a head read
-    /// (first `turn_context`, past the large `session_meta`). The cache means the
-    /// expensive head read happens at most once per session.
-    private static func resolveModel(_ raw: [CodexRawTokenLine], path: String) -> [CodexRawTokenLine] {
-        // No samples → nothing to stamp, and no reason to pay for a scan.
-        guard !raw.isEmpty else { return raw }
-        if let tailModel = raw.last(where: { $0.modelSlug != nil })?.modelSlug {
-            // Everything after this `turn_context` is inside the tail and carries no
-            // other one, so it is the newest in the whole file — current as of EOF.
-            rememberModel(tailModel, path: path, scannedThrough: fileSize(path: path))
-            return raw
-        }
-        guard let model = sessionModel(path: path) else { return raw }
-        return raw.map { $0.modelSlug == nil ? $0.withModelSlug(model) : $0 }
+    /// Samples for the five-minute Wk row. A fixed byte tail is insufficient for
+    /// image/tool-heavy sessions: one JSONL record can be several megabytes and
+    /// squeeze five minutes of small `token_count` records out of a 512 KiB read.
+    /// The read widens until it crosses the five-minute cutoff (or reaches the
+    /// bounded scan cap). Unchanged files reuse the parsed result; append-only
+    /// growth reads and parses only the newly appended byte range.
+    /// This cache is deliberately not used by `ledgerEvents` (see above).
+    static func recentWeeklySamples(fromLogPath path: String,
+                                    initialMaxBytes: Int = 512 * 1024,
+                                    now: Date = Date()) -> [CodexRunwayTokenActivitySample] {
+        let parsed = weeklyRawParse(
+            fromLogPath: path,
+            initialMaxBytes: initialMaxBytes,
+            now: now
+        )
+        // Weekly parsing widens until the relevant leading token has its actual
+        // preceding context (or reaches the hard cap). Do not fill a missing model
+        // from the unrelated global EOF cache: unresolved is deliberately unpriced.
+        return parsed.lines
+            .compactMap { finalize($0, now: now) }
+            .sorted { $0.capturedAt < $1.capturedAt }
     }
 
-    /// The session's current model when the token tail carried none.
-    ///
-    /// The cache records how far the file had been scanned when the model was
-    /// established, and every later cycle scans ONLY the bytes appended since. That
-    /// frontier is what keeps a `/model` switch from being missed: consulting a
-    /// cached model without re-checking new bytes would keep pricing at the old
-    /// model for the rest of a long turn (the switch's `turn_context` is outside the
-    /// tail, so nothing else would ever notice it). Never holds the lock across I/O.
-    private static func sessionModel(path: String) -> String? {
-        guard let size = fileSize(path: path) else { return nil }   // transient; retry next cycle
+    /// Model in force immediately before the first complete record in the ordinary
+    /// tail. Leading token records must inherit only this earlier context; using the
+    /// first later `turn_context` reverses `/model` chronology and misprices an
+    /// already-completed request. The cached frontier advances between JSONL record
+    /// boundaries, so append-only growth scans only the newly crossed prefix bytes.
+    private static func modelBeforeTailBoundary(path: String, boundary: UInt64) -> String? {
+        guard boundary > 0 else { return nil }
+        let identity = fileIdentity(path: path)
+        let signature = RunwayFileSignature.read(path: path)
         modelCacheLock.lock()
         let entry = modelCacheByPath[path]
         modelCacheLock.unlock()
 
-        if let entry, entry.scannedThrough <= size {
-            guard entry.scannedThrough < size else { return entry.model }  // nothing appended
-            // Re-read a small overlap: the previous frontier may have landed
-            // mid-line, and a `turn_context` straddling it would otherwise be lost.
-            let from = entry.scannedThrough > UInt64(modelScanOverlap)
-                ? entry.scannedThrough - UInt64(modelScanOverlap)
-                : 0
-            guard let delta = readRange(path: path, from: from, to: size) else { return entry.model }
+        if let entry,
+           let identity,
+           let signature,
+           entry.device == identity.device,
+           entry.inode == identity.inode,
+           (signature == entry.signature || signature.size > entry.signature.size),
+           suffixGuard(path: path, eof: entry.scannedThrough) == entry.boundaryGuard,
+           entry.scannedThrough <= boundary,
+           boundary - entry.scannedThrough <= UInt64(modelScanCap) {
+            guard entry.scannedThrough < boundary else { return entry.model }
+            guard let delta = readRange(path: path, from: entry.scannedThrough, to: boundary) else {
+                return nil
+            }
             let model = lastTurnContextModel(in: delta) ?? entry.model
-            rememberModel(model, path: path, scannedThrough: size)
+            rememberModel(
+                model, path: path, scannedThrough: boundary,
+                identity: identity, signature: signature
+            )
             return model
         }
 
-        // Cold cache, or the file shrank (rotated/truncated) — hunt from scratch.
-        let lookup = currentModel(fromLogPath: path)
+        // Cold cache, a rewind caused by a wider caller tail, or a jump beyond the
+        // bounded incremental scan: recover the latest preceding context directly.
+        let lookup = lastModel(fromLogPath: path, endingAt: boundary)
         guard lookup.didRead else { return nil }   // read failed; don't remember it
-        rememberModel(lookup.model, path: path, scannedThrough: size)
+        if let identity, let signature {
+            rememberModel(
+                lookup.model, path: path, scannedThrough: boundary,
+                identity: identity, signature: signature
+            )
+        }
         return lookup.model
     }
 
     static func retainCache(paths: Set<String>) {
         sampleCache.retain(paths: paths)
+        weeklyHistoryStore.retain(paths: paths)
         modelCacheLock.lock()
         modelCacheByPath = modelCacheByPath.filter { paths.contains($0.key) }
         modelCacheLock.unlock()
@@ -2183,14 +2275,29 @@ enum CodexRunwayTokenActivityParser {
     private struct ModelCacheEntry {
         let model: String?
         let scannedThrough: UInt64
+        let device: UInt64
+        let inode: UInt64
+        let boundaryGuard: Data
+        let signature: RunwayFileSignature
     }
     private static let modelCacheLock = NSLock()
     private static var modelCacheByPath: [String: ModelCacheEntry] = [:]
 
-    private static func rememberModel(_ model: String?, path: String, scannedThrough: UInt64?) {
-        guard let scannedThrough else { return }
+    private static func rememberModel(_ model: String?,
+                                      path: String,
+                                      scannedThrough: UInt64,
+                                      identity: (device: UInt64, inode: UInt64),
+                                      signature: RunwayFileSignature) {
+        guard let boundaryGuard = suffixGuard(path: path, eof: scannedThrough) else { return }
         modelCacheLock.lock()
-        modelCacheByPath[path] = ModelCacheEntry(model: model, scannedThrough: scannedThrough)
+        modelCacheByPath[path] = ModelCacheEntry(
+            model: model,
+            scannedThrough: scannedThrough,
+            device: identity.device,
+            inode: identity.inode,
+            boundaryGuard: boundaryGuard,
+            signature: signature
+        )
         modelCacheLock.unlock()
     }
 
@@ -2201,10 +2308,26 @@ enum CodexRunwayTokenActivityParser {
     }
 
     private static func readRange(path: String, from: UInt64, to: UInt64) -> Data? {
-        guard to > from, let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard to > from,
+              to - from <= UInt64(Int.max),
+              let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         try? handle.seek(toOffset: from)
-        return try? handle.read(upToCount: Int(to - from))
+        let expected = Int(to - from)
+        var result = Data()
+        result.reserveCapacity(expected)
+        while result.count < expected {
+            let chunk: Data
+            do {
+                guard let next = try handle.read(upToCount: expected - result.count),
+                      !next.isEmpty else { return nil }
+                chunk = next
+            } catch {
+                return nil
+            }
+            result.append(chunk)
+        }
+        return result
     }
 
     #if DEBUG
@@ -2214,60 +2337,515 @@ enum CodexRunwayTokenActivityParser {
     #endif
 
     private static func parseRawLines(fromLogPath path: String,
-                                      maxBytes: Int) -> [CodexRawTokenLine] {
-        guard let data = CodexRunwayRateLimitParser.tailData(path: path, maxBytes: maxBytes),
-              let text = String(data: data, encoding: .utf8) else {
-            return []
+                                      maxBytes: Int,
+                                      skipOversizedNonCandidates: Bool = false) -> CodexRawTokenParse {
+        guard let size = fileSize(path: path) else {
+            return .empty
         }
+        let byteCount = min(size, UInt64(max(1, maxBytes)))
+        let rawStart = size - byteCount
+        guard var data = readRangeAllowingEmpty(path: path, from: rawStart, to: size) else {
+            return .empty
+        }
+
+        // A byte tail normally starts in the middle of a JSONL record. Drop that
+        // fragment and anchor the model at the first complete record boundary.
+        // (The old parser tried to decode the fragment and discarded it anyway.)
+        var boundary = rawStart
+        if rawStart > 0,
+           readRange(path: path, from: rawStart - 1, to: rawStart)?.first != 0x0A {
+            guard let newline = data.firstIndex(of: 0x0A) else { return .empty }
+            let consumed = data.distance(from: data.startIndex, to: newline) + 1
+            data.removeFirst(consumed)
+            boundary += UInt64(consumed)
+        }
+        let initialModel = modelBeforeTailBoundary(path: path, boundary: boundary)
+        return parseRawLines(
+            data: data,
+            logPath: path,
+            initialModel: initialModel,
+            skipOversizedNonCandidates: skipOversizedNonCandidates
+        )
+    }
+
+    private static func parseRawLines(data: Data,
+                                      logPath path: String,
+                                      initialModel: String? = nil,
+                                      skipOversizedNonCandidates: Bool = false) -> CodexRawTokenParse {
+        // A tail/range can begin in the middle of a UTF-8 scalar. Lossy decoding
+        // only affects that already-incomplete first JSONL fragment; every complete
+        // line after its newline remains byte-for-byte parseable.
+        let text = String(decoding: data, as: UTF8.self)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { Data($0.utf8) }
+        return parseRawLines(
+            lines: lines,
+            logPath: path,
+            initialModel: initialModel,
+            skipOversizedNonCandidates: skipOversizedNonCandidates
+        )
+    }
+
+    private static func parseRawLines(lines: [Data],
+                                      logPath path: String,
+                                      initialModel: String? = nil,
+                                      skipOversizedNonCandidates: Bool) -> CodexRawTokenParse {
         // Codex logs the model on `turn_context` lines, not on `token_count`
         // lines, so track the latest-seen model in file order and stamp it onto
         // subsequent token lines. Pure function of the bytes → still cacheable.
         var out: [CodexRawTokenLine] = []
-        var lastModel: String?
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let data = String(raw).data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+        var lastModel = initialModel
+        for data in lines where !data.isEmpty {
+            if skipOversizedNonCandidates, data.count > oversizedRecordThreshold,
+               !hasRelevantEnvelopeType(data) {
+                continue
+            }
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             let payload = (obj["payload"] as? [String: Any]) ?? obj
-            if let m = modelSlug(from: payload) ?? modelSlug(from: obj) { lastModel = m }
+            if isTurnContext(obj: obj, payload: payload),
+               let model = modelSlug(from: payload) ?? modelSlug(from: obj) {
+                lastModel = model
+            }
+            // Codex writes both a per-request `token_usage_record` and a cumulative
+            // `token_count` for the same response. This parser differences adjacent
+            // samples as cumulative counters, so admitting the incremental record
+            // re-adds nearly the whole session on every response. Positively select
+            // only the cumulative family, including the legacy top-level envelope.
+            guard isCumulativeTokenCount(obj: obj, payload: payload) else { continue }
             if let line = tokenLine(obj: obj, payload: payload, logPath: path, model: lastModel) {
                 out.append(line)
             }
         }
-        // Backfill token lines that precede the tail's first `turn_context` with the
-        // first in-tail model (a session is effectively single-model). When the tail
-        // has no model at all — one turn dumped more than `maxBytes` — `out` stays
-        // all-nil and `resolveModel` fills it from the cache or file head. Pure
-        // function of the bytes → still cacheable.
-        if let sessionModel = out.first(where: { $0.modelSlug != nil })?.modelSlug {
-            for i in out.indices where out[i].modelSlug == nil {
-                out[i] = out[i].withModelSlug(sessionModel)
-            }
-        }
-        return out
+        return CodexRawTokenParse(lines: out, trailingModel: lastModel)
     }
 
-    /// The session's CURRENT model: the model on the **last** `turn_context` in the
-    /// file. Used only when the 512 KB token tail carried none, so widen the window
-    /// progressively until one appears — a single turn can dump megabytes between
-    /// `turn_context` lines.
-    ///
-    /// Taking the LAST one, not the file's first, is the whole point: after a
-    /// mid-session `/model` switch the first `turn_context` holds the model the
-    /// session STARTED with, so pricing from it misprices every token for the rest
-    /// of a long turn (e.g. a switch to gpt-5.6-luna still billed at gpt-5.6-sol —
-    /// 5x). The result is cached, so this runs at most once per unresolved stretch.
+    private static func weeklyRawParse(fromLogPath path: String,
+                                       initialMaxBytes: Int,
+                                       now: Date) -> CodexRawTokenParse {
+        let box = weeklyHistoryStore.box(for: path)
+        box.lock.lock(); defer { box.lock.unlock() }
+
+        // One bounded retry covers the ordinary append-during-read race. A second
+        // moving target fails closed for this five-second refresh; returning a
+        // candidate assembled from two file generations could fabricate a delta.
+        for attempt in 0..<2 {
+            guard let signature = RunwayFileSignature.read(path: path),
+                  let startingIdentity = fileIdentity(path: path) else { return .empty }
+            var artifact: CodexWeeklyHistoryArtifact?
+            if let cached = box.artifact,
+               cached.signature == signature,
+               cached.device == startingIdentity.device,
+               cached.inode == startingIdentity.inode {
+                artifact = cached
+            } else if let cached = box.artifact {
+                artifact = appendWeeklyArtifact(
+                    cached,
+                    path: path,
+                    signature: signature
+                )
+            }
+            if artifact == nil {
+                artifact = coldWeeklyArtifact(
+                    path: path,
+                    signature: signature,
+                    maxBytes: min(max(1, initialMaxBytes), weeklyHistoryScanCap)
+                )
+            }
+            guard var artifact else { return .empty }
+
+            // The cached object remains time-independent. An older/out-of-order
+            // `now` asks it for more byte history and replaces it with a larger
+            // bytes-derived suffix; no cutoff-filtered value is ever cached.
+            while weeklyArtifactNeedsMoreHistory(artifact, path: path, now: now) {
+                let scanned = signature.size - artifact.scanStart
+                guard artifact.scanStart > 0,
+                      scanned < UInt64(weeklyHistoryScanCap) else { break }
+                guard let wider = extendWeeklyArtifactBackward(
+                    artifact,
+                    path: path,
+                    minimumChunkBytes: max(1, initialMaxBytes)
+                ), wider.scanStart < artifact.scanStart else { break }
+                artifact = wider
+            }
+
+            guard RunwayFileSignature.read(path: path) == signature,
+                  let endingIdentity = fileIdentity(path: path),
+                  endingIdentity.device == artifact.device,
+                  endingIdentity.inode == artifact.inode else {
+                if attempt == 0 { continue }
+                return .empty
+            }
+            box.artifact = artifact
+            return materializedWeeklyParse(artifact, path: path)
+        }
+        return .empty
+    }
+
+    private static func coldWeeklyArtifact(path: String,
+                                           signature: RunwayFileSignature,
+                                           maxBytes: Int) -> CodexWeeklyHistoryArtifact? {
+        guard let identity = fileIdentity(path: path) else { return nil }
+        let byteCount = min(signature.size, UInt64(max(1, maxBytes)))
+        let start = signature.size - byteCount
+        let startsAtBoundary: Bool
+        if start == 0 {
+            startsAtBoundary = true
+        } else {
+            startsAtBoundary = readRange(path: path, from: start - 1, to: start)?.first == 0x0A
+        }
+        guard let data = readRangeAllowingEmpty(path: path, from: start, to: signature.size) else {
+            return nil
+        }
+        recordWeeklyPayloadRead(data.count)
+        let framed = frameJSONL(data, discardLeadingFragment: !startsAtBoundary)
+        let complete = parseRawLines(
+            lines: framed.lines,
+            logPath: path,
+            skipOversizedNonCandidates: true
+        )
+        return CodexWeeklyHistoryArtifact(
+            signature: signature,
+            device: identity.device,
+            inode: identity.inode,
+            scanStart: start,
+            leadingFragment: framed.leadingFragment,
+            completeParse: complete,
+            trailingFragment: framed.trailingFragment,
+            trailingFragmentIsTruncated: framed.trailingFragmentIsTruncated,
+            suffixGuard: suffixGuard(path: path, eof: signature.size) ?? Data()
+        )
+    }
+
+    /// Extends a cold/out-of-order history hunt with a disjoint earlier range.
+    /// The saved leading fragment reconstructs the one JSONL record split by the
+    /// old frontier, so a 16 MiB result reads about 16 MiB total rather than
+    /// reparsing 0.5 + 1 + 2 + 4 + 8 + 16 MiB overlapping tails.
+    private static func extendWeeklyArtifactBackward(
+        _ artifact: CodexWeeklyHistoryArtifact,
+        path: String,
+        minimumChunkBytes: Int
+    ) -> CodexWeeklyHistoryArtifact? {
+        let represented = artifact.signature.size - artifact.scanStart
+        let remainingBudget = UInt64(weeklyHistoryScanCap) - represented
+        guard artifact.scanStart > 0, remainingBudget > 0 else { return nil }
+        let desired = max(represented, UInt64(max(1, minimumChunkBytes)))
+        let chunkSize = min(artifact.scanStart, remainingBudget, desired)
+        let newStart = artifact.scanStart - chunkSize
+        guard let chunk = readRange(path: path, from: newStart, to: artifact.scanStart) else {
+            return nil
+        }
+        recordWeeklyPayloadRead(chunk.count)
+        var joined = chunk
+        joined.append(artifact.leadingFragment)
+        let startsAtBoundary = newStart == 0
+            || readRange(path: path, from: newStart - 1, to: newStart)?.first == 0x0A
+        let framed = frameJSONL(joined, discardLeadingFragment: !startsAtBoundary)
+        let earlier = parseRawLines(
+            lines: framed.lines,
+            logPath: path,
+            skipOversizedNonCandidates: true
+        )
+        let extendsSingleTruncatedRecord = artifact.trailingFragmentIsTruncated
+        return CodexWeeklyHistoryArtifact(
+            signature: artifact.signature,
+            device: artifact.device,
+            inode: artifact.inode,
+            scanStart: newStart,
+            leadingFragment: framed.leadingFragment,
+            completeParse: artifact.completeParse.prepending(earlier),
+            trailingFragment: extendsSingleTruncatedRecord
+                ? framed.trailingFragment
+                : artifact.trailingFragment,
+            trailingFragmentIsTruncated: extendsSingleTruncatedRecord
+                ? framed.trailingFragmentIsTruncated
+                : artifact.trailingFragmentIsTruncated,
+            suffixGuard: artifact.suffixGuard
+        )
+    }
+
+    private static func appendWeeklyArtifact(_ artifact: CodexWeeklyHistoryArtifact,
+                                             path: String,
+                                             signature: RunwayFileSignature)
+        -> CodexWeeklyHistoryArtifact? {
+        guard signature.size > artifact.signature.size,
+              signature.size - artifact.signature.size <= UInt64(weeklyHistoryScanCap),
+              signature.size - artifact.scanStart <= UInt64(weeklyHistoryScanCap),
+              let identity = fileIdentity(path: path),
+              identity.device == artifact.device,
+              identity.inode == artifact.inode,
+              suffixGuard(path: path, eof: artifact.signature.size) == artifact.suffixGuard,
+              let delta = readRangeAllowingEmpty(
+                path: path,
+                from: artifact.signature.size,
+                to: signature.size
+              ) else { return nil }
+        recordWeeklyPayloadRead(delta.count)
+
+        var combined = artifact.trailingFragment
+        combined.append(delta)
+        // A writer can spend several polls constructing one enormous JSON value.
+        // Never let the saved partial line grow past the same fail-safe as a cold
+        // history hunt; rebuild the bounded suffix and mark its front truncated.
+        if combined.count > weeklyHistoryScanCap {
+            return coldWeeklyArtifact(
+                path: path,
+                signature: signature,
+                maxBytes: weeklyHistoryScanCap
+            )
+        }
+        let framed = frameJSONL(
+            combined,
+            discardLeadingFragment: artifact.trailingFragmentIsTruncated
+        )
+        let appended = parseRawLines(
+            lines: framed.lines,
+            logPath: path,
+            initialModel: artifact.completeParse.trailingModel,
+            skipOversizedNonCandidates: true
+        )
+        return CodexWeeklyHistoryArtifact(
+            signature: signature,
+            device: identity.device,
+            inode: identity.inode,
+            scanStart: artifact.scanStart,
+            leadingFragment: artifact.leadingFragment,
+            completeParse: artifact.completeParse.appending(appended),
+            trailingFragment: framed.trailingFragment,
+            trailingFragmentIsTruncated: framed.trailingFragmentIsTruncated,
+            suffixGuard: suffixGuard(path: path, eof: signature.size) ?? Data()
+        )
+    }
+
+    private static func materializedWeeklyParse(_ artifact: CodexWeeklyHistoryArtifact,
+                                                path: String) -> CodexRawTokenParse {
+        guard !artifact.trailingFragment.isEmpty,
+              !artifact.trailingFragmentIsTruncated else {
+            return artifact.completeParse
+        }
+        // Preserve the historic behavior for a complete JSON value without a final
+        // newline. It is provisional: an append reparses the saved bytes together
+        // with the delta, so a genuinely incomplete record cannot poison the cache.
+        let provisional = parseRawLines(
+            lines: [artifact.trailingFragment],
+            logPath: path,
+            initialModel: artifact.completeParse.trailingModel,
+            skipOversizedNonCandidates: true
+        )
+        return artifact.completeParse.appending(provisional)
+    }
+
+    private static func weeklyArtifactNeedsMoreHistory(_ artifact: CodexWeeklyHistoryArtifact,
+                                                       path: String,
+                                                       now: Date) -> Bool {
+        let parsed = materializedWeeklyParse(artifact, path: path)
+        guard rawCrossesWeeklyCutoff(parsed.lines, now: now) else { return true }
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        return parsed.lines.contains { line in
+            guard let capturedAt = line.createdAtReal,
+                  capturedAt >= cutoff,
+                  capturedAt <= now else { return false }
+            return line.modelSlug == nil
+        }
+    }
+
+    private static func rawCrossesWeeklyCutoff(_ raw: [CodexRawTokenLine],
+                                               now: Date) -> Bool {
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        return raw.contains { line in
+            guard let capturedAt = line.createdAtReal else { return false }
+            return capturedAt <= cutoff
+        }
+    }
+
+    private struct JSONLFrame {
+        let leadingFragment: Data
+        let lines: [Data]
+        let trailingFragment: Data
+        let trailingFragmentIsTruncated: Bool
+    }
+
+    /// Splits only on literal LF bytes, preserving an unterminated EOF record for
+    /// the next append. When a tail starts mid-record, that first fragment remains
+    /// marked truncated until its LF arrives and is discarded as one unit.
+    private static func frameJSONL(_ data: Data,
+                                   discardLeadingFragment: Bool) -> JSONLFrame {
+        var lines: [Data] = []
+        var leadingFragment = Data()
+        var lineStart = 0
+        var dropCurrent = discardLeadingFragment
+        for (offset, byte) in data.enumerated() where byte == 0x0A {
+            if dropCurrent {
+                leadingFragment = data.subdata(in: lineStart..<(offset + 1))
+            } else if offset > lineStart {
+                lines.append(data.subdata(in: lineStart..<offset))
+            }
+            dropCurrent = false
+            lineStart = offset + 1
+        }
+        let trailing = lineStart < data.count
+            ? data.subdata(in: lineStart..<data.count)
+            : Data()
+        if dropCurrent { leadingFragment = trailing }
+        return JSONLFrame(
+            leadingFragment: leadingFragment,
+            lines: lines,
+            trailingFragment: trailing,
+            trailingFragmentIsTruncated: dropCurrent
+        )
+    }
+
+    private static func readRangeAllowingEmpty(path: String,
+                                               from: UInt64,
+                                               to: UInt64) -> Data? {
+        guard to >= from else { return nil }
+        if to == from { return Data() }
+        return readRange(path: path, from: from, to: to)
+    }
+
+    private static func recordWeeklyPayloadRead(_ count: Int) {
+        #if DEBUG
+        weeklyReadCounterLock.lock()
+        weeklyPayloadBytesRead += count
+        weeklyReadCounterLock.unlock()
+        #endif
+    }
+
+    private static func fileIdentity(path: String) -> (device: UInt64, inode: UInt64)? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let device = (attributes[.systemNumber] as? NSNumber)?.uint64Value,
+              let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value else {
+            return nil
+        }
+        return (device, inode)
+    }
+
+    private static func suffixGuard(path: String, eof: UInt64) -> Data? {
+        let guardSize: UInt64 = 4 * 1024
+        return readRangeAllowingEmpty(
+            path: path,
+            from: eof > guardSize ? eof - guardSize : 0,
+            to: eof
+        )
+    }
+
+    /// Huge response/tool records dominate transcript bytes. Before paying for a
+    /// full JSON object, scan JSON strings structurally for an outer or direct
+    /// payload `type`. Escaped quotes inside a content string are skipped, while a
+    /// valid discriminator remains discoverable regardless of key order or offset.
+    private static func hasRelevantEnvelopeType(_ data: Data) -> Bool {
+        let bytes = data
+        var index = 0
+        var objectDepth = 0
+        var payloadDepth: Int?
+        var pendingKeyByDepth: [Int: String] = [:]
+
+        while index < bytes.count {
+            switch bytes[index] {
+            case 0x7B: // {
+                let parentDepth = objectDepth
+                let containerKey = pendingKeyByDepth.removeValue(forKey: parentDepth)
+                objectDepth += 1
+                if parentDepth == 1, containerKey == "payload" {
+                    payloadDepth = objectDepth
+                }
+                index += 1
+            case 0x7D: // }
+                pendingKeyByDepth.removeValue(forKey: objectDepth)
+                if payloadDepth == objectDepth { payloadDepth = nil }
+                objectDepth = max(0, objectDepth - 1)
+                index += 1
+            case 0x5B: // [
+                pendingKeyByDepth.removeValue(forKey: objectDepth)
+                index += 1
+            case 0x2C: // ,
+                pendingKeyByDepth.removeValue(forKey: objectDepth)
+                index += 1
+            case 0x22: // "
+                let token = scanJSONString(bytes, openingQuote: index)
+                var next = token.nextIndex
+                while next < bytes.count,
+                      bytes[next] == 0x20 || bytes[next] == 0x09
+                        || bytes[next] == 0x0D || bytes[next] == 0x0A {
+                    next += 1
+                }
+                if next < bytes.count, bytes[next] == 0x3A { // :
+                    if let value = token.value {
+                        pendingKeyByDepth[objectDepth] = value
+                    } else {
+                        pendingKeyByDepth.removeValue(forKey: objectDepth)
+                    }
+                    index = next + 1
+                    continue
+                }
+                if pendingKeyByDepth[objectDepth] == "type",
+                   objectDepth == 1 || objectDepth == payloadDepth,
+                   token.value == "token_count" || token.value == "turn_context" {
+                    return true
+                }
+                pendingKeyByDepth.removeValue(forKey: objectDepth)
+                index = token.nextIndex
+            default:
+                index += 1
+            }
+        }
+        return false
+    }
+
+    private static func scanJSONString(_ bytes: Data,
+                                       openingQuote: Int)
+        -> (value: String?, nextIndex: Int) {
+        var index = openingQuote + 1
+        var value: [UInt8] = []
+        var canMaterialize = true
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == 0x5C { // escaped byte; irrelevant for our ASCII keys/types
+                canMaterialize = false
+                index = min(bytes.count, index + 2)
+                continue
+            }
+            if byte == 0x22 {
+                let string = canMaterialize ? String(bytes: value, encoding: .utf8) : nil
+                return (string, index + 1)
+            }
+            if value.count < 64 {
+                value.append(byte)
+            } else {
+                canMaterialize = false
+            }
+            index += 1
+        }
+        return (nil, bytes.count)
+    }
+
+    private static func isCumulativeTokenCount(obj: [String: Any],
+                                                payload: [String: Any]) -> Bool {
+        (payload["type"] as? String) == "token_count"
+            || (obj["type"] as? String) == "token_count"
+    }
+
+    private static func isTurnContext(obj: [String: Any],
+                                      payload: [String: Any]) -> Bool {
+        (payload["type"] as? String) == "turn_context"
+            || (obj["type"] as? String) == "turn_context"
+    }
+
+    /// The model in force at a JSONL boundary: the model on the last preceding
+    /// `turn_context`. Widen backward progressively because one tool/image record
+    /// can put megabytes between the boundary and its context.
     ///
     /// `didRead` separates "scanned the bytes, no `turn_context` there" (cacheable)
     /// from "couldn't read the file" (transient), so only the former is remembered.
-    private static func currentModel(fromLogPath path: String) -> (model: String?, didRead: Bool) {
+    private static func lastModel(fromLogPath path: String,
+                                  endingAt boundary: UInt64) -> (model: String?, didRead: Bool) {
         var window = 2 * 1024 * 1024   // the 512KB token tail already came up empty
         while true {
-            guard let data = CodexRunwayRateLimitParser.tailData(path: path, maxBytes: window) else {
+            let start = boundary > UInt64(window) ? boundary - UInt64(window) : 0
+            guard let data = readRangeAllowingEmpty(path: path, from: start, to: boundary) else {
                 return (nil, false)
             }
             if let model = lastTurnContextModel(in: data) { return (model, true) }
-            // Short read ⇒ that was the whole file, so no `turn_context` exists at all.
-            if data.count < window { return (nil, true) }
+            if start == 0 { return (nil, true) }
             guard window < modelScanCap else { return (nil, true) }
             window = min(window * 4, modelScanCap)
         }
@@ -2336,6 +2914,32 @@ enum CodexRunwayTokenActivityParser {
         identities.compactMap { activity(identity: $0, now: now) }
     }
 
+    static func weeklyProfile(identities: [RunwaySessionIdentity],
+                              now: Date = Date())
+        -> (activities: [RunwaySessionActivity], measuringIDs: Set<String>) {
+        var activities: [RunwaySessionActivity] = []
+        var measuringIDs: Set<String> = []
+        for identity in identities {
+            let paths = identity.logPaths.map { recentWeeklySamples(fromLogPath: $0, now: now) }
+            let pathActivities = paths.compactMap {
+                weeklyActivity(identity: identity, samples: $0, now: now)
+            }
+            if !pathActivities.isEmpty {
+                let tokensPerSecond = pathActivities.reduce(0) { $0 + $1.tokensPerSecond }
+                activities.append(RunwaySessionActivity(
+                    identity: identity,
+                    tokensPerSecond: tokensPerSecond,
+                    sampleStart: pathActivities.map(\.sampleStart).min() ?? now,
+                    sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now,
+                    components: pathActivities.flatMap(\.components)
+                ))
+            } else if paths.contains(where: { weeklyEvidenceIsMeasuring($0, now: now) }) {
+                measuringIDs.insert(identity.id)
+            }
+        }
+        return (activities, measuringIDs)
+    }
+
     /// Latest CUMULATIVE counters per log path, for the weekly calibration ledger.
     ///
     /// Cumulative rather than a rate on purpose: the ledger banks deltas between
@@ -2362,6 +2966,37 @@ enum CodexRunwayTokenActivityParser {
                 cacheCreation: 0,
                 modelSlug: latest.modelSlug
             ))
+        }
+        return result
+    }
+
+    /// Incremental Codex turns for calibration. Keeping request boundaries lets
+    /// pricing apply Sol's long-context tier to the whole request when its input
+    /// exceeds 272K, rather than treating a polling bucket as one request.
+    static func ledgerEvents(identities: [RunwaySessionIdentity],
+                             now: Date = Date()) -> [WeeklyQuotaTokenEvent] {
+        var seen: Set<String> = []
+        var result: [WeeklyQuotaTokenEvent] = []
+        for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
+            seen.insert(path)
+            let samples = recentSamples(fromLogPath: path, now: now)
+            for (previous, current) in zip(samples, samples.dropFirst()) {
+                let totalInput = max(0, current.input - previous.input)
+                let cached = max(0, current.cachedInput - previous.cachedInput)
+                let fresh = max(0, totalInput - cached)
+                let output = max(0, current.output - previous.output)
+                guard fresh + cached + output > 0 else { continue }
+                result.append(WeeklyQuotaTokenEvent(
+                    logPath: path,
+                    capturedAt: current.capturedAt,
+                    input: fresh,
+                    cachedInput: cached,
+                    output: output,
+                    cacheCreation: 0,
+                    modelSlug: current.modelSlug,
+                    contextInputTokens: totalInput
+                ))
+            }
         }
         return result
     }
@@ -2411,10 +3046,59 @@ enum CodexRunwayTokenActivityParser {
                 cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) / elapsed,
                 outputPerSecond: max(0, current.output - previous.output) / elapsed,
                 cacheCreationPerSecond: 0,
-                modelSlug: current.modelSlug
+                modelSlug: current.modelSlug,
+                contextInputTokens: max(0, current.input - previous.input)
             )
         }
         return nil
+    }
+
+    private static func weeklyEvidenceIsMeasuring(_ samples: [CodexRunwayTokenActivitySample],
+                                                   now: Date) -> Bool {
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        guard let first = samples.first(where: { $0.capturedAt >= cutoff }) else { return false }
+        return now.timeIntervalSince(first.capturedAt) < weeklyMinimumCoverage
+    }
+
+    static func weeklyActivity(identity: RunwaySessionIdentity,
+                               samples: [CodexRunwayTokenActivitySample],
+                               now: Date) -> RunwaySessionActivity? {
+        let cutoff = now.addingTimeInterval(-weeklyWindow)
+        let recent = samples.filter { $0.capturedAt >= cutoff && $0.capturedAt <= now }
+        guard recent.count >= 2, let first = recent.first, let last = recent.last else { return nil }
+        let coverage = now.timeIntervalSince(first.capturedAt)
+        guard coverage >= weeklyMinimumCoverage, coverage <= weeklyWindow else { return nil }
+        // A linearly decayed window makes the estimate fall on every refresh after
+        // a burst, while the normalization keeps a steady request stream unbiased.
+        let normalization = coverage - (coverage * coverage) / (2 * weeklyWindow)
+        guard normalization > 0 else { return nil }
+
+        var total = 0.0
+        var components: [RunwayModelComponent] = []
+        for (previous, current) in zip(recent, recent.dropFirst()) {
+            let delta = current.totalTokens - previous.totalTokens
+            guard delta > 0 else { continue }
+            let weight = max(0, 1 - now.timeIntervalSince(current.capturedAt) / weeklyWindow)
+            guard weight > 0 else { continue }
+            total += delta * weight
+            components.append(RunwayModelComponent(
+                modelSlug: current.modelSlug,
+                inputPerSecond: max(0, (current.input - current.cachedInput)
+                    - (previous.input - previous.cachedInput)) * weight / normalization,
+                cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) * weight / normalization,
+                outputPerSecond: max(0, current.output - previous.output) * weight / normalization,
+                cacheCreationPerSecond: 0,
+                contextInputTokens: max(0, current.input - previous.input)
+            ))
+        }
+        guard total > 0 else { return nil }
+        return RunwaySessionActivity(
+            identity: identity,
+            tokensPerSecond: total / normalization,
+            sampleStart: first.capturedAt,
+            sampleEnd: last.capturedAt,
+            components: components
+        )
     }
 
     private static func tokenLine(obj: [String: Any], payload: [String: Any],

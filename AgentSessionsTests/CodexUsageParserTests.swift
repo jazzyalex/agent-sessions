@@ -3299,6 +3299,24 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(snapshot?.burstSummary)
     }
 
+    func testWeeklyPendingRowsDistinguishMeasuringFromQuiet() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 30,
+            resetAt: now.addingTimeInterval(604_800),
+            currentRunoutAt: now.addingTimeInterval(604_800), observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let identities = ["measuring", "quiet"].map {
+            RunwaySessionIdentity(id: $0, displayName: $0, isGoal: false,
+                                  logPaths: ["/tmp/\($0).jsonl"])
+        }
+        let snapshot = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline, snapshot: nil, activeIdentities: identities, maxRows: 5,
+            pendingConfidence: .direct, waitingIDs: ["measuring"])
+        XCTAssertEqual(snapshot?.rows.first(where: { $0.id == "measuring" })?.confidence, .waiting)
+        XCTAssertEqual(snapshot?.rows.first(where: { $0.id == "quiet" })?.confidence, .direct)
+    }
+
     func testRunwayPendingRowsKeepSummaryForTwoOverflowIdentities() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let baseline = RunwayProviderBaseline(
@@ -3875,6 +3893,47 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(identities, [])
     }
 
+    func testCodexRunwayRecentSessionScannerSupportsWeeklyRetentionWithoutChangingDefault() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-weekly-retention-\(UUID().uuidString)")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let completedAt = now.addingTimeInterval(-120)
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-completed.jsonl")
+        try """
+        {"timestamp":"\(iso(completedAt))","type":"session_meta","payload":{"id":"session-completed","cwd":"/Users/alexm/Repository/Codex-History"}}
+        {"timestamp":"\(iso(completedAt))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        {"timestamp":"\(iso(completedAt))","type":"event_msg","payload":{"type":"task_complete"}}
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let defaultIdentities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+        let weeklyIdentities = CodexRunwayRecentSessionScanner.identities(
+            root: root,
+            now: now,
+            activeSampleAge: CodexRunwayTokenActivityParser.weeklyWindow,
+            completionGrace: CodexRunwayTokenActivityParser.weeklyWindow
+        )
+        let expiredWeeklyIdentities = CodexRunwayRecentSessionScanner.identities(
+            root: root,
+            now: now.addingTimeInterval(181),
+            activeSampleAge: CodexRunwayTokenActivityParser.weeklyWindow,
+            completionGrace: CodexRunwayTokenActivityParser.weeklyWindow
+        )
+
+        XCTAssertEqual(defaultIdentities, [])
+        XCTAssertEqual(weeklyIdentities.map(\.id), ["session-completed"])
+        XCTAssertEqual(
+            weeklyIdentities.first?.logPaths.map {
+                URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
+            },
+            [log.resolvingSymlinksInPath().path]
+        )
+        XCTAssertEqual(expiredWeeklyIdentities, [])
+    }
+
     func testCodexRunwayRecentSessionScannerKeepsLogsActiveAfterPriorTurnCompletion() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-reopened-\(UUID().uuidString)")
         let now = Date()
@@ -3896,6 +3955,60 @@ final class CodexUsageParserTests: XCTestCase {
         let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
 
         XCTAssertEqual(identities.first?.id, "session-reopened")
+    }
+
+    func testCodexRunwayLoaderRetainsCompletedChildForWeeklyDecayWindow() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-weekly-child-\(UUID().uuidString)")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let firstSampleAt = now.addingTimeInterval(-130)
+        let completedAt = now.addingTimeInterval(-120)
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let parent = dir.appendingPathComponent("rollout-parent.jsonl")
+        try """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"parent-session","cwd":"/Users/alexm/Repository/Codex-History"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"profile weekly runway"}]}}
+        """.write(to: parent, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parent.path)
+
+        let child = dir.appendingPathComponent("rollout-child.jsonl")
+        try """
+        {"timestamp":"\(iso(firstSampleAt))","type":"session_meta","payload":{"id":"child-session","cwd":"/Users/alexm/Repository/Codex-History","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-session"}}}}}
+        {"timestamp":"\(iso(firstSampleAt))","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+        {"timestamp":"\(iso(firstSampleAt))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":110000,"input_tokens":100000,"cached_input_tokens":90000,"output_tokens":10000}}}}
+        {"timestamp":"\(iso(completedAt))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":140000,"input_tokens":120000,"cached_input_tokens":100000,"output_tokens":20000}}}}
+        {"timestamp":"\(iso(completedAt))","type":"event_msg","payload":{"type":"task_complete"}}
+        """.write(to: child, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: completedAt], ofItemAtPath: child.path)
+
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 50,
+            resetAt: now.addingTimeInterval(7 * 24 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(7 * 24 * 60 * 60),
+            observedAt: now,
+            hasProjectedRunout: false,
+            windowMinutes: 10_080,
+            rateUnit: .weeklyPercentPerHour
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [],
+            now: now,
+            maxRows: 4,
+            recentSessionsRoot: root,
+            weeklyPercentPointsPerDollar: 0.5,
+            weeklyWindowAvailable: true
+        )
+
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+        let row = try XCTUnwrap(snapshot?.rows.first { $0.id == "parent-session" })
+
+        XCTAssertEqual(row.displayName, "profile weekly runway")
+        XCTAssertEqual(row.confidence, .direct)
+        XCTAssertGreaterThan(row.displayRate, 0)
     }
 
     func testCodexRunwayRecentSessionScannerSkipsSetupContextForNames() throws {
@@ -4459,7 +4572,9 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.outputPerMTok, 1.2)
         XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.cachedInputPerMTok, 0.02)
         XCTAssertEqual(t.price(forModel: "gpt-5.4-mini")?.inputPerMTok, 0.75)        // longer prefix beats gpt-5.4
-        XCTAssertEqual(t.price(forModel: "gpt-5-codex")?.inputPerMTok, 1.25)         // falls back to gpt-5
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-sol-2026-09-03")?.inputPerMTok, 4.0)
+        XCTAssertNil(t.price(forModel: "gpt-5-codex"), "unknown GPT variants fail closed")
+        XCTAssertNil(t.price(forModel: "gpt-5.6-sol-pro"), "a suffix is not necessarily a dated snapshot")
         XCTAssertNil(t.price(forModel: "totally-unknown-model"))
         XCTAssertNil(t.price(forModel: nil))
     }
@@ -4478,7 +4593,59 @@ final class CodexUsageParserTests: XCTestCase {
         let ok = #"{"version":1,"updated":"2099-01-01","models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
         XCTAssertTrue(t.loadForTesting(json: Data(ok.utf8)))
         XCTAssertEqual(t.price(forModel: "zzz-model")?.inputPerMTok, 9)
-        XCTAssertGreaterThan(t.revision, before)
+        XCTAssertNotEqual(t.revision, before)
+    }
+
+    func testPriceRevisionIsStableForEquivalentManifestContent() {
+        let a = RunwayPriceTable.makeEmptyForTesting()
+        let b = RunwayPriceTable.makeEmptyForTesting()
+        let compact = #"{"version":1,"updated":"2099-01-01","models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":5}}}"#
+        let formatted = """
+        {
+          "models": { "x": { "outputPerMTok": 5, "cachedInputPerMTok": 0.1, "inputPerMTok": 1 } },
+          "_note": "comment-only differences do not invalidate calibration",
+          "updated": "2099-02-01",
+          "version": 1
+        }
+        """
+        XCTAssertTrue(a.loadForTesting(json: Data(compact.utf8)))
+        XCTAssertTrue(b.loadForTesting(json: Data(formatted.utf8)))
+        XCTAssertEqual(a.revision, b.revision)
+    }
+
+    func testSolLongContextTierPricesTheWholeRequest() {
+        let price = RunwayPriceTable.makeForTesting().price(forModel: "gpt-5.6-sol")
+        let base = price?.rates(for: .standard, contextInputTokens: 272_000)
+        let long = price?.rates(for: .standard, contextInputTokens: 272_001)
+        XCTAssertEqual(base?.inputPerMTok, 4)
+        XCTAssertEqual(base?.outputPerMTok, 20)
+        XCTAssertEqual(long?.inputPerMTok, 8)
+        XCTAssertEqual(long?.cachedInputPerMTok, 0.8)
+        XCTAssertEqual(long?.outputPerMTok, 30)
+    }
+
+    func testEveryGPT56CodexTierUsesTheLongContextPolicy() {
+        let table = RunwayPriceTable.makeForTesting()
+        let expected: [String: Double] = [
+            "gpt-5.6-sol": 8,
+            "gpt-5.6": 8,
+            "gpt-5.6-terra": 4,
+            "gpt-5.6-luna": 0.4,
+            "codex-auto-review": 8
+        ]
+        for (model, inputRate) in expected {
+            XCTAssertEqual(table.price(forModel: model)?
+                .rates(for: .standard, contextInputTokens: 272_001)?.inputPerMTok,
+                           inputRate, model)
+        }
+    }
+
+    func testObservedSolBurstRemainsShortContextPriced() throws {
+        let price = try XCTUnwrap(RunwayPriceTable.makeForTesting().price(forModel: "gpt-5.6-sol"))
+        let rates = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 205_313))
+        XCTAssertEqual(rates.dollars(input: 897, cachedInput: 204_416, output: 505,
+                                     cacheWrite5m: 0, cacheWrite1h: 0),
+                       0.095_454_4, accuracy: 0.000_000_1)
     }
 
     func testDollarSnapshotPricesPerTypeIncludingCache() {
@@ -4877,9 +5044,9 @@ final class CodexUsageParserTests: XCTestCase {
                       "head read must clear a >64KB session_meta to find the first turn_context model")
     }
 
-    /// Regression: token lines that precede the tail's first `turn_context` are stamped
-    /// via backfill from the first in-tail model (a session is effectively single-model).
-    func testCodexRunwayModelBackfilledForLinesBeforeTailTurnContext() throws {
+    /// A later context cannot identify an earlier token's model. With no preceding
+    /// context in the file, the ambiguous leading sample must stay unpriced.
+    func testCodexRunwayDoesNotBackfillEarlierTokenFromLaterContext() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-backfill-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -4897,8 +5064,395 @@ final class CodexUsageParserTests: XCTestCase {
         let samples = CodexRunwayTokenActivityParser.recentSamples(fromLogPath: log.path, now: second.addingTimeInterval(1))
 
         XCTAssertEqual(samples.count, 2)
-        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-sol" },
-                      "the leading token line must be backfilled with the session model")
+        XCTAssertNil(samples.first?.modelSlug)
+        XCTAssertEqual(samples.last?.modelSlug, "gpt-5.6-sol")
+    }
+
+    func testCodexRunwayTailUsesPrecedingModelBeforeContextOnlySwitch() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-runway-context-only-tail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let third = second.addingTimeInterval(30)
+        let solContext = "{\"timestamp\":\"\(iso(first.addingTimeInterval(-2)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let oversized = "{\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "x", count: 540 * 1024))\"}}"
+        let token1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let token2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        let contextOnly = "{\"timestamp\":\"\(iso(second.addingTimeInterval(1)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\"}}"
+        try ([solContext, oversized, token1, token2, contextOnly].joined(separator: "\n") + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: second.addingTimeInterval(2))
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-sol" })
+
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        var events = CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: second.addingTimeInterval(2))
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.modelSlug, "gpt-5.6-sol")
+
+        let token3 = "{\"timestamp\":\"\(iso(third))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":3000,\"cached_input_tokens\":2400,\"output_tokens\":300,\"total_tokens\":3300}}}}"
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((token3 + "\n").utf8))
+        try handle.close()
+
+        let appendedSamples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: third.addingTimeInterval(1))
+        XCTAssertEqual(appendedSamples.map(\.modelSlug), [
+            "gpt-5.6-sol", "gpt-5.6-sol", "gpt-5.6-luna"
+        ])
+        events = CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: third.addingTimeInterval(1))
+        XCTAssertEqual(events.map(\.modelSlug), ["gpt-5.6-sol", "gpt-5.6-luna"])
+    }
+
+    func testCodexRunwayBoundaryModelCacheInvalidatesSameInodeRewrite() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-runway-boundary-rewrite-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        func context(_ model: String) -> String {
+            "{\"timestamp\":\"\(iso(first.addingTimeInterval(-2)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"\(model)\"}}"
+        }
+        func oversized(_ count: Int) -> String {
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "x", count: count))\"}}"
+        }
+        let token1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let token2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        let original = [
+            context("gpt-5.6-sol"), oversized(540 * 1024), token1, token2
+        ].joined(separator: "\n") + "\n"
+        try original.write(to: log, atomically: true, encoding: .utf8)
+        let originalInode = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: log.path)[.systemFileNumber])
+                as? NSNumber
+        )
+        XCTAssertTrue(CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: second.addingTimeInterval(1)
+        ).allSatisfy { $0.modelSlug == "gpt-5.6-sol" })
+
+        // Rewrite in place at identical total size. The context grows by one byte
+        // while the homogeneous filler shrinks by one, preserving both inode and
+        // the 4 KiB boundary guard that an append-only cache validates.
+        let rewritten = [
+            context("gpt-5.6-luna"), oversized(540 * 1024 - 1), token1, token2
+        ].joined(separator: "\n") + "\n"
+        XCTAssertEqual(rewritten.utf8.count, original.utf8.count)
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seek(toOffset: 0)
+        try handle.write(contentsOf: Data(rewritten.utf8))
+        try handle.truncate(atOffset: UInt64(rewritten.utf8.count))
+        try handle.close()
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: 1)],
+            ofItemAtPath: log.path
+        )
+        let rewrittenInode = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: log.path)[.systemFileNumber])
+                as? NSNumber
+        )
+        XCTAssertEqual(rewrittenInode, originalInode)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: second.addingTimeInterval(1))
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-luna" })
+    }
+
+    /// Codex Desktop emits these two record families for the same response:
+    /// `token_usage_record` is per-request, while `token_count` is cumulative.
+    /// Mixing them makes the next cumulative sample look like another copy of the
+    /// whole session and corrupts both the Wk rate and calibration ledger.
+    func testCodexRunwayUsesOnlyCumulativeTokenCountRecords() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-runway-record-family-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let incrementalAt = first.addingTimeInterval(30)
+        let second = first.addingTimeInterval(60)
+        let now = second.addingTimeInterval(1)
+        let context = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let cumulative1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let incremental = "{\"timestamp\":\"\(iso(incrementalAt))\",\"type\":\"token_usage_record\",\"payload\":{\"usage\":{\"input_tokens\":900,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1000}}}"
+        let cumulative2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        try ([context, cumulative1, incremental, cumulative2].joined(separator: "\n") + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: now)
+        XCTAssertEqual(samples.count, 2, "the incremental twin must not become a cumulative sample")
+        XCTAssertEqual(samples.map(\.input), [1_000, 2_000])
+        XCTAssertEqual(samples.map(\.cachedInput), [800, 1_600])
+        XCTAssertEqual(samples.map(\.output), [100, 200])
+
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let events = CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: now)
+        XCTAssertEqual(events.count, 1)
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event.input, 200)
+        XCTAssertEqual(event.cachedInput, 800)
+        XCTAssertEqual(event.output, 100)
+        XCTAssertEqual(event.contextInputTokens, 1_000)
+
+        let profile = CodexRunwayTokenActivityParser.weeklyProfile(
+            identities: [identity], now: now)
+        XCTAssertEqual(profile.activities.count, 1)
+        let activity = try XCTUnwrap(profile.activities.first)
+        XCTAssertEqual(activity.components.count, 1)
+        let coverage: Double = 61
+        let normalization = coverage - coverage * coverage / (2 * 300)
+        let weight = 1 - 1.0 / 300
+        let freshPerSecond = 200 * weight / normalization
+        let cachedPerSecond = 800 * weight / normalization
+        let outputPerSecond = 100 * weight / normalization
+        XCTAssertEqual(activity.inputPerSecond, freshPerSecond, accuracy: 0.000_001)
+        XCTAssertEqual(activity.cachedInputPerSecond, cachedPerSecond, accuracy: 0.000_001)
+        XCTAssertEqual(activity.outputPerSecond, outputPerSecond, accuracy: 0.000_001)
+
+        let expectedDollarsPerHour = (
+            freshPerSecond * 4 + cachedPerSecond * 0.4 + outputPerSecond * 20
+        ) / 1_000_000 * 3_600
+        let dollarsPerHour = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(
+            for: activity, priceTable: RunwayPriceTable.makeForTesting()))
+        XCTAssertEqual(dollarsPerHour, expectedDollarsPerHour, accuracy: 0.000_001)
+    }
+
+    /// Regression: image and tool-result records can be larger than the ordinary
+    /// 512 KiB activity tail. Wk must recover its time window in a separate cache;
+    /// otherwise a busy image session falls back to "measuring" on the next poll.
+    /// The wider row read must not expose old events to the forward-only ledger.
+    func testCodexWeeklyProfileWidensPastOversizedNonTokenRecordAndKeepsLedgerNarrow() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-weekly-oversized-record-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let first = now.addingTimeInterval(-310)
+        let second = now.addingTimeInterval(-240)
+        let third = now.addingTimeInterval(-5)
+        let context = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let cumulative1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let cumulative2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        let oversized = "{\"timestamp\":\"\(iso(second))\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "x", count: 1_000)) quoted \\\"token_count\\\" text \(String(repeating: "x", count: 699_000))\"}}"
+        let cumulative3 = "{\"timestamp\":\"\(iso(third))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":5000,\"cached_input_tokens\":4000,\"output_tokens\":500,\"total_tokens\":5500}}}}"
+        try ([context, cumulative1, cumulative2, oversized, cumulative3]
+            .joined(separator: "\n") + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+
+        // Prime the ordinary cache exactly as the loader does before weeklyProfile.
+        XCTAssertTrue(CodexRunwayTokenActivityParser.activities(
+            identities: [identity], now: now).isEmpty)
+        XCTAssertTrue(CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: now).isEmpty)
+
+        let profile = CodexRunwayTokenActivityParser.weeklyProfile(
+            identities: [identity], now: now)
+        XCTAssertTrue(profile.measuringIDs.isEmpty)
+        let activity = try XCTUnwrap(profile.activities.first)
+        XCTAssertEqual(profile.activities.count, 1)
+        XCTAssertEqual(activity.sampleStart, second)
+        XCTAssertEqual(activity.sampleEnd, third)
+        XCTAssertEqual(Set(activity.components.compactMap(\.modelSlug)), ["gpt-5.6-sol"])
+
+        let coverage: Double = 240
+        let normalization = coverage - coverage * coverage / (2 * 300)
+        let weight = 1 - 5.0 / 300
+        XCTAssertEqual(activity.inputPerSecond, 600 * weight / normalization, accuracy: 0.000_001)
+        XCTAssertEqual(activity.cachedInputPerSecond, 2_400 * weight / normalization, accuracy: 0.000_001)
+        XCTAssertEqual(activity.outputPerSecond, 300 * weight / normalization, accuracy: 0.000_001)
+
+        // A wider display read must not retroactively hand the old pair to the
+        // calibration ledger on this same unchanged-file poll.
+        XCTAssertTrue(CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: now).isEmpty)
+
+        // Appending another oversized record invalidates the Wk cache. The fresh
+        // adaptive read must still recover history without reusing the narrow one.
+        let fourth = now.addingTimeInterval(25)
+        let oversized2 = "{\"timestamp\":\"\(iso(third))\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "y", count: 700_000))\"}}"
+        let cumulative4 = "{\"timestamp\":\"\(iso(fourth))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":6000,\"cached_input_tokens\":4800,\"output_tokens\":600,\"total_tokens\":6600}}}}"
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((oversized2 + "\n" + cumulative4 + "\n").utf8))
+        try handle.close()
+
+        let updated = CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path, now: fourth.addingTimeInterval(1))
+        XCTAssertEqual(updated.map(\.input), [1_000, 2_000, 5_000, 6_000])
+    }
+
+    func testCodexWeeklyHistoryExtendsForOutOfOrderNowWithoutReusingShallowCutoff() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-weekly-out-of-order-now-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let base = Date(timeIntervalSince1970: 2_000_000)
+        let context1 = "{\"timestamp\":\"\(iso(base.addingTimeInterval(-401)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let old = "{\"timestamp\":\"\(iso(base.addingTimeInterval(-400)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let oversized = "{\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "x", count: 700_000))\"}}"
+        let context2 = "{\"timestamp\":\"\(iso(base.addingTimeInterval(-201)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let middle = "{\"timestamp\":\"\(iso(base.addingTimeInterval(-200)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        let latest = "{\"timestamp\":\"\(iso(base.addingTimeInterval(195)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":3000,\"cached_input_tokens\":2400,\"output_tokens\":300,\"total_tokens\":3300}}}}"
+        try ([context1, old, oversized, context2, middle, latest]
+            .joined(separator: "\n") + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        // This later clock only needs the small suffix after the oversized line.
+        let shallow = CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path,
+            initialMaxBytes: 4 * 1024,
+            now: base.addingTimeInterval(200)
+        )
+        XCTAssertEqual(shallow.map(\.input), [2_000, 3_000])
+        XCTAssertEqual(CodexRunwayTokenActivityParser.weeklyPayloadBytesReadForTesting, 4 * 1024)
+
+        // Same bytes, older clock: the cache must extend rather than reuse the
+        // cutoff-specific shallow result from the first request.
+        let extended = CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path,
+            initialMaxBytes: 4 * 1024,
+            now: base
+        )
+        XCTAssertEqual(extended.map(\.input), [1_000, 2_000])
+        XCTAssertEqual(
+            CodexRunwayTokenActivityParser.weeklyPayloadBytesReadForTesting,
+            try Data(contentsOf: log).count,
+            "backward extension must read disjoint bytes, not overlapping doubled tails"
+        )
+    }
+
+    func testCodexWeeklyHistoryCarriesContextOnlyModelSwitchAcrossOversizedAppend() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-weekly-context-only-switch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let context = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-311)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let first = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-310)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        let second = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-200)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}}}}"
+        try ([context, first, second].joined(separator: "\n") + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+        XCTAssertEqual(CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path, now: now).last?.modelSlug, "gpt-5.6-sol")
+
+        let switched = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-10)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\"}}"
+        let oversized = "{\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"content\":\"\(String(repeating: "y", count: 700_000))\"}}"
+        var handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((switched + "\n" + oversized + "\n").utf8))
+        try handle.close()
+        _ = CodexRunwayTokenActivityParser.recentWeeklySamples(fromLogPath: log.path, now: now)
+
+        let third = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-5)))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":3000,\"cached_input_tokens\":2400,\"output_tokens\":300,\"total_tokens\":3300}}}}"
+        handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((third + "\n").utf8))
+        try handle.close()
+
+        let samples = CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path, now: now)
+        XCTAssertEqual(samples.last?.input, 3_000)
+        XCTAssertEqual(samples.last?.modelSlug, "gpt-5.6-luna")
+        XCTAssertEqual(
+            CodexRunwayTokenActivityParser.weeklyPayloadBytesReadForTesting,
+            try Data(contentsOf: log).count,
+            "append reuse must read each transcript byte once"
+        )
+    }
+
+    func testCodexWeeklyHistoryFindsLateStructuralTypeAndReparsesNoNewlineRecord() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-weekly-late-envelope-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let context = "{\"timestamp\":\"\(iso(now.addingTimeInterval(-311)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        func lateEnvelope(_ at: Date, input: Int, cached: Int, output: Int, total: Int) -> String {
+            "{\"timestamp\":\"\(iso(at))\",\"padding\":\"\(String(repeating: "z", count: 70_000))\",\"payload\":{\"info\":{\"total_token_usage\":{\"input_tokens\":\(input),\"cached_input_tokens\":\(cached),\"output_tokens\":\(output),\"total_tokens\":\(total)}},\"type\":\"token_count\"}}"
+        }
+        let first = lateEnvelope(
+            now.addingTimeInterval(-310), input: 1_000, cached: 800, output: 100, total: 1_100)
+        let second = lateEnvelope(
+            now.addingTimeInterval(-5), input: 2_000, cached: 1_600, output: 200, total: 2_200)
+        // The final record is valid JSON but intentionally has no LF yet.
+        try ([context, first].joined(separator: "\n") + "\n" + second)
+            .write(to: log, atomically: true, encoding: .utf8)
+        XCTAssertEqual(CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path, now: now).map(\.input), [1_000, 2_000])
+
+        let third = lateEnvelope(
+            now.addingTimeInterval(-1), input: 3_000, cached: 2_400, output: 300, total: 3_300)
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(("\n" + third + "\n").utf8))
+        try handle.close()
+        XCTAssertEqual(CodexRunwayTokenActivityParser.recentWeeklySamples(
+            fromLogPath: log.path, now: now).map(\.input), [1_000, 2_000, 3_000])
+    }
+
+    func testCodexRunwayAcceptsLegacyTopLevelTokenCountEnvelope() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-runway-legacy-token-count-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let at = Date(timeIntervalSince1970: 2_000_000)
+        let context = "{\"timestamp\":\"\(iso(at))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let tokenCount = "{\"timestamp\":\"\(iso(at))\",\"type\":\"token_count\",\"payload\":{\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}}}}"
+        try (context + "\n" + tokenCount + "\n")
+            .write(to: log, atomically: true, encoding: .utf8)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: at.addingTimeInterval(1))
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples.first?.input, 1_000)
+        XCTAssertEqual(samples.first?.cachedInput, 800)
+        XCTAssertEqual(samples.first?.output, 100)
     }
 
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {

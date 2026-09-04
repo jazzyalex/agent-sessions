@@ -1,3 +1,29 @@
+## 2026-09-03 19:44 · quota-meter-weekly-burn · Weekly burn parser fixed and verified
+status: done
+
+**State:** The Quota Meter Wk path now reports sustained, correctly priced per-session burn; the repaired Debug build is running locally and the work remains uncommitted.
+
+**Verified:**
+- `HEAD` is `c6a14ca61a1f98e7edf3b0ee8ead4e47919d89dd` on `main`; no branch, commit, push, or deploy was performed.
+- Final stable suite: 2605 total / 2602 passed / 3 skipped / 0 failed in `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.09.03_19-38-46--0700.xcresult`.
+- Final Debug build succeeded, passed `codesign --verify --deep --strict`, and was relaunched as PID `81126`; `AgentSessions.debug.dylib` SHA-256 is `1999e4230352d9cf35be0f40cf1480ce62c82b1f3438c6fa421673bc72bcd494`.
+- Screenshot-cutoff replay is 13.3061915364%/h for Diagnose and 3.0550551429%/h for Social, formatting as 13%/h and 3.1%/h.
+
+**Decided / don't redo:**
+- The new-build 4.36x Ultra-plus-subagents versus light-solo gap is supported by telemetry; the old 479-943%/h readings were parser/snapshot inflation.
+- Wk uses cumulative `token_count` only, a one-minute evidence floor and five-minute decay, append-aware large-log history, request-aware long-context pricing, and chronology-safe model attribution. Codex calibration revision 4 rejects every earlier denominator.
+
+**Uncommitted / ownership:**
+- `AgentSessions/ClaudeStatus/*`, `AgentSessions/CodexStatus/*`, `AgentSessions/Views/AgentCockpitHUDView.swift`, and the two quota test files — this Quota Meter task; preserve together.
+- `docs/CHANGELOG.md`, `docs/prices.json`, `docs/summaries/2026-09.md`, and the Quota Meter portion of `docs/backlog.md` — this task; `docs/backlog.md` also contains an older unrelated edit, so preserve its full diff.
+- `docs/index.html`, `docs/assets/social-banners/`, and `docs/social-banners/` — concurrent social-banner session, not this task; do not alter or absorb.
+- `RepoHandover.md` — this checkpoint; intentionally uncommitted.
+
+**Key files:**
+- `AgentSessions/CodexStatus/CodexRunwayModel.swift` — cumulative parser, weekly history, model-boundary cache, and burn calculation.
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift` — calibration selection, persistence, and accounting revision 4.
+- `AgentSessionsTests/CodexUsageParserTests.swift` and `AgentSessionsTests/WeeklyQuotaCalibrationTests.swift` — regression coverage and revision gates.
+
 ## 2026-09-03 12:24 · quota-meter-claude-access · Claude unavailable state and provider visibility shipped
 status: done
 

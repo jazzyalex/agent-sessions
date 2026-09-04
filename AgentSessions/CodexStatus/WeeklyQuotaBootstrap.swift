@@ -298,15 +298,18 @@ enum CodexWeeklyQuotaBootstrapScanner {
         let volume = freshInput + cached + output + cacheWrite
         guard volume > 0 else { return }
 
-        guard let price = priceTable.price(forModel: currentModel) else {
+        guard let price = priceTable.price(forModel: currentModel),
+              let rates = price.rates(for: .standard,
+                                      contextInputTokens: value("input_tokens")) else {
             unpricedVolume += volume
             return
         }
         pricedVolume += volume
-        dollars += freshInput * price.inputPerMTok / 1_000_000
-            + cached * price.cachedInputPerMTok / 1_000_000
-            + output * price.outputPerMTok / 1_000_000
-            + cacheWrite * (price.cacheWritePerMTok ?? price.inputPerMTok) / 1_000_000
+        dollars += rates.dollars(input: freshInput,
+                                 cachedInput: cached,
+                                 output: output,
+                                 cacheWrite5m: cacheWrite,
+                                 cacheWrite1h: 0)
     }
 
     /// Codex writes ISO-8601 strings on transcript lines, but older rollouts and

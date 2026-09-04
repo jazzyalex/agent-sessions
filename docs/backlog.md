@@ -1284,6 +1284,23 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## Transcript (Session view)
 
+### Subagent session rows should start with the session name
+> **open** · sev: low · urg: low · verified —
+
+- **What:** in the sessions list, rows with subagents currently put the subagent
+  count before the session name (for example, `> 1 (12)`). Start every row at the
+  same horizontal position with the session name, matching normal session rows.
+  Keep the subagent indicator (`> 1 (12)`) after the session name; when the name
+  is truncated, place the indicator at the right edge of the available row.
+- **Why:** aligned session-name starts make the list much easier to scan visually.
+- **Why deferred:** cosmetic UI work with no urgency; the exact truncation and
+  trailing-indicator behavior should be designed and tested together.
+- **Risk if wrong:** names remain harder to compare across normal and subagent
+  sessions, especially when the list contains many similarly named sessions.
+- **To close:** verify normal and subagent rows share the same leading alignment,
+  long names truncate without overlapping the indicator, and the indicator remains
+  visible at the row's right edge.
+
 ### Semantic filters (Plan / Code / Diff / Review) in the Session view
 > **open** · sev: low · urg: low · verified —
 
@@ -1314,10 +1331,44 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## QM / Runway
 
-### OpenAI long-context pricing is unreachable from the Codex CLI — do not implement
-> **won't-do** · sev: low · urg: low · verified 2026-08-30
+### Weekly quota pricing and calibration need immutable, scoped v2 evidence
+> **partial** · sev: high · urg: med · verified 2026-09-03
 
-Recorded so the next price sweep does not re-investigate it. OpenAI publishes a second
+- **What is fixed locally:** the `Wk` path no longer annualizes and holds the newest
+  10-second token pair. It uses a weekly-only, linearly decayed five-minute window with
+  a 60-second evidence floor; removes the 150-second weekly hold; pools consecutive live
+  quota ticks; retains a better-conditioned bootstrap; differences only Codex's cumulative
+  `token_count` family instead of mixing in its per-request twin; keeps completed Codex
+  sessions attributable for the whole five-minute window; invalidates live Codex calibration
+  learned under the old activity accounting; applies Sol's strict `>272K` request tier;
+  rejects unsafe GPT prefix matches; uses a stable semantic price hash; and adaptively
+  recovers Wk row history hidden behind oversized image/tool transcript records.
+- **What remains:** one immutable request-pricing snapshot shared by display, live
+  calibration, and bootstrap; provider-specific semantic fingerprints; exact manifest
+  aliases and fail-closed unknown billing modifiers; stable request IDs, gap-proof calibration
+  ledger ingestion, and end-to-end five-minute coverage across every consumer; bounded
+  quota-quantization evidence; and v2
+  persistence scoped by provider, account, source, root, limit identity, price fingerprint,
+  and algorithm version.
+- **Where:** `RunwayPriceTable.swift`, `CodexRunwayModel.swift`,
+  `ClaudeRunwayTokenActivityParser.swift`, `WeeklyQuotaCalibration.swift`, and
+  `WeeklyQuotaBootstrap.swift`.
+- **Why deferred:** Sol Pro's review showed that these are one coordinated data-model and
+  persistence migration, not safe follow-up one-liners. The immediate inflated-rate path
+  can be corrected independently without changing 5h, token, or dollar timing.
+- **Risk if wrong:** a price refresh during a scan, an unknown billing modifier, incomplete
+  transcript coverage, or account/source ambiguity can still produce a stale or incorrectly
+  scoped weekly calibration. Those cases must fail closed rather than show a confident rate.
+- **To close:** land manifest and persistence v2 with immutable request quotes, bounded
+  calibration candidates, scope invalidation, migration tests, coverage/identity tests, and
+  preservation tests for existing 5h, token, dollar, cache, child-session, idle, and stopped
+  behavior.
+
+### OpenAI long-context pricing was historically unreachable from the Codex CLI
+> **partial** · sev: low · urg: low · verified 2026-09-03
+
+The local Quota Meter correction now implements the tier ahead of observed CLI reachability.
+OpenAI publishes a second
 price column for long context — for `gpt-5.6-sol` $8.00/$0.80/$10.00/$30.00 against the
 short-context $4.00/$0.40/$5.00/$20.00 the table ships; input, cached input and cache
 write double, output goes 1.5x. Only `gpt-5.6-sol`, `-terra` and `-luna` have the tier;
@@ -1336,13 +1387,11 @@ page is redesigned.
 **zero**. Claude has no long-context tier at all (4.6+ ships the full 1M window at
 standard rates), so this is OpenAI-only and currently unreachable.
 
-**Reopen if** `model_context_window` rises above 272,000. At that point the work is real:
-the runway prices *cumulative deltas* from `total_token_usage`
-([CodexRunwayModel.swift:2401](../AgentSessions/CodexStatus/CodexRunwayModel.swift:2401)),
-which has no per-turn structure, so it would have to read
-`payload.info.last_token_usage.input_tokens` per turn and classify each turn
-individually. Testing the *cumulative* input against 272,000 would flip nearly every long
-session to double rates after a few turns — a large, confident overstatement.
+**Implemented locally:** runway, live-calibration, and bootstrap pricing preserve request
+boundaries and classify the raw request input strictly above 272,000. The whole request
+then uses 2x input/cache-write and 1.5x output rates for Sol, Terra, Luna, the `gpt-5.6`
+alias, and the internal Sol-priced review label. The broader immutable-snapshot and
+manifest-v2 work remains in the entry above.
 
 ### Runway overflow "+X sessions" undercount (`withPendingRows`)
 > **done** 2026-07-09

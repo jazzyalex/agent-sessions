@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Which billing tier a usage record was served at.
 ///
@@ -60,13 +61,26 @@ struct RunwayModelPrice: Equatable, Sendable {
     /// halving a fast session is the exact failure this split exists to prevent, and
     /// the calculator already prefers an honest drop to a confident wrong number.
     let fast: RunwayRateSet?
+    let longContext: RunwayLongContextPrice?
 
     /// Rates for one observed tier, or nil when that tier has no rate set here.
-    func rates(for speed: RunwaySpeedTier) -> RunwayRateSet? {
+    func rates(for speed: RunwaySpeedTier,
+               contextInputTokens: Double? = nil) -> RunwayRateSet? {
+        let base: RunwayRateSet?
         switch speed {
-        case .standard: return standard
-        case .fast: return fast
+        case .standard: base = standard
+        case .fast: base = fast
         }
+        guard let base else { return nil }
+        guard let contextInputTokens, let longContext,
+              contextInputTokens > longContext.thresholdInputTokens else { return base }
+        return RunwayRateSet(
+            inputPerMTok: base.inputPerMTok * longContext.inputMultiplier,
+            cachedInputPerMTok: base.cachedInputPerMTok * longContext.inputMultiplier,
+            outputPerMTok: base.outputPerMTok * longContext.outputMultiplier,
+            cacheWritePerMTok: base.cacheWritePerMTok.map { $0 * longContext.inputMultiplier },
+            cacheWrite1hPerMTok: base.cacheWrite1hPerMTok.map { $0 * longContext.inputMultiplier }
+        )
     }
 
     /// Standard-tier accessors. Codex has no speed tiers at all, so its callers
@@ -79,15 +93,20 @@ struct RunwayModelPrice: Equatable, Sendable {
     var cacheWrite1hPerMTok: Double? { standard.cacheWrite1hPerMTok }
 }
 
+struct RunwayLongContextPrice: Equatable, Sendable {
+    let thresholdInputTokens: Double
+    let inputMultiplier: Double
+    let outputMultiplier: Double
+}
+
 /// Model→price lookup for `$` burn. Ships a compiled-in default snapshot and,
 /// optionally, refreshes from a read-only public manifest so prices can be
 /// corrected without an app release. The fetch is a plain GET of a static file —
 /// no user or session data is sent (same trust model as the Sparkle appcast).
 ///
-/// Lookup is **longest-prefix**: dated slugs like `claude-sonnet-4-5-20250929`
-/// match the key `claude-sonnet-4-5`. `revision` bumps on every accepted table
-/// change; it's informational only — the runway request id already recomputes on
-/// its 5s refresh bucket, so a refreshed price lands within one cycle.
+/// Lookup is **longest-prefix** for Claude and exact-or-dated-snapshot for GPT.
+/// `revision` is a stable hash of manifest content, so persisted calibrations see
+/// the same identity after restart and invalidate when accepted prices change.
 ///
 /// A cached or fetched manifest is only accepted when its `updated` date is at
 /// least as new as the compiled-in table's. Without that check, a client that
@@ -118,7 +137,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         if loadBundled, let decoded = Self.decode(Data(Self.bundledJSON.utf8)) {
             models = decoded.models
             loadedUpdated = decoded.updated
-            _revision = 1
+            _revision = decoded.revision
         }
         // Overlay a previously fetched manifest unless it predates what we ship.
         if readCache, let data = try? Data(contentsOf: Self.cacheURL()), let decoded = Self.decode(data) {
@@ -138,12 +157,12 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// prevented by process instead: `docs/prices.json` documents that `updated` MUST
     /// advance on every edit, and the bundled copy moves with it.
     @discardableResult
-    private func adopt(_ decoded: (models: [String: RunwayModelPrice], updated: String)) -> Bool {
+    private func adopt(_ decoded: (models: [String: RunwayModelPrice], updated: String, revision: Int)) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard decoded.updated >= loadedUpdated else { return false }
         models = decoded.models
         loadedUpdated = decoded.updated
-        _revision += 1
+        _revision = decoded.revision
         return true
     }
 
@@ -153,16 +172,32 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// cost results so a saved figure can be re-judged when rates move.
     var updatedDate: String { lock.lock(); defer { lock.unlock() }; return loadedUpdated }
 
-    /// Longest-prefix price lookup. nil slug or no matching key → nil (→ $ unpriceable).
+    /// nil slug or no safe matching key → nil (→ $ unpriceable).
     func price(forModel slug: String?) -> RunwayModelPrice? {
         guard let slug, !slug.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
         if let exact = models[slug] { return exact }
         var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
+            if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) {
+                continue
+            }
             if best == nil || key.count > best!.key.count { best = (key, price) }
         }
         return best?.price
+    }
+
+    private static func isRecognizedGPTSnapshot(_ slug: String, extending key: String) -> Bool {
+        let suffix = String(slug.dropFirst(key.count))
+        if suffix.count == 9, suffix.first == "-", suffix.dropFirst().allSatisfy(\.isNumber) {
+            return true
+        }
+        guard suffix.count == 11, suffix.first == "-" else { return false }
+        let date = Array(suffix.dropFirst())
+        return date[4] == "-" && date[7] == "-"
+            && date.enumerated().allSatisfy { index, character in
+                index == 4 || index == 7 ? character == "-" : character.isNumber
+            }
     }
 
     /// Fire-and-forget: fetch the manifest at most once/day and cache it. Never
@@ -213,6 +248,17 @@ final class RunwayPriceTable: @unchecked Sendable {
                           cacheWrite1hPerMTok: cacheWrite1hPerMTok)
         }
     }
+    private struct RawLongContext: Decodable {
+        let thresholdInputTokens: Double
+        let inputMultiplier: Double
+        let outputMultiplier: Double
+
+        var price: RunwayLongContextPrice {
+            RunwayLongContextPrice(thresholdInputTokens: thresholdInputTokens,
+                                   inputMultiplier: inputMultiplier,
+                                   outputMultiplier: outputMultiplier)
+        }
+    }
     /// `cacheWrite1hPerMTok` and `fast` are optional, so this still decodes a
     /// manifest published before either existed — schema `version` stays 1, and an
     /// older client simply ignores the new keys.
@@ -223,6 +269,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         let cacheWritePerMTok: Double?
         let cacheWrite1hPerMTok: Double?
         let fast: RawRates?
+        let longContext: RawLongContext?
 
         var standardRateSet: RunwayRateSet {
             RunwayRateSet(inputPerMTok: inputPerMTok,
@@ -237,14 +284,26 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// version; nil otherwise (malformed or unrecognized `version` → caller keeps
     /// its current table). A manifest with no `updated` sorts oldest, so it can
     /// never shadow a dated bundled table.
-    private static func decode(_ data: Data) -> (models: [String: RunwayModelPrice], updated: String)? {
+    private static func decode(_ data: Data)
+        -> (models: [String: RunwayModelPrice], updated: String, revision: Int)? {
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
               manifest.version == supportedVersion,
               !manifest.models.isEmpty else { return nil }
         let models = manifest.models.mapValues {
-            RunwayModelPrice(standard: $0.standardRateSet, fast: $0.fast?.rateSet)
+            RunwayModelPrice(standard: $0.standardRateSet,
+                             fast: $0.fast?.rateSet,
+                             longContext: $0.longContext?.price)
         }
-        return (models, manifest.updated ?? "")
+        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        object.removeValue(forKey: "_note")
+        object.removeValue(forKey: "updated")
+        guard let canonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            return nil
+        }
+        let digest = SHA256.hash(data: canonical)
+        let stableRevision = digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+            & UInt64(Int.max)
+        return (models, manifest.updated ?? "", Int(stableRevision))
     }
 
     private static func cacheURL() -> URL {
@@ -272,7 +331,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// Compiled-in default snapshot. Also published at `docs/prices.json` for the
     /// refresh — the two MUST stay identical, because whichever is newer wins outright
     /// and a rate that reaches only one of them is silently reverted by the other.
-    /// Verified 2026-08-30 against the official pricing pages
+    /// Verified 2026-09-03 against the official pricing pages
     /// (platform.claude.com/docs/en/about-claude/pricing and
     /// developers.openai.com/api/docs/pricing). Keyed by tier so longest-prefix
     /// resolves every generation (`claude-sonnet` → claude-sonnet-5, `gpt-5.6-sol`
@@ -294,8 +353,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-08-30",
-      "_note": "USD per million tokens. Rates verified 2026-08-30 from platform.claude.com and developers.openai.com. Longest-prefix matching keeps Sonnet 5 at its permanent $2/$10 while Sonnet 4.x stays at $3/$15. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object is Anthropic fast mode (Opus 5 and Opus 4.8 only, $10/$50) with its cache rates derived off the fast input base; models without it drop out of $ rather than bill a fast record at standard. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default so a contributing review slice is not silently dropped. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "updated": "2026-09-03",
+      "_note": "USD per million tokens. Rates verified 2026-09-03 from platform.claude.com and developers.openai.com. Sol requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family prefixes remain supported. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object is Anthropic fast mode. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
         "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
@@ -311,15 +370,20 @@ final class RunwayPriceTable: @unchecked Sendable {
         "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
         "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
         "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0,  "cacheWrite1hPerMTok": 1.6 },
-        "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
-        "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5 },
-        "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25 },
-        "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
+        "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
+        "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
+        "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
+        "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null },
         "gpt-5.4-mini":    { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 4.5,  "cacheWritePerMTok": null },
         "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null },
         "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
-        "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 }
+        "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+                               "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } }
       }
     }
     """

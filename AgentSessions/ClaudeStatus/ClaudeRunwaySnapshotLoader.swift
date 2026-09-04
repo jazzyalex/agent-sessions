@@ -80,6 +80,12 @@ enum ClaudeRunwaySnapshotLoader {
                 // fixed account rate, so a spike can only redistribute shares.)
                 let activities = ClaudeRunwayTokenActivityParser
                     .activitiesClampingProvisional(identities: identities, now: request.now)
+                let weeklyProfile = request.baseline.rateUnit == .weeklyPercentPerHour
+                    ? ClaudeRunwayTokenActivityParser.weeklyProfile(
+                        identities: identities,
+                        now: request.now
+                    )
+                    : (activities: [], measuringIDs: Set<String>())
                 // Bank this cycle's activity for weekly calibration on EVERY cycle,
                 // whatever unit is selected: the ledger's bucket timeline doubles as
                 // the poll-continuity record, and a skipped cycle would later read
@@ -131,7 +137,7 @@ enum ClaudeRunwaySnapshotLoader {
                         weeklyUnavailableIDs = Set(identities.map(\.id))
                     } else if let calibration = request.weeklyPercentPointsPerDollar,
                               let weekly = CodexRunwayCalculator.weeklyEstimatedSnapshot(
-                                  baseline: request.baseline, activities: activities,
+                                  baseline: request.baseline, activities: weeklyProfile.activities,
                                   priceTable: RunwayPriceTable.shared,
                                   percentPointsPerDollar: calibration, maxRows: request.maxRows) {
                         core = weekly.snapshot
@@ -139,7 +145,7 @@ enum ClaudeRunwaySnapshotLoader {
                         pendingIdentities = identities.filter { !weekly.unpriceableIDs.contains($0.id) }
                     } else if request.weeklyPercentPointsPerDollar != nil {
                         core = nil
-                        weeklyUnavailableIDs = Set(activities.map(\.identity.id))
+                        weeklyUnavailableIDs = Set(weeklyProfile.activities.map(\.identity.id))
                     } else {
                         core = nil
                     }
@@ -164,10 +170,10 @@ enum ClaudeRunwaySnapshotLoader {
                     snapshot: withUnavailable,
                     activeIdentities: pendingIdentities,
                     maxRows: request.maxRows,
-                    pendingConfidence: weeklyPendingConfidence
+                    pendingConfidence: weeklyPendingConfidence,
+                    waitingIDs: weeklyProfile.measuringIDs
                 )
-                continuation.resume(returning: RunwaySnapshotAssembly.withWeeklyRateHold(
-                    snapshot, hold: .shared, now: request.now))
+                continuation.resume(returning: snapshot)
             }
         }
     }
