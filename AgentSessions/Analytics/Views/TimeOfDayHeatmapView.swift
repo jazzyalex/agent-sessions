@@ -272,7 +272,7 @@ struct TimeOfDayHeatmapView: View {
                                 .tracking(0.5)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                ForEach(timeInsights, id: \.self) { insight in
+                                ForEach(Array(timeInsights.enumerated()), id: \.offset) { _, insight in
                                     HStack(spacing: 8) {
                                         Circle()
                                             .fill(Color.blue.opacity(0.5))
@@ -469,18 +469,19 @@ struct TimeOfDayHeatmapView: View {
         return 1
     }
 
-    private var timeInsights: [String] {
-        var insights: [String] = []
+    private var timeInsights: [LocalizedStringResource] {
+        var insights: [LocalizedStringResource] = []
 
         // Most productive period
-        let periods = [
+        let periods: [(LocalizedStringResource, Int)] = [
             ("Morning", morningActivity),
             ("Afternoon", afternoonActivity),
             ("Evening", eveningActivity),
             ("Night", nightActivity)
         ]
         if let best = periods.max(by: { $0.1 < $1.1 }), best.1 > 0 {
-            insights.append("\(best.0) is your most active period")
+            let periodName = String(localized: best.0)
+            insights.append("\(periodName) is your most active period")
         }
 
         // Weekday vs weekend
@@ -505,7 +506,8 @@ struct TimeOfDayHeatmapView: View {
             (day, cells.filter { $0.day == day }.map { $0.activityLevel.rawValue }.reduce(0, +))
         }
         if let bestDay = dayTotals.max(by: { $0.1 < $1.1 }), bestDay.1 > 0 {
-            let dayName = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bestDay.0]
+            let dayNames: [LocalizedStringResource] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            let dayName = String(localized: dayNames[bestDay.0])
             insights.append("\(dayName) is your busiest day")
         }
 

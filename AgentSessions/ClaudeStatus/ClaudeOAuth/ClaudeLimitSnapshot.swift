@@ -107,7 +107,7 @@ enum ClaudeUsageMode: String, CaseIterable {
     case tmuxOnly   // Existing tmux /usage probing only (pre-OAuth behavior)
     case webOnly    // claude.ai Web API only, no OAuth or tmux
 
-    var displayName: String {
+    var displayName: LocalizedStringResource {
         switch self {
         case .auto: return "Auto (OAuth + Web/tmux)"
         case .oauthOnly: return "OAuth only"

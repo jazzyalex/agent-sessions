@@ -90,7 +90,7 @@ final class AuthStatusNotifierTests: XCTestCase {
         await first.value
 
         XCTAssertEqual(gate.posts, 1)
-        XCTAssertEqual(gate.titles, [expired.headline])
+        XCTAssertEqual(gate.titles, [String(localized: expired.headline)])
     }
     func testRecoveryThenSignedOutRefires() async {
         let g = FakeGate(); let st = store(); let n = AuthStatusNotifier(gate: g, store: st)

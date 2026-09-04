@@ -180,7 +180,7 @@ struct AnalyticsView: View {
             // Date range picker
             Picker("Date Range", selection: $dateRange) {
                 ForEach(AnalyticsDateRange.allCases.filter { $0 != .custom }) { range in
-                    Text(range.rawValue).tag(range)
+                    Text(range.displayName).tag(range)
                 }
             }
             .pickerStyle(.menu)
@@ -190,7 +190,7 @@ struct AnalyticsView: View {
             // Agent filter picker
             Picker("Agent", selection: $agentFilter) {
                 ForEach(availableAgentFilters) { filter in
-                    Text(filter.rawValue).tag(filter)
+                    Text(filter.displayName).tag(filter)
                 }
             }
             .pickerStyle(.menu)
@@ -201,7 +201,7 @@ struct AnalyticsView: View {
             Picker("Project", selection: $projectFilter) {
                 Text("All Projects").tag(AnalyticsProjectFilter.all)
                 ForEach(availableProjects, id: \.self) { project in
-                    Text(project).tag(AnalyticsProjectFilter.specific(project))
+                    Text(verbatim: project).tag(AnalyticsProjectFilter.specific(project))
                 }
             }
             .pickerStyle(.menu)

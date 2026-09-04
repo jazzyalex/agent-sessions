@@ -65,10 +65,10 @@ final class UpdateCheckModel: ObservableObject {
 
     private func showUpToDateNSAlert() {
         let alert = NSAlert()
-        alert.messageText = "You're up to date"
-        alert.informativeText = "You have the latest version installed."
+        alert.messageText = String(localized: "You're up to date", comment: "Title of the alert shown when no app update is available.")
+        alert.informativeText = String(localized: "You have the latest version installed.", comment: "Explanation in the alert shown when no app update is available.")
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in the up-to-date alert."))
 
         // Set app icon without white background
         if let appIcon = NSApp.applicationIconImage {

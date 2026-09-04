@@ -3825,28 +3825,28 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
             inlineContextImageID = nil
 
-            let out = NSMenu(title: "Transcript")
+            let out = NSMenu(title: String(localized: "Transcript", comment: "Title of a transcript context menu."))
             out.autoenablesItems = false
 
             let hasSelection = textView.selectedRange().length > 0
-            let copySelection = NSMenuItem(title: "Copy", action: hasSelection ? #selector(copySelectionOnly(_:)) : nil, keyEquivalent: "")
+            let copySelection = NSMenuItem(title: String(localized: "Copy", comment: "Command in a transcript or image context menu."), action: hasSelection ? #selector(copySelectionOnly(_:)) : nil, keyEquivalent: "")
             copySelection.target = hasSelection ? self : nil
             copySelection.isEnabled = hasSelection
             out.addItem(copySelection)
 
-            let copyBlock = NSMenuItem(title: "Copy Block", action: #selector(copyBlock(_:)), keyEquivalent: "")
+            let copyBlock = NSMenuItem(title: String(localized: "Copy Block", comment: "Command in a transcript or image context menu."), action: #selector(copyBlock(_:)), keyEquivalent: "")
             copyBlock.target = self
             copyBlock.isEnabled = !activeBlockText.isEmpty
             out.addItem(copyBlock)
 
             out.addItem(.separator())
 
-            let speak = NSMenuItem(title: "Speak", action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
+            let speak = NSMenuItem(title: String(localized: "Speak", comment: "Command in a transcript or image context menu."), action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
             speak.target = self
             speak.isEnabled = textView.selectedRange().length > 0 || !activeBlockText.isEmpty
             out.addItem(speak)
 
-            let stop = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeaking(_:)), keyEquivalent: "")
+            let stop = NSMenuItem(title: String(localized: "Stop Speaking", comment: "Command in a transcript or image context menu."), action: #selector(stopSpeaking(_:)), keyEquivalent: "")
             stop.target = self
             stop.isEnabled = isSpeaking
             out.addItem(stop)
@@ -4362,36 +4362,36 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         private func inlineImageContextMenu() -> NSMenu {
-            let out = NSMenu(title: "Image")
+            let out = NSMenu(title: String(localized: "Image", comment: "Title of a transcript context menu."))
             out.autoenablesItems = false
 
-            let openBrowser = NSMenuItem(title: "Open in Image Browser", action: #selector(openInlineImageInBrowser(_:)), keyEquivalent: "")
+            let openBrowser = NSMenuItem(title: String(localized: "Open in Image Browser", comment: "Command in a transcript or image context menu."), action: #selector(openInlineImageInBrowser(_:)), keyEquivalent: "")
             openBrowser.target = self
             out.addItem(openBrowser)
 
             out.addItem(.separator())
 
-            let openPreview = NSMenuItem(title: "Open in Preview", action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
+            let openPreview = NSMenuItem(title: String(localized: "Open in Preview", comment: "Command in a transcript or image context menu."), action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
             openPreview.target = self
             out.addItem(openPreview)
 
             out.addItem(.separator())
 
-            let copyPath = NSMenuItem(title: "Copy Image Path (for CLI agent)", action: #selector(copyInlineImagePath(_:)), keyEquivalent: "")
+            let copyPath = NSMenuItem(title: String(localized: "Copy Image Path (for CLI agent)", comment: "Command in a transcript or image context menu."), action: #selector(copyInlineImagePath(_:)), keyEquivalent: "")
             copyPath.target = self
             out.addItem(copyPath)
 
-            let copyImage = NSMenuItem(title: "Copy Image", action: #selector(copyInlineImage(_:)), keyEquivalent: "")
+            let copyImage = NSMenuItem(title: String(localized: "Copy Image", comment: "Command in a transcript or image context menu."), action: #selector(copyInlineImage(_:)), keyEquivalent: "")
             copyImage.target = self
             out.addItem(copyImage)
 
             out.addItem(.separator())
 
-            let saveDownloads = NSMenuItem(title: "Save to Downloads", action: #selector(saveInlineImageToDownloads(_:)), keyEquivalent: "")
+            let saveDownloads = NSMenuItem(title: String(localized: "Save to Downloads", comment: "Command in a transcript or image context menu."), action: #selector(saveInlineImageToDownloads(_:)), keyEquivalent: "")
             saveDownloads.target = self
             out.addItem(saveDownloads)
 
-            let save = NSMenuItem(title: "Save…", action: #selector(saveInlineImageWithPanel(_:)), keyEquivalent: "")
+            let save = NSMenuItem(title: String(localized: "Save…", comment: "Command in a transcript or image context menu."), action: #selector(saveInlineImageWithPanel(_:)), keyEquivalent: "")
             save.target = self
             out.addItem(save)
 

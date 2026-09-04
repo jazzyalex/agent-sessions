@@ -23,7 +23,7 @@ enum LaunchPhase: Int, Comparable {
         self == .ready
     }
 
-    var statusDescription: String {
+    var statusDescription: LocalizedStringResource {
         switch self {
         case .idle: return "Waiting to index…"
         case .hydrating: return "Preparing session index…"

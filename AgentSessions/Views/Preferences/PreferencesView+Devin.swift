@@ -163,8 +163,8 @@ extension PreferencesView {
 
     func pickDevinBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Devin CLI Binary"
-        panel.message = "Choose the devin executable file"
+        panel.title = String(localized: "Select Devin CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the devin executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -204,8 +204,8 @@ extension PreferencesView {
 
     func pickDevinSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Devin Sessions Directory"
-        panel.message = "Choose the Devin sessions folder"
+        panel.title = String(localized: "Select Devin Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the Devin sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

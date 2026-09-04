@@ -623,8 +623,8 @@ struct PreferencesView: View {
 
     func pickCodexActiveRegistryFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Codex Active Registry Directory"
-        panel.message = "Choose the folder that contains active-session presence JSON files."
+        panel.title = String(localized: "Select Codex Active Registry Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the folder that contains active-session presence JSON files.", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -860,7 +860,7 @@ struct PreferencesView: View {
         agentUpdateCheckingSources.contains(source) || agentUpdatingSources.contains(source)
     }
 
-    func agentUpdateButtonTitle(for source: SessionSource) -> String {
+    func agentUpdateButtonTitle(for source: SessionSource) -> LocalizedStringResource {
         if agentUpdatingSources.contains(source) { return "Updating..." }
         if agentUpdateCheckingSources.contains(source) { return "Checking..." }
         return "Update..."
@@ -1067,8 +1067,8 @@ struct PreferencesView: View {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Update")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: String(localized: "Update", comment: "Confirmation button in an update alert."))
+        alert.addButton(withTitle: String(localized: "Cancel", comment: "Cancel button in an update alert."))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -1077,7 +1077,7 @@ struct PreferencesView: View {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in an error alert."))
         _ = alert.runModal()
     }
 
@@ -1202,7 +1202,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .general: return "General"
         case .usageTracking: return "Usage Tracking"

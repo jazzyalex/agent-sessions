@@ -159,8 +159,8 @@ extension PreferencesView {
 
     func pickPiBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Pi CLI Binary"
-        panel.message = "Choose the pi executable file"
+        panel.title = String(localized: "Select Pi CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the pi executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -200,8 +200,8 @@ extension PreferencesView {
 
     func pickPiSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Pi Sessions Directory"
-        panel.message = "Choose the Pi sessions folder"
+        panel.title = String(localized: "Select Pi Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the Pi sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

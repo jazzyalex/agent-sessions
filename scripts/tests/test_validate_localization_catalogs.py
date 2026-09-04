@@ -123,13 +123,44 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             callback()
         self.assertIn(message, stderr.getvalue())
 
+    def test_extracted_key_coverage_accepts_reviewed_verbatim_set(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            validator.validate_extracted_key_coverage(
+                {"Cataloged": {}}, {"Cataloged": {}, "raw-path": {}}
+            )
+
+    def test_extracted_key_coverage_rejects_unexpected_key(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            self.assert_validation_fails(
+                lambda: validator.validate_extracted_key_coverage(
+                    {"Cataloged": {}},
+                    {"Cataloged": {}, "raw-path": {}, "Forgotten UI": {}},
+                ),
+                "unexpected=['Forgotten UI']",
+            )
+
+    def test_extracted_key_coverage_rejects_stale_allowlist_key(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            self.assert_validation_fails(
+                lambda: validator.validate_extracted_key_coverage(
+                    {"Cataloged": {}}, {"Cataloged": {}}
+                ),
+                "missing=['raw-path']",
+            )
+
     def test_current_catalogs_pass_full_validation(self) -> None:
         counts = validator.validate_catalogs(
             validator.LOCALIZABLE,
             validator.INFO_PLIST,
             skip_xcstringstool=False,
         )
-        self.assertEqual(counts, (145, 6, {"zh-Hans"}))
+        self.assertEqual(counts, (1287, 6, {"zh-Hans"}))
 
     def test_complete_zh_hans_in_both_catalogs_passes(self) -> None:
         app_strings = {"Hello": string_entry("Hello")}

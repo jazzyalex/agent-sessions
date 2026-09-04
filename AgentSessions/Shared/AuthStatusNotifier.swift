@@ -91,7 +91,10 @@ actor AuthStatusNotifier {
         // not a stale headline, and consume the shared episode for that verdict.
         guard let current = latestStatus[key], current.state.isAlarming else { return }
         guard store.shouldNotify(provider: provider, state: current.state) else { return }
-        gate.post(title: current.headline, body: "Open Agent Sessions to see how to fix it.")
+        gate.post(
+            title: String(localized: current.headline),
+            body: String(localized: "Open Agent Sessions to see how to fix it.", comment: "Body of an authentication problem notification.")
+        )
     }
 }
 

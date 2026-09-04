@@ -68,7 +68,7 @@ struct AgentBreakdownView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
-                .help(metric.detailDescription)
+                .help(Text(metric.detailDescription))
 
                 // Flip hint icon
                 if !isFlipped {
@@ -139,7 +139,7 @@ struct AgentBreakdownView: View {
                                 .tracking(0.5)
 
                             VStack(alignment: .leading, spacing: 8) {
-                                ForEach(agentInsights, id: \.self) { insight in
+                                ForEach(Array(agentInsights.enumerated()), id: \.offset) { _, insight in
                                     HStack(spacing: 8) {
                                         Circle()
                                             .fill(Color.blue.opacity(0.5))
@@ -323,8 +323,8 @@ struct AgentBreakdownView: View {
         }
     }
 
-    private var agentInsights: [String] {
-        var insights: [String] = []
+    private var agentInsights: [LocalizedStringResource] {
+        var insights: [LocalizedStringResource] = []
 
         guard !breakdown.isEmpty else { return insights }
 

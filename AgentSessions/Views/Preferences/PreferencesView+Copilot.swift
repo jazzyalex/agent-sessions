@@ -185,8 +185,8 @@ extension PreferencesView {
 
     func pickCopilotBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select GitHub Copilot CLI Binary"
-        panel.message = "Choose the copilot executable file"
+        panel.title = String(localized: "Select GitHub Copilot CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the copilot executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -203,8 +203,8 @@ extension PreferencesView {
 
     func pickCopilotSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Copilot Sessions Directory"
-        panel.message = "Choose a folder where Copilot session-state logs are stored"
+        panel.title = String(localized: "Select Copilot Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose a folder where Copilot session-state logs are stored", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

@@ -141,7 +141,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
     func testEverySourcePaneHasTitleAndIcon() {
         for source in SessionSource.allCases {
             let tab = PreferencesTab(source: source)
-            XCTAssertFalse(tab.title.isEmpty, "\(source)")
+            XCTAssertFalse(String(localized: tab.title).isEmpty, "\(source)")
             XCTAssertFalse(tab.iconName.isEmpty, "\(source)")
         }
     }

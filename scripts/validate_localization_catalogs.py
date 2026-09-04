@@ -39,20 +39,57 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 145
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1287
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "ee5bd7bd62577e294b496c774117784d233c3299f87fe68a14065fe15a0ac5ee"
+    "31d4ac8e50d4302fdd4a8373b7b32f529af2a440cea2105bfa9bf70820483e38"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
+    "GitHub Copilot CLI",
+    "GitHub Discussions",
+    "Antigravity CLI",
+    "Claude Desktop",
     "Claude Code",
     "Codex CLI",
+    "Qwen Code",
+    "Kimi Code",
+    "Grok CLI",
+    "Devin CLI",
     "OpenCode",
+    "OpenClaw",
     "iTerm2",
+    "GitHub",
     "Codex",
     "Claude",
+    "Copilot",
+    "Antigravity",
+    "Cursor",
+    "Hermes",
+    "Droid",
+    "Qwen",
+    "Kimi",
+    "Grok",
+    "Devin",
+    "MIT License",
+    "Terminal App",
+    "VS Code",
     "Finder",
     "Terminal",
+    "macOS",
+    "Web API",
+    "OAuth",
+    "JSONL",
+    "JSON",
+    "Markdown",
+    "Sparkle",
+    "tmux",
+    "launchd",
+    "github.com/jazzyalex/agent-sessions",
+    "jazzyalex.github.io/agent-sessions",
+    "jazzyalex@gmail.com",
+    "fx",
+    "⌥⌘F",
+    "⌘F",
     "#side",
     "Option-Command-F",
     "Shift-Command-G",
@@ -63,6 +100,72 @@ PRESERVED_TERMS = (
     "Command-F",
     "Command-G",
 )
+# Xcode extracts these literals from controls that intentionally display raw
+# symbols, provider names, format fragments, or path examples. Keep this list
+# exact so any new extracted key must either enter the catalog or be reviewed
+# here as deliberately verbatim.
+EXPECTED_VERBATIM_EXTRACTED_KEYS = {
+    "",
+    " ",
+    " %@",
+    " ▸4h 59m",
+    "%@ %@",
+    "%@ --  %@",
+    "%@ —",
+    "%@ — %@",
+    "%@: %@%@",
+    "%lld",
+    "%lld%%",
+    "(%lld%%)",
+    "(%lld)",
+    "+",
+    "/path/to/agent",
+    "/path/to/agy",
+    "/path/to/claude",
+    "/path/to/codex",
+    "/path/to/copilot",
+    "/path/to/devin",
+    "/path/to/droid",
+    "/path/to/fx",
+    "/path/to/grok",
+    "/path/to/hermes",
+    "/path/to/kimi",
+    "/path/to/openclaw",
+    "/path/to/opencode",
+    "/path/to/pi",
+    "/path/to/qwen",
+    ">",
+    "@jazzyalex",
+    "A",
+    "AS",
+    "F",
+    "M",
+    "Pi",
+    "S",
+    "T",
+    "W",
+    "|",
+    "~/.copilot/session-state",
+    "~/.cursor",
+    "~/.cursor/chats/*/*/store.db",
+    "~/.cursor/projects/*/agent-transcripts/",
+    "~/.factory/projects",
+    "~/.factory/sessions",
+    "~/.fx/sessions",
+    "~/.grok/sessions",
+    "~/.hermes/sessions",
+    "~/.kimi-code/sessions",
+    "~/.local/share/devin/cli",
+    "~/.openclaw",
+    "~/.pi/agent/sessions",
+    "~/.qwen/projects",
+    "·",
+    "· %@",
+    "—",
+    "↻",
+    "−",
+    "★",
+}
 FORMAT_TOKEN = re.compile(
     r"%#@[^@]+@|%arg|%%|%(?:\d+\$)?(?:lld|llu|ld|lu|d|u|f|g|@)"
 )
@@ -332,6 +435,19 @@ def english_payload(entry: dict[str, Any], path: Path, key: str) -> dict[str, An
     return en
 
 
+def validate_extracted_key_coverage(
+    original_strings: dict[str, Any], synced_strings: dict[str, Any]
+) -> None:
+    extracted_only = set(synced_strings) - set(original_strings)
+    if extracted_only != EXPECTED_VERBATIM_EXTRACTED_KEYS:
+        unexpected = sorted(extracted_only - EXPECTED_VERBATIM_EXTRACTED_KEYS)
+        missing = sorted(EXPECTED_VERBATIM_EXTRACTED_KEYS - extracted_only)
+        fail(
+            "extracted keys outside the catalog differ from the reviewed verbatim set; "
+            f"unexpected={unexpected[:5]}, missing={missing[:5]}"
+        )
+
+
 def validate_extraction_drift(
     extraction_root: Path,
     catalog_path: Path,
@@ -367,6 +483,8 @@ def validate_extraction_drift(
         synced_strings = synced.get("strings")
         if not isinstance(synced_strings, dict):
             fail("temporary synced catalog has no strings object")
+
+        validate_extracted_key_coverage(original_strings, synced_strings)
 
         stale = sorted(
             key

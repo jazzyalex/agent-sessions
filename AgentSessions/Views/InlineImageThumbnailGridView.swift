@@ -231,7 +231,7 @@ final class InlineImageTileButton: NSButton {
         self.sessionID = sessionID
         well.image = nil
         applyPlaceholderLook()
-        toolTip = "Open image"
+        toolTip = String(localized: "Open image", comment: "Tooltip for opening an image thumbnail.")
     }
 
     func setThumbnail(_ image: NSImage) {

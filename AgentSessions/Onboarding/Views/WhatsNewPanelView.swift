@@ -113,8 +113,8 @@ struct WhatsNewPanelView: View {
                 palette: palette,
                 icon: item.iconSystemName,
                 iconColor: palette.accentBlue,
-                verbatimTitle: item.title,
-                verbatimDescription: item.body
+                title: item.title,
+                description: item.body
             )
         case .promo:
             promoRow(item)
@@ -146,7 +146,7 @@ struct WhatsNewPanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             if let title = item.linkTitle, let url = item.linkURL {
-                Link(title, destination: url)
+                Link(destination: url) { Text(title) }
                     .font(.system(size: 12, weight: .semibold))
             }
         }
@@ -170,7 +170,7 @@ struct WhatsNewPanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             if let title = item.linkTitle, let url = item.linkURL {
-                Link(title, destination: url)
+                Link(destination: url) { Text(title) }
                     .font(.system(size: 12, weight: .semibold))
             }
         }

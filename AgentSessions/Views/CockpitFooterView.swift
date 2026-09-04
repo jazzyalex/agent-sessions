@@ -373,7 +373,7 @@ private struct FooterAuthCell: View {
 /// tooltip carries the full explanation.
 private struct FooterIdleChip: View {
     let provider: QuotaData.Provider
-    let detail: String
+    let detail: LocalizedStringResource
 
     var body: some View {
         HStack(spacing: 5) {
@@ -547,21 +547,21 @@ private struct IndexingIndicator: View {
 	        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
-	            if !hasUsageData { return "Waiting" }
-	            if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
+	            if !hasUsageData { return String(localized: "Waiting", comment: "Usage status before data is available.") }
+	            if fiveUnavailable { return UsageStaleThresholds.localizedUnavailableCopy }
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
 	            if rel != "—" { return rel }
-	            if fiveIsStale { return "n/a" }
+	            if fiveIsStale { return String(localized: "n/a", comment: "Compact usage status when reset timing is unavailable.") }
 	            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
 	        let weekResetDisplayText: String = {
-	            if !hasUsageData { return "Waiting" }
-	            if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
+	            if !hasUsageData { return String(localized: "Waiting", comment: "Usage status before data is available.") }
+	            if weekUnavailable { return UsageStaleThresholds.localizedUnavailableCopy }
 	            let s = formatWeeklyReset(weekResetDate)
 	            if s != "—" { return s }
-	            if weekIsStale { return "n/a" }
+	            if weekIsStale { return String(localized: "n/a", comment: "Compact usage status when reset timing is unavailable.") }
 	            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()

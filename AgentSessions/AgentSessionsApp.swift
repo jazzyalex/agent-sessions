@@ -821,7 +821,7 @@ extension AgentSessionsApp {
             comment: "Informational alert title shown once after analytics became explicitly user-triggered."
         )
         alert.informativeText = String(
-            localized: "Agent Sessions now prioritizes Unified and Cockpit responsiveness.\nAnalytics indexing starts only when you open Analytics and press Build.",
+            localized: "Agent Sessions now prioritizes Unified and Quota Meter responsiveness.\nAnalytics indexing starts only when you open Analytics.",
             comment: "Informational alert body. Keep the two sentences and line break together."
         )
         alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in an informational alert."))
@@ -1126,18 +1126,16 @@ extension AgentSessionsApp {
 
     @MainActor
     private func presentCrashRecoveryPrompt(newCrashCount: Int) async {
-        let noun = newCrashCount == 1 ? "report" : "reports"
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Crash report detected"
-        alert.informativeText = """
-        Agent Sessions detected \(newCrashCount) new crash \(noun) from a prior run.
-        You can email the report directly or export it and open a GitHub issue:
-        https://github.com/jazzyalex/agent-sessions/issues/new
-        """
-        alert.addButton(withTitle: "Email Crash Report")
-        alert.addButton(withTitle: "Export + Open GitHub Issue")
-        alert.addButton(withTitle: "Later")
+        alert.messageText = String(localized: "Crash report detected", comment: "Title of the crash recovery alert.")
+        alert.informativeText = String(
+            localized: "Agent Sessions detected \(newCrashCount) new crash reports from a prior run. You can email the report directly or export it and open a GitHub issue: https://github.com/jazzyalex/agent-sessions/issues/new",
+            comment: "Crash recovery explanation. The count needs plural variants; the product name and URL remain verbatim."
+        )
+        alert.addButton(withTitle: String(localized: "Email Crash Report", comment: "Button that opens an email draft for a crash report."))
+        alert.addButton(withTitle: String(localized: "Export + Open GitHub Issue", comment: "Button that exports a crash report and opens the issue tracker."))
+        alert.addButton(withTitle: String(localized: "Later", comment: "Button that postpones handling a crash report."))
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
@@ -1160,7 +1158,7 @@ extension AgentSessionsApp {
         let maybeURL = await CrashReportingService.shared.supportEmailDraftURL(recipient: Self.crashSupportRecipient)
         guard let url = maybeURL else {
             await CrashReportingService.shared.setLastEmailError("Failed to build email draft URL.")
-            showCrashPromptError(title: "Unable to Prepare Email", message: "The crash email draft could not be prepared.")
+            showCrashPromptError(title: String(localized: "Unable to Prepare Email", comment: "Title of a crash-report email error."), message: String(localized: "The crash email draft could not be prepared.", comment: "Explanation when a crash-report email draft cannot be prepared."))
             return false
         }
 
@@ -1169,7 +1167,7 @@ extension AgentSessionsApp {
             return true
         } else {
             await CrashReportingService.shared.setLastEmailError("Could not open the default email app.")
-            showCrashPromptError(title: "Unable to Open Email App", message: "Please ensure a default email app is configured, or export the report and file a GitHub issue.")
+            showCrashPromptError(title: String(localized: "Unable to Open Email App", comment: "Title of an error opening the email app."), message: String(localized: "Please ensure a default email app is configured, or export the report and file a GitHub issue.", comment: "Recovery instructions when the email app cannot be opened."))
             return false
         }
     }
@@ -1188,7 +1186,7 @@ extension AgentSessionsApp {
             _ = NSWorkspace.shared.open(Self.crashIssueURL)
             return true
         } catch {
-            showCrashPromptError(title: "Export Failed", message: error.localizedDescription)
+            showCrashPromptError(title: String(localized: "Export Failed", comment: "Title of a crash-report export error."), message: error.localizedDescription)
             return false
         }
     }
@@ -1199,7 +1197,7 @@ extension AgentSessionsApp {
         alert.alertStyle = .warning
         alert.messageText = title
         alert.informativeText = message
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in an alert."))
         _ = alert.runModal()
     }
 }
@@ -1311,7 +1309,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
 
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.contentView = hv
-        window.title = "Onboarding"
+        window.title = String(localized: "Onboarding", comment: "Title of the onboarding window.")
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 820, height: 700))
         window.minSize = NSSize(width: 820, height: 700)

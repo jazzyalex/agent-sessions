@@ -124,10 +124,11 @@ final class RunwayAuthDegradationTests: XCTestCase {
     /// in-app sign-in promise, and never mentions Claude Desktop (rejected rung-1).
     func testNoCLILadderCopyHasBothRungsNoCancelledFeature() {
         let s = UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled, cliPresent: false)
-        XCTAssertTrue(s.detail.contains("claude.ai"))                     // rung 1
-        XCTAssertTrue(s.detail.contains("CLI"))                            // rung 2
-        XCTAssertFalse(s.detail.lowercased().contains("coming soon"))
-        XCTAssertFalse(s.detail.contains("Desktop"))
+        let detail = String(localized: s.detail)
+        XCTAssertTrue(detail.contains("claude.ai"))                     // rung 1
+        XCTAssertTrue(detail.contains("CLI"))                            // rung 2
+        XCTAssertFalse(detail.lowercased().contains("coming soon"))
+        XCTAssertFalse(detail.contains("Desktop"))
     }
 
     /// Codex is unaffected: it uses the `cliPresent: true` default and keeps its
@@ -181,8 +182,8 @@ final class RunwayAuthDegradationTests: XCTestCase {
         XCTAssertFalse(UsageAuthState.idle.isAlarming)
         let s = UsageAuthStatus.make(provider: .claude, state: .idle)
         XCTAssertEqual(s.remediation, .none)
-        XCTAssertTrue(s.headline.contains("No active"))
-        XCTAssertEqual(s.chipLabel, "")
+        XCTAssertTrue(String(localized: s.headline).contains("No active"))
+        XCTAssertEqual(String(localized: s.chipLabel), "")
     }
 
     /// Claude's idle detail is the recovery ladder (2026-07-18): with the latch
@@ -193,12 +194,13 @@ final class RunwayAuthDegradationTests: XCTestCase {
     /// cases but can consume tokens). Codex keeps the generic calm copy.
     func testClaudeIdleDetailCarriesRecoveryLadder() {
         let s = UsageAuthStatus.make(provider: .claude, state: .idle)
-        XCTAssertTrue(s.detail.contains("claude"), "rung 1: run any claude CLI command")
-        XCTAssertTrue(s.detail.lowercased().contains("cookie"), "rung 2: paste a claude.ai session cookie")
-        XCTAssertTrue(s.detail.lowercased().contains("probe button"), "rung 3: QM toolbar probe button as last resort")
-        XCTAssertTrue(s.detail.lowercased().contains("token"), "probe rung must carry its token-cost caveat")
+        let detail = String(localized: s.detail)
+        XCTAssertTrue(detail.contains("claude"), "rung 1: run any claude CLI command")
+        XCTAssertTrue(detail.lowercased().contains("cookie"), "rung 2: paste a claude.ai session cookie")
+        XCTAssertTrue(detail.lowercased().contains("probe button"), "rung 3: QM toolbar probe button as last resort")
+        XCTAssertTrue(detail.lowercased().contains("token"), "probe rung must carry its token-cost caveat")
         let codex = UsageAuthStatus.make(provider: .codex, state: .idle)
-        XCTAssertTrue(codex.detail.contains("next Codex session"), "Codex idle copy stays generic")
+        XCTAssertTrue(String(localized: codex.detail).contains("next Codex session"), "Codex idle copy stays generic")
     }
 
     /// A suppressed-fallback dead end re-emits the calm idle verdict instead of

@@ -14,7 +14,7 @@ struct LimitAlertReadinessFormatter {
                      providerEnabled: Bool,
                      visualEnabled: Bool,
                      soundEnabled: Bool,
-                     now: Date = Date()) -> String {
+                     now: Date = Date()) -> LocalizedStringResource {
         guard notificationsEnabled else { return "Alerts off" }
         guard providerEnabled else { return "Alerts off for \(provider)" }
         if !visualEnabled && !soundEnabled { return "Delivery off" }
@@ -461,7 +461,7 @@ extension PreferencesView {
                                          projectionRunoutAt: Double,
                                          projectionObservedAt: Double,
                                          delivery: String,
-                                         deliveryAt: Double) -> String {
+                                         deliveryAt: Double) -> LocalizedStringResource {
         LimitAlertReadinessFormatter.text(
             provider: provider,
             source: source,

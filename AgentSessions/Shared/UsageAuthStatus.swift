@@ -31,8 +31,8 @@ enum Remediation: Equatable {
 struct UsageAuthStatus: Equatable {
     var state: UsageAuthState
     var remediation: Remediation
-    var headline: String
-    var detail: String
+    var headline: LocalizedStringResource
+    var detail: LocalizedStringResource
     /// Provider display name ("Claude"/"Codex"), retained so compact surfaces
     /// (footer chip, menu-bar face) can build a short label without the full
     /// "Runway paused — …" headline.
@@ -41,7 +41,7 @@ struct UsageAuthStatus: Equatable {
     /// Ultra-short label for the compact footer chip. Drops the "Runway paused —"
     /// preamble the full-banner headline carries, so the chip stays a single tight
     /// pill. Empty for non-alarming states.
-    var chipLabel: String {
+    var chipLabel: LocalizedStringResource {
         let name = providerName.isEmpty ? "CLI" : providerName
         switch state {
         case .signedOut: return "\(name) signed out"
@@ -69,7 +69,7 @@ struct UsageAuthStatus: Equatable {
         // Claude-only no-CLI ladder (rung 1 Web API mode, rung 2 guided install).
         // Web API mode is a Claude-specific shipped path, so Codex never ladders.
         let claudeInstallCmd = "npm install -g @anthropic-ai/claude-code"
-        let ladderDetail = "Sign in at claude.ai, then enable Web API mode — or install the Claude CLI so Agent Sessions can read usage directly."
+        let ladderDetail: LocalizedStringResource = "Sign in at claude.ai, then enable Web API mode — or install the Claude CLI so Agent Sessions can read usage directly."
         let ladder = Remediation.noCLILadder(installCommand: claudeInstallCmd, docsURL: installURL)
         let claudeNoCLI = (provider == .claude && !cliPresent)
 
@@ -83,12 +83,12 @@ struct UsageAuthStatus: Equatable {
             // recovery ladder instead of a passive "wait": (1) any terminal
             // `claude` run refreshes the CLI token — desktop-app sessions never
             // do; (2) a pasted claude.ai cookie feeds the web path; (3) the
-            // Quick Meter toolbar probe button is the last resort (needs the CLI
+            // Quota Meter toolbar probe button is the last resort (needs the CLI
             // installed and can consume tokens, so it is never auto-run).
             if provider == .claude {
                 return .init(state: state, remediation: .none,
                     headline: "No active \(name) session",
-                    detail: "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: the probe button in the Quick Meter toolbar (may consume tokens).",
+                    detail: "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: the probe button in the Quota Meter toolbar (may consume tokens).",
                     providerName: name)
             }
             return .init(state: state, remediation: .none,

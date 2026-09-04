@@ -7,7 +7,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var displayName: String {
+    var displayName: LocalizedStringResource {
         switch self {
         case .sessions: return "Sessions"
         case .messages: return "Messages"
@@ -15,7 +15,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
     }
 
     /// Shown in pickers/descriptions to clarify what changes when toggled.
-    var detailDescription: String {
+    var detailDescription: LocalizedStringResource {
         switch self {
         case .sessions: return "Counts unique conversations"
         case .messages: return "Counts total messages across conversations"
@@ -23,7 +23,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
     }
 
     /// Axis label for charts that visualize this metric.
-    var axisLabel: String {
+    var axisLabel: LocalizedStringResource {
         switch self {
         case .sessions: return "Sessions"
         case .messages: return "Messages"

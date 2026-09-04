@@ -1567,21 +1567,25 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func viewModeMenuButton(_ mode: SessionViewMode,
-                                    title: String,
-                                    help: String) -> some View {
+                                    title: LocalizedStringResource,
+                                    help: LocalizedStringResource) -> some View {
         Button {
             setViewMode(mode)
         } label: {
             if viewMode == mode {
-                Label(title, systemImage: "checkmark")
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(systemName: "checkmark")
+                }
             } else {
                 Text(title)
             }
         }
-        .help(help)
+        .help(Text(help))
     }
 
-    private var viewModeMenuTitle: String {
+    private var viewModeMenuTitle: LocalizedStringResource {
         switch viewMode {
         case .blocks: return "Session"
         case .terminal: return "Session" // unreachable post-migration; resolves to .blocks
@@ -4479,18 +4483,10 @@ private struct ClaudeArchiveRestoreStripControl: View {
             case .failed(let message): return "failed:\(message)"
             }
         }
-        var title: String {
+        var title: LocalizedStringResource {
             switch self {
             case .restored: return "Restored"
             case .failed: return "Couldn’t restore session"
-            }
-        }
-        var message: String {
-            switch self {
-            case .restored:
-                return "Relaunch Claude Desktop to see it."
-            case .failed(let message):
-                return message
             }
         }
     }
@@ -4548,7 +4544,12 @@ private struct ClaudeArchiveRestoreStripControl: View {
                presenting: outcome) { _ in
             Button("OK") {}
         } message: { o in
-            Text(o.message)
+            switch o {
+            case .restored:
+                Text("Relaunch Claude Desktop to see it.")
+            case .failed(let message):
+                Text(verbatim: message)
+            }
         }
         .task(id: session.id) { await refreshArchiveState() }
         .onReceive(NotificationCenter.default.publisher(for: .claudeArchiveDidChange)) { _ in

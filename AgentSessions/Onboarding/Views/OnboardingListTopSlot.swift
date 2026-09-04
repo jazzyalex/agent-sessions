@@ -310,14 +310,12 @@ private struct SlotWidthKey: PreferenceKey {
 
 /// One link-style action in a slot card's action row.
 struct SlotCardAction: Identifiable {
-    let title: String
+    let id: String
+    let title: LocalizedStringResource
     /// The card's primary action, drawn semibold. At most one per card.
     let isProminent: Bool
     let perform: () -> Void
 
-    /// Titles are unique within a card and stable across renders, which `UUID()`
-    /// would not be.
-    var id: String { title }
 }
 
 /// Chrome shared by the two slot cards whose body text is allowed to wrap.
@@ -338,10 +336,10 @@ struct WrappingSlotCard: View {
     let palette: OnboardingPalette
     let iconName: String
     let iconTint: Color
-    let title: String
-    let message: String
+    let title: LocalizedStringResource
+    let message: LocalizedStringResource
     let actions: [SlotCardAction]
-    let dismissHelp: String
+    let dismissHelp: LocalizedStringResource
     var onDismiss: () -> Void
     /// Width of the slot, measured by `OnboardingListTopSlot`. Zero before the
     /// first layout pass, which is read as wide: most windows are, and starting
@@ -431,7 +429,7 @@ struct WrappingSlotCard: View {
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
-        .help(dismissHelp)
+        .help(Text(dismissHelp))
     }
 }
 
@@ -454,7 +452,7 @@ struct StewardCard: View {
     /// the reader to volunteer, so it opens by qualifying them — someone who does
     /// not use this agent can stop reading at the first two words. Held as static
     /// functions so tests can pin the claims without rendering the view.
-    static func titleText(for agent: StewardAgent) -> String {
+    static func titleText(for agent: StewardAgent) -> LocalizedStringResource {
         "Use \(agent.stewardName)?"
     }
 
@@ -464,7 +462,7 @@ struct StewardCard: View {
     /// at all. No version or month is quoted — `STEWARDS.md`, one click away
     /// behind "What's involved", carries the precise footnote and can be kept
     /// current without shipping a build.
-    static func bodyText(for agent: StewardAgent) -> String {
+    static func bodyText(for agent: StewardAgent) -> LocalizedStringResource {
         if agent.source == .qwen {
             return """
                 Looking for a steward. Qwen's free tier ended, so newer builds go unverified here. \
@@ -485,8 +483,8 @@ struct StewardCard: View {
             title: Self.titleText(for: agent),
             message: Self.bodyText(for: agent),
             actions: [
-                SlotCardAction(title: "Become the steward", isProminent: true, perform: onSignUp),
-                SlotCardAction(title: "What's involved", isProminent: false, perform: onLearnMore)
+                SlotCardAction(id: "become-steward", title: "Become the steward", isProminent: true, perform: onSignUp),
+                SlotCardAction(id: "whats-involved", title: "What's involved", isProminent: false, perform: onLearnMore)
             ],
             dismissHelp: "Don't ask again",
             onDismiss: onDismiss,
@@ -512,8 +510,8 @@ struct ContributeCard: View {
     /// sentence can be pinned by a test. Deliberately not a strings file — every
     /// other card in this slot keeps its copy inline too. No source count is
     /// stated here: that number changes every release.
-    static let titleText = "Help add your agent"
-    static let bodyText = """
+    static let titleText: LocalizedStringResource = "Help add your agent"
+    static let bodyText: LocalizedStringResource = """
         Agent Sessions adds new agents from user contributions — a pull request, your coding agent \
         working from our brief, or a sanitized sample. Never share real transcripts, keys, or \
         private paths.
@@ -527,9 +525,9 @@ struct ContributeCard: View {
             title: Self.titleText,
             message: Self.bodyText,
             actions: [
-                SlotCardAction(title: "Contribute an agent", isProminent: true, perform: onOpen),
-                SlotCardAction(title: "How it works", isProminent: false, perform: onLearnMore),
-                SlotCardAction(title: "Maybe later", isProminent: false, perform: onSnooze)
+                SlotCardAction(id: "contribute-agent", title: "Contribute an agent", isProminent: true, perform: onOpen),
+                SlotCardAction(id: "how-it-works", title: "How it works", isProminent: false, perform: onLearnMore),
+                SlotCardAction(id: "maybe-later", title: "Maybe later", isProminent: false, perform: onSnooze)
             ],
             dismissHelp: "Don't ask again",
             onDismiss: onDismiss,
@@ -681,7 +679,7 @@ private struct QuotaMeterPromoActivator: View {
 struct WhatsNewCard: View {
     let palette: OnboardingPalette
     let majorMinor: String
-    let teaser: String?
+    let teaser: LocalizedStringResource?
     var onOpen: () -> Void
     var onDismiss: () -> Void
 

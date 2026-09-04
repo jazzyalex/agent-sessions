@@ -11,6 +11,17 @@ enum AnalyticsDateRange: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .today: return "Today"
+        case .last7Days: return "Last 7 Days"
+        case .last30Days: return "Last 30 Days"
+        case .last90Days: return "Last 90 Days"
+        case .allTime: return "All Time"
+        case .custom: return "Custom..."
+        }
+    }
+
     /// Calculate the start date for this range
     func startDate(relativeTo now: Date = Date()) -> Date? {
         let calendar = Calendar.current
@@ -67,6 +78,27 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
     case fxOnly = "fx Only"
 
     var id: String { rawValue }
+
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .all: return "All Agents"
+        case .codexOnly: return "Codex Only"
+        case .claudeOnly: return "Claude Only"
+        case .antigravityOnly: return "Antigravity Only"
+        case .opencodeOnly: return "OpenCode Only"
+        case .hermesOnly: return "Hermes Only"
+        case .copilotOnly: return "Copilot Only"
+        case .droidOnly: return "Droid Only"
+        case .openclawOnly: return "OpenClaw Only"
+        case .cursorOnly: return "Cursor Only"
+        case .piOnly: return "Pi Only"
+        case .kimiOnly: return "Kimi Only"
+        case .grokOnly: return "Grok Only"
+        case .qwenOnly: return "Qwen Only"
+        case .devinOnly: return "Devin Only"
+        case .fxOnly: return "fx Only"
+        }
+    }
 
     /// The single-agent filter that isolates `source`, derived from `matches` rather
     /// than a second hand-written mapping.

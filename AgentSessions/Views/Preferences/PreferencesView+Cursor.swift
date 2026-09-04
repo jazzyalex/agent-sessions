@@ -159,8 +159,8 @@ extension PreferencesView {
 
     func pickCursorBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Cursor CLI Binary"
-        panel.message = "Choose the agent executable file"
+        panel.title = String(localized: "Select Cursor CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the agent executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

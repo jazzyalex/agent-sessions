@@ -1224,7 +1224,7 @@ final class CodexUsageParserTests: XCTestCase {
                        providerEnabled: Bool = true,
                        visualEnabled: Bool = true,
                        soundEnabled: Bool = true) -> String {
-            LimitAlertReadinessFormatter.text(
+            String(localized: LimitAlertReadinessFormatter.text(
                 provider: "Codex",
                 source: source,
                 freshness: freshness,
@@ -1239,7 +1239,7 @@ final class CodexUsageParserTests: XCTestCase {
                 visualEnabled: visualEnabled,
                 soundEnabled: soundEnabled,
                 now: now
-            )
+            ))
         }
 
         XCTAssertEqual(readiness(notificationsEnabled: false), "Alerts off")
