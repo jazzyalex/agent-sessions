@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1287
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1293
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "ad49f9ec628c30e8f9aed3c33a6d85f884855347276d7c24a4ac183e784339f6"
+    "b8f3437113ce07763b0c81553facbf8a9b385a357dd8b3f49dd1b7f417b0b492"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -169,6 +169,20 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
 FORMAT_TOKEN = re.compile(
     r"%#@[^@]+@|%arg|%%|%(?:\d+\$)?(?:lld|llu|ld|lu|d|u|f|g|@)"
 )
+ARGUMENT_FORMAT_TOKEN = re.compile(
+    r"%(?:(\d+)\$)?(lld|llu|ld|lu|d|u|f|g|@)"
+)
+PLURAL_FORMAT_TOKEN = re.compile(r"%#@[^@]+@")
+INLINE_CODE_LITERAL = re.compile(r"`([^`\n]+)`")
+PRESERVED_LITERALS_BY_KEY = {
+    "Copy setup command: claude": ("claude",),
+    "Download from claude.ai/download or install via npm: npm install -g @anthropic/claude-cli": (
+        "claude.ai/download",
+        "npm install -g @anthropic/claude-cli",
+    ),
+    "Run codex --version to confirm resume support": ("codex --version",),
+    "via claude.ai": ("claude.ai",),
+}
 
 
 def fail(message: str) -> NoReturn:
@@ -240,6 +254,47 @@ def localization_values(localization: Any) -> list[str]:
     ]
 
 
+def format_signature(value: str) -> tuple[Any, ...]:
+    arguments: list[tuple[int, str]] = []
+    next_implicit_index = 1
+    for match in ARGUMENT_FORMAT_TOKEN.finditer(value):
+        explicit_index, kind = match.groups()
+        if explicit_index is None:
+            index = next_implicit_index
+            next_implicit_index += 1
+        else:
+            index = int(explicit_index)
+        arguments.append((index, kind))
+    return (
+        tuple(sorted(arguments)),
+        value.count("%%"),
+        tuple(sorted(PLURAL_FORMAT_TOKEN.findall(value))),
+        value.count("%arg"),
+    )
+
+
+def validate_format_tokens(
+    path: Path,
+    key: str,
+    locale: str,
+    source_localization: Any,
+    localization: Any,
+) -> None:
+    if locale == "en":
+        return
+    source_signatures = sorted(
+        format_signature(value) for value in localization_values(source_localization)
+    )
+    translated_signatures = sorted(
+        format_signature(value) for value in localization_values(localization)
+    )
+    if source_signatures != translated_signatures:
+        fail(
+            f"{display_path(path)}:{key}:{locale} must preserve format argument "
+            "positions and types"
+        )
+
+
 def has_translatable_text(value: str) -> bool:
     stripped = FORMAT_TOKEN.sub("", value)
     for term in PRESERVED_TERMS:
@@ -258,9 +313,12 @@ def validate_preserved_terms(
         return
     source_text = "\n".join(localization_values(source_localization))
     translated_text = "\n".join(localization_values(localization))
+    per_key_terms = PRESERVED_LITERALS_BY_KEY.get(key, ())
+    inline_code_terms = tuple(INLINE_CODE_LITERAL.findall(source_text))
+    protected_terms = set(PRESERVED_TERMS + per_key_terms + inline_code_terms)
     changed = sorted(
         term
-        for term in PRESERVED_TERMS
+        for term in protected_terms
         if source_text.count(term) != translated_text.count(term)
     )
     if changed:
@@ -378,6 +436,9 @@ def validate_shape(path: Path, catalog: dict[str, Any]) -> tuple[set[str], set[s
         for locale, localization in localizations.items():
             validate_string_unit(path, key, locale, localization)
             validate_preserved_terms(
+                path, key, locale, source_localization, localization
+            )
+            validate_format_tokens(
                 path, key, locale, source_localization, localization
             )
             validate_translation_changed(

@@ -374,7 +374,7 @@ private struct AgentRow: View {
                     .font(.system(size: style.nameSize, weight: .semibold))
                     .foregroundStyle(.primary)
 
-                Text(agent.details(for: metric))
+                Text(verbatim: agent.details(for: metric))
                     .font(.system(size: style.detailSize))
                     .foregroundStyle(.secondary)
             }

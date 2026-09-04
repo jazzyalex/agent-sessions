@@ -299,11 +299,15 @@ private struct UsageMeterMenuBarLabel: View {
                     // at a glance.
                     HStack(spacing: 3) {
                         MenuBarReconnectingGlyph()
-                        Text(q.reconnectingCaption == "reconnecting…"
-                             ? (q.provider == .claude ? "Claude" : "Codex")
-                             : q.reconnectingCaption)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                        if q.reconnectingCaptionUsesProviderName {
+                            Text(verbatim: q.provider == .claude ? "Claude" : "Codex")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(q.reconnectingCaption)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 case .live:
                     CockpitQuotaWidget(

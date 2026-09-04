@@ -160,7 +160,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             validator.INFO_PLIST,
             skip_xcstringstool=False,
         )
-        self.assertEqual(counts, (1287, 6, {"zh-Hans"}))
+        self.assertEqual(counts, (1293, 6, {"zh-Hans"}))
 
     def test_current_catalog_uses_current_product_terms(self) -> None:
         strings = validator.load_catalog(validator.LOCALIZABLE)["strings"]
@@ -227,6 +227,69 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         self.assert_validation_fails(
             lambda: self.validate_fixture(app_strings),
             "must preserve literal terms",
+        )
+
+    def test_per_key_command_literal_must_be_preserved(self) -> None:
+        key = "Copy setup command: claude"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "复制设置命令：克劳德"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve literal terms",
+        )
+
+    def test_inline_code_literal_must_be_preserved(self) -> None:
+        key = "Run `codex login` to continue"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "运行 `登录` 以继续"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve literal terms",
+        )
+
+    def test_format_arguments_may_reorder_with_positions(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": "已处理 %2$lld 个文件：%1$@",
+            }
+        }
+        info_strings = self.info_strings()
+        self.add_zh_hans(info_strings)
+        self.assertEqual(
+            self.validate_fixture({key: entry}, info_strings),
+            (1, 6, {"zh-Hans"}),
+        )
+
+    def test_format_argument_type_swap_fails(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": "已处理 %1$lld 个文件：%2$@",
+            }
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve format argument positions and types",
+        )
+
+    def test_missing_format_argument_fails(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "%@ 已处理文件"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve format argument positions and types",
         )
 
     def test_unknown_locale_fails(self) -> None:

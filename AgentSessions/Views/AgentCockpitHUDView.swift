@@ -2843,7 +2843,7 @@ private struct HUDLimitsProviderEntry {
     /// The same `QuotaData` value's compact reconnecting caption (e.g. "rate
     /// limited — retrying…"), carried alongside `presentationState` so every
     /// HUD surface renders the actual cause instead of a generic spinner.
-    var reconnectingCaption: String = "reconnecting…"
+    var reconnectingCaption: LocalizedStringResource = "reconnecting…"
     /// True when the provider explicitly returned a rate-limit response. Unlike
     /// a short reconnect attempt, this can be a long server-directed pause and
     /// should render without an endlessly spinning activity indicator.
@@ -4889,7 +4889,7 @@ private func isProbeFailed(_ s: ProbeCoordinator.ProbeRowState) -> Bool {
 private struct HUDLimitsRetryCell: View {
     let source: UsageTrackingSource
     var enlarged: Bool = false
-    var caption: String = "reconnecting…"
+    var caption: LocalizedStringResource = "reconnecting…"
 
     var body: some View {
         HStack(spacing: 8) {

@@ -300,8 +300,9 @@ final class StatusItemController: NSObject {
                     menu.addItem(makeTitleItem(String(localized: auth.detail)))
                 }
                 // Calm transient caption (P2) — beneath the Claude meters, no alarm.
-                if let reason = claudeStatus.transientReason {
-                    menu.addItem(makeTitleItem(reason))
+                if claudeStatus.transientReason != nil {
+                    let caption = QuotaData.claude(from: claudeStatus).reconnectingCaption
+                    menu.addItem(makeTitleItem(String(localized: caption)))
                 }
                 // Honest source label (P4): CLI-probe fallback vs OAuth endpoint.
                 if claudeStatus.currentSource == .tmuxUsage {
@@ -563,7 +564,8 @@ final class StatusItemController: NSObject {
         case .idle:
             return String(localized: "\(label) --  No active session", comment: "Menu bar quota row when there is no active session; the quota label remains verbatim.")
         case .reconnecting:
-            return String(localized: "\(label) --  \(quota.reconnectingCaption)", comment: "Menu bar quota row while reconnecting; the quota label remains verbatim.")
+            let caption = String(localized: quota.reconnectingCaption)
+            return String(localized: "\(label) --  \(caption)", comment: "Menu bar quota row while reconnecting; the quota label remains verbatim.")
         case .live:
             return resetLine(label: label, percent: percent, reset: reset)
         }

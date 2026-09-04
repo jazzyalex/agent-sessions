@@ -180,10 +180,15 @@ struct AnalyticsAgentBreakdown: Identifiable, Equatable {
     func details(for metric: AnalyticsAggregationMetric) -> String {
         switch metric {
         case .sessions:
-            let suffix = sessionCount == 1 ? "session" : "sessions"
-            return "\(AnalyticsSummary.formatNumber(sessionCount)) \(suffix) • \(durationFormatted)"
+            return String(
+                localized: "\(sessionCount) sessions • \(durationFormatted)",
+                comment: "Analytics agent row showing a localized session count and duration."
+            )
         case .messages:
-            return "\(AnalyticsSummary.formatNumber(messageCount)) messages • \(durationFormatted)"
+            return String(
+                localized: "\(messageCount) messages • \(durationFormatted)",
+                comment: "Analytics agent row showing a localized message count and duration."
+            )
         }
     }
 

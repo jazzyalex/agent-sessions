@@ -685,6 +685,47 @@
         }
       }
     },
+    "%lld messages • %@": {
+      "comment": "Analytics agent row showing a localized message count and duration.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld message • %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld messages • %2$@"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld 条消息 • %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld 条消息 • %2$@"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld sessions": {
       "comment": "Footer count of sessions.",
       "localizations": {
@@ -719,6 +760,47 @@
                 "stringUnit": {
                   "state": "translated",
                   "value": "%lld 个会话"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld sessions • %@": {
+      "comment": "Analytics agent row showing a localized session count and duration.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld session • %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld sessions • %2$@"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld 个会话 • %2$@"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld 个会话 • %2$@"
                 }
               }
             }
@@ -20964,6 +21046,57 @@
         }
       }
     },
+    "rate limited — retrying…": {
+      "comment": "Compact quota status shown while retrying after a rate limit.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "rate limited — retrying…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求频率受限 — 正在重试…"
+          }
+        }
+      }
+    },
+    "reconnecting…": {
+      "comment": "Compact quota status shown while reconnecting to a provider.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "reconnecting…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在重新连接…"
+          }
+        }
+      }
+    },
+    "retrying…": {
+      "comment": "Compact quota status shown while retrying after a temporary outage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "retrying…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在重试…"
+          }
+        }
+      }
+    },
     "side": {
       "localizations": {
         "en": {
@@ -21041,6 +21174,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "通过 CLI 探测"
+          }
+        }
+      }
+    },
+    "via claude.ai": {
+      "comment": "Menu label identifying claude.ai as the current usage data source.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "via claude.ai"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过 claude.ai"
           }
         }
       }
