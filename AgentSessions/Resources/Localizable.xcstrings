@@ -4459,18 +4459,18 @@
         }
       }
     },
-    "Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.": {
+    "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery."
+            "value": "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "监控台的额度耗尽倒计时基于最新的 5 小时用量速率，因此显示的重置前预计时间可能比通知提醒更长。此显示设置与通知发送相互独立。"
+            "value": "额度监视器的额度耗尽倒计时基于最新的 5 小时用量速率，因此显示的重置前预计时间可能比通知提醒更长。此显示设置与通知发送相互独立。"
           }
         }
       }
@@ -13433,18 +13433,18 @@
         }
       }
     },
-    "Removes Agent Sessions from the Dock when the menu bar item or a pinned Cockpit keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.": {
+    "Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Removes Agent Sessions from the Dock when the menu bar item or a pinned Cockpit keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon."
+            "value": "Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当可通过菜单栏项目或固定的监控台访问 Agent Sessions 时，从程序坞中隐藏它。如果两种方式都不可用，Agent Sessions 会恢复程序坞图标。"
+            "value": "当可通过菜单栏项目或固定的额度监视器访问 Agent Sessions 时，从程序坞中隐藏它。如果两种方式都不可用，Agent Sessions 会恢复程序坞图标。"
           }
         }
       }

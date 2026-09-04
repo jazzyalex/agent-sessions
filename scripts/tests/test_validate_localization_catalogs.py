@@ -162,6 +162,15 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         )
         self.assertEqual(counts, (1287, 6, {"zh-Hans"}))
 
+    def test_current_catalog_uses_current_product_terms(self) -> None:
+        strings = validator.load_catalog(validator.LOCALIZABLE)["strings"]
+        stale_terms = ("cockpit", "quick meter", "favorite")
+        stale_keys = [
+            key for key in strings
+            if any(term in key.lower() for term in stale_terms)
+        ]
+        self.assertEqual(stale_keys, [])
+
     def test_complete_zh_hans_in_both_catalogs_passes(self) -> None:
         app_strings = {"Hello": string_entry("Hello")}
         info_strings = self.info_strings()
