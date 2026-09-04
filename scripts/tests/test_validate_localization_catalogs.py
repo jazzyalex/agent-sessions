@@ -240,6 +240,30 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             "must preserve literal terms",
         )
 
+    def test_recovery_ladder_literals_must_be_preserved(self) -> None:
+        key = (
+            "Usage paused — the saved CLI token lapsed. Run any claude command "
+            "in Terminal to refresh it, or paste a claude.ai session cookie in "
+            "Settings. Last resort: the probe button in the Quota Meter toolbar "
+            "(may consume tokens)."
+        )
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": (
+                    "用量已暂停 — 保存的 CLI 令牌已失效。请在终端中运行任意克劳德"
+                    "命令以刷新令牌，或在设置中粘贴会话 Cookie。"
+                ),
+            }
+        }
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            self.validate_fixture({key: entry})
+        self.assertIn("must preserve literal terms", stderr.getvalue())
+        self.assertIn("claude", stderr.getvalue())
+        self.assertIn("claude.ai", stderr.getvalue())
+
     def test_inline_code_literal_must_be_preserved(self) -> None:
         key = "Run `codex login` to continue"
         entry = string_entry(key)

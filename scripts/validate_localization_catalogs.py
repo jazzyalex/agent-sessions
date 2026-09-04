@@ -181,6 +181,10 @@ PRESERVED_LITERALS_BY_KEY = {
         "npm install -g @anthropic/claude-cli",
     ),
     "Run codex --version to confirm resume support": ("codex --version",),
+    "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: the probe button in the Quota Meter toolbar (may consume tokens).": (
+        "claude",
+        "claude.ai",
+    ),
     "via claude.ai": ("claude.ai",),
 }
 
