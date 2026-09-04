@@ -156,6 +156,24 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Marketing Surfaces
 
+### Social banners need a feed-size typography pass
+> **open** · sev: low · urg: low · verified 2026-09-03
+
+- **What:** the current X-ready banner preserves all fifteen supported-agent names, but
+  the descriptor and agent list are small in X's desktop composer and will be harder to
+  scan on mobile. The title and product screenshot remain clear.
+- **Where:** `docs/assets/social-banners/agent-sessions-x-native.png` and the public
+  preview at `docs/social-banners/index.html`.
+- **Fix shape:** test the banner at X desktop and mobile feed widths, enlarge the
+  descriptor, and either reduce the in-image agent list or move the complete list into
+  post copy. Preserve the 2:1 crop and the deterministic, non-generated composition.
+- **Why deferred:** the current banner is usable for the immediate post; typography can
+  improve in a focused visual pass without delaying publication.
+- **Risk if wrong:** the compatibility breadth becomes decorative texture instead of a
+  readable product claim.
+- **To close:** verify the descriptor and every retained agent name at real desktop and
+  mobile feed sizes, then replace the public X-ready asset without changing its URL.
+
 ### Session-Bench needs an in-app surface, and it is not a changelog entry
 > **open** · sev: low · urg: low · verified —
 
