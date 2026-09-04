@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 <!-- Headings the release-note generator does not recognise are dropped from the
      Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py). -->
 ### Maintenance
+- Added a public social-banner download page with X, Open Graph/GitHub, LinkedIn, and 16:9 variants of the native composition.
 - Established the localization foundation with English String Catalogs for app and permission copy, stable non-display identifiers, typed localized-copy boundaries, pluralized session counts, locale-aware notification durations, compiler-extraction drift validation, and contributor conventions for the planned Simplified Chinese translation.
 - The telemetry foundation now reads configuration and token usage for Codex, Claude, Pi and Copilot, with order-independent accounting, fail-closed API-equivalent pricing, and no product surface attached yet.
 - Identity-backed session metadata now stores timestamps in seconds consistently while retaining millisecond identity revisions; the in-place migration preserves every indexed row and schedules analytics re-derivation naturally.
