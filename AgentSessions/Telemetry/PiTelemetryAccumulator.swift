@@ -53,7 +53,8 @@ struct PiTelemetryAccumulator {
             let model = message["model"] as? String
             // A message states the model that actually served it, which is the right
             // attribution even when no model_change announced it.
-            timeline.observe(model: model, effort: nil, observedAt: observedAt, anchorLine: index)
+            timeline.observe(model: model, effort: nil, observedAt: observedAt, anchorLine: index,
+                             provenance: .assistantRecord)
 
             guard let usage = message["usage"] as? [String: Any] else { return }
             sawUsageRecord = true

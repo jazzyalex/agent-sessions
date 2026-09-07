@@ -41,18 +41,32 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Window layout the plan reported (`5h+weekly` vs `weekly`). A plan change
     /// alters what a percentage point means, so it invalidates the conversion.
     var limitShape: String?
+    /// Usage source that supplied the account-level observation. OAuth, CLI RPC,
+    /// JSONL fallback and a status probe are not interchangeable evidence paths.
+    /// Optional for records written before source-family provenance existed; such
+    /// records are not compatible when a caller supplies a current family.
+    var sourceFamily: String?
 
     /// Both providers report weekly consumption as whole percentage points, so a
     /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
     /// biases every estimate low, worst exactly where the numerator is smallest.
     static let quantizationMidpoint: Double = 0.5
 
-    /// Whether this measurement may be served under the given conditions. An
-    /// unstamped legacy record passes: it predates the stamp rather than
-    /// contradicting it.
-    func isCompatible(priceRevision: Int, limitShape: String?) -> Bool {
+    /// Whether this measurement may be served under the given conditions.
+    /// Source-family provenance fails closed: a scoped caller cannot consume an
+    /// unstamped legacy record because its evidence path cannot be established.
+    func isCompatible(priceRevision: Int,
+                      limitShape: String?,
+                      sourceFamily: String? = nil) -> Bool {
         if let stamped = self.priceRevision, stamped != priceRevision { return false }
         if let stamped = self.limitShape, let current = limitShape, stamped != current { return false }
+        if let current = sourceFamily {
+            guard self.sourceFamily == current else { return false }
+        } else if self.sourceFamily != nil {
+            // A caller without a family scope cannot safely consume a stamped
+            // record because it cannot prove that the evidence paths agree.
+            return false
+        }
         return true
     }
 

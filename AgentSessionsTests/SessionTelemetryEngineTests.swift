@@ -39,10 +39,39 @@ final class SessionTelemetryEngineTests: XCTestCase {
         ]
     }
 
+    private func codexLines(accountID: String) -> [String] {
+        let metadata = "{\"timestamp\":\"2026-08-26T09:59:59.000Z\",\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(accountID)\"}}"
+        return [metadata] + codexLines()
+    }
+
     private func claudeLines() -> [String] {
         [
             #"{"type":"assistant","timestamp":"2026-08-26T10:00:00.000Z","isSidechain":false,"effort":"medium","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"speed":"standard"}}}"#
         ]
+    }
+
+    private func configuredCodexQuota(prices: RunwayPriceTable,
+                                      now: Date,
+                                      reset: Date,
+                                      accountID: String = "account-a") -> WeeklyQuotaCalibrationStore {
+        let quota = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: now)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
+        let scope = WeeklyQuotaCalibrationScope(
+            provider: "codex",
+            accountHash: WeeklyQuotaCalibrationScope.hashAccount(accountID),
+            sourceFamily: "oauth",
+            limitShape: "weekly",
+            priceRevision: prices.revision)
+        quota.observeQuota(provider: "codex", remainingPercent: 80,
+                           hasExactPercent: false, resetAt: reset, observedAt: now,
+                           scope: scope, now: now)
+        return quota
     }
 
     // MARK: - Dispatch / descriptor agreement
@@ -105,6 +134,31 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(second.usageEvents.first?.priceTableRevision, prices.revision)
     }
 
+    func testPriceMetadataChangeInvalidatesCachedProvenance() async throws {
+        let url = try write(codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: firstManifest))
+        let semanticRevision = prices.revision
+        let engine = SessionTelemetryEngine(priceTable: prices)
+        let firstValue = await engine.telemetry(for: session(url, source: .codex))
+        let first = try XCTUnwrap(firstValue)
+        XCTAssertEqual(first.costEstimate?.priceTableUpdated, "2098-01-01")
+        XCTAssertEqual(engine.parseCount, 1)
+
+        XCTAssertTrue(prices.loadForTesting(json: secondManifest))
+        XCTAssertEqual(prices.revision, semanticRevision,
+                       "metadata-only edits must not invalidate calibration")
+        let secondValue = await engine.telemetry(for: session(url, source: .codex))
+        let second = try XCTUnwrap(secondValue)
+        XCTAssertEqual(second.costEstimate?.priceTableUpdated, "2099-01-01")
+        XCTAssertEqual(engine.parseCount, 2,
+                       "cache must refresh the exact manifest provenance even when rates are unchanged")
+    }
+
     /// The exact staleness case a mtime-only key misses.
     func testSizeChangeWithFixedMtimeRecomputes() async throws {
         let url = try write(codexLines())
@@ -157,9 +211,13 @@ final class SessionTelemetryEngineTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(604_800)
         let quota = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: now)
-        quota.setBootstrapForTesting(provider: "claude", result: WeeklyQuotaBootstrapResult(
+        var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
-            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now))
+            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        quota.setBootstrapForTesting(provider: "claude", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "claude", accountHash: nil,
                                                 sourceFamily: "oauth", limitShape: "weekly",
                                                 priceRevision: prices.revision)
@@ -178,11 +236,100 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertFalse(estimate.accountScoped, "Claude exposes no stable account identity")
     }
 
-    func testCachedTranscriptRefreshesWeeklyQuotaWithoutReparsing() async throws {
-        let priceableLines = codexLines().map {
-            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.6-sol")
+    func testCodexWeeklyQuotaFailsClosedWithoutDurableTranscriptAccountIdentity() async throws {
+        let url = try write(codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertEqual(estimate.unavailableReason,
+                       "session has no durable account identity matching the calibration account")
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped)
+        XCTAssertEqual(estimate.calibrationProvenance?.origin, .bootstrap)
+        XCTAssertEqual(estimate.calibrationProvenance?.accountHash,
+                       WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+    }
+
+    func testCodexWeeklyQuotaFailsClosedForMismatchedDurableTranscriptAccount() async throws {
+        let url = try write(codexLines(accountID: "account-b").map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertEqual(estimate.unavailableReason,
+                       "session has no durable account identity matching the calibration account")
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped)
+    }
+
+    func testCodexWeeklyQuotaUsesMatchingDurableTranscriptAccountIdentity() async throws {
+        let url = try write(codexLines(accountID: "account-a").map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .estimated)
+        XCTAssertNotNil(estimate.percentPoints)
+        XCTAssertTrue(estimate.accountScoped)
+        XCTAssertEqual(estimate.calibrationProvenance?.origin, .bootstrap)
+        XCTAssertEqual(estimate.calibrationProvenance?.sourceFamily, "oauth")
+        XCTAssertEqual(estimate.calibrationProvenance?.accountHash,
+                       WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+        XCTAssertEqual(estimate.calibrationProvenance?.scannedAt, now)
+        XCTAssertEqual(estimate.quotaObservedAt, now,
+                       "the latest raw observation remains separate from scan provenance")
+    }
+
+    func testCodexWeeklyQuotaFailsClosedForConflictingTranscriptAccountIdentities() async throws {
+        let lines = [
+            #"{"type":"session_meta","payload":{"account_id":"account-a"}}"#,
+            #"{"type":"session_started","payload":{"accountId":"account-b"}}"#
+        ] + codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
         }
-        let url = try write(priceableLines)
+        let url = try write(lines)
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped)
+    }
+
+    func testCachedTranscriptRefreshesWeeklyQuotaWithoutReparsing() async throws {
+        let url = try write(codexLines(accountID: "account-a").map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
         let prices = RunwayPriceTable.makeForTesting()
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(604_800)
@@ -194,9 +341,13 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(before.weeklyQuotaEstimate?.status, .unavailable)
         XCTAssertEqual(engine.parseCount, 1)
 
-        quota.setBootstrapForTesting(provider: "codex", result: WeeklyQuotaBootstrapResult(
+        var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
-            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now))
+            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "codex",
                                                 accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),
                                                 sourceFamily: "oauth", limitShape: "weekly",

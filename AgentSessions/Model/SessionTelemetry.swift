@@ -2,16 +2,17 @@ import Foundation
 
 /// Where a telemetry observation came from. Kept explicit because the two
 /// providers record configuration very differently: Codex writes the effective
-/// settings for every turn, while Claude only ever stamps the model on the
-/// assistant record that used it — so Claude's "initial" configuration is an
-/// inference from the first record, not something the transcript states.
+    /// settings for every turn, while Claude only ever stamps the model on the
+    /// assistant record that used it — so Claude's "initial" configuration is an
+    /// inference from the first observed record, not something the transcript
+    /// states in a session-start event.
 public enum TelemetryProvenance: String, Codable, Sendable {
     /// Codex `turn_context` payload — the effective settings for that turn.
     case effectiveTurnContext
     /// Claude assistant record (`message.model` / the record's top-level `effort`).
     case assistantRecord
-    /// Initial configuration backfilled from the first value ever observed for a
-    /// field, rather than read from a session-start record.
+    /// Initial configuration inferred from the first observed record, rather than
+    /// read from a session-start record. Fields absent from that record stay unknown.
     case inferredFirstObservation
     /// A dedicated change event the provider emits in its own right — Pi's
     /// `model_change` / `thinking_level_change`, Copilot's `session.model_change`.
@@ -19,7 +20,8 @@ public enum TelemetryProvenance: String, Codable, Sendable {
     case providerChangeRecord
 }
 
-/// A model + reasoning-effort pair observed at one point in a transcript.
+/// Configuration fields observed at one point in a transcript. Either field may be
+/// unknown when the provider's record states only the other one.
 public struct SessionConfiguration: Equatable, Codable, Sendable {
     public let model: String?
     public let reasoningEffort: String?
@@ -33,16 +35,41 @@ public struct SessionConfiguration: Equatable, Codable, Sendable {
     public let anchorLine: Int
     public let provenance: TelemetryProvenance
 
+    /// Field-level evidence. These remain optional because a configuration record
+    /// may state only one field; an absent field must stay unknown rather than being
+    /// filled from a later record.
+    public let modelObservedAt: Date?
+    public let modelAnchorLine: Int?
+    public let modelProvenance: TelemetryProvenance?
+    public let reasoningEffortObservedAt: Date?
+    public let reasoningEffortAnchorLine: Int?
+    public let reasoningEffortProvenance: TelemetryProvenance?
+
     public init(model: String?,
                 reasoningEffort: String?,
                 observedAt: Date?,
                 anchorLine: Int,
-                provenance: TelemetryProvenance) {
+                provenance: TelemetryProvenance,
+                modelObservedAt: Date? = nil,
+                modelAnchorLine: Int? = nil,
+                modelProvenance: TelemetryProvenance? = nil,
+                reasoningEffortObservedAt: Date? = nil,
+                reasoningEffortAnchorLine: Int? = nil,
+                reasoningEffortProvenance: TelemetryProvenance? = nil) {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.observedAt = observedAt
         self.anchorLine = anchorLine
         self.provenance = provenance
+        self.modelObservedAt = model == nil ? nil : (modelObservedAt ?? observedAt)
+        self.modelAnchorLine = model == nil ? nil : (modelAnchorLine ?? anchorLine)
+        self.modelProvenance = model == nil ? nil : (modelProvenance ?? provenance)
+        self.reasoningEffortObservedAt = reasoningEffort == nil
+            ? nil : (reasoningEffortObservedAt ?? observedAt)
+        self.reasoningEffortAnchorLine = reasoningEffort == nil
+            ? nil : (reasoningEffortAnchorLine ?? anchorLine)
+        self.reasoningEffortProvenance = reasoningEffort == nil
+            ? nil : (reasoningEffortProvenance ?? provenance)
     }
 }
 
@@ -93,8 +120,9 @@ public struct ConfigurationChange: Equatable, Codable, Sendable {
 public struct TelemetryUsageSlice: Equatable, Codable, Sendable {
     public var model: String?
     public var reasoningEffort: String?
-    /// `RunwaySpeedTier.rawValue`. Always `"standard"` for Codex, which has no
-    /// speed tiers.
+    /// A normalized pricing basis. `"standard-normalized"` is used when Codex's
+    /// actual service tier is not observed; it must not be presented as evidence
+    /// that the request ran on a provider-reported standard tier.
     public var speed: String
 
     public var freshInputTokens: Int
@@ -169,7 +197,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     /// Total input presented to this request, including cached input when the
     /// provider reports it. nil means the transcript cannot establish the value.
     public let contextInputTokens: Int?
-    /// API-equivalent cost under the stamped immutable price-table revision.
+    /// API-equivalent cost under the stamped price-table identity.
     /// nil means unpriced or not yet priced; consult the session cost reasons.
     public let apiEquivalentUSD: Double?
     public let priceTableRevision: Int?
@@ -267,7 +295,8 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
     /// `updated` date of the price manifest used, so a stored result can be
     /// re-judged when rates move.
     public let priceTableUpdated: String
-    /// Stable content hash of the exact manifest used for every priced event.
+    /// Stable semantic hash of the model/rate content used for priced events.
+    /// Pair with `priceTableUpdated` to identify metadata-only manifest changes.
     public let priceTableRevision: Int
 
     public init(apiEquivalentUSD: Double?,
@@ -315,8 +344,38 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
     public let quotaResetAt: Date?
     public let quotaObservedAt: Date?
     public let quotaPrecision: String?
+    /// Provenance of the ratio, separate from the latest raw quota observation
+    /// above. A carried bootstrap can be weeks old even when the latest poll is
+    /// fresh, and that distinction must remain visible to callers.
+    public let calibrationProvenance: WeeklyQuotaCalibrationProvenance?
     public let calculatedAt: Date
     public let priceTableRevision: Int
+
+    public init(status: TelemetryWeeklyQuotaStatus,
+                percentPoints: Double?,
+                unavailableReason: String?,
+                percentPointsPerAPIDollar: Double?,
+                accountScoped: Bool,
+                sourceFamily: String?,
+                quotaResetAt: Date?,
+                quotaObservedAt: Date?,
+                quotaPrecision: String?,
+                calibrationProvenance: WeeklyQuotaCalibrationProvenance? = nil,
+                calculatedAt: Date,
+                priceTableRevision: Int) {
+        self.status = status
+        self.percentPoints = percentPoints
+        self.unavailableReason = unavailableReason
+        self.percentPointsPerAPIDollar = percentPointsPerAPIDollar
+        self.accountScoped = accountScoped
+        self.sourceFamily = sourceFamily
+        self.quotaResetAt = quotaResetAt
+        self.quotaObservedAt = quotaObservedAt
+        self.quotaPrecision = quotaPrecision
+        self.calibrationProvenance = calibrationProvenance
+        self.calculatedAt = calculatedAt
+        self.priceTableRevision = priceTableRevision
+    }
 }
 
 /// Provider-neutral telemetry for one transcript.
@@ -330,7 +389,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 2
+    public static let parserVersion = 3
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?
@@ -343,12 +402,16 @@ public struct SessionTelemetry: Equatable, Codable, Sendable {
     public let weeklyQuotaEstimate: TelemetryWeeklyQuotaEstimate?
     public let parserVersion: Int
 
-    public var sessionOwnedTopLineTokens: Int {
-        usageEvents.filter { $0.ownership == .session }.reduce(0) { $0 + $1.topLineTokens }
+    public var sessionOwnedTopLineTokens: Int? {
+        let owned = usageEvents.filter { $0.ownership == .session }
+        guard !owned.isEmpty else { return nil }
+        return owned.reduce(0) { $0 + $1.topLineTokens }
     }
 
-    public var descendantTopLineTokens: Int {
-        usageEvents.filter { $0.ownership == .descendant }.reduce(0) { $0 + $1.topLineTokens }
+    public var descendantTopLineTokens: Int? {
+        let owned = usageEvents.filter { $0.ownership == .descendant }
+        guard !owned.isEmpty else { return nil }
+        return owned.reduce(0) { $0 + $1.topLineTokens }
     }
 
     /// nil when any contributing event in that ownership class is unpriced.

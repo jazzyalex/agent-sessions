@@ -674,6 +674,7 @@ final class CodexUsageModel: ObservableObject {
                 accountHash: WeeklyQuotaCalibrationScope.hashAccount(
                     CodexCalibrationAccountScope.accountId(now: now)),
                 limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
+                sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(

@@ -19,23 +19,40 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
     /// A cumulative `token_count` record, the shape that carries `total_token_usage`.
     private func tokenCount(input: Int, cached: Int = 0, cacheWrite: Int = 0,
                             output: Int, reasoning: Int = 0, total: Int? = nil,
+                            lastInput: Int? = nil, lastCached: Int? = nil,
+                            lastCacheWrite: Int? = nil, lastOutput: Int? = nil,
+                            includeLastUsage: Bool = true,
                             at ts: String = "2026-08-26T10:00:01.000Z") -> String {
         let usage: [String: Any] = [
             "input_tokens": input, "cached_input_tokens": cached,
             "cache_write_input_tokens": cacheWrite, "output_tokens": output,
             "reasoning_output_tokens": reasoning, "total_tokens": total ?? (input + output)
         ]
+        let lastUsage: [String: Any] = [
+            "input_tokens": lastInput ?? input,
+            "cached_input_tokens": lastCached ?? cached,
+            "cache_write_input_tokens": lastCacheWrite ?? cacheWrite,
+            "output_tokens": lastOutput ?? output,
+            "reasoning_output_tokens": reasoning,
+            "total_tokens": (lastInput ?? input) + (lastOutput ?? output)
+        ]
+        var info: [String: Any] = ["total_token_usage": usage]
+        if includeLastUsage { info["last_token_usage"] = lastUsage }
         return json(["timestamp": ts, "type": "event_msg",
                      "payload": ["type": "token_count",
-                                 "info": ["total_token_usage": usage, "last_token_usage": usage]]])
+                                 "info": info]])
     }
 
     private func turnCompleted(input: Int, cached: Int = 0, output: Int,
+                               wrapped: Bool = false,
                                at ts: String = "2026-08-26T10:00:02.000Z") -> String {
-        json(["timestamp": ts, "type": "event_msg",
-              "payload": ["type": "turn.completed",
-                          "usage": ["input_tokens": input, "cached_input_tokens": cached,
-                                    "output_tokens": output, "total_tokens": input + output]]])
+        let usage: [String: Any] = ["input_tokens": input, "cached_input_tokens": cached,
+                                    "output_tokens": output, "total_tokens": input + output]
+        if wrapped {
+            return json(["timestamp": ts, "type": "event_msg",
+                         "payload": ["type": "turn.completed", "usage": usage]])
+        }
+        return json(["timestamp": ts, "type": "turn.completed", "usage": usage])
     }
 
     private func json(_ dict: [String: Any]) -> String {
@@ -87,19 +104,22 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
             context("", "high"),
             context("gpt-5.6-codex", "high")
         ])
-        XCTAssertEqual(t.initialConfiguration?.model, "gpt-5.6-codex")
+        XCTAssertNil(t.initialConfiguration?.model,
+                     "a later model must not be backdated into the effort-only first record")
+        XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "high")
+        XCTAssertEqual(t.currentConfiguration?.model, "gpt-5.6-codex")
         XCTAssertTrue(t.configurationChanges.isEmpty, "empty string is absence, not a value")
     }
 
-    /// Symmetric backfill: whichever field is seen first, the other fills in from
-    /// its own first sighting without counting as a change.
-    func testEffortObservedBeforeModelBackfillsWithoutChange() {
+    func testEffortObservedBeforeModelDoesNotSynthesizeInitialPair() {
         let t = CodexTelemetryAccumulator.accumulate(lines: [
             context(nil, "xhigh"),
             context("gpt-5.6-codex", "xhigh")
         ])
         XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "xhigh")
-        XCTAssertEqual(t.initialConfiguration?.model, "gpt-5.6-codex")
+        XCTAssertNil(t.initialConfiguration?.model)
+        XCTAssertEqual(t.currentConfiguration?.model, "gpt-5.6-codex")
+        XCTAssertEqual(t.currentConfiguration?.reasoningEffort, "xhigh")
         XCTAssertTrue(t.configurationChanges.isEmpty)
     }
 
@@ -178,7 +198,9 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         // Δinput 10 − Δcached 50 is negative; fresh clamps at 0 rather than
         // subtracting tokens that were already counted.
         XCTAssertEqual(slice(t, model: "model-a")?.freshInputTokens, 90)
-        XCTAssertEqual(slice(t, model: "model-a")?.cacheReadTokens, 60)
+        XCTAssertEqual(slice(t, model: "model-a")?.cacheReadTokens, 20,
+                       "cache detail is bounded by the input it classifies")
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 110)
     }
 
     func testReasoningSubsetNotAddedToTopLine() {
@@ -190,12 +212,12 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageSummary?.topLineTokens, 140, "100 fresh + 40 output; reasoning is inside output")
     }
 
-    func testCodexSlicesAlwaysStandardSpeed() {
+    func testCodexSlicesUseExplicitStandardNormalizedPricingBasis() {
         let t = CodexTelemetryAccumulator.accumulate(lines: [
             context("model-a", "medium"),
             tokenCount(input: 100, output: 10, total: 110)
         ])
-        XCTAssertTrue(t.usageSlices.allSatisfy { $0.speed == "standard" })
+        XCTAssertTrue(t.usageSlices.allSatisfy { $0.speed == "standard-normalized" })
     }
 
     func testCacheWriteTokensCounted() {
@@ -205,6 +227,9 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         ])
         XCTAssertEqual(slice(t, model: "model-a")?.cacheWrite5mTokens, 25)
         XCTAssertEqual(slice(t, model: "model-a")?.cacheWrite1hTokens, 0, "Codex has no TTL split")
+        XCTAssertEqual(slice(t, model: "model-a")?.freshInputTokens, 75)
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 110,
+                       "cache writes classify input and must not add tokens")
     }
 
     // MARK: - Usage families
@@ -213,11 +238,13 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         let t = CodexTelemetryAccumulator.accumulate(lines: [
             context("model-a", "medium"),
             turnCompleted(input: 100, output: 10),
-            turnCompleted(input: 50, output: 5)
+            turnCompleted(input: 150, output: 15)
         ])
-        XCTAssertEqual(slice(t, model: "model-a")?.freshInputTokens, 150, "per-turn records sum, never delta")
+        XCTAssertEqual(slice(t, model: "model-a")?.freshInputTokens, 150,
+                       "current top-level turn.completed records are cumulative")
         XCTAssertEqual(slice(t, model: "model-a")?.outputTokens, 15)
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["turn.completed"])
+        XCTAssertEqual(t.usageSummary?.recordedTotalTokens, 165)
     }
 
     func testBothFamiliesNeverDoubleCounted() {
@@ -238,7 +265,8 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         let t = CodexTelemetryAccumulator.accumulate(lines: [
             context("gpt-5.6-sol", "xhigh"),
             tokenCount(input: 200_000, cached: 50_000, output: 10),
-            tokenCount(input: 500_001, cached: 100_000, output: 20)
+            tokenCount(input: 500_001, cached: 100_000, output: 20,
+                       lastInput: 300_001, lastCached: 50_000, lastOutput: 10)
         ])
         XCTAssertEqual(t.usageEvents.count, 2)
         XCTAssertEqual(t.usageEvents[0].contextInputTokens, 200_000)
@@ -247,6 +275,40 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageEvents[1].cacheReadTokens, 50_000)
         XCTAssertEqual(t.usageEvents[1].reasoningEffort, "xhigh")
         XCTAssertEqual(t.usageEvents[1].ownership, .session)
+    }
+
+    func testRequestContextIsUnavailableWhenLastUsageDoesNotMatchCumulativeDelta() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("gpt-5.6-sol", "xhigh"),
+            tokenCount(input: 200_000, output: 10),
+            tokenCount(input: 500_001, output: 20)
+        ])
+        XCTAssertEqual(t.usageEvents[1].freshInputTokens, 300_001,
+                       "accounting still comes from the cumulative delta")
+        XCTAssertNil(t.usageEvents[1].contextInputTokens,
+                     "the cumulative total is not request-scoped context evidence")
+    }
+
+    func testRequestContextIsUnavailableWithoutLastUsage() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("gpt-5.6-sol", "xhigh"),
+            tokenCount(input: 300_000, output: 10, includeLastUsage: false)
+        ])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 300_010)
+        XCTAssertNil(t.usageEvents.first?.contextInputTokens)
+    }
+
+    func testWrappedHistoricalTurnCompletedUsageFailsClosed() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("model-a", "medium"),
+            turnCompleted(input: 100, output: 10, wrapped: true),
+            turnCompleted(input: 150, output: 15, wrapped: true)
+        ])
+        XCTAssertEqual(t.usageSummary?.usageFamilies, ["turn.completed"])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 0)
+        XCTAssertFalse(t.usageSummary?.hasComponentBreakdown == true)
+        XCTAssertNil(t.usageSummary?.recordedTotalTokens)
+        XCTAssertTrue(t.usageEvents.isEmpty)
     }
 
     func testMalformedCumulativeMarkerDoesNotSuppressValidTurnUsage() {

@@ -4457,7 +4457,8 @@ final class CodexUsageParserTests: XCTestCase {
         RunwaySessionActivity(
             identity: .init(id: id, displayName: id.uppercased(), isGoal: false, logPaths: ["/\(id)"]),
             tokensPerSecond: outputPerSecond, sampleStart: now, sampleEnd: now,
-            outputPerSecond: outputPerSecond, modelSlug: "gpt-5.6")
+            outputPerSecond: outputPerSecond, modelSlug: "gpt-5.6",
+            contextInputTokens: 0)
     }
 
     /// Acceptance test 4: doubling a session's CURRENT activity doubles its %/h.
@@ -4566,6 +4567,9 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
+        XCTAssertNil(t.price(forModel: "claude-sonnet-6"), "future Claude generations must not inherit generic family rates")
+        XCTAssertNil(t.price(forModel: "claude-sonnet-5-preview"), "unrecognized Claude suffixes must fail closed")
+        XCTAssertNil(t.price(forModel: "claude-opus-50"), "a version-like suffix is not an approved alias")
         // Codex tiers price distinctly via longest-prefix.
         XCTAssertEqual(t.price(forModel: "gpt-5.6-sol")?.outputPerMTok, 20.0)
         XCTAssertEqual(t.price(forModel: "gpt-5.6-terra")?.outputPerMTok, 12.0)
@@ -4611,6 +4615,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertTrue(a.loadForTesting(json: Data(compact.utf8)))
         XCTAssertTrue(b.loadForTesting(json: Data(formatted.utf8)))
         XCTAssertEqual(a.revision, b.revision)
+        XCTAssertNotEqual(a.manifestFingerprint, b.manifestFingerprint,
+                          "exact manifest identity includes metadata even when rates are equivalent")
     }
 
     func testSolLongContextTierPricesTheWholeRequest() {
@@ -4622,6 +4628,9 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(long?.inputPerMTok, 8)
         XCTAssertEqual(long?.cachedInputPerMTok, 0.8)
         XCTAssertEqual(long?.outputPerMTok, 30)
+        XCTAssertEqual(price?.rates(for: .standard, contextInputTokens: nil),
+                       price?.rates(for: .standard),
+                       "the shared table preserves base-rate access for runway consumers")
     }
 
     func testEveryGPT56CodexTierUsesTheLongContextPolicy() {

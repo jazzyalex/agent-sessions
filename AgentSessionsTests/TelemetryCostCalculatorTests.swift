@@ -24,14 +24,16 @@ final class TelemetryCostCalculatorTests: XCTestCase {
                             outputTokens: output)
     }
 
-    private func event(_ model: String, input: Int, context: Int,
-                       ownership: TelemetryUsageOwnership = .session) -> TelemetryUsageEvent {
+    private func event(_ model: String, input: Int, context: Int?,
+                       speed: String = "standard",
+                       ownership: TelemetryUsageOwnership = .session,
+                       cacheWrite5m: Int = 0, output: Int = 0) -> TelemetryUsageEvent {
         TelemetryUsageEvent(recordID: UUID().uuidString, observedAt: Date(), anchorLine: 0,
                             usageFamily: "token_count", ownership: ownership,
-                            model: model, reasoningEffort: "high", speed: "standard",
+                            model: model, reasoningEffort: "high", speed: speed,
                             freshInputTokens: input, cacheReadTokens: 0,
-                            cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
-                            outputTokens: 0, contextInputTokens: context)
+                            cacheWrite5mTokens: cacheWrite5m, cacheWrite1hTokens: 0,
+                            outputTokens: output, contextInputTokens: context)
     }
 
     // MARK: - Priced
@@ -59,6 +61,31 @@ final class TelemetryCostCalculatorTests: XCTestCase {
             slices: [slice("claude-opus-5", fresh: oneMillion, output: oneMillion)],
             priceTable: table())
         XCTAssertEqual(try XCTUnwrap(standard.apiEquivalentUSD), 30.0, accuracy: 0.0001)
+    }
+
+    func testStandardNormalizedTierUsesStandardRates() throws {
+        let result = TelemetryCostCalculator.estimate(
+            slices: [slice("claude-opus-5", speed: "standard-normalized",
+                           fresh: oneMillion, output: oneMillion)],
+            priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.apiEquivalentUSD), 30.0, accuracy: 0.0001)
+    }
+
+    func testUnknownSpeedIsUnpriceable() {
+        let result = TelemetryCostCalculator.estimate(
+            slices: [slice("claude-opus-5", speed: "future-tier", fresh: oneMillion)],
+            priceTable: table())
+        XCTAssertNil(result.apiEquivalentUSD)
+        XCTAssertEqual(result.missingPriceComponents, ["claude-opus-5:future-tier"])
+    }
+
+    func testUnknownEventSpeedIsUnpriceable() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("claude-opus-5", input: oneMillion, context: oneMillion,
+                           speed: "future-tier")],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.missingPriceComponents, ["claude-opus-5:future-tier"])
     }
 
     func testLongestPrefixMatchPricesDatedSlug() {
@@ -90,6 +117,24 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 3.2, accuracy: 0.000001)
         XCTAssertEqual(result.events.map(\.priceTableRevision), [t.revision, t.revision])
         XCTAssertEqual(result.events.compactMap(\.apiEquivalentUSD).reduce(0, +), 3.2, accuracy: 0.000001)
+    }
+
+    func testLongContextModelWithUnknownContextIsUnpriceable() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-5.6-sol", input: 100_000, context: nil)],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+    }
+
+    func testCodexStyleAsymmetricComponentsDoNotDoubleCountInput() throws {
+        // A raw Codex input total of 100k with 25k cached reads normalizes to
+        // 75k fresh input + 25k cache write + 10k output. At gpt-5.6's $4/$5/$20
+        // rates that is (75k*4 + 25k*5 + 10k*20) / 1M = $0.625.
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-5.6", input: 75_000, context: 100_000,
+                           cacheWrite5m: 25_000, output: 10_000)],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 0.625, accuracy: 0.000000001)
     }
 
     func testDescendantEvidenceIsPricedButExcludedFromSessionTotal() throws {

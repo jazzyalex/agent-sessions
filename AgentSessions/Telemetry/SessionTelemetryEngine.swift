@@ -1,5 +1,52 @@
 import Foundation
 
+/// Account identity is only trustworthy when the transcript itself records it
+/// in a durable session metadata record. The current signed-in auth file cannot
+/// identify a historical transcript: an account switch leaves old files in
+/// place. Unknown, conflicting, or free-form message fields therefore produce
+/// no identity and make weekly attribution fail closed.
+private struct CodexTranscriptAccountIdentity {
+    private static let metadataRecordTypes: Set<String> = [
+        "session_meta",
+        "session_started",
+        "session_start"
+    ]
+
+    private var hash: String?
+    private var isAmbiguous = false
+
+    var durableAccountHash: String? {
+        isAmbiguous ? nil : hash
+    }
+
+    mutating func consume(line: String) {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String,
+              Self.metadataRecordTypes.contains(type.lowercased()) else { return }
+
+        let payload = object["payload"] as? [String: Any] ?? object
+        let raw = Self.accountID(in: payload) ?? Self.accountID(in: object)
+        guard let raw else { return }
+        let next = WeeklyQuotaCalibrationScope.hashAccount(raw)
+        guard let next else { return }
+        if let hash, hash != next {
+            isAmbiguous = true
+        } else {
+            hash = next
+        }
+    }
+
+    private static func accountID(in object: [String: Any]) -> String? {
+        for key in ["account_id", "accountId"] {
+            guard let value = object[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
+}
+
 /// On-demand telemetry for one session.
 ///
 /// Telemetry is not stored on `Session`, not in SQLite, and NOT derived from
@@ -52,7 +99,17 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         let signature: RunwayFileSignature
         let parserVersion: Int
         let priceTableRevision: Int
+        let priceTableUpdated: String
         let telemetry: SessionTelemetry
+        /// Hash of an account identity explicitly recorded by the transcript.
+        /// The current signed-in account is deliberately not used as a proxy:
+        /// historical files can outlive an account switch.
+        let durableAccountHash: String?
+    }
+
+    private struct ComputedTelemetry {
+        let telemetry: SessionTelemetry
+        let durableAccountHash: String?
     }
 
     /// nil when the source cannot produce telemetry, or the file is unreadable.
@@ -69,9 +126,13 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         // entirely rather than risk serving a stale result for a file we cannot check.
         guard let signature = RunwayFileSignature.read(path: path) else { return nil }
         if let cached = cachedTelemetry(path: path, signature: signature,
-                                        priceTableRevision: priceTable.revision) {
-            return applyingWeeklyQuota(to: cached, source: session.source,
-                                       capabilities: capabilities, now: now())
+                                        priceTableRevision: priceTable.revision,
+                                        priceTableUpdated: priceTable.updatedDate) {
+            return applyingWeeklyQuota(to: cached.telemetry,
+                                       source: session.source,
+                                       capabilities: capabilities,
+                                       durableAccountHash: cached.durableAccountHash,
+                                       now: now())
         }
 
         let source = session.source
@@ -83,8 +144,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
         guard let computed else { return nil }
         store(computed, path: path, signature: signature)
-        return applyingWeeklyQuota(to: computed, source: source,
-                                   capabilities: capabilities, now: now())
+        return applyingWeeklyQuota(to: computed.telemetry,
+                                   source: source,
+                                   capabilities: capabilities,
+                                   durableAccountHash: computed.durableAccountHash,
+                                   now: now())
     }
 
     // MARK: - Computation
@@ -92,16 +156,22 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private func compute(path: String,
                          source: SessionSource,
                          capabilities: TelemetryCapabilities,
-                         priceTable: RunwayPriceTable) -> SessionTelemetry? {
+                         priceTable: RunwayPriceTable) -> ComputedTelemetry? {
         let url = URL(fileURLWithPath: path)
         var telemetry: SessionTelemetry?
+        var durableAccountHash: String?
 
         // Streamed, never materialized: the largest local Codex rollout is 256 MB.
         switch source {
         case .codex:
             var accumulator = CodexTelemetryAccumulator()
-            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
+            var identity = CodexTranscriptAccountIdentity()
+            guard streamLines(at: url, into: {
+                identity.consume(line: $0)
+                accumulator.consume(line: $0, index: $1)
+            }) else { return nil }
             telemetry = accumulator.finish()
+            durableAccountHash = identity.durableAccountHash
         case .claude:
             var accumulator = ClaudeTelemetryAccumulator()
             guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
@@ -124,21 +194,24 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         // Pricing needs both permission and component tokens: a legacy total-only
         // transcript reports a token count but can never be priced.
         guard capabilities.cost.isAvailable, base.usageSummary?.hasComponentBreakdown == true else {
-            return base
+            return ComputedTelemetry(telemetry: base,
+                                     durableAccountHash: durableAccountHash)
         }
         let priced = TelemetryCostCalculator.price(events: base.usageEvents,
                                                    fallbackSlices: base.usageSlices,
                                                    priceTable: priceTable)
-        return SessionTelemetry(source: base.source,
-                                initialConfiguration: base.initialConfiguration,
-                                currentConfiguration: base.currentConfiguration,
-                                configurationChanges: base.configurationChanges,
-                                usageSlices: base.usageSlices,
-                                usageEvents: priced.events,
-                                usageSummary: base.usageSummary,
-                                costEstimate: priced.estimate,
-                                weeklyQuotaEstimate: nil,
-                                parserVersion: base.parserVersion)
+        return ComputedTelemetry(
+            telemetry: SessionTelemetry(source: base.source,
+                                        initialConfiguration: base.initialConfiguration,
+                                        currentConfiguration: base.currentConfiguration,
+                                        configurationChanges: base.configurationChanges,
+                                        usageSlices: base.usageSlices,
+                                        usageEvents: priced.events,
+                                        usageSummary: base.usageSummary,
+                                        costEstimate: priced.estimate,
+                                        weeklyQuotaEstimate: nil,
+                                        parserVersion: base.parserVersion),
+            durableAccountHash: durableAccountHash)
     }
 
     /// Weekly attribution depends on live account calibration, not transcript
@@ -147,10 +220,12 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private func applyingWeeklyQuota(to telemetry: SessionTelemetry,
                                      source: SessionSource,
                                      capabilities: TelemetryCapabilities,
+                                     durableAccountHash: String?,
                                      now: Date) -> SessionTelemetry {
         let weekly = weeklyQuotaEstimate(source: source,
                                          capabilities: capabilities,
                                          cost: telemetry.costEstimate,
+                                         durableAccountHash: durableAccountHash,
                                          quotaStore: quotaStore,
                                          now: now)
         return SessionTelemetry(source: telemetry.source,
@@ -168,6 +243,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private func weeklyQuotaEstimate(source: SessionSource,
                                      capabilities: TelemetryCapabilities,
                                      cost: TelemetryCostEstimate?,
+                                     durableAccountHash: String?,
                                      quotaStore: WeeklyQuotaCalibrationStore,
                                      now: Date) -> TelemetryWeeklyQuotaEstimate? {
         guard capabilities.weeklyQuota.isAvailable else { return nil }
@@ -177,6 +253,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 unavailableReason: "session has no priceable component breakdown",
                 percentPointsPerAPIDollar: nil, accountScoped: false,
                 sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calibrationProvenance: nil,
                 calculatedAt: now, priceTableRevision: priceTable.revision)
         }
         guard let dollars = cost.apiEquivalentUSD else {
@@ -185,6 +262,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 unavailableReason: "session has unpriced usage",
                 percentPointsPerAPIDollar: nil, accountScoped: false,
                 sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calibrationProvenance: nil,
                 calculatedAt: now, priceTableRevision: cost.priceTableRevision)
         }
         guard let context = quotaStore.attributionContext(provider: source.rawValue, now: now),
@@ -194,6 +272,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 unavailableReason: "no compatible account-window calibration",
                 percentPointsPerAPIDollar: nil, accountScoped: false,
                 sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calibrationProvenance: nil,
                 calculatedAt: now, priceTableRevision: cost.priceTableRevision)
         }
         guard context.scope.accountHash != nil else {
@@ -206,6 +285,20 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 quotaResetAt: context.latestSnapshot?.resetAt,
                 quotaObservedAt: context.latestSnapshot?.observedAt,
                 quotaPrecision: context.latestSnapshot?.precision.rawValue,
+                calibrationProvenance: context.calibrationProvenance,
+                calculatedAt: now, priceTableRevision: cost.priceTableRevision)
+        }
+        guard durableAccountHash == context.scope.accountHash else {
+            return TelemetryWeeklyQuotaEstimate(
+                status: .unavailable, percentPoints: nil,
+                unavailableReason: "session has no durable account identity matching the calibration account",
+                percentPointsPerAPIDollar: context.percentPointsPerDollar,
+                accountScoped: false,
+                sourceFamily: context.scope.sourceFamily,
+                quotaResetAt: context.latestSnapshot?.resetAt,
+                quotaObservedAt: context.latestSnapshot?.observedAt,
+                quotaPrecision: context.latestSnapshot?.precision.rawValue,
+                calibrationProvenance: context.calibrationProvenance,
                 calculatedAt: now, priceTableRevision: cost.priceTableRevision)
         }
         return TelemetryWeeklyQuotaEstimate(
@@ -218,6 +311,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             quotaResetAt: context.latestSnapshot?.resetAt,
             quotaObservedAt: context.latestSnapshot?.observedAt,
             quotaPrecision: context.latestSnapshot?.precision.rawValue,
+            calibrationProvenance: context.calibrationProvenance,
             calculatedAt: now,
             priceTableRevision: cost.priceTableRevision)
     }
@@ -242,22 +336,30 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
     private func cachedTelemetry(path: String,
                                  signature: RunwayFileSignature,
-                                 priceTableRevision: Int) -> SessionTelemetry? {
+                                 priceTableRevision: Int,
+                                 priceTableUpdated: String) -> ComputedTelemetry? {
         lock.lock(); defer { lock.unlock() }
         guard let entry = cache[path],
               entry.signature == signature,
               entry.parserVersion == SessionTelemetry.parserVersion,
-              entry.priceTableRevision == priceTableRevision else { return nil }
+              entry.priceTableRevision == priceTableRevision,
+              entry.priceTableUpdated == priceTableUpdated else { return nil }
         touch(path)
-        return entry.telemetry
+        return ComputedTelemetry(telemetry: entry.telemetry,
+                                 durableAccountHash: entry.durableAccountHash)
     }
 
-    private func store(_ telemetry: SessionTelemetry, path: String, signature: RunwayFileSignature) {
+    private func store(_ computed: ComputedTelemetry,
+                       path: String,
+                       signature: RunwayFileSignature) {
         lock.lock(); defer { lock.unlock() }
-        cache[path] = Entry(signature: signature,
-                            parserVersion: SessionTelemetry.parserVersion,
-                            priceTableRevision: telemetry.costEstimate?.priceTableRevision ?? priceTable.revision,
-                            telemetry: telemetry)
+        cache[path] = Entry(
+            signature: signature,
+            parserVersion: SessionTelemetry.parserVersion,
+            priceTableRevision: computed.telemetry.costEstimate?.priceTableRevision ?? priceTable.revision,
+            priceTableUpdated: computed.telemetry.costEstimate?.priceTableUpdated ?? priceTable.updatedDate,
+            telemetry: computed.telemetry,
+            durableAccountHash: computed.durableAccountHash)
         touch(path)
         while order.count > Self.cacheCapacity {
             cache.removeValue(forKey: order.removeFirst())

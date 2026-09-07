@@ -51,7 +51,12 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
             assistantMessage(model: "pi-model-a", input: 12, output: 7)
         ])
         XCTAssertEqual(t.initialConfiguration?.model, "pi-model-a")
-        XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "off")
+        // The first record states only the model. The later thinking-level event
+        // must not be backdated into a model/effort pair Pi never observed.
+        XCTAssertNil(t.initialConfiguration?.reasoningEffort)
+        XCTAssertEqual(t.initialConfiguration?.modelAnchorLine, 0)
+        XCTAssertEqual(t.initialConfiguration?.modelProvenance, .providerChangeRecord)
+        XCTAssertNil(t.initialConfiguration?.reasoningEffortAnchorLine)
         XCTAssertEqual(t.source, .pi)
     }
 
@@ -156,6 +161,20 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
             assistantMessage(model: "pi-model-b", input: 10, output: 5)
         ])
         XCTAssertEqual(slice(t, model: "pi-model-b")?.freshInputTokens, 10)
+        XCTAssertEqual(t.configurationChanges.first?.provenance, .assistantRecord,
+                       "a message fallback is weaker evidence than model_change")
+        XCTAssertEqual(t.currentConfiguration?.modelProvenance, .assistantRecord)
+        XCTAssertEqual(t.currentConfiguration?.provenance, .assistantRecord)
+    }
+
+    func testAssistantModelFallbackCarriesAssistantProvenance() {
+        let t = PiTelemetryAccumulator.accumulate(lines: [
+            assistantMessage(model: "pi-model-b", input: 10, output: 5)
+        ])
+        XCTAssertEqual(t.initialConfiguration?.model, "pi-model-b")
+        XCTAssertEqual(t.initialConfiguration?.provenance, .assistantRecord)
+        XCTAssertEqual(t.initialConfiguration?.modelProvenance, .assistantRecord)
+        XCTAssertEqual(t.initialConfiguration?.modelAnchorLine, 0)
     }
 
     func testSummaryNilWhenNoRecordsAtAll() {
@@ -177,7 +196,8 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let t = PiTelemetryAccumulator.accumulate(lines: lines)
         XCTAssertEqual(t.initialConfiguration?.model, "pi-fixture-model")
-        XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "off")
+        XCTAssertNil(t.initialConfiguration?.reasoningEffort)
+        XCTAssertEqual(t.initialConfiguration?.reasoningEffortAnchorLine, nil)
         // Two assistant messages, 12 in / 7 out each.
         XCTAssertEqual(t.usageSummary?.topLineTokens, 38)
         XCTAssertEqual(t.usageSummary?.hasComponentBreakdown, true)

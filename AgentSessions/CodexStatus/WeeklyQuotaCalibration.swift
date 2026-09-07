@@ -67,10 +67,56 @@ struct AccountQuotaSnapshot: Equatable, Codable, Sendable {
     let priceRevision: Int
 }
 
+/// Where the conversion used for an attribution came from. A bootstrap may be
+/// from the current quota window or carried across a reset; those are different
+/// evidence paths even when they produce the same ratio.
+public enum WeeklyQuotaCalibrationOrigin: String, Codable, Sendable {
+    case live
+    case bootstrap
+    case carriedBootstrap
+}
+
+/// Evidence for the conversion, kept separate from the latest raw quota poll.
+/// The latter says what the provider reported most recently; this says which
+/// measurement supplied the pp-per-dollar ratio.
+public struct WeeklyQuotaCalibrationProvenance: Equatable, Codable, Sendable {
+    public let origin: WeeklyQuotaCalibrationOrigin
+    /// Set for a live tracker calibration. Bootstrap scans use `scannedAt`.
+    public let acquiredAt: Date?
+    /// Set for a bootstrap scan, including a carried-over scan.
+    public let scannedAt: Date?
+    public let sourceFamily: String
+    public let accountHash: String?
+    public let priceRevision: Int
+    /// Reset/window that the calibration itself was measured against, not the
+    /// timestamp of the latest raw quota observation.
+    public let originResetAt: Date?
+    public let originWindowStart: Date?
+
+    public init(origin: WeeklyQuotaCalibrationOrigin,
+                acquiredAt: Date?,
+                scannedAt: Date?,
+                sourceFamily: String,
+                accountHash: String?,
+                priceRevision: Int,
+                originResetAt: Date?,
+                originWindowStart: Date?) {
+        self.origin = origin
+        self.acquiredAt = acquiredAt
+        self.scannedAt = scannedAt
+        self.sourceFamily = sourceFamily
+        self.accountHash = accountHash
+        self.priceRevision = priceRevision
+        self.originResetAt = originResetAt
+        self.originWindowStart = originWindowStart
+    }
+}
+
 struct WeeklyQuotaAttributionContext: Sendable {
     let percentPointsPerDollar: Double
     let scope: WeeklyQuotaCalibrationScope
     let latestSnapshot: AccountQuotaSnapshot?
+    let calibrationProvenance: WeeklyQuotaCalibrationProvenance
 }
 
 /// One accepted observation of the conversion.
@@ -79,6 +125,10 @@ struct WeeklyQuotaCalibration: Equatable, Codable, Sendable {
     let acquiredAt: Date
     let intervalSeconds: Double
     let dropPercentPoints: Double
+    /// The quota-window anchor used for this live measurement. Optional for
+    /// records written before provenance was introduced.
+    let resetAt: Date?
+    let windowStart: Date?
 }
 
 /// A session's cumulative token counters as of `capturedAt`, keyed by the log path
@@ -354,6 +404,13 @@ struct WeeklyQuotaCalibrationTracker {
             .percentPointsPerDollar
     }
 
+    /// The live measurement supplying the current conversion, if one is still
+    /// within its retention window. Store callers use this to report provenance
+    /// without exposing the tracker's mutable history.
+    func latestCalibration(now: Date) -> WeeklyQuotaCalibration? {
+        accepted.last(where: { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge })
+    }
+
     var acceptedCount: Int { accepted.count }
 
     mutating func invalidate() {
@@ -433,7 +490,9 @@ struct WeeklyQuotaCalibrationTracker {
             percentPointsPerDollar: drop / activity.dollars,
             acquiredAt: observedAt,
             intervalSeconds: elapsed,
-            dropPercentPoints: drop
+            dropPercentPoints: drop,
+            resetAt: resetAt,
+            windowStart: resetAt.addingTimeInterval(-7 * 24 * 60 * 60)
         )
         guard calibration.percentPointsPerDollar.isFinite,
               calibration.percentPointsPerDollar > 0 else {
@@ -579,6 +638,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let accountHash: String
         let priceRevision: Int
         let limitShape: String?
+        let sourceFamily: String?
     }
     private var activeScopeKeys: [String: BootstrapScopeKey] = [:]
     /// Providers whose older anchor-keyed caches have been folded into the
@@ -721,27 +781,132 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         return percentPointsPerDollarLocked(provider: provider, now: now)
     }
 
+    private struct CalibrationSelection {
+        let ratio: Double
+        let provenance: WeeklyQuotaCalibrationProvenance
+    }
+
+    /// The compatibility stamp used by an in-memory bootstrap. The tracker is
+    /// the normal source of truth; the active bootstrap key covers the short
+    /// interval after restore and before the next raw quota observation arrives.
+    private func bootstrapCompatibility(for provider: String) -> (priceRevision: Int,
+                                                                    limitShape: String?,
+                                                                    sourceFamily: String?)? {
+        if let scope = trackers[provider]?.currentScope {
+            return (scope.priceRevision, scope.limitShape, scope.sourceFamily)
+        }
+        guard let key = activeScopeKeys[provider] else { return nil }
+        return (key.priceRevision, key.limitShape, key.sourceFamily)
+    }
+
+    private func compatibleBootstrap(_ bootstrap: WeeklyQuotaBootstrapResult,
+                                     for provider: String) -> Bool {
+        guard let expected = bootstrapCompatibility(for: provider) else { return true }
+        return bootstrap.isCompatible(priceRevision: expected.priceRevision,
+                                      limitShape: expected.limitShape,
+                                      sourceFamily: expected.sourceFamily)
+    }
+
     /// Caller holds `lock`.
-    private func percentPointsPerDollarLocked(provider: String, now: Date) -> Double? {
+    private func calibrationSelectionLocked(provider: String,
+                                            now: Date) -> CalibrationSelection? {
         let tracker = trackers[provider]
-        let live = tracker?.percentPointsPerDollar(now: now)
+        let scope = tracker?.currentScope
+        let live = tracker?.latestCalibration(now: now)
         let livePoints = tracker?.conditioningPercentPoints(now: now) ?? 0
-        if let bootstrap = bestConditionedBootstrap(provider: provider, now: now) {
+        if let bootstrap = bestConditionedBootstrap(provider: provider, now: now),
+           compatibleBootstrap(bootstrap, for: provider) {
             let requiredLivePoints = min(
                 Self.wellConditionedPercentPoints,
                 bootstrap.usedPercentPoints
             )
-            if livePoints >= requiredLivePoints, let live { return live }
-            return freshenedBootstrapRatio(provider: provider, bootstrap: bootstrap, now: now)
-                ?? bootstrap.calibratedPercentPointsPerDollar
+            if livePoints >= requiredLivePoints, let live, let liveScope = scope {
+                return CalibrationSelection(
+                    ratio: live.percentPointsPerDollar,
+                    provenance: WeeklyQuotaCalibrationProvenance(
+                        origin: .live,
+                        acquiredAt: live.acquiredAt,
+                        scannedAt: nil,
+                        sourceFamily: liveScope.sourceFamily,
+                        accountHash: liveScope.accountHash,
+                        priceRevision: liveScope.priceRevision,
+                        originResetAt: live.resetAt,
+                        originWindowStart: live.windowStart))
+            }
+            guard let ratio = freshenedBootstrapRatio(provider: provider,
+                                                      bootstrap: bootstrap,
+                                                      now: now)
+                    ?? bootstrap.calibratedPercentPointsPerDollar else {
+                return live.flatMap { calibration in
+                    guard let liveScope = scope else { return nil }
+                    return CalibrationSelection(
+                        ratio: calibration.percentPointsPerDollar,
+                        provenance: WeeklyQuotaCalibrationProvenance(
+                            origin: .live,
+                            acquiredAt: calibration.acquiredAt,
+                            scannedAt: nil,
+                            sourceFamily: liveScope.sourceFamily,
+                            accountHash: liveScope.accountHash,
+                            priceRevision: liveScope.priceRevision,
+                            originResetAt: calibration.resetAt,
+                            originWindowStart: calibration.windowStart))
+                }
+            }
+            // Prefer the scoped quota snapshot used by transcript attribution.
+            // `latestResetsAt` is maintained by the bootstrap poll path, while
+            // `observeQuota` is also used directly by callers and tests.
+            let scopedSnapshot: AccountQuotaSnapshot? = snapshots[provider]?.last.flatMap { snapshot in
+                guard let scope,
+                      snapshot.provider == scope.provider,
+                      snapshot.accountHash == scope.accountHash,
+                      snapshot.sourceFamily == scope.sourceFamily,
+                      snapshot.limitShape == scope.limitShape,
+                      snapshot.priceRevision == scope.priceRevision else { return nil }
+                return Optional(snapshot)
+            }
+            let currentReset = scopedSnapshot?.resetAt ?? latestResetsAt[provider]
+            let isCurrentWindow = currentReset.map {
+                abs(bootstrap.resetsAt.timeIntervalSince($0))
+                    < CodexWeeklyQuotaBootstrapScanner.anchorTolerance
+            } ?? true
+            let sourceFamily = scope?.sourceFamily ?? bootstrap.sourceFamily ?? "unknown"
+            let accountHash = scope?.accountHash
+            let priceRevision = scope?.priceRevision ?? bootstrap.priceRevision ?? 0
+            return CalibrationSelection(
+                ratio: ratio,
+                provenance: WeeklyQuotaCalibrationProvenance(
+                    origin: isCurrentWindow ? .bootstrap : .carriedBootstrap,
+                    acquiredAt: nil,
+                    scannedAt: bootstrap.scannedAt,
+                    sourceFamily: sourceFamily,
+                    accountHash: accountHash,
+                    priceRevision: priceRevision,
+                    originResetAt: bootstrap.resetsAt,
+                    originWindowStart: bootstrap.windowStart))
         }
-        return live
+        guard let live, let liveScope = scope else { return nil }
+        return CalibrationSelection(
+            ratio: live.percentPointsPerDollar,
+            provenance: WeeklyQuotaCalibrationProvenance(
+                origin: .live,
+                acquiredAt: live.acquiredAt,
+                scannedAt: nil,
+                sourceFamily: liveScope.sourceFamily,
+                accountHash: liveScope.accountHash,
+                priceRevision: liveScope.priceRevision,
+                originResetAt: live.resetAt,
+                originWindowStart: live.windowStart))
+    }
+
+    /// Caller holds `lock`.
+    private func percentPointsPerDollarLocked(provider: String, now: Date) -> Double? {
+        calibrationSelectionLocked(provider: provider, now: now)?.ratio
     }
 
     func attributionContext(provider: String, now: Date) -> WeeklyQuotaAttributionContext? {
         lock.lock(); defer { lock.unlock() }
-        guard let ratio = percentPointsPerDollarLocked(provider: provider, now: now) else { return nil }
-        guard let scope = trackers[provider]?.currentScope else { return nil }
+        guard let selection = calibrationSelectionLocked(provider: provider, now: now),
+              let scope = trackers[provider]?.currentScope else { return nil }
         let latest = snapshots[provider]?.last.flatMap { snapshot in
             snapshot.provider == scope.provider
                 && snapshot.accountHash == scope.accountHash
@@ -749,9 +914,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 && snapshot.limitShape == scope.limitShape
                 && snapshot.priceRevision == scope.priceRevision ? snapshot : nil
         }
-        return WeeklyQuotaAttributionContext(percentPointsPerDollar: ratio,
+        return WeeklyQuotaAttributionContext(percentPointsPerDollar: selection.ratio,
                                              scope: scope,
-                                             latestSnapshot: latest)
+                                             latestSnapshot: latest,
+                                             calibrationProvenance: selection.provenance)
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger
@@ -823,8 +989,13 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// is a property of the plan, not of the window.
     private func bestConditionedBootstrap(provider: String,
                                           now: Date = Date()) -> WeeklyQuotaBootstrapResult? {
-        let current = bootstraps[provider]
-        guard let best = bestBootstraps[provider] else { return current }
+        let current = bootstraps[provider].flatMap {
+            compatibleBootstrap($0, for: provider) ? $0 : nil
+        }
+        let best = bestBootstraps[provider].flatMap {
+            compatibleBootstrap($0, for: provider) ? $0 : nil
+        }
+        guard let best else { return current }
         // A carry-over describes the quota REGIME it was measured under, and a
         // regime can change without touching anything the compatibility stamp can
         // see. Promotional weekly limits are the live example: both vendors have run
@@ -856,11 +1027,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// restart under the user and let the spinner run indefinitely in practice.
     func calibrationAbandoned(provider: String, now: Date) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if (trackers[provider]?.percentPointsPerDollar(now: now)) != nil { return false }
-        // Must consult the SAME selection the reader uses, or a carried-over
-        // measurement satisfies `percentPointsPerDollar` while this still reports
-        // "give up" — the row would show n/a next to a perfectly good number.
-        if bestConditionedBootstrap(provider: provider, now: now)?.percentPointsPerDollar != nil { return false }
+        // Must consult the SAME selection the reader uses, or an incompatible
+        // source-family carry-over could suppress the waiting fallback while the
+        // attribution path correctly refuses to serve it.
+        if calibrationSelectionLocked(provider: provider, now: now) != nil { return false }
         // A scan still running WILL produce a number, so don't show "n/a" only to
         // contradict it seconds later. Bounded by `scanDeadline`: without that, a
         // stalled scan would pin the clock on screen forever, which is the exact
@@ -994,6 +1164,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                              accountHash: String?,
                                              priceRevision: Int,
                                              limitShape: String?,
+                                             sourceFamily: String?,
                                              bestKey: String,
                                              defaults: UserDefaults) {
         lock.lock()
@@ -1013,7 +1184,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                   // this an old plan could win forever purely by having reached a
                   // larger percentage.
                   cached.isCompatible(priceRevision: priceRevision,
-                                      limitShape: limitShape) else { continue }
+                                      limitShape: limitShape,
+                                      sourceFamily: sourceFamily) else { continue }
             if cached.usedPercentPoints > (best?.usedPercentPoints ?? 0) { best = cached }
         }
         guard let best else { return }
@@ -1038,6 +1210,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                          usedPercentPoints: Double,
                          accountHash: String? = nil,
                          limitShape: String? = nil,
+                         sourceFamily: String? = nil,
                          now: Date = Date(),
                          defaults: UserDefaults = .standard) {
         let storeKey = Self.bootstrapKey(provider: provider, accountHash: accountHash, resetsAt: resetsAt)
@@ -1046,7 +1219,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let scopeKey = BootstrapScopeKey(
             accountHash: accountHash ?? "unscoped",
             priceRevision: priceRevision,
-            limitShape: limitShape)
+            limitShape: limitShape,
+            sourceFamily: sourceFamily)
         var promoted: WeeklyQuotaBootstrapResult?
         lock.lock()
         // The persisted keys are account-scoped but these maps are not, so a
@@ -1089,7 +1263,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
            cached.percentPointsPerDollar != nil,
            cached.isCompatible(priceRevision: priceRevision,
-                               limitShape: limitShape) {
+                               limitShape: limitShape,
+                               sourceFamily: sourceFamily) {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
@@ -1097,6 +1272,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                     accountHash: accountHash,
                                     priceRevision: priceRevision,
                                     limitShape: limitShape,
+                                    sourceFamily: sourceFamily,
                                     bestKey: bestKey,
                                     defaults: defaults)
 
@@ -1113,7 +1289,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            abs(cached.resetsAt.timeIntervalSince(resetsAt)) < CodexWeeklyQuotaBootstrapScanner.anchorTolerance,
            cached.percentPointsPerDollar != nil,
            cached.isCompatible(priceRevision: priceRevision,
-                               limitShape: limitShape) {
+                               limitShape: limitShape,
+                               sourceFamily: sourceFamily) {
             bootstraps[provider] = cached
         }
         // Promote on RESTORE too, not only after a scan. A launch that restores
@@ -1211,6 +1388,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                   result.percentPointsPerDollar != nil else { backOff(); return }
             var stamped = result
             stamped.limitShape = limitShape
+            stamped.sourceFamily = sourceFamily
             self.lock.lock()
             // The account may have changed while this walk was running. Its
             // result describes the PREVIOUS account and must not land here — the

@@ -98,13 +98,17 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageEvents[1].reasoningEffort, "low")
     }
 
-    func testEffortObservedBeforeModelBackfillsWithoutChange() {
+    func testEffortObservedBeforeModelDoesNotBackfillInitialConfiguration() {
         let t = ClaudeTelemetryAccumulator.accumulate(lines: [
             assistant(model: nil, effort: "medium"),
             assistant(model: "claude-opus-5", effort: "medium", id: "m1", usage: usage(input: 10, output: 5))
         ])
         XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "medium")
-        XCTAssertEqual(t.initialConfiguration?.model, "claude-opus-5")
+        // The later model was not present in the first assistant record and must
+        // remain unknown in the initial configuration rather than being backdated.
+        XCTAssertNil(t.initialConfiguration?.model)
+        XCTAssertEqual(t.initialConfiguration?.reasoningEffortAnchorLine, 0)
+        XCTAssertNil(t.initialConfiguration?.modelAnchorLine)
         XCTAssertTrue(t.configurationChanges.isEmpty)
     }
 

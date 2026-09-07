@@ -129,4 +129,31 @@ final class SessionTelemetryTypesTests: XCTestCase {
         XCTAssertNil(cost.apiEquivalentUSD)
         XCTAssertFalse(cost.unpricedModels.isEmpty)
     }
+
+    func testOwnershipTotalsAreUnknownWhenThatOwnershipHasNoEvents() {
+        let event = TelemetryUsageEvent(
+            recordID: "legacy-token-count", observedAt: nil, anchorLine: 0,
+            usageFamily: "token_count", ownership: .session,
+            model: nil, reasoningEffort: nil, speed: "standard-normalized",
+            freshInputTokens: 100, cacheReadTokens: 0,
+            cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+            outputTokens: 10, contextInputTokens: nil)
+        let telemetry = SessionTelemetry(
+            source: .codex, initialConfiguration: nil, currentConfiguration: nil,
+            configurationChanges: [], usageSlices: [], usageEvents: [event],
+            usageSummary: nil, costEstimate: nil)
+
+        XCTAssertEqual(telemetry.sessionOwnedTopLineTokens, 110)
+        XCTAssertNil(telemetry.descendantTopLineTokens,
+                     "absence of descendant ownership evidence is unknown, not zero")
+    }
+
+    func testOwnershipTotalsAreUnknownWhenNoUsageEventsExist() {
+        let telemetry = SessionTelemetry(
+            source: .codex, initialConfiguration: nil, currentConfiguration: nil,
+            configurationChanges: [], usageSlices: [], usageSummary: nil,
+            costEstimate: nil)
+        XCTAssertNil(telemetry.sessionOwnedTopLineTokens)
+        XCTAssertNil(telemetry.descendantTopLineTokens)
+    }
 }

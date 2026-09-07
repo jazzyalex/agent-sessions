@@ -418,6 +418,58 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertNil(tracker.persistedData(), "but it must never reach disk")
     }
 
+    func testBootstrapSourceFamilyMismatchIsNotServed() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0.addingTimeInterval(-3600),
+            resetsAt: reset, scannedAt: t0)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+
+        let rpcScope = scope(priceRevision: prices.revision, source: "cli-rpc", shape: "weekly")
+        store.observeQuota(provider: "codex", remainingPercent: 80,
+                           hasExactPercent: false, resetAt: reset,
+                           observedAt: t0, scope: rpcScope, now: t0)
+
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
+                     "a ratio measured by OAuth cannot cross into the CLI-RPC evidence family")
+        XCTAssertNil(store.attributionContext(provider: "codex", now: t0))
+    }
+
+    func testCarriedBootstrapProvenanceIsSeparateFromLatestQuotaObservation() throws {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let oldReset = t0.addingTimeInterval(604_800)
+        let observedAt = oldReset.addingTimeInterval(60)
+        let currentReset = oldReset.addingTimeInterval(604_800)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 30, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0.addingTimeInterval(-604_800),
+            resetsAt: oldReset, scannedAt: t0)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        store.setBestBootstrapForTesting(provider: "codex", result: bootstrap)
+
+        let currentScope = scope(priceRevision: prices.revision, source: "oauth", shape: "weekly")
+        store.observeQuota(provider: "codex", remainingPercent: 90,
+                           hasExactPercent: false, resetAt: currentReset,
+                           observedAt: observedAt, scope: currentScope, now: observedAt)
+
+        let context = try XCTUnwrap(store.attributionContext(provider: "codex", now: observedAt))
+        XCTAssertEqual(context.calibrationProvenance.origin, .carriedBootstrap)
+        XCTAssertEqual(context.calibrationProvenance.scannedAt, t0)
+        XCTAssertEqual(context.calibrationProvenance.originResetAt, oldReset)
+        XCTAssertEqual(context.calibrationProvenance.sourceFamily, "oauth")
+        XCTAssertEqual(context.latestSnapshot?.observedAt, observedAt)
+        XCTAssertEqual(context.latestSnapshot?.resetAt, currentReset)
+    }
+
     /// The waiting clock must be bounded, and the budget runs from APP LAUNCH.
     /// Uses a private store: `.shared` carries a launch timestamp from whenever
     /// the first test touched it, which made an earlier version of this test pass
@@ -503,7 +555,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let ledger = store.ledger(provider: "codex")
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(4 * 24 * 3600)
-        let liveScope = scope(account: nil)
+        let liveScope = scope(priceRevision: prices.revision, account: nil)
         var cumulativeOutput = 0.0
 
         ledger.record(observations: [
@@ -530,9 +582,13 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         }
 
         let now = t0.addingTimeInterval(40 * 60)
-        store.setBootstrapForTesting(provider: "codex", result: WeeklyQuotaBootstrapResult(
+        var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 33, dollars: 156.648, unpricedVolumeShare: 0,
-            windowStart: t0.addingTimeInterval(-604_800), resetsAt: reset, scannedAt: now))
+            windowStart: t0.addingTimeInterval(-604_800), resetsAt: reset, scannedAt: now)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = liveScope.limitShape
+        bootstrap.sourceFamily = liveScope.sourceFamily
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
 
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: now) ?? 0,
                        33.5 / 156.648, accuracy: 0.0001)

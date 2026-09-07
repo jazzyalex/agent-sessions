@@ -644,6 +644,7 @@ final class ClaudeUsageModel: ObservableObject {
                 windowMinutes: 10080,
                 usedPercentPoints: weeklyRatio * 100,
                 limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
+                sourceFamily: "\(s.source)",
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(

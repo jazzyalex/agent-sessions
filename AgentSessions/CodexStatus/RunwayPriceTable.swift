@@ -9,13 +9,25 @@ import CryptoKit
 /// the bill in exactly the case that most looks like a fast session.
 enum RunwaySpeedTier: String, Equatable, Sendable {
     case standard
+    /// The provider did not expose a billing tier, but another trusted source
+    /// normalized the record to the standard API-equivalent rate set. This is
+    /// intentionally distinct from an observed `standard` value in provenance.
+    case standardNormalized = "standard-normalized"
     case fast
+    /// Sentinel used when a raw usage value is absent or not understood. It has
+    /// no rate set: callers must not turn an unknown tier into standard pricing.
+    case unknown
 
-    /// Only the literal `"fast"` selects the fast tier. Anything else — `"standard"`,
-    /// null, absent, or a tier introduced after this build — reads as standard, so an
-    /// unrecognized value can never silently double a session's cost.
+    /// The Claude runway source contract treats an absent speed as standard.
+    /// Explicit transcript telemetry bypasses this adapter and rejects unknown
+    /// raw strings before price lookup.
     init(usageValue: Any?) {
-        self = (usageValue as? String) == "fast" ? .fast : .standard
+        switch usageValue as? String {
+        case "standard": self = .standard
+        case "standard-normalized": self = .standardNormalized
+        case "fast": self = .fast
+        default: self = .standard
+        }
     }
 }
 
@@ -68,24 +80,27 @@ struct RunwayModelPrice: Equatable, Sendable {
                contextInputTokens: Double? = nil) -> RunwayRateSet? {
         let base: RunwayRateSet?
         switch speed {
-        case .standard: base = standard
+        case .standard, .standardNormalized: base = standard
         case .fast: base = fast
+        case .unknown: base = nil
         }
         guard let base else { return nil }
-        guard let contextInputTokens, let longContext,
-              contextInputTokens > longContext.thresholdInputTokens else { return base }
-        return RunwayRateSet(
-            inputPerMTok: base.inputPerMTok * longContext.inputMultiplier,
-            cachedInputPerMTok: base.cachedInputPerMTok * longContext.inputMultiplier,
-            outputPerMTok: base.outputPerMTok * longContext.outputMultiplier,
-            cacheWritePerMTok: base.cacheWritePerMTok.map { $0 * longContext.inputMultiplier },
-            cacheWrite1hPerMTok: base.cacheWrite1hPerMTok.map { $0 * longContext.inputMultiplier }
-        )
+        if let contextInputTokens, let longContext,
+           contextInputTokens > longContext.thresholdInputTokens {
+            return RunwayRateSet(
+                inputPerMTok: base.inputPerMTok * longContext.inputMultiplier,
+                cachedInputPerMTok: base.cachedInputPerMTok * longContext.inputMultiplier,
+                outputPerMTok: base.outputPerMTok * longContext.outputMultiplier,
+                cacheWritePerMTok: base.cacheWritePerMTok.map { $0 * longContext.inputMultiplier },
+                cacheWrite1hPerMTok: base.cacheWrite1hPerMTok.map { $0 * longContext.inputMultiplier }
+            )
+        }
+        return base
     }
 
-    /// Standard-tier accessors. Codex has no speed tiers at all, so its callers
-    /// (weekly calibration, weekly bootstrap) read the standard rates through these
-    /// rather than unwrapping a rate set they can never fail to have.
+    /// Standard-rate accessors. Codex callers use these for an explicitly
+    /// standard-normalized API-equivalent estimate because rollout logs do not
+    /// preserve the actual service tier.
     var inputPerMTok: Double { standard.inputPerMTok }
     var cachedInputPerMTok: Double { standard.cachedInputPerMTok }
     var outputPerMTok: Double { standard.outputPerMTok }
@@ -105,7 +120,13 @@ struct RunwayLongContextPrice: Equatable, Sendable {
 struct RunwayPriceSnapshot: Sendable {
     let models: [String: RunwayModelPrice]
     let updatedDate: String
+    /// Changes only when the model/rate semantics change. Calibration scopes use
+    /// this value so a date or note-only manifest edit does not discard learning.
     let revision: Int
+    var semanticRevision: Int { revision }
+    /// Exact canonical JSON fingerprint, including manifest metadata. Cache and
+    /// telemetry provenance can use this when byte/content identity matters.
+    let manifestFingerprint: String
 
     func price(forModel slug: String?) -> RunwayModelPrice? {
         guard let slug, !slug.isEmpty else { return nil }
@@ -113,6 +134,7 @@ struct RunwayPriceSnapshot: Sendable {
         var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) { continue }
+            if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) { continue }
             if best == nil || key.count > best!.key.count { best = (key, price) }
         }
         return best?.price
@@ -128,6 +150,38 @@ struct RunwayPriceSnapshot: Sendable {
                 index == 4 || index == 7 ? character == "-" : character.isNumber
             }
     }
+
+    fileprivate static func isRecognizedClaudeSlug(_ slug: String, extending key: String) -> Bool {
+        let suffix = String(slug.dropFirst(key.count))
+        guard !suffix.isEmpty, suffix.first == "-" else { return false }
+
+        // Versioned keys accept the provider's dated alias form only. This keeps
+        // `claude-sonnet-5-20260101` working without treating arbitrary suffixes
+        // such as `claude-sonnet-5-preview` as the same priced model.
+        let keyParts = key.split(separator: "-")
+        let isGenericFamily = keyParts.count == 2
+            && keyParts[0] == "claude"
+            && ["opus", "sonnet", "haiku", "fable", "mythos"].contains(keyParts[1])
+        if !isGenericFamily {
+            return Self.isClaudeDateSuffix(suffix)
+        }
+
+        // Generic family aliases are intentionally bounded to known major
+        // generations. A future `claude-sonnet-6` must wait for an explicit table
+        // entry instead of inheriting Sonnet 4.x pricing.
+        let parts = suffix.dropFirst().split(separator: "-")
+        guard let major = parts.first, major.allSatisfy(\.isNumber),
+              let majorNumber = Int(major), (3...5).contains(majorNumber),
+              parts.dropFirst().allSatisfy({ part in
+                  part.allSatisfy(\.isNumber)
+              }) else { return false }
+        return true
+    }
+
+    private static func isClaudeDateSuffix(_ suffix: String) -> Bool {
+        let digits = suffix.dropFirst()
+        return digits.count == 8 && digits.allSatisfy(\.isNumber)
+    }
 }
 
 /// Model→price lookup for `$` burn. Ships a compiled-in default snapshot and,
@@ -136,8 +190,10 @@ struct RunwayPriceSnapshot: Sendable {
 /// no user or session data is sent (same trust model as the Sparkle appcast).
 ///
 /// Lookup is **longest-prefix** for Claude and exact-or-dated-snapshot for GPT.
-/// `revision` is a stable hash of manifest content, so persisted calibrations see
-/// the same identity after restart and invalidate when accepted prices change.
+/// `revision` is a stable semantic hash of the model/rate content, so persisted
+/// calibrations survive metadata-only edits. `manifestFingerprint` is the exact
+/// canonical manifest identity exposed for verification; telemetry caches pair
+/// `revision` with `updated` so metadata-only manifest changes also invalidate.
 ///
 /// A cached or fetched manifest is only accepted when its `updated` date is at
 /// least as new as the compiled-in table's. Without that check, a client that
@@ -159,6 +215,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     private let lock = NSLock()
     private var models: [String: RunwayModelPrice] = [:]
     private var _revision = 0
+    private var _manifestFingerprint = ""
     private var lastFetchAt: Date?
     /// `updated` of the table currently in `models`. ISO `yyyy-MM-dd` sorts
     /// lexicographically, so a plain string compare is a correct date compare.
@@ -168,7 +225,8 @@ final class RunwayPriceTable: @unchecked Sendable {
         if loadBundled, let decoded = Self.decode(Data(Self.bundledJSON.utf8)) {
             models = decoded.models
             loadedUpdated = decoded.updated
-            _revision = decoded.revision
+            _revision = decoded.semanticRevision
+            _manifestFingerprint = decoded.manifestFingerprint
         }
         // Overlay a previously fetched manifest unless it predates what we ship.
         if readCache, let data = try? Data(contentsOf: Self.cacheURL()), let decoded = Self.decode(data) {
@@ -188,24 +246,29 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// prevented by process instead: `docs/prices.json` documents that `updated` MUST
     /// advance on every edit, and the bundled copy moves with it.
     @discardableResult
-    private func adopt(_ decoded: (models: [String: RunwayModelPrice], updated: String, revision: Int)) -> Bool {
+    private func adopt(_ decoded: (models: [String: RunwayModelPrice], updated: String,
+                                   semanticRevision: Int, manifestFingerprint: String)) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard decoded.updated >= loadedUpdated else { return false }
         models = decoded.models
         loadedUpdated = decoded.updated
-        _revision = decoded.revision
+        _revision = decoded.semanticRevision
+        _manifestFingerprint = decoded.manifestFingerprint
         return true
     }
 
     var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return models.isEmpty }
     var revision: Int { lock.lock(); defer { lock.unlock() }; return _revision }
+    var semanticRevision: Int { revision }
+    var manifestFingerprint: String { lock.lock(); defer { lock.unlock() }; return _manifestFingerprint }
     /// `updated` date of the table currently loaded. Stamped onto stored telemetry
     /// cost results so a saved figure can be re-judged when rates move.
     var updatedDate: String { lock.lock(); defer { lock.unlock() }; return loadedUpdated }
 
     func snapshot() -> RunwayPriceSnapshot {
         lock.lock(); defer { lock.unlock() }
-        return RunwayPriceSnapshot(models: models, updatedDate: loadedUpdated, revision: _revision)
+        return RunwayPriceSnapshot(models: models, updatedDate: loadedUpdated, revision: _revision,
+                                   manifestFingerprint: _manifestFingerprint)
     }
 
     /// nil slug or no safe matching key → nil (→ $ unpriceable).
@@ -216,6 +279,9 @@ final class RunwayPriceTable: @unchecked Sendable {
         var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) {
+                continue
+            }
+            if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) {
                 continue
             }
             if best == nil || key.count > best!.key.count { best = (key, price) }
@@ -234,6 +300,10 @@ final class RunwayPriceTable: @unchecked Sendable {
             && date.enumerated().allSatisfy { index, character in
                 index == 4 || index == 7 ? character == "-" : character.isNumber
             }
+    }
+
+    private static func isRecognizedClaudeSlug(_ slug: String, extending key: String) -> Bool {
+        RunwayPriceSnapshot.isRecognizedClaudeSlug(slug, extending: key)
     }
 
     /// Fire-and-forget: fetch the manifest at most once/day and cache it. Never
@@ -321,7 +391,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// its current table). A manifest with no `updated` sorts oldest, so it can
     /// never shadow a dated bundled table.
     private static func decode(_ data: Data)
-        -> (models: [String: RunwayModelPrice], updated: String, revision: Int)? {
+        -> (models: [String: RunwayModelPrice], updated: String,
+            semanticRevision: Int, manifestFingerprint: String)? {
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
               manifest.version == supportedVersion,
               !manifest.models.isEmpty else { return nil }
@@ -331,15 +402,19 @@ final class RunwayPriceTable: @unchecked Sendable {
                              longContext: $0.longContext?.price)
         }
         guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        object.removeValue(forKey: "_note")
-        object.removeValue(forKey: "updated")
-        guard let canonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+        guard let exactCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
             return nil
         }
-        let digest = SHA256.hash(data: canonical)
+        let fingerprint = SHA256.hash(data: exactCanonical).map { String(format: "%02x", $0) }.joined()
+        object.removeValue(forKey: "_note")
+        object.removeValue(forKey: "updated")
+        guard let semanticCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            return nil
+        }
+        let digest = SHA256.hash(data: semanticCanonical)
         let stableRevision = digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
             & UInt64(Int.max)
-        return (models, manifest.updated ?? "", Int(stableRevision))
+        return (models, manifest.updated ?? "", Int(stableRevision), fingerprint)
     }
 
     private static func cacheURL() -> URL {

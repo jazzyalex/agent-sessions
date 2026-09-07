@@ -74,7 +74,14 @@ enum TelemetryCostCalculator {
                 continue
             }
 
-            let tier = RunwaySpeedTier(rawValue: slice.speed) ?? .standard
+            guard let tier = RunwaySpeedTier(rawValue: slice.speed) else {
+                appendOnce("\(slug):\(slice.speed)", to: &missingComponents)
+                continue
+            }
+            if price.longContext != nil {
+                appendOnce("\(slug):contextInputTokens", to: &missingComponents)
+                continue
+            }
             guard let rates = price.rates(for: tier) else {
                 // Billing a fast record at standard would halve it. Refuse instead.
                 appendOnce("\(slug):\(tier.rawValue)", to: &missingComponents)
@@ -125,7 +132,14 @@ enum TelemetryCostCalculator {
             appendOnce(slug, to: &unpricedModels)
             return nil
         }
-        let tier = RunwaySpeedTier(rawValue: event.speed) ?? .standard
+        guard let tier = RunwaySpeedTier(rawValue: event.speed) else {
+            appendOnce("\(slug):\(event.speed)", to: &missingComponents)
+            return nil
+        }
+        if price.longContext != nil, event.contextInputTokens == nil {
+            appendOnce("\(slug):contextInputTokens", to: &missingComponents)
+            return nil
+        }
         guard let rates = price.rates(for: tier,
                                       contextInputTokens: event.contextInputTokens.map(Double.init)) else {
             appendOnce("\(slug):\(tier.rawValue)", to: &missingComponents)

@@ -59,7 +59,8 @@ final class SessionTelemetryFixtureTests: XCTestCase {
         XCTAssertEqual(t.usageSummary?.recordedTotalTokens, 16_422)
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["token_count"])
         XCTAssertEqual(t.usageSummary?.usageFamilyConflict, false)
-        XCTAssertTrue(t.usageSlices.allSatisfy { $0.speed == "standard" }, "Codex has no speed tiers")
+        XCTAssertTrue(t.usageSlices.allSatisfy { $0.speed == "standard-normalized" },
+                      "Codex logs do not prove actual service tier; estimates use published standard rates")
     }
 
     // MARK: - Claude

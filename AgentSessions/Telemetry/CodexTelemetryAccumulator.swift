@@ -32,11 +32,14 @@ struct CodexTelemetryAccumulator {
     private var cumulativeEvents: [TelemetryUsageEvent] = []
     private var turnEvents: [TelemetryUsageEvent] = []
     private var cumulative = CumulativeCounters()
+    private var turnCumulative = CumulativeCounters()
     private var recordedTotal = 0
+    private var turnRecordedTotal = 0
     private var sawCumulativeMarker = false
     private var sawCumulativeFamily = false
     private var sawTurnCompletedFamily = false
     private var turnCompletedTokens = 0
+    private var sawAmbiguousTurnUsage = false
     private var cumulativeHasComponents = false
     private var turnHasComponents = false
 
@@ -71,9 +74,25 @@ struct CodexTelemetryAccumulator {
                 recordedTotal += cumulative.lastTotal
                 cumulative = CumulativeCounters()
             }
-            let delta = cumulative.advance(to: sample)
+            var delta = cumulative.advance(to: sample)
+            if let lastUsage = info["last_token_usage"] as? [String: Any] {
+                let request = CumulativeCounters.Sample(usage: lastUsage)
+                let requestDelta = UsageDelta(sample: request)
+                // `total_token_usage` remains the accounting authority. The
+                // request-scoped record is used only when it exactly describes
+                // this cumulative increment; otherwise tier selection would apply
+                // one request's context size to an aggregate of several requests.
+                if request.hasComponents, requestDelta.topLine == delta.topLine {
+                    delta = delta.withContextInput(request.input)
+                } else {
+                    delta = delta.withContextInput(nil)
+                }
+            } else {
+                delta = delta.withContextInput(nil)
+            }
             if delta.hasComponents { cumulativeHasComponents = true }
-            cumulativeSlices.add(delta, model: timeline.model, effort: timeline.effort, speed: "standard")
+            cumulativeSlices.add(delta, model: timeline.model, effort: timeline.effort,
+                                 speed: "standard-normalized")
             if delta.topLine > 0 {
                 cumulativeEvents.append(event(delta: delta, payload: payload, observedAt: observedAt,
                                               anchorLine: index, family: "token_count"))
@@ -85,13 +104,27 @@ struct CodexTelemetryAccumulator {
             guard let usage = (payload["usage"] as? [String: Any])
                     ?? ((payload["data"] as? [String: Any])?["usage"] as? [String: Any]) else { return }
             sawTurnCompletedFamily = true
-            // Per-turn records are incremental: sum them, never delta them.
-            let increment = UsageDelta(sample: CumulativeCounters.Sample(usage: usage))
+            let sample = CumulativeCounters.Sample(usage: usage)
+            // Current Codex exec JSONL writes `turn.completed` at the top level
+            // and its usage is cumulative. Historical rollout/event_msg records
+            // use the same usage keys but do not persist a version or semantic
+            // discriminator. Refuse to guess whether those wrapped records are
+            // cumulative or incremental.
+            guard obj["payload"] == nil else {
+                sawAmbiguousTurnUsage = sawAmbiguousTurnUsage || sample.total > 0
+                return
+            }
+            if turnCumulative.isReset(by: sample) {
+                turnRecordedTotal += turnCumulative.lastTotal
+                turnCumulative = CumulativeCounters()
+            }
+            let increment = turnCumulative.advance(to: sample).withContextInput(nil)
             turnCompletedTokens += increment.topLine
             // Always recorded, into its own table. Whether it counts is decided in
             // `finish()`, once the whole file has been seen.
             if increment.hasComponents { turnHasComponents = true }
-            turnSlices.add(increment, model: timeline.model, effort: timeline.effort, speed: "standard")
+            turnSlices.add(increment, model: timeline.model, effort: timeline.effort,
+                           speed: "standard-normalized")
             if increment.topLine > 0 {
                 turnEvents.append(event(delta: increment, payload: payload, observedAt: observedAt,
                                         anchorLine: index, family: "turn.completed"))
@@ -114,7 +147,10 @@ struct CodexTelemetryAccumulator {
             ownership: .session,
             model: timeline.model,
             reasoningEffort: timeline.effort,
-            speed: RunwaySpeedTier.standard.rawValue,
+            // Codex rollout records do not preserve the actual API service tier.
+            // This explicitly means "priced at the standard published rate", not
+            // that a standard execution tier was observed.
+            speed: "standard-normalized",
             freshInputTokens: delta.fresh,
             cacheReadTokens: delta.cacheRead,
             cacheWrite5mTokens: delta.cacheWrite,
@@ -130,7 +166,8 @@ struct CodexTelemetryAccumulator {
         if sawCumulativeMarker { families.append("token_count") }
         if sawTurnCompletedFamily { families.append("turn.completed") }
 
-        let bankedTotal = recordedTotal + cumulative.lastTotal
+        let cumulativeBankedTotal = recordedTotal + cumulative.lastTotal
+        let turnBankedTotal = turnRecordedTotal + turnCumulative.lastTotal
 
         // The authority decision, made once, with the whole file seen: cumulative
         // wins wherever it appears, so the two families are never summed.
@@ -145,11 +182,14 @@ struct CodexTelemetryAccumulator {
             summary = TelemetryUsageSummary(
                 topLineTokens: winningSlices.topLineTokens,
                 hasComponentBreakdown: hasComponents,
-                recordedTotalTokens: bankedTotal > 0 ? bankedTotal : nil,
+                recordedTotalTokens: (sawCumulativeFamily ? cumulativeBankedTotal : turnBankedTotal) > 0
+                    ? (sawCumulativeFamily ? cumulativeBankedTotal : turnBankedTotal)
+                    : nil,
                 usageFamilies: families,
                 // Both families reporting positive tokens is a real conflict: the
                 // totals come from the cumulative family alone.
-                usageFamilyConflict: sawCumulativeFamily && sawTurnCompletedFamily && turnCompletedTokens > 0
+                usageFamilyConflict: sawCumulativeFamily && sawTurnCompletedFamily
+                    && (turnCompletedTokens > 0 || sawAmbiguousTurnUsage)
             )
         }
 
@@ -214,17 +254,17 @@ struct CumulativeCounters {
         previous = sample
         lastTotal = sample.total
         guard let base else { return UsageDelta(sample: sample) }
-        return UsageDelta(
-            // Codex's `input_tokens` INCLUDES `cached_input_tokens`, so fresh input
-            // is the difference. Clamped because a cache-heavy turn can move cached
-            // more than input, and the excess was already counted as a cache read.
-            fresh: max(0, (sample.input - base.input) - (sample.cached - base.cached)),
+        return UsageDelta.normalized(
+            // Codex input includes both cache reads and cache writes. Normalize
+            // the detail counters inside the input delta so top-line tokens remain
+            // exactly input + output even if a malformed detail counter overshoots.
+            input: max(0, sample.input - base.input),
             cacheRead: max(0, sample.cached - base.cached),
             cacheWrite: max(0, sample.cacheWrite - base.cacheWrite),
             output: max(0, sample.output - base.output),
             reasoning: max(0, sample.reasoning - base.reasoning),
             hasComponents: sample.hasComponents,
-            contextInput: sample.hasComponents ? max(0, sample.input - base.input) : nil
+            contextInput: nil
         )
     }
 }
@@ -253,13 +293,34 @@ struct UsageDelta {
     /// A whole sample counted as one contribution — the first record of an epoch,
     /// or an incremental per-turn record.
     init(sample: CumulativeCounters.Sample) {
-        self.init(fresh: max(0, sample.input - sample.cached),
-                  cacheRead: sample.cached,
-                  cacheWrite: sample.cacheWrite,
-                  output: sample.output,
-                  reasoning: sample.reasoning,
-                  hasComponents: sample.hasComponents,
-                  contextInput: sample.hasComponents ? sample.input : nil)
+        self = Self.normalized(input: sample.input,
+                               cacheRead: sample.cached,
+                               cacheWrite: sample.cacheWrite,
+                               output: sample.output,
+                               reasoning: sample.reasoning,
+                               hasComponents: sample.hasComponents,
+                               contextInput: nil)
+    }
+
+    static func normalized(input: Int, cacheRead: Int, cacheWrite: Int,
+                           output: Int, reasoning: Int, hasComponents: Bool,
+                           contextInput: Int?) -> UsageDelta {
+        let safeInput = max(0, input)
+        let safeRead = min(safeInput, max(0, cacheRead))
+        let safeWrite = min(safeInput - safeRead, max(0, cacheWrite))
+        return UsageDelta(fresh: safeInput - safeRead - safeWrite,
+                          cacheRead: safeRead,
+                          cacheWrite: safeWrite,
+                          output: max(0, output),
+                          reasoning: max(0, reasoning),
+                          hasComponents: hasComponents,
+                          contextInput: contextInput)
+    }
+
+    func withContextInput(_ value: Int?) -> UsageDelta {
+        UsageDelta(fresh: fresh, cacheRead: cacheRead, cacheWrite: cacheWrite,
+                   output: output, reasoning: reasoning,
+                   hasComponents: hasComponents, contextInput: value)
     }
 
     var topLine: Int { fresh + cacheRead + cacheWrite + output }
@@ -323,12 +384,18 @@ struct UsageSliceTable {
 /// context lines that omit effort, and 10,466 of 47,671 sampled Claude assistant
 /// records carry no effort at all — treating absence as a value would emit a stream
 /// of phantom "changed to nil" entries.
+///
+/// Initial configuration is the subset stated by the first configuration record.
+/// A later first sighting cannot be backdated into that configuration, because doing
+/// so invents a model/effort pair that no record observed. Field-level anchors and
+/// provenance retain the evidence for each value that is actually present.
 struct ConfigurationTimeline {
-    /// Provenance for observations and changes — what the record itself is.
+    /// Default provenance for observations and changes — what the record itself is.
+    /// Individual observations may override this (Pi assistant-message fallback).
     private let provenance: TelemetryProvenance
     /// Provenance for the INITIAL configuration, which can differ: Codex states the
     /// effective settings for its first turn, whereas Claude's initial values are
-    /// inferred from the first record that happened to carry them.
+    /// inferred from the first assistant record (and absent fields stay unknown).
     private let initialProvenance: TelemetryProvenance
 
     private(set) var model: String?
@@ -337,62 +404,103 @@ struct ConfigurationTimeline {
 
     private var firstObservedAt: Date?
     private var firstAnchorLine: Int?
-    private var initialModel: String?
-    private var initialEffort: String?
+    private struct FieldObservation {
+        let value: String
+        let observedAt: Date?
+        let anchorLine: Int
+        let provenance: TelemetryProvenance
+    }
+    private var initialModel: FieldObservation?
+    private var initialEffort: FieldObservation?
+    private var currentModel: FieldObservation?
+    private var currentEffort: FieldObservation?
     private var lastObservedAt: Date?
     private var lastAnchorLine = 0
+    private var lastProvenance: TelemetryProvenance?
 
     init(provenance: TelemetryProvenance, initialProvenance: TelemetryProvenance? = nil) {
         self.provenance = provenance
         self.initialProvenance = initialProvenance ?? provenance
     }
 
-    mutating func observe(model newModel: String?, effort newEffort: String?, observedAt: Date?, anchorLine: Int) {
+    mutating func observe(model newModel: String?, effort newEffort: String?, observedAt: Date?, anchorLine: Int,
+                          provenance observationProvenance: TelemetryProvenance? = nil) {
         let cleanModel = Self.clean(newModel)
         let cleanEffort = Self.clean(newEffort)
         guard cleanModel != nil || cleanEffort != nil else { return }
+        let observationProvenance = observationProvenance ?? provenance
+        let isFirstObservation = firstAnchorLine == nil
 
-        if firstAnchorLine == nil {
+        if isFirstObservation {
             firstAnchorLine = anchorLine
             firstObservedAt = observedAt
         }
         lastAnchorLine = anchorLine
         lastObservedAt = observedAt
+        lastProvenance = observationProvenance
 
         if let cleanModel {
             if let current = model, current != cleanModel {
                 changes.append(ConfigurationChange(field: .model, oldValue: current, newValue: cleanModel,
                                                    observedAt: observedAt, anchorLine: anchorLine,
-                                                   provenance: provenance))
+                                                   provenance: observationProvenance))
             }
-            // Backfill is symmetric: whichever field is seen first, the other's first
-            // sighting completes the initial configuration silently.
-            if initialModel == nil { initialModel = cleanModel }
+            let observation = FieldObservation(value: cleanModel, observedAt: observedAt,
+                                               anchorLine: anchorLine, provenance: observationProvenance)
+            if isFirstObservation { initialModel = observation }
+            currentModel = observation
             model = cleanModel
         }
         if let cleanEffort {
             if let current = effort, current != cleanEffort {
                 changes.append(ConfigurationChange(field: .reasoningEffort, oldValue: current, newValue: cleanEffort,
                                                    observedAt: observedAt, anchorLine: anchorLine,
-                                                   provenance: provenance))
+                                                   provenance: observationProvenance))
             }
-            if initialEffort == nil { initialEffort = cleanEffort }
+            let observation = FieldObservation(value: cleanEffort, observedAt: observedAt,
+                                               anchorLine: anchorLine, provenance: observationProvenance)
+            if isFirstObservation { initialEffort = observation }
+            currentEffort = observation
             effort = cleanEffort
         }
     }
 
     var initialConfiguration: SessionConfiguration? {
         guard let firstAnchorLine else { return nil }
-        return SessionConfiguration(model: initialModel, reasoningEffort: initialEffort,
+        let model = initialModel?.value
+        let effort = initialEffort?.value
+        // A combined configuration is only as strong as the record that stated
+        // both fields. When fields arrived independently, the aggregate metadata
+        // describes the first field and field-level metadata preserves the truth.
+        // Claude deliberately supplies `.inferredFirstObservation` as the
+        // aggregate provenance even though its field evidence is stamped
+        // `.assistantRecord`. For timelines without a distinct initial policy
+        // (Codex/Pi/Copilot), retain the provenance of the first record itself.
+        let aggregateProvenance = initialProvenance == provenance
+            ? (initialModel?.provenance ?? initialEffort?.provenance ?? initialProvenance)
+            : initialProvenance
+        return SessionConfiguration(model: model, reasoningEffort: effort,
                                     observedAt: firstObservedAt, anchorLine: firstAnchorLine,
-                                    provenance: initialProvenance)
+                                    provenance: aggregateProvenance,
+                                    modelObservedAt: initialModel?.observedAt,
+                                    modelAnchorLine: initialModel?.anchorLine,
+                                    modelProvenance: initialModel?.provenance,
+                                    reasoningEffortObservedAt: initialEffort?.observedAt,
+                                    reasoningEffortAnchorLine: initialEffort?.anchorLine,
+                                    reasoningEffortProvenance: initialEffort?.provenance)
     }
 
     var currentConfiguration: SessionConfiguration? {
         guard firstAnchorLine != nil else { return nil }
         return SessionConfiguration(model: model, reasoningEffort: effort,
                                     observedAt: lastObservedAt, anchorLine: lastAnchorLine,
-                                    provenance: provenance)
+                                    provenance: lastProvenance ?? provenance,
+                                    modelObservedAt: currentModel?.observedAt,
+                                    modelAnchorLine: currentModel?.anchorLine,
+                                    modelProvenance: currentModel?.provenance,
+                                    reasoningEffortObservedAt: currentEffort?.observedAt,
+                                    reasoningEffortAnchorLine: currentEffort?.anchorLine,
+                                    reasoningEffortProvenance: currentEffort?.provenance)
     }
 
     /// An empty string is absence, not a value — matching `SessionIndexer`'s
