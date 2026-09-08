@@ -17,8 +17,8 @@ steward's own local sessions, then reports one of three outcomes:
 
   exit 0  all good -- the local sessions match the committed baseline.
   exit 1  drift -- something new showed up. Prints the difference in plain
-          words, writes a REDACTED sample next to the report, and prints a
-          ready-to-paste GitHub issue body.
+          words, attempts a REDACTED sample, and prints a GitHub issue body
+          with the sample outcome. A sample is optional for reporting drift.
   exit 2  cannot check -- the agent's CLI is not installed, or there are no
           sessions on disk yet. Says which, and what to do about it.
 
@@ -351,7 +351,7 @@ def _cannot_check_reason(agent: str, result: dict) -> str | None:
 
 
 def _issue_body(agent: str, result: dict, diff: dict, sample_path: Path | None,
-                leaks: list[str]) -> str:
+                leaks: list[str], *, write_sample: bool = True) -> str:
     verified = result.get("verified_version")
     installed = (result.get("installed") or {}).get("parsed_version")
     upstream = (result.get("upstream") or {}).get("parsed_version")
@@ -377,18 +377,29 @@ def _issue_body(agent: str, result: dict, diff: dict, sample_path: Path | None,
     ])
     if sample_path is not None:
         lines.extend([
-            f"A redacted sample is attached. It was produced by `scripts/steward_check.py {agent}`,",
+            "Sample status: generated.",
+            f"A redacted sample was produced by `scripts/steward_check.py {agent}`.",
             "Content values were replaced; structural discriminators (`type`, `role`, `subtype`, `model`) remain.",
             f"Attach the generated file named: {sample_path.name}",
             "Drag it into the GitHub issue; do not paste raw sessions.",
         ])
     else:
+        if not write_sample:
+            explanation = "Sample status: disabled (--no-sample)."
+        elif leaks:
+            explanation = (
+                "Sample status: withheld. The automatic privacy check rejected the sample"
+                + f" ({', '.join(leaks)})."
+            )
+        else:
+            explanation = "Sample status: unavailable. Automatic extraction produced no sample."
         lines.extend([
+            explanation,
             "No sample is attached.",
-            "The automatic redaction could not guarantee the sample was clean"
-            + (f" (it still contained {', '.join(leaks)})" if leaks else "")
-            + ", so it was withheld.",
-            "Please describe the change in words instead, or hand-redact a few records yourself.",
+            "The format differences above can still be reviewed without a sample. "
+            "Maintainers will assess whether more evidence is needed.",
+            "Do not paste raw sessions or hand-redact records. "
+            "You can describe the change in words.",
         ])
     lines.extend([
         "",
@@ -504,7 +515,7 @@ def _report(agent: str, result: dict, out_dir: Path, write_sample: bool = True) 
         else:
             print("No sample could be extracted automatically for this agent's storage format.")
 
-    body = _issue_body(agent, result, diff, sample_path, leaks)
+    body = _issue_body(agent, result, diff, sample_path, leaks, write_sample=write_sample)
     issue_path = out_dir / "issue.md"
     out_dir.mkdir(parents=True, exist_ok=True)
     issue_path.write_text(body, encoding="utf-8")

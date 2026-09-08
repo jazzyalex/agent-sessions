@@ -12,7 +12,8 @@ That is the whole job. One agent, your own installation, your own sessions.
 - Gets pinged when that agent's format needs a re-check — about 2–3 times a year.
 - Runs one command against their own sessions, and reports what it says. Roughly
   10 minutes.
-- If the format changed, attaches the redacted sample the tool produces to an issue.
+- If the format changed, reports the differences and attaches a generated redacted
+  sample when one is available.
 
 ## What a steward does not do
 
@@ -61,7 +62,13 @@ The check itself is one command:
 ```
 
 It compares your agent's sessions against the recorded baseline and, if the format moved,
-writes a redacted sample you can attach to an issue.
+reports the differences. The sample status says whether a redacted sample was generated,
+withheld by the privacy check, unavailable from automatic extraction, or disabled with
+`--no-sample`. This reporting behavior is the same for every agent.
+
+A sample is optional for reporting a change. Maintainers will decide whether the report
+provides enough evidence. Do not paste raw sessions or hand-redact records when a sample
+is missing. See `scripts/steward_check.py::_issue_body` for the shared report format.
 
 ## Tiers
 

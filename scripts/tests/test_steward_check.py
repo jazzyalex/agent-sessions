@@ -7,6 +7,8 @@ in a public issue. Each test here pins one of those.
 """
 import json
 
+import pytest
+
 import agent_watch
 import steward_check
 
@@ -351,6 +353,46 @@ def test_public_agent_names_resolve_too():
     assert steward_check._resolve_agent("Grok-CLI", known) == "grok"
     assert steward_check._resolve_agent("claude_code", known) == "claude"
     assert steward_check._resolve_agent("not-an-agent", known) is None
+
+
+@pytest.mark.parametrize("agent", steward_check._known_agents())
+@pytest.mark.parametrize("sample_status", ["generated", "withheld", "unavailable", "disabled"])
+def test_sample_outcomes_are_uniform_and_do_not_change_drift_verdict(
+    tmp_path, monkeypatch, capsys, agent, sample_status,
+):
+    # Storage-specific extraction is outside this contract. Exercise the real
+    # sample writer, privacy gate, report and exit code with each extractor result.
+    def extract(*args, **kwargs):
+        assert sample_status != "disabled", "--no-sample must not extract records"
+        if sample_status == "unavailable":
+            return []
+        if sample_status == "withheld":
+            return [{"type": "new_record", "model": "steward@example.com"}]
+        return [{"type": "new_record", "text": "[trimmed for fixture]"}]
+
+    monkeypatch.setattr(steward_check, "_collect_drifting_records", extract)
+    result = _result(evidence={
+        "schema_matches_baseline": False,
+        "schema_diff": {"unknown_types": ["new_record"]},
+    })
+    code = steward_check._report(agent, result, tmp_path, write_sample=sample_status != "disabled")
+    body = (tmp_path / "issue.md").read_text()
+    output = capsys.readouterr().out
+    assert code == steward_check.EXIT_DRIFT
+    assert "A kind of record we have never seen before: new_record" in body
+    assert f"Sample status: {sample_status}" in body
+    assert f"Sample status: {sample_status}" in output
+    assert "steward@example.com" not in body
+    assert "hand-redact a few records yourself" not in body
+    sample = tmp_path / "redacted-sample" / f"{agent}-drift-sample.jsonl"
+    assert sample.exists() == (sample_status == "generated")
+    if sample_status == "generated":
+        assert "Attach the generated file" in body
+        assert "sample is attached" not in body
+    else:
+        assert "Maintainers will assess whether more evidence is needed" in body
+        assert "Do not paste raw sessions or hand-redact records" in body
+        assert ("privacy check rejected" in body) == (sample_status == "withheld")
 
 
 def test_plain_language_output_carries_no_emoji(tmp_path, capsys):

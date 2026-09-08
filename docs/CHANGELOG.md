@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 <!-- Headings the release-note generator does not recognise are dropped from the
      Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py). -->
 ### Maintenance
+- Steward reports use the same sample statuses for every agent: generated, withheld, unavailable, or disabled. Missing samples no longer imply a privacy rejection or ask contributors to hand-redact records; format differences remain available for maintainer review.
 - Added a public social-banner download page with X, Open Graph/GitHub, LinkedIn, and 16:9 variants of the native composition.
 - Established the localization foundation with English String Catalogs for app and permission copy, stable non-display identifiers, typed localized-copy boundaries, pluralized session counts, locale-aware notification durations, compiler-extraction drift validation, and contributor conventions for the planned Simplified Chinese translation.
 - The telemetry foundation now reads configuration changes and request-level token usage for Codex, Claude, Pi and Copilot, preserves parent-versus-descendant ownership, prices every request against one immutable manifest revision (including long-context tiers), and can attribute API-equivalent session cost to a compatible weekly-quota calibration. Raw quota observations retain reset, precision and source provenance, with account hashes where the provider exposes identity; unavailable calculations fail closed, and no product surface is attached yet.
