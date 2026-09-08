@@ -1,0 +1,65 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>AgentSessions</title>
+        <item>
+            <title>5.1.1</title>
+            <pubDate>Mon, 31 Aug 2026 14:00:38 -0700</pubDate>
+            <description><![CDATA[
+<style>
+.rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
+.rn h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2px; }
+.rn h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #86868b; margin: 18px 0 6px; }
+.rn h3.hl { color: #0071e3; }
+.rn ul { margin: 0; padding-left: 18px; }
+.rn li { margin: 5px 0; }
+.rn ul.highlights li { margin: 9px 0; }
+.rn strong { font-weight: 650; }
+.rn code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 5px; }
+.rn a { color: #0071e3; text-decoration: none; }
+.rn .more { color: #86868b; font-size: 12px; margin-top: 16px; }
+@media (prefers-color-scheme: dark) {
+  .rn { color: #f5f5f7; }
+  .rn h3 { color: #98989d; }
+  .rn h3.hl { color: #2997ff; }
+  .rn code { background: rgba(255,255,255,0.13); }
+  .rn a { color: #2997ff; }
+}
+</style>
+<div class="rn">
+<h2>What&#x27;s New in 5.1.1</h2>
+<h3 class="hl">Highlights</h3>
+<ul class="highlights">
+<li><strong>A small version number and a big fix list.</strong> Twelve fixes, three of them silent failures you had no way to notice: Claude sessions indexed after 2026-08-21 were listed but returned nothing from search, Claude spend read about a sixth low in the <code>$</code> unit, and a <code>QWEN_HOME</code> set for something unrelated emptied the Qwen list. All three looked healthy from the outside, which is why they lasted. If you run Claude or Qwen, take this update.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>Session Runway can read your week.</strong> A new <code>Wk</code> unit answers &quot;how fast is *this* session eating my weekly quota&quot;, in percentage points per hour — per session, not one account-wide rate split up. It learns the conversion from usage already on disk, so a figure appears seconds after launch instead of hours later. Idle sessions read <code>quiet</code>, which also replaces &quot;flat&quot; in the <code>5h</code>, <code>tk</code> and <code>$</code> units.</li>
+<li><strong>Claude&#x27;s model-scoped weekly limit is visible.</strong> Claude reports a third window beside the 5-hour and weekly ones — a weekly budget for one model — and Agent Sessions could not see it at all. The menu-bar dropdown now names it (&quot;Wk Fable: 70% · resets …&quot;); the compact meter&#x27;s <code>Wk</code> stays the all-models number.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li><strong>Claude sessions are searchable again.</strong> Since 2026-08-21 they were listed with the right title, project and dates, but searching their text returned nothing — and nothing said so. 256 sessions on the development machine, nine days&#x27; worth. Picked up on the first launch after updating.</li>
+<li><strong>Claude spend was understated by about a sixth in the <code>$</code> unit.</strong> Anthropic charges a cache write by how long it is kept alive — 1.25x input for five minutes, 2x for an hour — and every write was billed at the cheaper rate, while Claude Code almost only writes hour-long ones. Fast mode is priced at its own rates now too, rather than silently at half.</li>
+<li><strong>A <code>QWEN_HOME</code> you set for something else no longer empties your Qwen list.</strong> Qwen 0.14.x ignores that variable and reads <code>~/.qwen</code>; the app only ever looked where it pointed. It falls back now, and resume follows the same root — so those sessions come back listed *and* resumable.</li>
+<li><strong>A Qwen record Agent Sessions does not recognise says so.</strong> Types outside the four it knew were dropped without a trace, so a newer build&#x27;s transcript could quietly lose turns. They surface as a note now, and the kinds Qwen 0.22 writes render as themselves — including two carrying real conversation.</li>
+<li><strong>The weekly burn-rate figure is no longer thrown off by a countdown.</strong> When Claude&#x27;s usage falls back to the terminal, the reset reads &quot;in 4h 28m&quot; rather than a date, and every refresh stored that as a new week — about a third below the truth. Readings are keyed only on a stated date now.</li>
+<li><strong>Weekly Session Runway drops stale calibration immediately.</strong> A same-process price refresh or weekly-limit shape change can no longer keep serving a conversion learned under the previous scope, and a failed scan from an account you switched away from cannot delay the new account&#x27;s scan.</li>
+</ul>
+<h3>Reminder: What You Got in 5.1</h3>
+<ul>
+<li><strong>Devin CLI and fx join the lineup.</strong> Two more coding agents put their local history in the same searchable list as the rest, each with a Settings pane and a resume command. Both were contributed and are stewarded by @thedavidweng — the first outside test of the adapter recipe 5.0 documented.</li>
+<li><strong>Devin CLI sessions.</strong> Browsing, search, filtering, Analytics and transcripts over Devin&#x27;s shared SQLite store, with binary and storage-root controls in Settings. <code>devin --resume &lt;id&gt;</code>, verified on CLI 3000.5.20 (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">report</a>). Active sessions only; no image extraction yet.</li>
+<li><strong>fx (vercel-labs) sessions.</strong> Per-session checkpoints under <code>~/.fx/sessions</code>, with every kind of turn rendered — background commands, auto-compaction summaries, interrupted turns. <code>fx --resume &lt;id&gt;</code>, verified on fx 0.0.5 (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">report</a>). No image extraction yet.</li>
+<li><strong>Weekly Session Runway reflects recent quota movement.</strong> Its <code>%/h</code> averaged everything burned since the weekly reset, so one heavy day set the pace for days; it measures the burn between recent same-reset readings now, and shows <code>tk/h</code> until it has one.</li>
+</ul>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1.1</a></p>
+</div>
+            ]]></description>
+            <sparkle:version>72</sparkle:version>
+            <sparkle:shortVersionString>5.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg" length="23555312" type="application/octet-stream" sparkle:edSignature="7+p1AQ8mva55y0D5v57cdUx1r4546W2ybHR6bJpbDx7dMVadTxKsKoFp1n7QfW8zeOTLiYbEs85LyP8CJt61DQ=="/>
+        </item>
+    </channel>
+</rss>

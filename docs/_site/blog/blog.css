@@ -1,0 +1,70 @@
+/* The Rollout — blog-only styles, layered over guides/guide.css.
+   Dark mode and all color tokens come from guide.css; this file is
+   blog-listing/post structure only. */
+
+.post-list {
+  list-style: none;
+  padding-left: 0;
+  max-width: 860px;
+}
+
+.post-list li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hair-strong);
+}
+
+.post-list h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.post-list h2 a {
+  text-decoration: none;
+}
+
+.post-meta {
+  color: var(--ink-2);
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.post-excerpt {
+  margin: 6px 0 0;
+  color: var(--ink-2);
+}
+
+article.post {
+  max-width: 860px;
+}
+
+article.post img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--hair-strong);
+  border-radius: 8px;
+}
+
+.post-back {
+  margin-top: 40px;
+}
+
+.post-figure {
+  margin: 28px 0;
+}
+
+.post-figure svg,
+.post-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.post-figure figcaption {
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 10px;
+  max-width: 720px;
+}

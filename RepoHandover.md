@@ -1,3 +1,26 @@
+## 2026-09-08 15:35 · qm-weekly-calibration-integrity · Weekly runway calibration corrected
+status: done
+
+**State:** Quota Meter weekly calibration and Astra pricing are committed locally on `main`; the corrected standalone Debug app was built and launched, with no push or release.
+
+**Verified:**
+- `HEAD` is `abafc2fc284b9b6fc9eeb2c0849f286d92e9c246` (`fix: harden quota meter weekly runway`), 18 files, 1,050 insertions / 174 deletions.
+- Clean full XCResult: 2,651 total / 2,648 passed / 3 skipped / 0 failed. The final prefix-removal change separately passed all 6 `WeeklyQuotaDisplayTests`.
+- Standalone `.deriveddata-manual` Debug build succeeded, passed strict codesign verification, and was launched as PID `79318` when last checked.
+
+**Decided / don't redo:**
+- Historical and live Codex calibration now share cumulative accounting, weekly-anchor boundaries, event-time semantics, adaptive history coverage, fail-closed long-context handling, and revision-6 persistence. Do not restore the conflicting legacy denominators.
+- Weekly rows intentionally show plain values such as `2.2%/h`, with no `~` or other prefix; the tooltip carries the five-minute-estimate explanation.
+- The coordinated immutable-evidence/persistence redesign is deferred as the separate open Quota Meter v2 item at `docs/backlog.md`; it is not a blocker for this correction.
+- `docs/_site/` was excluded from the commit because it is a pre-existing 42 MB generated-site artifact, not source.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — this checkpoint; intentionally uncommitted. `docs/_site/` — pre-existing generated output, owner unverified.
+
+**Key files:**
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift`, `WeeklyQuotaBootstrap.swift`, and `CodexRunwayModel.swift` — calibration contract and ingestion.
+- `docs/superpowers/specs/2026-09-08-codex-weekly-calibration-integrity.md`, matching plan, and `docs/backlog.md` — evidence, implementation record, and v2 follow-up.
+
 ## 2026-09-08 12:38 · steward-sample-reporting · Unified optional sample reporting committed
 status: done
 

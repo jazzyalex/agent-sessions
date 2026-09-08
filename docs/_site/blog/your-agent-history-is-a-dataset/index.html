@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Your agent history is a dataset. Almost nobody queries it." />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Eleven months of coding-agent transcripts, measured: what one typed instruction triggers, and five questions your session history can answer." />
+<meta property="og:description" content="Eleven months of coding-agent transcripts, measured: what one typed instruction triggers, and five questions your session history can answer." />
+<link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/" />
+<meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/" />
+<meta property="og:site_name" content="Agent Sessions" />
+<meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-07-21T00:00:00-07:00" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta property="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" />
+<meta property="twitter:title" content="Your agent history is a dataset. Almost nobody queries it." />
+<meta name="twitter:site" content="@jazzyalex" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","dateModified":"2026-07-21T00:00:00-07:00","datePublished":"2026-07-21T00:00:00-07:00","description":"Eleven months of coding-agent transcripts, measured: what one typed instruction triggers, and five questions your session history can answer.","headline":"Your agent history is a dataset. Almost nobody queries it.","image":"https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png","mainEntityOfPage":{"@type":"WebPage","@id":"https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/"},"url":"https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/"}</script>
+<!-- End Jekyll SEO tag -->
+
+  <title>Your agent history is a dataset. Nobody queries it.</title>
+  <link rel="alternate" type="application/rss+xml" title="The Rollout — Agent Sessions" href="/agent-sessions/feed.xml">
+  <link rel="icon" href="/agent-sessions/assets/app-icon-32.png">
+  <link rel="stylesheet" href="/agent-sessions/guides/guide.css">
+  <link rel="stylesheet" href="/agent-sessions/blog/blog.css">
+  <script defer src="/agent-sessions/guides/guide.js"></script>
+  <!-- GoatCounter: cookieless, privacy-first analytics (no consent banner needed) -->
+  <script data-goatcounter="https://agent-sessions.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/agent-sessions/">
+        <img src="/agent-sessions/assets/app-icon-512.png" alt="Agent Sessions icon">
+        Agent Sessions
+      </a>
+      <div class="nav-links">
+        <a href="/agent-sessions/guides/">Guides</a>
+        <a href="/agent-sessions/bench/">Bench</a>
+        <a href="/agent-sessions/blog/">The Rollout</a>
+        <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="github-stars-container" style="display:none;"> <span class="gh-star-icon">★</span> <span id="github-stars">–</span></span></a>
+      </div>
+    </div>
+  </nav>
+  <main class="guide-shell">
+    <article class="post">
+  <p class="eyebrow">The Rollout</p>
+  <h1>Your agent history is a dataset. Almost nobody queries it.</h1>
+  <p class="post-meta"><time datetime="2026-07-21T00:00:00-07:00">July 21, 2026</time></p>
+  <p>For every instruction I typed into Codex over the last eleven months, it
+logged an average of 34 events: 2.7 assistant messages, 10.7 tool calls, and
+about 19 entries of bookkeeping around them. Claude Code’s ratio is different
+in shape but similar in scale — 13.5 assistant events and 5.7 tool results
+per instruction. I know this because the full record of every session is
+sitting on my disk in parseable form, 3.8 GB of it, and I finally parsed it.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-s1:#2a78d6; --viz-s2:#1baf7a; --viz-s3:#eda100; --viz-s4:#4a3aa7; --viz-surface:#fcfcfb;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-s1:#3987e5; --viz-s2:#199e70; --viz-s3:#c98500; --viz-s4:#9085e9; --viz-surface:#1a1a19; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 250" role="img" aria-label="Stacked bar chart: events logged per typed user instruction. Codex: 2.7 assistant, 10.7 tool, 15.0 bookkeeping, 4.2 other, total 33.6. Claude Code: 13.5 assistant, 5.7 tool, 0.9 bookkeeping, 7.2 other, total 27.2.">
+  <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">Events logged per typed instruction</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">Corpus averages, Aug 2025 – Jul 2026, one machine</text>
+  <!-- scale: 16 px per event; x0=110 -->
+  <g font-size="12.5">
+    <text x="102" y="86" text-anchor="end" fill="var(--viz-ink)">Codex</text>
+    <!-- 2.7*16=43, 10.7*16=171, 15*16=240, 4.2*16=67 ; gaps 2px -->
+    <rect x="110" y="70" width="43" height="24" rx="3" fill="var(--viz-s1)" />
+    <rect x="155" y="70" width="171" height="24" rx="3" fill="var(--viz-s2)" />
+    <rect x="328" y="70" width="240" height="24" rx="3" fill="var(--viz-s3)" />
+    <rect x="570" y="70" width="67" height="24" rx="3" fill="var(--viz-s4)" />
+    <text x="645" y="87" font-size="12" font-weight="600" fill="var(--viz-ink)">33.6</text>
+
+    <text x="102" y="136" text-anchor="end" fill="var(--viz-ink)">Claude Code</text>
+    <!-- 13.5*16=216, 5.7*16=91, 0.9*16=14, 7.2*16=115 -->
+    <rect x="110" y="120" width="216" height="24" rx="3" fill="var(--viz-s1)" />
+    <rect x="328" y="120" width="91" height="24" rx="3" fill="var(--viz-s2)" />
+    <rect x="421" y="120" width="14" height="24" rx="3" fill="var(--viz-s3)" />
+    <rect x="437" y="120" width="115" height="24" rx="3" fill="var(--viz-s4)" />
+    <text x="560" y="137" font-size="12" font-weight="600" fill="var(--viz-ink)">27.2</text>
+  </g>
+  <!-- legend -->
+  <g font-size="11.5" fill="var(--viz-ink2)">
+    <rect x="110" y="176" width="10" height="10" rx="2" fill="var(--viz-s1)" /><text x="126" y="185">assistant messages</text>
+    <rect x="260" y="176" width="10" height="10" rx="2" fill="var(--viz-s2)" /><text x="276" y="185">tool calls + results</text>
+    <rect x="410" y="176" width="10" height="10" rx="2" fill="var(--viz-s3)" /><text x="426" y="185">bookkeeping / metadata</text>
+    <rect x="590" y="176" width="10" height="10" rx="2" fill="var(--viz-s4)" /><text x="606" y="185">other</text>
+  </g>
+  <text x="110" y="212" font-size="11" fill="var(--viz-muted)">"Other" is mostly reasoning items. Codex logs turn context and token counts as separate</text>
+  <text x="110" y="228" font-size="11" fill="var(--viz-muted)">events, hence the bookkeeping share.</text>
+</svg>
+</div>
+<figcaption>One typed sentence, thirty-odd logged events. The tool-call block in the middle is where the actual work happened, and it's all on your disk.</figcaption>
+</figure>
+
+<p>The point is not the volume. The point is that this is a <em>dataset</em> about how
+you build software, generated as a free byproduct, complete with timestamps,
+tool inputs and outputs, and (in the better formats) per-message model and
+token accounting. Developers who would never dream of running a service
+without metrics are sitting on months of their own engineering telemetry and
+have never run a single query against it.</p>
+
+<p>The first obstacle is usually just knowing where the files are. Each agent
+stores its sessions somewhere different, and the paths and formats are written
+up per agent in the <a href="/agent-sessions/guides/">local history guides</a>.</p>
+
+<h2 id="five-questions-your-history-can-already-answer">Five questions your history can already answer</h2>
+
+<p><strong>What did that feature actually cost?</strong> Sessions in the newer formats carry
+token counts and sometimes dollar figures per message. Group by day or by
+repo and you have cost-per-feature numbers that no dashboard gives you,
+because the vendor dashboard doesn’t know your project boundaries.</p>
+
+<p><strong>Which commands keep failing?</strong> Every failed build, every flaky test run,
+every permission error is in the tool-output events, with timestamps. The
+third time a session trips over the same broken script is visible in the
+data before it is visible in your patience. This one has direct payoff: the
+recurring failure is usually a one-line fix in the repo’s agent
+instructions.</p>
+
+<p><strong>What did we decide, and when?</strong> Search is the killer feature of an archive.
+“The session where we rejected the geometry redesign” is findable by
+keyword in seconds with an indexed browser, and the full context — what was
+tried, what the output showed, why it died — is all there. Git remembers the
+outcome; the transcript remembers the argument.</p>
+
+<p><strong>How has your prompting changed?</strong> Instructions from month one read
+differently than month eleven: shorter, more specific, front-loaded with
+constraints. Your own history is the before/after corpus, and skimming it is
+a faster prompting course than most prompting courses.</p>
+
+<p><strong>Where does the time go?</strong> Timestamps on every event mean a session has a
+measurable shape: how long between your instruction and the first tool call,
+how long the agent spent in test loops, how much wall-clock a “quick fix”
+session really took. Aggregate a month of that and you know which kinds of
+tasks to delegate differently, or not at all.</p>
+
+<h2 id="why-nobody-does-this">Why nobody does this</h2>
+
+<p>Three honest reasons. The formats are undocumented, so writing a parser
+means reverse engineering six dialects of JSONL and SQLite (we covered the
+details in <a href="/agent-sessions/blog/how-coding-agents-remember/">the field study</a>).
+The volumes are awkward: 3.8 GB is too big to grep casually and too small to
+justify a data pipeline. And the tooling is young: the vendors treat these
+files as crash-recovery state, not as a product surface, so nothing ships
+with a search box over your own history.</p>
+
+<p>The parsing problem, at least, is solved for the reading half.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=your-agent-history-is-a-dataset">Agent Sessions</a> indexes all
+six formats into one searchable, local-only browser — that’s the “what did
+we decide” and “which command failed” questions handled without writing a
+line of code. The aggregate questions still need a script, and the one this
+post’s numbers came from is in the repo as a starting point.</p>
+
+<p>A year of your engineering decisions is on your disk, already written down,
+already machine-readable. That is more than most teams can say about their
+human decisions. It seems worth a query or two.</p>
+
+  <p class="post-back"><a href="/agent-sessions/blog/">&larr; The Rollout</a></p>
+</article>
+
+  </main>
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
+</body>
+</html>

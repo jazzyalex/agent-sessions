@@ -1,0 +1,2229 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="https://jazzyalex.github.io/agent-sessions/feed.xml" rel="self" type="application/atom+xml" /><link href="https://jazzyalex.github.io/agent-sessions/" rel="alternate" type="text/html" /><updated>2026-09-03T19:58:31-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/feed.xml</id><title type="html">Agent Sessions</title><subtitle>Local history, search, and usage tracking for AI coding agents on macOS — Codex, Claude Code, Cursor, OpenCode, Copilot, and more.</subtitle><entry><title type="html">A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL</title><link href="https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/" rel="alternate" type="text/html" title="A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL" /><published>2026-08-29T00:00:00-07:00</published><updated>2026-08-29T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/"><![CDATA[<p>With checkpointing switched off, a SQLite database we had just filled with
+5,000 committed rows measured 4,096 bytes on disk: one page, holding the file
+header and nothing else. The real data, 1.1 MB of it, sat in the <code class="language-plaintext highlighter-rouge">-wal</code> file
+beside it, including the <code class="language-plaintext highlighter-rouge">CREATE TABLE</code> statement. A reader that consults only
+the main file therefore does not report zero rows out of that database; it
+reports <code class="language-plaintext highlighter-rouge">no such table</code>, which is a strange thing to be told about a table you
+just watched being created.</p>
+
+<p>Which readers go blind that way is the useful question, and the answer we would
+have given a week ago is wrong. We know exactly how wrong, because we wrote it
+into our own engineering notes, believed it for over a month, and published it
+on this blog. That post has been retracted. This one is the correction.</p>
+
+<h2 id="three-files-one-database">Three files, one database</h2>
+
+<p>SQLite’s write-ahead-log mode splits a database across three files. The main
+<code class="language-plaintext highlighter-rouge">.db</code> file holds pages as of the last checkpoint. Committed transactions are
+appended to <code class="language-plaintext highlighter-rouge">&lt;name&gt;-wal</code>, the write-ahead log, and folded back into the main
+file only when a checkpoint runs. The third file, <code class="language-plaintext highlighter-rouge">&lt;name&gt;-shm</code>, holds the
+wal-index: a shared map telling a reader which pages have newer versions
+sitting in the log. In exchange for the extra files, readers do not block the
+writer and the writer does not block readers, which is the point of the mode.</p>
+
+<p>The arrangement has one consequence that surprises people the first time. A
+committed row is durable, real, and possibly nowhere near the main database
+file. We ran a writer with <code class="language-plaintext highlighter-rouge">PRAGMA wal_autocheckpoint=0</code> — checkpointing off,
+which is just an exaggerated version of a busy writer that has not checkpointed
+recently — and the entire 5,000-row table lived in the log. The <code class="language-plaintext highlighter-rouge">.db</code> held the
+header page; every row and the schema itself sat in the <code class="language-plaintext highlighter-rouge">-wal</code>.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9; --viz-accent:#2a78d6; --viz-box:#f0efec;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; --viz-accent:#3987e5; --viz-box:#26262a; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 330" role="img" aria-label="Diagram: a WAL-mode SQLite database split across three files. The main live.db is 4,096 bytes and holds only the header page; live.db-wal is 1.1 MB and holds every committed row plus the schema; live.db-shm holds the wal-index. An upper reader opened on the plain path or read-only consults the wal-index, merges the main file with the log, and sees all 5,000 rows. A lower reader opened with immutable=1, or on a .db copied without its -wal, never reaches the log: it answers from the header page, or fails outright with error 14.">
+  <text x="12" y="22" font-size="14" font-weight="600" fill="var(--viz-ink)">Where the rows actually are, and who can see them</text>
+  <!-- file boxes -->
+  <g>
+    <rect x="20" y="48" width="220" height="58" rx="8" fill="var(--viz-box)" />
+    <text x="130" y="72" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db — 4,096 bytes</text>
+    <text x="130" y="92" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">header page only</text>
+
+    <rect x="20" y="122" width="220" height="66" rx="8" fill="none" stroke="var(--viz-accent)" stroke-width="2" />
+    <text x="130" y="148" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db-wal — 1.1 MB</text>
+    <text x="130" y="168" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">all 5,000 rows + the schema</text>
+
+    <rect x="20" y="204" width="220" height="58" rx="8" fill="var(--viz-box)" />
+    <text x="130" y="228" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db-shm</text>
+    <text x="130" y="248" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">wal-index: which pages are in the log</text>
+  </g>
+  <!-- reader boxes -->
+  <g>
+    <rect x="460" y="56" width="240" height="80" rx="8" fill="none" stroke="var(--viz-accent)" stroke-width="2" />
+    <text x="580" y="80" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">plain path · mode=ro · -readonly</text>
+    <text x="580" y="100" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">consults the wal-index, merges both</text>
+    <text x="580" y="122" font-size="12" font-weight="600" fill="var(--viz-accent)" text-anchor="middle">sees all 5,000 rows</text>
+
+    <rect x="460" y="196" width="240" height="80" rx="8" fill="none" stroke="var(--viz-muted)" stroke-width="2" stroke-dasharray="5 4" />
+    <text x="580" y="220" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">immutable=1 · a .db copied without its -wal</text>
+    <text x="580" y="240" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">never reaches the log</text>
+    <text x="580" y="262" font-size="12" font-weight="600" fill="var(--viz-muted)" text-anchor="middle">"no such table", or error 14</text>
+  </g>
+  <!-- arrows: upper reader to all three files -->
+  <g stroke="var(--viz-accent)" stroke-width="1.6" fill="none">
+    <path d="M 460 78 C 380 70, 320 70, 244 76" />
+    <path d="M 460 96 C 380 110, 320 130, 244 148" />
+    <path d="M 460 114 C 390 150, 330 190, 244 222" />
+  </g>
+  <!-- arrow: lower reader to main db only -->
+  <g stroke="var(--viz-muted)" stroke-width="1.6" fill="none" stroke-dasharray="5 4">
+    <path d="M 460 232 C 350 220, 300 150, 244 96" />
+  </g>
+  <text x="352" y="316" font-size="11" fill="var(--viz-muted)" text-anchor="middle">Measured 2026-08-29: SQLite 3.43.2 (macOS CLI) and 3.53.4 (Python), identical results.</text>
+</svg>
+</div>
+<figcaption>The database during the measurement. The main file is a 4 KB header; the megabyte is in the log. The upper reader goes through the wal-index and merges the two; the lower one never reaches the log and answers from the header page alone.</figcaption>
+</figure>
+
+<h2 id="the-folk-claim-measured">The folk claim, measured</h2>
+
+<p>The folk claim goes like this: open a WAL database read-only and you can only
+see what has been checkpointed, because rows still in the <code class="language-plaintext highlighter-rouge">-wal</code> are invisible
+to a read-only connection. A version of that sentence sat in our own notes,
+written in July after a verification query against our app’s index database
+came back empty while the app was mid-write. The explanation fit the symptom,
+sounded like a known WAL subtlety, and survived unchallenged for over a month.</p>
+
+<p>It fails a thirty-second test. Below is what every reader configuration
+actually returned, opened fresh against a live writer holding 5,000 committed,
+deliberately uncheckpointed rows. Fresh connections matter: none of these
+readers can be holding a stale snapshot, so whatever each one reports is a
+property of how it opened the file. The macOS system CLI (SQLite 3.43.2) and
+the SQLite 3.53.4 inside Python’s <code class="language-plaintext highlighter-rouge">sqlite3</code> module agree on every row of it.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reader</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>plain path, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">file:…?mode=ro</code>, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">sqlite3 -readonly</code>, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td>read-only, <code class="language-plaintext highlighter-rouge">-shm</code> missing but <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct; the reader builds the index itself</td>
+    </tr>
+    <tr>
+      <td>read-only, <code class="language-plaintext highlighter-rouge">-shm</code> present but <code class="language-plaintext highlighter-rouge">-wal</code> missing</td>
+      <td>hard error: <code class="language-plaintext highlighter-rouge">unable to open database file</code> (14)</td>
+    </tr>
+    <tr>
+      <td>read-only on a copy of the <code class="language-plaintext highlighter-rouge">.db</code> alone</td>
+      <td>hard error 14</td>
+    </tr>
+    <tr>
+      <td>read-write on a copy of the <code class="language-plaintext highlighter-rouge">.db</code> alone</td>
+      <td>wrong — answers from the header page</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">file:…?immutable=1</code>, even with the <code class="language-plaintext highlighter-rouge">-wal</code> there</td>
+      <td>wrong — the WAL is ignored</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Read-only is not the problem. The determining factor is much simpler and it is
+easy to get backwards: <strong>the <code class="language-plaintext highlighter-rouge">-wal</code> file’s presence is necessary and
+sufficient.</strong> The <code class="language-plaintext highlighter-rouge">-shm</code> is neither. Given the log, a read-only connection
+builds the wal-index it needs — writing a <code class="language-plaintext highlighter-rouge">-shm</code> if the directory allows, and
+otherwise keeping the index in its own memory. Take the log away and no
+permission or flag saves you.</p>
+
+<p>That reframes which failures are dangerous. A read-only reader that cannot
+reach the log fails <em>loudly</em>, with error 14 at the first query rather than at
+<code class="language-plaintext highlighter-rouge">open</code>, because SQLite opens lazily. Only two configurations answer confidently
+with the wrong data: <code class="language-plaintext highlighter-rouge">immutable=1</code>, which promises the file cannot change and
+so skips the log entirely, and a read-<em>write</em> connection to a copied <code class="language-plaintext highlighter-rouge">.db</code>,
+which is allowed to start a fresh empty log and then reports what the header
+page alone contains.</p>
+
+<p>One practical trap follows from this. A <code class="language-plaintext highlighter-rouge">-wal</code> is often zero bytes, which makes
+it look like an empty file not worth copying. Copying it is precisely what
+makes the read work.</p>
+
+<h2 id="the-two-readers-that-actually-lie">The two readers that actually lie</h2>
+
+<p><code class="language-plaintext highlighter-rouge">immutable=1</code> is a URI parameter that asserts the database file cannot change.
+It exists for databases on read-only media, and SQLite responds by skipping
+locking, change detection, and the WAL. Point it at a live database and the
+assertion is false: in the run above it ignored 1.1 MB of committed data and
+answered <code class="language-plaintext highlighter-rouge">no such table</code> from the header page. The parameter did exactly what
+it promises, on a file that broke the promise, and nothing anywhere warned us.</p>
+
+<p>The copied <code class="language-plaintext highlighter-rouge">.db</code> is the same failure without the URI, and it is the one people
+actually hit: a quick <code class="language-plaintext highlighter-rouge">cp</code> before poking at a live app’s data, a backup script
+globbing <code class="language-plaintext highlighter-rouge">*.db</code>, a database attached to a bug report. The log stays behind.
+Opened read-write, that copy is allowed to begin a fresh empty log, so it opens
+cleanly, parses correctly, and answers from whatever the last checkpoint wrote
+— which can be a single header page.</p>
+
+<p>Opened read-only, the same copy fails instead, with <code class="language-plaintext highlighter-rouge">unable to open database
+file</code> at the first query. That asymmetry is worth internalising, because it is
+the source of a recurring false bug report: <em>“this app’s database won’t open
+read-only, error 14.”</em> Nearly always the repro copied the <code class="language-plaintext highlighter-rouge">.db</code> without its
+<code class="language-plaintext highlighter-rouge">-wal</code>. Re-test against the live path before concluding anything is broken. We
+managed to file that exact false report against our own app while writing this
+post.</p>
+
+<p>What to do instead is short. To inspect a live database, query the real path
+with plain <code class="language-plaintext highlighter-rouge">SELECT</code>s; readers do not block a WAL writer, so the caution behind
+reaching for a read-only flag is already satisfied by the mode itself. To take
+a copy, take the set — <code class="language-plaintext highlighter-rouge">.db</code>, <code class="language-plaintext highlighter-rouge">-wal</code>, <code class="language-plaintext highlighter-rouge">-shm</code> — and copy the <code class="language-plaintext highlighter-rouge">-wal</code> <strong>even when
+it is zero bytes</strong>, because its absence is what turns a read-only open into
+error 14. And when you own the database, <code class="language-plaintext highlighter-rouge">PRAGMA wal_checkpoint(TRUNCATE);</code>
+folds the log into the main file first, after which the single file means what
+it appears to mean.</p>
+
+<h2 id="the-whole-test-runnable">The whole test, runnable</h2>
+
+<p>The measurement fits in one script, and running it beats trusting us:</p>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/bin/sh</span>
+<span class="c"># A live writer commits 5,000 rows in WAL mode with checkpointing off,</span>
+<span class="c"># then every reader opens fresh.</span>
+<span class="nv">W</span><span class="o">=</span><span class="si">$(</span><span class="nb">mktemp</span> <span class="nt">-d</span><span class="si">)</span><span class="p">;</span> <span class="nv">DB</span><span class="o">=</span><span class="s2">"</span><span class="nv">$W</span><span class="s2">/live.db"</span>
+
+python3 - <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">PY</span><span class="sh">' &amp;
+import sqlite3, sys, time
+c = sqlite3.connect(sys.argv[1])
+c.execute("PRAGMA journal_mode=WAL")
+c.execute("PRAGMA wal_autocheckpoint=0")   # park everything in the -wal
+c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)")
+c.executemany("INSERT INTO t (body) VALUES (?)", [("x"*200,) for _ in range(5000)])
+c.commit(); print("committed", flush=True); time.sleep(60)
+</span><span class="no">PY
+</span><span class="nv">WRITER</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span> <span class="nb">sleep </span>2
+<span class="nb">ls</span> <span class="nt">-l</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">"</span>                                 <span class="c"># live.db is 4096 bytes</span>
+
+q<span class="o">()</span> <span class="o">{</span> <span class="nb">printf</span> <span class="s1">'%-22s %s\n'</span> <span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span> <span class="s2">"</span><span class="si">$(</span>sqlite3 <span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span> <span class="s1">'select count(*) from t;'</span> 2&gt;&amp;1<span class="si">)</span><span class="s2">"</span><span class="p">;</span> <span class="o">}</span>
+q <span class="s2">"plain path"</span>          <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span>
+q <span class="s2">"mode=ro"</span>             <span class="s2">"file:</span><span class="nv">$DB</span><span class="s2">?mode=ro"</span>
+q <span class="s2">"immutable=1"</span>         <span class="s2">"file:</span><span class="nv">$DB</span><span class="s2">?immutable=1"</span>
+<span class="c"># Each copy gets its own file: opening one read-write CREATES an empty -wal</span>
+<span class="c"># beside it, which would then let a later read-only probe succeed.</span>
+<span class="nb">cp</span> <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/ro.db"</span><span class="p">;</span> <span class="nb">cp</span> <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/rw.db"</span>   <span class="c"># the .db WITHOUT its -wal</span>
+q <span class="s2">".db copy, read-only"</span>  <span class="s2">"file:</span><span class="nv">$W</span><span class="s2">/ro.db?mode=ro"</span>
+q <span class="s2">".db copy, read-write"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/rw.db"</span>
+
+<span class="nb">kill</span> <span class="nv">$WRITER</span> 2&gt;/dev/null<span class="p">;</span> <span class="nb">wait</span> <span class="nv">$WRITER</span> 2&gt;/dev/null<span class="p">;</span> <span class="nb">rm</span> <span class="nt">-rf</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">"</span>
+</code></pre></div></div>
+
+<p>On this machine the first two probes answer <code class="language-plaintext highlighter-rouge">5000</code>. <code class="language-plaintext highlighter-rouge">immutable=1</code> and the
+read-write copy both answer <code class="language-plaintext highlighter-rouge">Error: in prepare, no such table: t</code> — confidently
+wrong. The read-only copy answers <code class="language-plaintext highlighter-rouge">Error: in prepare, unable to open database
+file</code> — wrong, but honestly so. All of it with the writer alive and a megabyte
+of its committed rows sitting in <code class="language-plaintext highlighter-rouge">live.db-wal</code>.</p>
+
+<h2 id="the-clock-freezes-too">The clock freezes too</h2>
+
+<p>There is a second, quieter consequence of writes landing in the sidecar: the
+main <code class="language-plaintext highlighter-rouge">.db</code> file’s modification time moves at checkpoint time, not at commit
+time. Watch that file to learn when the database changes — a file watcher, an
+mtime comparison, a backup tool’s is-it-newer check — and nothing appears to
+happen while a busy writer streams commits into the <code class="language-plaintext highlighter-rouge">-wal</code> next door.</p>
+
+<p>We ship a tool that has to get both blind spots right.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=sqlite-wal-missing-rows">Agent Sessions</a>
+opens other programs’ SQLite session stores read-only — OpenCode’s
+<code class="language-plaintext highlighter-rouge">opencode.db</code>, Hermes’s <code class="language-plaintext highlighter-rouge">state.db</code>, Devin’s session database, Cursor’s chat
+store — while the agent that owns each one may still be writing to it.
+OpenCode’s is WAL-mode and live, which is where these traps first bit us. Its
+change monitor,
+<code class="language-plaintext highlighter-rouge">UnifiedSessionIndexer.fileSignature</code>, treats a <code class="language-plaintext highlighter-rouge">.db</code> file’s signature as the
+newest mtime across the database <em>and</em> its <code class="language-plaintext highlighter-rouge">-wal</code>/<code class="language-plaintext highlighter-rouge">-shm</code> sidecars, so a live
+database still registers as changed between checkpoints. For Hermes the
+freshness check skips file stats entirely:
+<code class="language-plaintext highlighter-rouge">HermesStateDBReader.sessionActivitySignature</code> asks the database itself what a
+session’s latest activity is, because the honest source for “did anything
+change” is a query, not a timestamp. The read path, meanwhile, leans on the
+corrected fact from the table above: those readers all pass
+<code class="language-plaintext highlighter-rouge">SQLITE_OPEN_READONLY</code>, and read-only is not the limitation folklore makes it
+out to be.</p>
+
+<h2 id="why-this-keeps-coming-up">Why this keeps coming up</h2>
+
+<p>Local software keeps drifting into SQLite. Browsers keep history in it,
+messaging apps archive into it, Electron apps persist state in it, and the
+newest arrivals are coding agents, whose on-disk session stores we mapped in
+<a href="/agent-sessions/blog/where-agents-store-history/">an earlier post</a> —
+OpenCode and Hermes both moved their entire history into WAL-mode databases.
+The situation that produces these traps, a database owned by a program that is
+running right now and read by a tool that did not write it, gets more common
+every year.</p>
+
+<p>The failure shape is worth naming, because it is not specific to SQLite.
+<code class="language-plaintext highlighter-rouge">immutable=1</code> and the lone copy both fail by succeeding: valid connection,
+clean parse, wrong data, no error anywhere. An instrument that cannot fail
+loudly will report success while measuring the wrong thing, and the defense is
+a positive control — confirm the reader can see data you know exists before
+trusting what it says is absent. We had over a month between writing down the
+wrong cause and testing it; the test took thirty seconds. As for the July
+incident that started all this, the honest answer is that we no longer know
+what caused it. The explanation we wrote down at the time is the one part we
+can now disprove.</p>
+
+<p>Agent Sessions is a free, local-only macOS app with no telemetry that makes
+every coding agent’s session history searchable, including the WAL-mode
+databases above, all opened read-only.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=sqlite-wal-missing-rows">Download it</a>,
+or read the database readers yourself —
+<a href="https://github.com/jazzyalex/agent-sessions">the source is on GitHub</a>, and a
+star there helps the next person doubting a healthy writer find this page.
+More posts like this one live at <a href="/agent-sessions/blog/">/blog/</a>.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[A SQLite query says no such table while the writer holds a megabyte of committed rows. Measured: which WAL readers go blind, and why read-only isn't one.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Session-Bench: 20 pass/fail gates for coding-agent session formats</title><link href="https://jazzyalex.github.io/agent-sessions/blog/session-bench-launch/" rel="alternate" type="text/html" title="Session-Bench: 20 pass/fail gates for coding-agent session formats" /><published>2026-08-07T00:00:00-07:00</published><updated>2026-08-23T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/session-bench-launch</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/session-bench-launch/"><![CDATA[<p>A coding agent’s session file is the only durable record of the
+conversation behind your code: what was asked, what ran, what it cost,
+what broke. We parse ten of these formats in production and fingerprint
+them for drift weekly, and the standard of care is low. Formats drift
+without notice, three of ten carry no version marker, and Claude Code,
+Codex, Cursor, and Antigravity publish nothing about their persisted
+formats.</p>
+
+<p>Opinions about that are cheap, so we turned ours into a benchmark — of
+the layer existing benchmarks skip. SWE-bench measures whether the agent
+completed the work; Session-Bench measures what the harness preserved
+after the work was done.
+<strong><a href="/agent-sessions/bench/">Session-Bench</a></strong> scores the session
+format of every harness we support on twenty scored pass/fail gates
+across five areas: signal density, completeness, stability, openness, and
+tooling cost. No partial credit, no vibes; a gate is pass, fail, or
+explicitly not run. Scores are mechanically generated from published
+measurements and checklist verdicts — to dispute a grade, dispute an input
+and re-run the evaluator — though some underlying raw artifacts (probe
+session files, corpus query transcripts) are not yet public; archiving
+them is the 1.0 milestone. The bench page
+is permanent, and grades will change when formats do. One caveat on scope,
+stated plainly: the bench measures each harness’s CLI session store; desktop and
+IDE surfaces can differ and get their own rows in a future version.</p>
+
+<figure class="post-figure bench-poster-figure">
+  <a href="/agent-sessions/assets/session-bench-poster.png" title="Open the full-resolution Session-Bench poster">
+    <img src="/agent-sessions/assets/session-bench-poster.png" width="1024" height="1536" alt="Session-Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates" loading="eager" />
+  </a>
+  <figcaption>Session-Bench v0.3 at a glance. Open the image for the full-resolution poster.</figcaption>
+</figure>
+
+<h2 id="the-v03-leaderboard">The v0.3 leaderboard</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Harness</th>
+      <th>Format</th>
+      <th>Gates cleared</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><strong>Pi</strong></td>
+      <td>flat parent-linked JSONL</td>
+      <td><strong>18</strong> / 19</td>
+    </tr>
+    <tr>
+      <td>2†</td>
+      <td><strong>OpenClaw</strong></td>
+      <td>flat parent-linked JSONL</td>
+      <td><strong>17</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Claude Code</strong></td>
+      <td>nested-envelope JSONL</td>
+      <td><strong>12</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Codex</strong></td>
+      <td>nested-envelope JSONL</td>
+      <td><strong>12</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>5†</td>
+      <td><strong>OpenCode</strong></td>
+      <td>SQLite rows</td>
+      <td><strong>11</strong> / 17</td>
+    </tr>
+    <tr>
+      <td>6†</td>
+      <td><strong>Kimi Code</strong></td>
+      <td>wire-op journal</td>
+      <td><strong>11</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>7†</td>
+      <td><strong>Hermes</strong></td>
+      <td>SQLite ledger + FTS</td>
+      <td><strong>10</strong> / 17</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><strong>Copilot CLI</strong></td>
+      <td>event-sourced JSONL</td>
+      <td><strong>10</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td><strong>Antigravity</strong></td>
+      <td>step-typed JSONL</td>
+      <td><strong>9</strong> / 18</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><strong>Cursor Agent</strong></td>
+      <td>flat JSONL + binary metadata DB</td>
+      <td><strong>7</strong> / 18</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>† One measurement could not be taken — a broken headless runtime, an auth
+failure, no store-size figure comparable across formats, or an
+observation window too short to judge stability (Kimi joined monitoring
+in late July). That gate is <em>not run</em>, drops out of the denominator, and
+the rank is provisional within a stated best/worst range on the bench
+page. An authentication error
+is not evidence about a format. Ranking is by fraction of scored gates
+cleared; ties share a rank.</p>
+
+<p>The signal gates come from a controlled probe: the identical one-line
+prompt (“List the files in the current directory, then say hello in one
+sentence.”), attempted headless through every harness, with each resulting
+session artifact measured byte for byte and each failed run recorded as
+exactly that.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9; --viz-axis:#c3c2b7; --viz-bar:#2a78d6; --viz-bar2:#9db9d8;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; --viz-axis:#383835; --viz-bar:#3987e5; --viz-bar2:#3d5a7a; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 396" role="img" aria-label="Bar chart: bytes written for the identical one-line task, by agent. OpenCode 274 KB as a fresh database file, Kimi 101 KB, Codex 78 KB, Copilot 67 KB, Claude Code 40 KB, Antigravity 6.8 KB, Cursor 1.9 KB, Pi 1.5 KB.">
+  <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">Bytes on disk for the identical one-line task</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">The Session-Bench probe prompt — measured 2026-08-04</text>
+  <line x1="140" y1="52" x2="140" y2="356" stroke="var(--viz-axis)" stroke-width="1" />
+  <g font-size="12.5">
+    <text x="132" y="72" text-anchor="end" fill="var(--viz-ink)">OpenCode</text>
+    <rect x="140" y="60" width="535" height="22" rx="4" fill="var(--viz-bar2)" />
+    <rect x="140" y="60" width="10" height="22" rx="3" fill="var(--viz-bar)" />
+    <text x="667" y="76" text-anchor="end" font-size="12" font-weight="600" fill="var(--viz-ink)">274 KB db creation (size gate: not run)</text>
+
+    <text x="132" y="108" text-anchor="end" fill="var(--viz-ink)">Kimi</text>
+    <rect x="140" y="96" width="198" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="346" y="112" font-size="12" font-weight="600" fill="var(--viz-ink)">101 KB</text>
+
+    <text x="132" y="144" text-anchor="end" fill="var(--viz-ink)">Codex</text>
+    <rect x="140" y="132" width="153" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="301" y="148" font-size="12" font-weight="600" fill="var(--viz-ink)">78 KB</text>
+
+    <text x="132" y="180" text-anchor="end" fill="var(--viz-ink)">Copilot CLI</text>
+    <rect x="140" y="168" width="131" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="279" y="184" font-size="12" font-weight="600" fill="var(--viz-ink)">67 KB</text>
+
+    <text x="132" y="216" text-anchor="end" fill="var(--viz-ink)">Claude Code</text>
+    <rect x="140" y="204" width="79" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="227" y="220" font-size="12" font-weight="600" fill="var(--viz-ink)">40 KB</text>
+
+    <text x="132" y="252" text-anchor="end" fill="var(--viz-ink)">Antigravity</text>
+    <rect x="140" y="240" width="14" height="22" rx="3" fill="var(--viz-bar)" />
+    <text x="162" y="256" font-size="12" font-weight="600" fill="var(--viz-ink)">6.8 KB</text>
+
+    <text x="132" y="288" text-anchor="end" fill="var(--viz-ink)">Cursor Agent</text>
+    <rect x="140" y="276" width="5" height="22" rx="2" fill="var(--viz-bar)" />
+    <text x="153" y="292" font-size="12" font-weight="600" fill="var(--viz-ink)">1.9 KB</text>
+
+    <text x="132" y="324" text-anchor="end" fill="var(--viz-ink)">Pi</text>
+    <rect x="140" y="312" width="4" height="22" rx="2" fill="var(--viz-bar)" />
+    <text x="152" y="328" font-size="12" font-weight="600" fill="var(--viz-ink)">1.5 KB</text>
+  </g>
+  <text x="12" y="352" font-size="11" fill="var(--viz-muted)">Hermes and OpenClaw could not run headless (broken one-shot runtime; auth error) — their size gate is scored not-run.</text>
+  <text x="12" y="368" font-size="11" fill="var(--viz-muted)">OpenCode's bar shows one-time db creation (~5 KB of rows inside); a comparable incremental measurement is pending, so its size gate is not scored.</text>
+</svg>
+</div>
+<figcaption>The probe that feeds the signal gates: one identical exchange, a 69× spread between Pi and Kimi, and two harnesses that could not produce a log at all.</figcaption>
+</figure>
+
+<p>The full gate-by-gate matrix, with the evidence behind every cell, is on
+<a href="/agent-sessions/bench/">the bench page</a>. The short version of how
+each grade was earned:</p>
+
+<p><strong>Pi, 18/19.</strong> The smallest harness in the set keeps the cleanest record:
+per-event timestamps, per-message model, token counts, dollar cost, readable
+thinking, first-class compaction events, a 1.5 KB log for our standardized
+one-line task — and it is the only harness that publishes a proper
+session-format specification, in its docs since April. It drops a single
+point, for leaving abandoned branches in the file for naive readers to
+trip over.</p>
+
+<p><strong>OpenClaw, 17/18.</strong> The other small harness. Full usage accounting
+including dollars, tool calls with outputs, stable schema across its
+~4-month observation window,
+and official documentation of its session store schema and transcript
+event structure.
+Its size probe is marked not-run rather than scored — the headless path
+refused to authenticate, which is a fact about automation readiness, not
+about the format — and the bench says so instead of guessing. Where it
+writes those files:
+<a href="/agent-sessions/guides/openclaw-local-agent-history.html">OpenClaw local agent history</a>.</p>
+
+<p><strong>Claude Code, 12/18.</strong> Genuinely good bones — per-line writer-version stamps (an app version, not a schema version — that now costs a gate),
+model and usage on every assistant event, subagent trees, fifteen-plus
+additive changes across the full four-month window without one breakage. It bleeds points on
+what it writes: 40 KB for a one-line exchange (two-thirds of it attachment
+records), a content-key share of 23.9% of corpus bytes, no dollar figure, and
+about 97.5% of recent thinking blocks are cryptographic signature with the
+text stripped. The reasoning is certified to have happened. You just can’t
+read it.</p>
+
+<p><strong>Codex, 12/18.</strong> The most complete wire-replay record we measured, and
+one of the most wasteful. Every turn is logged twice by design (a UI event plus the exact
+wire item), and its <code class="language-plaintext highlighter-rouge">world_state</code> context snapshots reach 41.6 KB per line
+in real sessions. Two of its v0.1 fails reversed on re-verification: raw
+reasoning is encrypted, but about a third of reasoning items carry a
+plaintext summary, and real rollouts do record thread and subagent links —
+both corrections credited to external review. It is also the only format here whose log
+occasionally answers the prompt: in our controlled run, the model read the
+file listing out of its own session file’s world snapshot instead of
+running the tool.</p>
+
+<p><strong>OpenCode, 11/18.</strong> A transparently queryable database design: every text chunk an
+addressable row, plaintext reasoning, dollar cost recorded, and its biggest
+rows turn out to be actual work product (tool outputs, diff summaries), not
+bookkeeping dumps. Its lean-session gate is not-run, stated plainly: the
+probe wrote about 5 KB of logical rows, but a physical before-and-after
+store measurement comparable to the JSONL harnesses (pages, indexes, WAL)
+hasn’t been taken yet, and we won’t score a number we didn’t measure. It
+still pays for the architecture in bench terms: nothing to <code class="language-plaintext highlighter-rouge">tail -f</code>, and a
+JSON-to-SQLite migration inside our observation window.</p>
+
+<p><strong>Copilot CLI, 10/18.</strong> The richest telemetry in the set (router scores, token
+checkpoints, a full shutdown accounting event) wrapped in the worst fixed
+cost: it writes its complete system prompt into every session, a 52 KB line
+in a 67 KB log. It also moved its entire storage layout at v1.0, and its
+session title lives in a sidecar YAML file.</p>
+
+<p><strong>Kimi Code, 11/18.</strong> The strangest format we track: a wire-operations
+journal where retries (<code class="language-plaintext highlighter-rouge">attempt: "2/10"</code>), steering, and cancels are all in
+the record — real forensic value. Its probe log is 0.9% conversation by
+bytes (7% across the whole corpus),
+snapshots a 70 KB tool catalog every session, splits user and model content
+into two disjoint op families that a naive reader will half-miss, and is
+the only format whose artifact declares a wire-protocol version field.
+We initially scored that marker as dishonest — the installed bundle ships a
+1.5 constant while sessions say 1.4 — then traced the actual writer and
+reversed ourselves: the binary carries two protocol generations side by
+side, and the one that wrote our session stamps 1.4 truthfully. The bench
+keeps the receipts either way.</p>
+
+<p><strong>Hermes, 10/17.</strong> The only format that can search itself — a trigram
+full-text index inside the database — plus real dollar accounting. But
+model attribution is session-level, there is nothing to tail, it migrated
+storage backends inside the window, and querying the live database turned
+up a 36 KB system prompt stored in nearly every session row (116 of 118) —
+the same fixed-cost habit as Copilot, just hidden in a column instead of a
+log line. Its size
+probe is not-run: the headless one-shot mode has returned no output since
+late June.</p>
+
+<p><strong>Antigravity, 9/18.</strong> Tidy 6.8 KB logs with per-event timestamps, and
+then the completeness floor gives out: no model field anywhere (our parser
+regexes model changes out of user-input text), no token counts, user
+content wrapped in XML tags inside JSON strings, and the largest storage
+migration we observed — markdown artifacts to JSONL, mid-window. Both sides
+of that migration are mapped in the
+<a href="/agent-sessions/guides/antigravity-cli-local-history.html">Antigravity CLI history guide</a>.</p>
+
+<p><strong>Cursor Agent, 7/18.</strong> Last place, and the leanest file in the bench, which
+is the point: 1.9 KB per session because the transcript records no
+timestamps, no model, no token counts, no cost, and no tool outputs. (Tool
+<em>calls</em> appeared sometime since July — an undocumented change we caught by
+re-measuring.) Its transcript is readable JSONL — but complete reconstruction, including
+model, timestamps, and metadata, requires an opaque sidecar database of
+protobuf blobs and hex-encoded JSON that standard tools cannot read.</p>
+
+<h2 id="the-gate-we-scored-wrong-and-what-it-actually-shows">The gate we scored wrong, and what it actually shows</h2>
+
+<p>The first version of this post claimed O3 — documented schema — failed all
+ten harnesses. That was an error, caught by external review five days
+after publication, and the bench works the way we said it does: the
+verdicts changed, the
+<a href="/agent-sessions/bench/#corrections">corrections log</a> says exactly
+what and why. Pi has published a genuine
+<a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md">session-format specification</a>
+since April. OpenClaw documents its session store schema and transcript
+event structure. Hermes documents its persistence layers and stored
+fields; Copilot documents its storage layout and persisted event types.
+Four cells flipped.</p>
+
+<p>The corrected finding is sharper than the wrong one: the two leaders on
+the board document their formats. Claude Code, Codex, Cursor, and
+Antigravity do not document their persisted session formats at all,
+OpenCode’s tables live only in source code, and Kimi documents where
+sessions live but not what the records mean. Every parser of the undocumented formats —
+ours included — is reverse-engineered and breaks a little when a vendor
+renames a field. These files hold months of paid working history.</p>
+
+<p>The same review cycle then found the reverse error on Codex — we had
+underscored it. Real rollouts carry plaintext reasoning summaries and
+subagent-thread records our evidence missed, so two fails flipped to
+passes and Codex rose to joint third. The rubric also moved twice in the
+same cycle: v0.2 made the honest-version gate conditional on a version
+existing at all and gave each stability verdict its actual observation
+window; v0.3 tightened the version gate to format versions only — an
+application version identifies the writer, not the schema, so Claude
+Code, Codex, Copilot, and OpenCode lost that point while Pi, OpenClaw,
+and Kimi, who stamp true format versions, kept it. A bench that grades
+others on their records has to keep its own this way.</p>
+
+<p>The drift data says this is not hypothetical caution. Across up to four
+months of weekly checks (observation windows vary per harness and each
+stability verdict states its own), four of ten formats had a structural
+break: Copilot moved
+flat files to per-session directories at v1.0, OpenCode and Hermes each
+replaced JSON storage with SQLite, and Antigravity swapped markdown
+artifacts for JSONL wholesale. Three of ten still carry no version marker
+of any kind, so a parser learns about changes by failing.</p>
+
+<h2 id="using-this-to-choose-a-harness">Using this to choose a harness</h2>
+
+<p>The composite score rewards all-rounders; most developers care about one
+property more than the rest. From the gate data: if you want local cost
+accounting in dollars, only Pi, OpenClaw, OpenCode, and Hermes write it. If
+you want history you can grep and tail, every JSONL harness qualifies —
+Pi, OpenClaw, Claude Code, Codex, Copilot, Kimi, and Antigravity — while
+the database camp and Cursor’s split store do not. If you want to search
+your history without installing anything, Hermes is alone. If you want
+reasoning (or at least a stored summary of it) you can still read next
+quarter, that rules out Claude Code, OpenClaw, and Cursor today. And if being
+able to read your own record back matters at all, Cursor’s binary metadata
+store is the one to avoid. The
+<a href="/agent-sessions/bench/">bench page</a> keeps a per-area breakdown for
+exactly this kind of narrowing.</p>
+
+<h2 id="what-passing-would-look-like">What passing would look like</h2>
+
+<p>The bench encodes it: write append-only lines you can tail, keep
+conversation above a quarter of the bytes, stamp model and usage on every
+message, record cost in currency, keep a readable rationale in the record
+(sealed chain-of-thought may be legitimate policy, but then store a
+summary), declare a version honestly, don’t move the store, and publish the
+schema. No harness clears every scored gate today. Pi is one away.
+The gates are not exotic; they describe a format that respects the person
+whose disk it is written to.</p>
+
+<p>Grades will move — that is the point of a standing bench. The
+<a href="https://github.com/jazzyalex/agent-sessions/tree/main/docs/agent-support">monitoring ledger and methodology</a>
+and the <a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/agent-json-tracking.md">drift log</a>
+are public, re-runs happen with our weekly monitoring, and disputes are
+welcome as issues. <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=session-bench-launch">Agent Sessions</a>
+itself is a free, local-only macOS browser for all ten of these stores;
+reading them every day is how the bench got built.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[We scored what ten coding agents write to disk: signal density, completeness, stability, openness, tooling cost. Pass, fail, or not run, no partial credit.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/bench-social-card.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/bench-social-card.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Agent-legible repositories: your repo now has two kinds of readers</title><link href="https://jazzyalex.github.io/agent-sessions/blog/agent-legible-repositories/" rel="alternate" type="text/html" title="Agent-legible repositories: your repo now has two kinds of readers" /><published>2026-07-24T00:00:00-07:00</published><updated>2026-07-24T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/agent-legible-repositories</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/agent-legible-repositories/"><![CDATA[<p>The highest-leverage file in this repository contains no code. It is an
+instructions file that every agent session reads before touching anything,
+and one line in it — use this script to register new Swift files with the
+Xcode project — has prevented more broken builds than any test we have. Not
+because agents are careless, but because a macOS project file is exactly the
+kind of global, fragile, undocumented state a fresh session cannot infer
+from the code around it.</p>
+
+<p>That is the general situation now. A repository has two kinds of readers:
+humans, who read it warm, with months of accumulated context, and agents,
+who read it cold, from zero, dozens of times a week. Sessions are stateless;
+the repo is the only memory they all share. Which means repo structure has
+quietly become interface design, and the question “can a competent stranger
+be productive here in ninety seconds” is no longer hypothetical. You are
+running that experiment several times a day.</p>
+
+<h2 id="the-five-memory-surfaces">The five memory surfaces</h2>
+
+<p>After a year of running multiple agents against the same repos daily, the
+structure that works has settled into five layers, distinguished by when
+they load and how long they stay true.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-accent:#2a78d6; --viz-box:#f0efec; --viz-grid:#e1e0d9;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-accent:#3987e5; --viz-box:#26262a; --viz-grid:#2c2c2a; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 330" role="img" aria-label="Stack diagram of five repo memory surfaces: instruction files (always loaded), playbooks and skills (loaded on demand), executable scripts (run, not read), handover file (temporal state), transcript archive (ground truth).">
+  <text x="12" y="22" font-size="14" font-weight="600" fill="var(--viz-ink)">The five memory surfaces of an agent-legible repo</text>
+  <g>
+    <rect x="60" y="44" width="480" height="44" rx="7" fill="var(--viz-box)" />
+    <text x="76" y="63" font-size="12.5" font-weight="600" fill="var(--viz-ink)">1 · Instruction files</text>
+    <text x="76" y="79" font-size="11.5" fill="var(--viz-ink2)">CLAUDE.md / agents.md — rules, invariants, pointers</text>
+    <text x="556" y="70" font-size="11" fill="var(--viz-muted)">every session, automatically</text>
+
+    <rect x="60" y="96" width="480" height="44" rx="7" fill="var(--viz-box)" />
+    <text x="76" y="115" font-size="12.5" font-weight="600" fill="var(--viz-ink)">2 · Playbooks &amp; skills</text>
+    <text x="76" y="131" font-size="11.5" fill="var(--viz-ink2)">deploy, release-notes, QA flows — procedures with steps</text>
+    <text x="556" y="122" font-size="11" fill="var(--viz-muted)">loaded when relevant</text>
+
+    <rect x="60" y="148" width="480" height="44" rx="7" fill="var(--viz-box)" />
+    <text x="76" y="167" font-size="12.5" font-weight="600" fill="var(--viz-ink)">3 · Executable scripts</text>
+    <text x="76" y="183" font-size="11.5" fill="var(--viz-ink2)">the fragile operations, wrapped — run, not re-derived</text>
+    <text x="556" y="174" font-size="11" fill="var(--viz-muted)">invoked, never inferred</text>
+
+    <rect x="60" y="200" width="480" height="44" rx="7" fill="var(--viz-box)" />
+    <text x="76" y="219" font-size="12.5" font-weight="600" fill="var(--viz-ink)">4 · Handover file</text>
+    <text x="76" y="235" font-size="11.5" fill="var(--viz-ink2)">dated entries: state, decisions, next steps</text>
+    <text x="556" y="226" font-size="11" fill="var(--viz-muted)">read at start, written at end</text>
+
+    <rect x="60" y="252" width="480" height="44" rx="7" fill="var(--viz-box)" />
+    <text x="76" y="271" font-size="12.5" font-weight="600" fill="var(--viz-ink)">5 · Transcript archive</text>
+    <text x="76" y="287" font-size="11.5" fill="var(--viz-ink2)">every past session, searchable — the ground truth</text>
+    <text x="556" y="278" font-size="11" fill="var(--viz-muted)">queried when history matters</text>
+  </g>
+  <!-- side axis -->
+  <g stroke="var(--viz-accent)" stroke-width="1.5">
+    <line x1="34" y1="48" x2="34" y2="292" />
+  </g>
+  <g fill="var(--viz-accent)"><path d="M 34 292 l -4 -8 l 8 0 z" /></g>
+  <text x="24" y="170" font-size="10.5" fill="var(--viz-muted)" transform="rotate(-90 24 170)" text-anchor="middle">cheaper to load → richer detail</text>
+</svg>
+</div>
+<figcaption>Top layers load every session and must stay terse; bottom layers hold the detail and load only when asked. Most repos have layer 1 at best.</figcaption>
+</figure>
+
+<p><strong>Instruction files</strong> are the always-loaded layer, which means every line in
+them taxes every session. The discipline is the same as for any hot path:
+rules and invariants only, with pointers down the stack for detail. “Read
+the newest handover entry before starting” is one line; it makes layer 4
+work. The common failure is treating this file as documentation and letting
+it grow until the agent’s attention budget is spent before the work starts.</p>
+
+<p><strong>Playbooks and skills</strong> hold multi-step procedures — how a release ships,
+how QA runs, what the deploy gate checks. They only load when the task
+matches, so they can afford detail the instruction file cannot. The test for
+whether something belongs here: it has steps, and doing the steps wrong has
+a blast radius.</p>
+
+<p><strong>Executable scripts</strong> are the layer people underrate. An agent asked to add
+a file to an Xcode project will, from first principles, edit the pbxproj —
+sometimes correctly. A script removes the “sometimes.” Anything global,
+fragile, or full of tribal knowledge (project registration, code signing,
+notarization, database migrations) should be a script the agent runs rather
+than a procedure it re-derives. Scripts are the difference between telling
+every new hire how the coffee machine works and just labeling the buttons.</p>
+
+<p><strong>The handover file</strong> carries time: what is half-done, what was rejected and
+why, what comes next. It deserves its own discussion, and has one in
+<a href="/agent-sessions/blog/the-handover-problem/">the handover problem</a>.</p>
+
+<p><strong>The transcript archive</strong> is the layer you already have whether you
+maintain it or not: every agent writes complete session logs to your disk
+(<a href="/agent-sessions/blog/where-agents-store-history/">here, exactly</a>).
+Unqueried, it is dead weight. Searchable, it is the answer to “have we hit
+this error before” and “what did we decide in May” — questions the other
+four layers are too terse to answer. A local browser like
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=agent-legible-repositories">Agent Sessions</a> makes this
+layer usable without any setup.</p>
+
+<h2 id="the-test">The test</h2>
+
+<p>The measure of an agent-legible repo is what a cold session does in its
+first two minutes. In a repo with these layers: reads the rules, reads the
+briefing, and starts the actual task. In a repo without them: greps around,
+re-derives the build system, makes a reasonable-but-wrong assumption about
+the one fragile thing, and spends your review cycle discovering what the
+last session already knew.</p>
+
+<p>None of this is agent-specific, which is the quietly satisfying part. Terse
+rules, written procedures, wrapped operations, shift-change notes, and a
+searchable record are what good teams do for humans; agents just remove the
+option of pretending the onboarding docs are fine when they are not. The
+stateless reader was always coming. Now it reads your repo before lunch,
+every day, and it grades the structure by how much of your money it burns
+on archaeology.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[Coding agents read your repository cold, dozens of times a week. How to structure instruction files, scripts, and handover state for every session.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Your agent history is a dataset. Almost nobody queries it.</title><link href="https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/" rel="alternate" type="text/html" title="Your agent history is a dataset. Almost nobody queries it." /><published>2026-07-21T00:00:00-07:00</published><updated>2026-07-21T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/your-agent-history-is-a-dataset/"><![CDATA[<p>For every instruction I typed into Codex over the last eleven months, it
+logged an average of 34 events: 2.7 assistant messages, 10.7 tool calls, and
+about 19 entries of bookkeeping around them. Claude Code’s ratio is different
+in shape but similar in scale — 13.5 assistant events and 5.7 tool results
+per instruction. I know this because the full record of every session is
+sitting on my disk in parseable form, 3.8 GB of it, and I finally parsed it.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-s1:#2a78d6; --viz-s2:#1baf7a; --viz-s3:#eda100; --viz-s4:#4a3aa7; --viz-surface:#fcfcfb;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-s1:#3987e5; --viz-s2:#199e70; --viz-s3:#c98500; --viz-s4:#9085e9; --viz-surface:#1a1a19; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 250" role="img" aria-label="Stacked bar chart: events logged per typed user instruction. Codex: 2.7 assistant, 10.7 tool, 15.0 bookkeeping, 4.2 other, total 33.6. Claude Code: 13.5 assistant, 5.7 tool, 0.9 bookkeeping, 7.2 other, total 27.2.">
+  <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">Events logged per typed instruction</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">Corpus averages, Aug 2025 – Jul 2026, one machine</text>
+  <!-- scale: 16 px per event; x0=110 -->
+  <g font-size="12.5">
+    <text x="102" y="86" text-anchor="end" fill="var(--viz-ink)">Codex</text>
+    <!-- 2.7*16=43, 10.7*16=171, 15*16=240, 4.2*16=67 ; gaps 2px -->
+    <rect x="110" y="70" width="43" height="24" rx="3" fill="var(--viz-s1)" />
+    <rect x="155" y="70" width="171" height="24" rx="3" fill="var(--viz-s2)" />
+    <rect x="328" y="70" width="240" height="24" rx="3" fill="var(--viz-s3)" />
+    <rect x="570" y="70" width="67" height="24" rx="3" fill="var(--viz-s4)" />
+    <text x="645" y="87" font-size="12" font-weight="600" fill="var(--viz-ink)">33.6</text>
+
+    <text x="102" y="136" text-anchor="end" fill="var(--viz-ink)">Claude Code</text>
+    <!-- 13.5*16=216, 5.7*16=91, 0.9*16=14, 7.2*16=115 -->
+    <rect x="110" y="120" width="216" height="24" rx="3" fill="var(--viz-s1)" />
+    <rect x="328" y="120" width="91" height="24" rx="3" fill="var(--viz-s2)" />
+    <rect x="421" y="120" width="14" height="24" rx="3" fill="var(--viz-s3)" />
+    <rect x="437" y="120" width="115" height="24" rx="3" fill="var(--viz-s4)" />
+    <text x="560" y="137" font-size="12" font-weight="600" fill="var(--viz-ink)">27.2</text>
+  </g>
+  <!-- legend -->
+  <g font-size="11.5" fill="var(--viz-ink2)">
+    <rect x="110" y="176" width="10" height="10" rx="2" fill="var(--viz-s1)" /><text x="126" y="185">assistant messages</text>
+    <rect x="260" y="176" width="10" height="10" rx="2" fill="var(--viz-s2)" /><text x="276" y="185">tool calls + results</text>
+    <rect x="410" y="176" width="10" height="10" rx="2" fill="var(--viz-s3)" /><text x="426" y="185">bookkeeping / metadata</text>
+    <rect x="590" y="176" width="10" height="10" rx="2" fill="var(--viz-s4)" /><text x="606" y="185">other</text>
+  </g>
+  <text x="110" y="212" font-size="11" fill="var(--viz-muted)">"Other" is mostly reasoning items. Codex logs turn context and token counts as separate</text>
+  <text x="110" y="228" font-size="11" fill="var(--viz-muted)">events, hence the bookkeeping share.</text>
+</svg>
+</div>
+<figcaption>One typed sentence, thirty-odd logged events. The tool-call block in the middle is where the actual work happened, and it's all on your disk.</figcaption>
+</figure>
+
+<p>The point is not the volume. The point is that this is a <em>dataset</em> about how
+you build software, generated as a free byproduct, complete with timestamps,
+tool inputs and outputs, and (in the better formats) per-message model and
+token accounting. Developers who would never dream of running a service
+without metrics are sitting on months of their own engineering telemetry and
+have never run a single query against it.</p>
+
+<p>The first obstacle is usually just knowing where the files are. Each agent
+stores its sessions somewhere different, and the paths and formats are written
+up per agent in the <a href="/agent-sessions/guides/">local history guides</a>.</p>
+
+<h2 id="five-questions-your-history-can-already-answer">Five questions your history can already answer</h2>
+
+<p><strong>What did that feature actually cost?</strong> Sessions in the newer formats carry
+token counts and sometimes dollar figures per message. Group by day or by
+repo and you have cost-per-feature numbers that no dashboard gives you,
+because the vendor dashboard doesn’t know your project boundaries.</p>
+
+<p><strong>Which commands keep failing?</strong> Every failed build, every flaky test run,
+every permission error is in the tool-output events, with timestamps. The
+third time a session trips over the same broken script is visible in the
+data before it is visible in your patience. This one has direct payoff: the
+recurring failure is usually a one-line fix in the repo’s agent
+instructions.</p>
+
+<p><strong>What did we decide, and when?</strong> Search is the killer feature of an archive.
+“The session where we rejected the geometry redesign” is findable by
+keyword in seconds with an indexed browser, and the full context — what was
+tried, what the output showed, why it died — is all there. Git remembers the
+outcome; the transcript remembers the argument.</p>
+
+<p><strong>How has your prompting changed?</strong> Instructions from month one read
+differently than month eleven: shorter, more specific, front-loaded with
+constraints. Your own history is the before/after corpus, and skimming it is
+a faster prompting course than most prompting courses.</p>
+
+<p><strong>Where does the time go?</strong> Timestamps on every event mean a session has a
+measurable shape: how long between your instruction and the first tool call,
+how long the agent spent in test loops, how much wall-clock a “quick fix”
+session really took. Aggregate a month of that and you know which kinds of
+tasks to delegate differently, or not at all.</p>
+
+<h2 id="why-nobody-does-this">Why nobody does this</h2>
+
+<p>Three honest reasons. The formats are undocumented, so writing a parser
+means reverse engineering six dialects of JSONL and SQLite (we covered the
+details in <a href="/agent-sessions/blog/how-coding-agents-remember/">the field study</a>).
+The volumes are awkward: 3.8 GB is too big to grep casually and too small to
+justify a data pipeline. And the tooling is young: the vendors treat these
+files as crash-recovery state, not as a product surface, so nothing ships
+with a search box over your own history.</p>
+
+<p>The parsing problem, at least, is solved for the reading half.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=your-agent-history-is-a-dataset">Agent Sessions</a> indexes all
+six formats into one searchable, local-only browser — that’s the “what did
+we decide” and “which command failed” questions handled without writing a
+line of code. The aggregate questions still need a script, and the one this
+post’s numbers came from is in the repo as a starting point.</p>
+
+<p>A year of your engineering decisions is on your disk, already written down,
+already machine-readable. That is more than most teams can say about their
+human decisions. It seems worth a query or two.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[Eleven months of coding-agent transcripts, measured: what one typed instruction triggers, and five questions your session history can answer.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">The handover problem: agent sessions end, projects don’t</title><link href="https://jazzyalex.github.io/agent-sessions/blog/the-handover-problem/" rel="alternate" type="text/html" title="The handover problem: agent sessions end, projects don’t" /><published>2026-07-17T00:00:00-07:00</published><updated>2026-07-17T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/the-handover-problem</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/the-handover-problem/"><![CDATA[<p>A coding agent session is bounded by its context window; a project is not.
+On the repository this blog ships from, the last two months of work spans
+well over a hundred agent sessions across two different agents. Every one of
+those sessions started from zero. Whatever the previous session knew — which
+approach was rejected and why, what was left half-done, which test is flaky
+for an unrelated reason — was gone unless someone wrote it down somewhere the
+next session would look.</p>
+
+<p>That is the handover problem. It is the agentic version of shift change at a
+hospital, and the industry mostly pretends it doesn’t exist. New sessions
+re-derive context by re-reading the codebase, which costs tokens and time,
+and worse, re-derivation recovers facts but not decisions. The code shows
+what it is; it does not show the two designs that were tried and abandoned
+on Tuesday.</p>
+
+<h2 id="what-actually-carries-state-today">What actually carries state today</h2>
+
+<p>There are four places session-to-session state can live, and they are not
+interchangeable.</p>
+
+<p><strong>Git history</strong> carries what changed and, with disciplined commit messages,
+why. It carries nothing about work in progress, rejected alternatives, or
+intent. It is the official record, written after the fact, by the winner.</p>
+
+<p><strong>Transcripts</strong> carry everything, which is their problem. The full record of
+a working session on our machines averages hundreds of events per user
+message; the signal about “where we left off” is diffused across megabytes.
+Transcripts are for audit and search (that is <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=the-handover-problem">what Agent Sessions is
+for</a>),
+not for briefing the next shift.</p>
+
+<p><strong>Built-in memory features</strong> (CLAUDE.md auto-memory, agent memory stores)
+carry durable preferences and hard-won facts well. They are the wrong shape
+for project state: memory is organized by topic and persists indefinitely,
+while project state is organized by time and is mostly obsolete in a week.
+Writing “task 3 is half-done” into long-term memory is how you get haunted
+by it in August.</p>
+
+<p><strong>The handover file</strong> carries exactly the shift-change payload: current
+state, open decisions, next steps. It is the only one of the four that is
+written <em>for</em> the next session, at the moment the context still exists.</p>
+
+<h2 id="the-pattern">The pattern</h2>
+
+<p>What we run in production is one file at the repo root, <code class="language-plaintext highlighter-rouge">RepoHandover.md</code>,
+append-only, newest entry first, each entry dated and written at the end of
+a working session. Three sections, no more:</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9; --viz-accent:#2a78d6; --viz-box:#f0efec;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; --viz-accent:#3987e5; --viz-box:#26262a; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 300" role="img" aria-label="Diagram: three agent sessions over time, each ending by writing to a handover file which the next session reads at start. Context windows end; the handover file bridges them.">
+  <text x="12" y="22" font-size="14" font-weight="600" fill="var(--viz-ink)">Sessions end. The handover file is the bridge.</text>
+  <!-- session boxes -->
+  <g>
+    <rect x="20" y="52" width="180" height="64" rx="8" fill="var(--viz-box)" />
+    <text x="110" y="78" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">Session A</text>
+    <text x="110" y="98" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">context dies at the end</text>
+
+    <rect x="270" y="52" width="180" height="64" rx="8" fill="var(--viz-box)" />
+    <text x="360" y="78" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">Session B</text>
+    <text x="360" y="98" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">different day, zero memory</text>
+
+    <rect x="520" y="52" width="180" height="64" rx="8" fill="var(--viz-box)" />
+    <text x="610" y="78" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">Session C</text>
+    <text x="610" y="98" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">maybe a different agent</text>
+  </g>
+  <!-- handover file -->
+  <rect x="180" y="190" width="360" height="72" rx="8" fill="none" stroke="var(--viz-accent)" stroke-width="2" />
+  <text x="360" y="216" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">RepoHandover.md — newest entry first</text>
+  <text x="360" y="236" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">State · Decisions (with the why) · Next steps</text>
+  <text x="360" y="252" font-size="11" fill="var(--viz-muted)" text-anchor="middle">written at session end, read at session start</text>
+  <!-- arrows -->
+  <g stroke="var(--viz-accent)" stroke-width="1.6" fill="none">
+    <path d="M 110 116 C 110 160, 220 175, 250 190" />
+    <path d="M 330 190 C 340 160, 350 140, 356 120" />
+    <path d="M 360 116 0 0 0 0" opacity="0" />
+    <path d="M 400 190 C 420 160, 440 145, 452 120" />
+    <path d="M 470 190 C 520 170, 580 150, 606 120" />
+  </g>
+  <g fill="var(--viz-accent)">
+    <path d="M 250 190 l -10 -1 l 6 8 z" />
+    <path d="M 356 120 l -6 8 l 9 1 z" />
+    <path d="M 452 120 l -6 8 l 9 1 z" />
+    <path d="M 606 120 l -7 7 l 9 2 z" />
+  </g>
+  <g font-size="10.5" fill="var(--viz-muted)">
+    <text x="130" y="160">writes</text>
+    <text x="300" y="150">reads</text>
+    <text x="430" y="150">writes</text>
+    <text x="540" y="150">reads</text>
+  </g>
+</svg>
+</div>
+<figcaption>Each session writes the briefing the next one reads. The file outlives every context window that contributed to it.</figcaption>
+</figure>
+
+<p>The entry format matters less than the discipline around it. Ours:</p>
+
+<ul>
+  <li><strong>State</strong>: what is done, what is half-done, what is verified vs merely
+written. “Code-complete, QA pending” is a state; “made progress” is not.</li>
+  <li><strong>Decisions</strong>: choices made and the reason, especially rejected paths.
+This is the section git cannot give you. “Hover-resize approach rejected;
+made jumping worse; next attempt must start with runtime tracing” saves
+the next session a day.</li>
+  <li><strong>Next</strong>: the first three things the next session should do, in order.</li>
+</ul>
+
+<p>Then one line in the repo’s agent instructions file: <em>before starting work,
+read the newest entry.</em> Both major agents honor that reliably, and a session
+that starts with the briefing skips the archaeology.</p>
+
+<p>Two rules keep it working. Entries are written at session end, when the
+context is still hot; a handover reconstructed the next morning is fiction
+with good intentions. And the file is a log, not a wiki: nobody edits old
+entries, they only supersede them. When an entry stops being true, the new
+entry says so.</p>
+
+<h2 id="why-not-just-resume-the-session">Why not just resume the session?</h2>
+
+<p>Resume features are real and improving, and they solve a different problem.
+Resuming reopens <em>one</em> conversation with its old context; it does not brief
+a <em>different</em> session, a different agent, or a teammate. It also drags the
+whole transcript back in, including the parts that were wrong. A handover
+entry is small on purpose: it is the distillation the resumed transcript
+never got.</p>
+
+<p>The honest cost of the pattern is that it takes two minutes at the end of a
+session, which is exactly when nobody wants to spend two minutes. Automate
+the nudge if you can (a session-end hook that drafts the entry works well;
+the agent writes a decent first draft of its own shift report). The payoff
+compounds: on this repo, the handover file plus instructions file is now the
+de facto onboarding document, and it cost nothing beyond the discipline.</p>
+
+<p>Session transcripts remain the ground truth underneath all of this. When a
+handover entry says “we rejected the geometry redesign,” the transcript is
+where the details live, searchable months later. That layering — terse
+briefing on top, full record below — is the whole system, and each layer is
+bad at the other’s job.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[Agent sessions are stateless and projects outlive dozens of them. The dated handover file, and why it beats memory features and transcript mining.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Recovering an AI coding-agent session you thought you lost</title><link href="https://jazzyalex.github.io/agent-sessions/blog/recovering-a-lost-session/" rel="alternate" type="text/html" title="Recovering an AI coding-agent session you thought you lost" /><published>2026-07-17T00:00:00-07:00</published><updated>2026-07-17T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/recovering-a-lost-session</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/recovering-a-lost-session/"><![CDATA[<p>A session that vanishes from your agent’s resume picker is almost never gone.
+Three things usually happened instead: you archived it, you moved or renamed the
+project folder, or the file actually left the disk. Only the last one is
+unrecoverable, and even then the recovery runs through your backups, not the
+agent. The first two look identical from inside the tool — an empty picker, a
+session that was there yesterday — but the fix is completely different, and
+neither one touches the transcript itself. Knowing which case you’re in is the
+whole job. This is how to check, and how to get each one back.</p>
+
+<h2 id="1-its-archived-not-deleted">1. It’s archived, not deleted</h2>
+
+<p>Archive is the most common way a session “disappears,” because the agents that
+ship an archive action rarely make it obvious that the data survives. Archiving
+sets a flag or moves a file. It never deletes the transcript.</p>
+
+<p><strong>OpenCode.</strong> In the <code class="language-plaintext highlighter-rouge">/sessions</code> picker, <code class="language-plaintext highlighter-rouge">Ctrl+d</code> reads like a delete key and
+behaves like one — the session drops off the list. It’s a soft archive. It sets
+a <code class="language-plaintext highlighter-rouge">time_archived</code> timestamp on that session’s row in
+<code class="language-plaintext highlighter-rouge">~/.local/share/opencode/opencode.db</code>, and the picker simply filters archived
+rows out. The full transcript is still in the database. Set <code class="language-plaintext highlighter-rouge">time_archived</code> back
+to <code class="language-plaintext highlighter-rouge">NULL</code> for that row in the <code class="language-plaintext highlighter-rouge">session</code> table and the session comes back. Credit
+where it’s due: that recipe is community knowledge, posted by Loocos in
+<a href="https://github.com/anomalyco/opencode/issues/23468">opencode#23468</a>, not
+something any viewer invented. Don’t expect a GUI to spare you the SQL here,
+either: a tool reading that same table with the same <code class="language-plaintext highlighter-rouge">time_archived IS NULL</code>
+filter the picker uses will hide exactly what the picker hides. For OpenCode,
+the database edit is the reliable fix.</p>
+
+<p><strong>Codex.</strong> Codex Desktop’s Archive action doesn’t delete either. It moves the
+session’s rollout file out of <code class="language-plaintext highlighter-rouge">~/.codex/sessions/</code> and into a sibling folder,
+<code class="language-plaintext highlighter-rouge">~/.codex/archived_sessions/</code>. Same append-only <code class="language-plaintext highlighter-rouge">.jsonl</code>, same content, one
+directory over. To restore a Codex session, move the <code class="language-plaintext highlighter-rouge">rollout-*.jsonl</code> file back
+under <code class="language-plaintext highlighter-rouge">~/.codex/sessions/YYYY/MM/DD/</code> (matching the date in its filename), or
+just open it where it sits — an archived rollout is a completely normal Codex
+log.</p>
+
+<p><strong>Claude Desktop.</strong> Archiving is a Desktop feature here, not a Claude Code CLI
+one, and the flag is stored nowhere near the transcript. Desktop keeps a small
+metadata sidecar per conversation under <code class="language-plaintext highlighter-rouge">~/Library/Application
+Support/Claude/claude-code-sessions/</code>, as <code class="language-plaintext highlighter-rouge">local_*.json</code> files that point back at
+the CLI transcript through a <code class="language-plaintext highlighter-rouge">cliSessionId</code> field. (Cowork sessions use a
+parallel tree, <code class="language-plaintext highlighter-rouge">local-agent-mode-sessions/</code>, with the same sidecar shape.)
+Archiving sets <code class="language-plaintext highlighter-rouge">isArchived</code> to <code class="language-plaintext highlighter-rouge">true</code> in that sidecar. Your JSONL under
+<code class="language-plaintext highlighter-rouge">~/.claude/projects/</code> is not touched at all. Claude Desktop ships a native
+unarchive action — easy to miss in the UI, but reach for it first. Editing by
+hand means setting <code class="language-plaintext highlighter-rouge">isArchived</code> back to <code class="language-plaintext highlighter-rouge">false</code> in the sidecar; searching the
+transcript for the flag will turn up nothing, because it was never in there.</p>
+
+<p>The pattern across all three: archive is a filter, not a shredder. The bytes you
+wrote are still on disk. You’re changing which of them the picker chooses to
+show you.</p>
+
+<p>If you need the full layout of the store you’re digging through, there is a guide
+per agent: <a href="/agent-sessions/guides/opencode-sqlite-history.html">OpenCode</a>,
+<a href="/agent-sessions/guides/codex-local-history.html">Codex</a>, and
+<a href="/agent-sessions/guides/claude-code-jsonl-history.html">Claude Code</a>.</p>
+
+<h2 id="2-the-project-folder-moved-or-renamed">2. The project folder moved or renamed</h2>
+
+<p>This one is sneakier, because nothing was archived and nothing was deleted, yet
+<code class="language-plaintext highlighter-rouge">claude --resume</code> from your project shows an empty list. The cause is how Claude
+Code files sessions: one folder per project, and the folder is named after the
+working directory you launched from, with every <code class="language-plaintext highlighter-rouge">/</code> turned into a <code class="language-plaintext highlighter-rouge">-</code>. A project
+at <code class="language-plaintext highlighter-rouge">/Users/you/app</code> lands in <code class="language-plaintext highlighter-rouge">~/.claude/projects/-Users-you-app/</code>. The resume
+picker keys on your <em>current</em> directory. Rename the project to <code class="language-plaintext highlighter-rouge">app-v2</code> and
+launch Claude from it, and the picker looks in <code class="language-plaintext highlighter-rouge">-Users-you-app-v2</code>, a folder
+that doesn’t exist yet. Nothing matches, so nothing shows. This is the classic
+“find lost Claude Code history” panic, and the history was never lost — it’s
+sitting in the folder named for the old path.</p>
+
+<p>Two facts make recovery easy once you know the mechanic. First, the old folder
+is still there under <code class="language-plaintext highlighter-rouge">~/.claude/projects/</code>, named for wherever the project used
+to live. Second, each event line in the JSONL records its own <code class="language-plaintext highlighter-rouge">cwd</code>, so the
+original path travels with the data even if you rename the folder. To get the
+sessions back, you have a few honest options: resume from the old path if it
+still exists, or copy (don’t move, until you’ve confirmed it works)
+<code class="language-plaintext highlighter-rouge">~/.claude/projects/&lt;old-encoded-cwd&gt;/</code> into a folder named for the new path so
+the picker matches again. A handful of community tools — the “teleport” and
+“folder-move” helpers people pass around — automate exactly this folder rename,
+which is the whole reason they exist. There’s nothing magic inside them; they
+reconcile the encoded folder name with where your project now lives.</p>
+
+<p>Cursor falls into the same trap, with one cosmetic difference in the encoding.
+Its agent transcripts live under <code class="language-plaintext highlighter-rouge">~/.cursor/projects/</code>, one folder per project
+path with the separators turned into dashes and no leading dash — the project
+above becomes <code class="language-plaintext highlighter-rouge">Users-you-app</code>, where Claude Code would write <code class="language-plaintext highlighter-rouge">-Users-you-app</code>.
+Inside it, <code class="language-plaintext highlighter-rouge">agent-transcripts/&lt;session-id&gt;/&lt;session-id&gt;.jsonl</code>. Rename the repo
+and the old transcripts stay filed under the old name, exactly as with Claude
+Code. Cursor’s chat databases are a separate surface: per-session SQLite files
+under <code class="language-plaintext highlighter-rouge">~/.cursor/chats/</code>, in directories named by a workspace hash rather than
+by path, so renaming the project doesn’t disturb those.</p>
+
+<p>Codex behaves a little differently and it’s worth being precise about why. Codex
+shards sessions by date under <code class="language-plaintext highlighter-rouge">~/.codex/sessions/YYYY/MM/DD/</code>, not by project
+path, so moving your repo never relocates the log file. The original working
+directory is recorded inside the rollout’s <code class="language-plaintext highlighter-rouge">session_meta</code> line instead. Moving
+the folder doesn’t hide a Codex session by path the way it does for Claude Code
+or Cursor — you locate it by date or ID, not by browsing from the new directory.</p>
+
+<h2 id="3-the-file-was-genuinely-deleted">3. The file was genuinely deleted</h2>
+
+<p>Sometimes the honest answer is that the session is gone. A <code class="language-plaintext highlighter-rouge">rm</code>, an overzealous
+cleanup script, or an emptied Trash took the <code class="language-plaintext highlighter-rouge">.jsonl</code> file or the SQLite database
+off the disk. No session viewer can recover that, and any tool that claims it can
+is either reading a backup or misleading you. A read-only viewer opens these
+files; it does not resurrect them. That boundary is worth stating plainly,
+because it’s the one place the reassuring “it’s probably just archived” story
+stops being true.</p>
+
+<p>What actually recovers a deleted file is a backup that predates the deletion, and
+your operating system almost certainly has one running:</p>
+
+<ul>
+  <li><strong>macOS — Time Machine.</strong> If it’s on, it snapshots your home directory,
+including <code class="language-plaintext highlighter-rouge">~/.claude/</code>, <code class="language-plaintext highlighter-rouge">~/.codex/</code>, and
+<code class="language-plaintext highlighter-rouge">~/.local/share/opencode/opencode.db</code>. Enter Time Machine, navigate to the
+exact path, pick a date before the deletion, and restore the file. For the
+SQLite-backed agents (OpenCode, Hermes), you’re restoring the whole database
+to that point in time, so you’ll get every session that existed then, not just
+the one you lost.</li>
+  <li><strong>Windows — Volume Shadow Copies.</strong> The “Previous Versions” tab on a folder,
+and File History if you’ve enabled it, expose shadow copies of the session
+directory. Same idea: pick a version from before the delete and restore.</li>
+</ul>
+
+<p>If neither is enabled, there’s no clean recovery, and that’s the real cost of
+running without backups. This is the case to prevent, not the one to fix.</p>
+
+<h2 id="where-a-viewer-actually-helps">Where a viewer actually helps</h2>
+
+<p>Two of the three failure modes above are findability problems, not data-loss
+problems, and that’s exactly where a read-only session browser earns its place.
+The path case is the one it flattens completely: read every project folder under
+<code class="language-plaintext highlighter-rouge">~/.claude/projects/</code> and <code class="language-plaintext highlighter-rouge">~/.cursor/projects/</code> at once and it stops mattering
+which directory you happen to be standing in, which is the entire mechanism
+behind the renamed-repo panic. Archive is a partial win. A browser that walks
+<code class="language-plaintext highlighter-rouge">~/.codex/archived_sessions/</code> and reads Claude Desktop’s sidecars will show you
+the Codex and Claude sessions their own pickers hide.</p>
+
+<p>Be skeptical of anything broader. Upstream archive flags are easy for a viewer
+to inherit and awkward to override, and a tool that reads OpenCode’s <code class="language-plaintext highlighter-rouge">session</code>
+table the obvious way inherits <code class="language-plaintext highlighter-rouge">time_archived IS NULL</code> along with it — so it
+hides the same rows the picker does, mine included. “Reads the store” and
+“shows you everything in the store” are different claims, and the second one is
+worth checking rather than assuming.</p>
+
+<p>What none of them can do is invent bytes that aren’t on disk. A truly deleted
+session is a backup problem, full stop. Honest tools tell you that instead of
+pretending otherwise.</p>
+
+<figure class="post-figure">
+<style>
+.recovery-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 auto; max-width: 760px; }
+.recovery-table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+.recovery-table th, .recovery-table td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid #d0d7de; }
+.recovery-table thead th { border-bottom: 2px solid #d0d7de; font-weight: 600; }
+.recovery-table code { font-size: 12.5px; }
+@media (prefers-color-scheme: dark) {
+  .recovery-table th, .recovery-table td { border-bottom-color: #2c2c2e; }
+  .recovery-table thead th { border-bottom-color: #3a3a3c; }
+}
+</style>
+<div class="recovery-table-wrap">
+<table class="recovery-table">
+<thead>
+<tr><th>How it "disappeared"</th><th>What actually happened</th><th>How to get it back</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenCode session gone after <code>Ctrl+d</code> in <code>/sessions</code></td>
+<td>Soft archive: a <code>time_archived</code> timestamp is set on the row in <code>~/.local/share/opencode/opencode.db</code>; the transcript is still in the DB.</td>
+<td>Set <code>time_archived</code> back to <code>NULL</code> in the <code>session</code> table. Viewers generally inherit the same filter, so this one really is the SQL edit.</td>
+</tr>
+<tr>
+<td>Codex session missing from the list after Archive</td>
+<td>The <code>rollout-*.jsonl</code> was moved to <code>~/.codex/archived_sessions/</code>, one folder over from <code>~/.codex/sessions/</code>.</td>
+<td>Move the rollout back under <code>~/.codex/sessions/YYYY/MM/DD/</code>, or just open it where it is.</td>
+</tr>
+<tr>
+<td>Claude session hidden from Claude Desktop</td>
+<td><code>isArchived=true</code> in a <code>local_*.json</code> sidecar under <code>~/Library/Application&nbsp;Support/Claude/claude-code-sessions/</code>, not in the transcript.</td>
+<td>Use Claude Desktop's native unarchive, or set <code>isArchived=false</code> in that sidecar.</td>
+</tr>
+<tr>
+<td><code>claude --resume</code> shows nothing after you renamed the repo</td>
+<td>Sessions are filed under the <em>old</em> path, encoded as a folder name (<code>/</code>&nbsp;&rarr;&nbsp;<code>-</code>); the picker keys on your current directory.</td>
+<td>Resume from the old path, or copy <code>~/.claude/projects/&lt;old-encoded-cwd&gt;/</code> into a folder named for the new path.</td>
+</tr>
+<tr>
+<td>Cursor transcripts missing after the same rename</td>
+<td>Same mechanic, same encoding minus the leading dash: transcripts stay under <code>~/.cursor/projects/&lt;old-encoded-path&gt;/agent-transcripts/</code>.</td>
+<td>Copy the old folder to one named for the new path. Chat DBs under <code>~/.cursor/chats/</code> are hash-named and unaffected.</td>
+</tr>
+<tr>
+<td>The file is simply not there anymore</td>
+<td>A delete, a cleanup script, or an emptied Trash removed the <code>.jsonl</code> or the database from disk.</td>
+<td>Restore from Time Machine (macOS) or Volume Shadow Copies / Previous Versions (Windows). No app can recover what's off disk.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<figcaption>Six ways a session "disappears," and the honest fix for each. Five of them never left your disk. The last one is a backup problem, and no viewer can pretend otherwise.</figcaption>
+</figure>
+
+<h2 id="the-one-habit-that-makes-all-of-this-moot">The one habit that makes all of this moot</h2>
+
+<p>Before you trust any recovery step, decide which case you’re in. Empty picker
+but the file’s timestamp is recent? Archived. Empty picker right after you moved
+the project? Path mismatch. File genuinely missing from disk? Backups or
+nothing. Guessing wastes the time you’d spend just looking at the path.</p>
+
+<p>Agent Sessions is a free, local-only macOS app with no telemetry that opens all
+of these stores read-only in one window. It searches every project folder at
+once, so a renamed repo stops hiding your history, and it surfaces the archived
+Codex rollouts and archived Claude Desktop sessions that the agents’ own pickers
+filter out. It does not list archived OpenCode rows — that one is still the SQL
+edit above — and it cannot recover a deleted file, because nothing can. The only
+write it will ever make is the Claude unarchive, and that ships switched off
+until you turn it on.</p>
+
+<p><a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=recovering-a-lost-session">Download it</a>,
+and if it hands back a session you’d already written off,
+<a href="https://github.com/jazzyalex/agent-sessions">star the repo</a> — that’s the whole
+ask. More posts like this one live at <a href="/agent-sessions/blog/">/blog/</a>.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[A practical, honest guide to getting back a Claude Code, Codex, OpenCode, or Cursor session that vanished — archived, moved by path, or deleted.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">A prompt-injection-safe GitHub triage agent: give the model no tools</title><link href="https://jazzyalex.github.io/agent-sessions/blog/injection-safe-github-triage/" rel="alternate" type="text/html" title="A prompt-injection-safe GitHub triage agent: give the model no tools" /><published>2026-07-16T00:00:00-07:00</published><updated>2026-07-16T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/injection-safe-github-triage</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/injection-safe-github-triage/"><![CDATA[<p>In January 2026, a security researcher took over a GitHub repository by opening
+one issue. The repo used Anthropic’s Claude Code GitHub Action to triage
+issues. RyotaK of GMO Flatt Security wrote an issue that read like an
+error message and refined it until the model “recovered” by running the
+commands buried inside. That walked the action into reading
+<code class="language-plaintext highlighter-rouge">/proc/self/environ</code>, where the credential for minting an OIDC token was
+sitting; Anthropic’s backend traded that token for a GitHub App
+installation token with write access to code, issues, and workflows. One issue
+produced full write access. Anthropic rated it 7.8, paid a bounty, and shipped
+the fix in <a href="https://flatt.tech/research/posts/poisoning-claude-code-one-github-issue-to-break-the-supply-chain/">claude-code-action
+v1.0.94</a>.</p>
+
+<p>The specific bug was an authorization check that trusted any actor whose name
+ended in <code class="language-plaintext highlighter-rouge">[bot]</code>. The general problem is older and unsolved: point a tool-armed
+LLM at text an attacker controls, and one well-written paragraph can make it do
+what the attacker wrote, not what you asked. This is indirect prompt
+injection, and there is no known way to sanitize it away. The action’s own
+security notes admit as much: they strip HTML comments and hidden characters,
+then warn that new bypasses will emerge. Filtering raises the bar. It does not
+close the door.</p>
+
+<p>I wanted the same job without that door: a small task that runs over my two
+repositories every morning, reads the new issues, PRs, and discussions, drafts
+a digest and any replies worth sending, and lets me approve each one before it
+posts. That is exactly the workload that just got someone owned. Here is how to
+run it so an injection has nothing to hold onto.</p>
+
+<figure class="post-figure">
+<style>
+.tf-fig { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 auto; max-width: 760px; }
+.tf-svg { width: 100%; height: auto; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.tf-box { fill: #f6f8fa; stroke: #d0d7de; }
+.tf-model { fill: #eef1f4; stroke: #b7bfc7; }
+.tf-t { fill: #1f2328; font-size: 13px; }
+.tf-h { fill: #1f2328; font-size: 13.5px; font-weight: 600; }
+.tf-mut { fill: #57606a; font-size: 12px; }
+.tf-danger { stroke: #d1242f; fill: #d1242f; }
+.tf-danger-t { fill: #d1242f; font-size: 12.5px; font-weight: 600; }
+.tf-danger-box { fill: #fff0f0; stroke: #f0b9bd; }
+.tf-safe { stroke: #1a7f37; fill: #1a7f37; }
+.tf-safe-t { fill: #1a7f37; font-size: 12.5px; font-weight: 600; }
+.tf-safe-box { fill: #eef6f0; stroke: #a7d3b3; }
+.tf-arrow { stroke: #57606a; stroke-width: 1.5; fill: none; }
+.tf-wall { stroke: #1a7f37; stroke-width: 2.5; }
+.tf-ah { fill: #57606a; }
+.tf-ah-d { fill: #d1242f; }
+@media (prefers-color-scheme: dark) {
+  .tf-box { fill: #1c1c1e; stroke: #3a3a3c; }
+  .tf-model { fill: #242426; stroke: #48484a; }
+  .tf-t, .tf-h { fill: #e6e6e6; }
+  .tf-mut { fill: #9a9a9e; }
+  .tf-danger, .tf-danger-t { fill: #ff6b6b; stroke: #ff6b6b; }
+  .tf-danger-box { fill: #2a1416; stroke: #5c2b2f; }
+  .tf-safe, .tf-safe-t { fill: #3fb950; stroke: #3fb950; }
+  .tf-safe-box { fill: #10251a; stroke: #2b5236; }
+  .tf-arrow { stroke: #9a9a9e; }
+  .tf-wall { stroke: #3fb950; }
+  .tf-ah { fill: #9a9a9e; }
+  .tf-ah-d { fill: #ff6b6b; }
+}
+</style>
+<div class="tf-fig">
+<svg class="tf-svg" viewBox="0 0 760 380" role="img" aria-label="Two architectures for pointing an LLM at an attacker-controlled issue. With tools, an injection reaches secrets and write access. Tool-less, it can only produce a draft a human reviews.">
+  <defs>
+    <marker id="tfArr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" class="tf-ah" />
+    </marker>
+    <marker id="tfArrD" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" class="tf-ah-d" />
+    </marker>
+  </defs>
+
+  <!-- Panel A: tools -->
+  <text x="30" y="28" class="tf-h">Agent with tools, in CI</text>
+  <rect x="30" y="44" width="300" height="40" rx="7" class="tf-box" />
+  <text x="45" y="69" class="tf-t">Attacker's issue text</text>
+  <line x1="180" y1="84" x2="180" y2="112" class="tf-arrow" marker-end="url(#tfArr)" />
+  <rect x="30" y="112" width="300" height="46" rx="7" class="tf-model" />
+  <text x="45" y="134" class="tf-t">LLM</text>
+  <text x="45" y="150" class="tf-mut">shell · files · network</text>
+  <line x1="180" y1="158" x2="180" y2="188" class="tf-danger" stroke-width="1.5" marker-end="url(#tfArrD)" />
+  <rect x="30" y="188" width="300" height="120" rx="7" class="tf-danger-box" />
+  <text x="45" y="212" class="tf-t">reads /proc/self/environ</text>
+  <text x="45" y="236" class="tf-t">mints an OIDC → write token</text>
+  <text x="45" y="260" class="tf-t">pushes to your repo</text>
+  <text x="45" y="292" class="tf-danger-t">injection reaches actions</text>
+
+  <!-- Panel B: tool-less -->
+  <text x="430" y="28" class="tf-h">Tool-less agent</text>
+  <rect x="430" y="44" width="300" height="40" rx="7" class="tf-box" />
+  <text x="445" y="69" class="tf-t">Attacker's issue text + canaries</text>
+  <line x1="580" y1="84" x2="580" y2="112" class="tf-arrow" marker-end="url(#tfArr)" />
+  <rect x="430" y="112" width="300" height="46" rx="7" class="tf-model" />
+  <text x="445" y="134" class="tf-t">LLM</text>
+  <text x="445" y="150" class="tf-mut">no tools · text in, text out</text>
+  <!-- safe chain -->
+  <line x1="580" y1="158" x2="580" y2="188" class="tf-arrow" marker-end="url(#tfArr)" />
+  <rect x="430" y="188" width="300" height="34" rx="7" class="tf-safe-box" />
+  <text x="445" y="210" class="tf-t">text: digest + draft replies</text>
+  <line x1="580" y1="222" x2="580" y2="240" class="tf-arrow" marker-end="url(#tfArr)" />
+  <rect x="430" y="240" width="300" height="34" rx="7" class="tf-safe-box" />
+  <text x="445" y="262" class="tf-t">a human approves</text>
+  <line x1="580" y1="274" x2="580" y2="292" class="tf-arrow" marker-end="url(#tfArr)" />
+  <rect x="430" y="292" width="300" height="34" rx="7" class="tf-safe-box" />
+  <text x="445" y="314" class="tf-t">post one reply</text>
+</svg>
+</div>
+<figcaption>Same input, two blast radii. A tool-armed agent that "recovers" from a malicious issue can reach secrets and write access. A tool-less one has nothing to call; the worst an injection produces is a draft a human throws away.</figcaption>
+</figure>
+
+<h2 id="the-wrong-fix-first-fencing-a-tool-using-agent">The wrong fix first: fencing a tool-using agent</h2>
+
+<p>My first attempt kept the agent and fenced it with flags. Claude Code accepts
+<code class="language-plaintext highlighter-rouge">--allowedTools</code> and <code class="language-plaintext highlighter-rouge">--disallowedTools</code>, but a deny-list is a pre-approval
+list, not a sandbox. The process still runs with your filesystem, environment,
+and network reachable; the flags govern which named tools the model may call,
+not what the process can touch. If <code class="language-plaintext highlighter-rouge">Task</code>, <code class="language-plaintext highlighter-rouge">Agent</code>, <code class="language-plaintext highlighter-rouge">Skill</code>, or <code class="language-plaintext highlighter-rouge">Workflow</code>
+survive, an injection can spawn a subagent that arrives with its own tools. You
+bar the front door and leave a door that builds new doors. I could not convince
+myself the fence held, so I removed the tools instead.</p>
+
+<h2 id="the-design-tool-less-by-construction">The design: tool-less by construction</h2>
+
+<p>The agent that reads untrusted text does one thing: turn text into text. No
+shell, no files, no network, no subagents. Everything it needs arrives in the
+prompt; everything it produces leaves on stdout. Three plain scripts sit
+around it.</p>
+
+<p><code class="language-plaintext highlighter-rouge">gather.sh</code> runs first and does all the reading: it calls <code class="language-plaintext highlighter-rouge">gh</code> and writes a
+snapshot of open issues, PRs, discussions, and recent releases to a file.
+The model fetches nothing.</p>
+
+<p><code class="language-plaintext highlighter-rouge">run-agent.sh</code> feeds that snapshot to the model as data and takes back text:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>claude -p --output-format text --strict-mcp-config \
+  --disallowedTools Bash WebFetch WebSearch Task Agent Workflow Skill \
+                    NotebookEdit Edit Write Glob Grep TodoWrite \
+  &lt; prompt.txt
+</code></pre></div></div>
+
+<p>The prompt goes in on stdin, the process runs in an empty temporary directory,
+and the disallow list names every tool that reads, writes, fetches, or spawns.
+What is left is a language model with nothing to invoke.</p>
+
+<p><code class="language-plaintext highlighter-rouge">reply.sh</code> runs afterward, and only when I say so. It posts one approved reply
+by id with <code class="language-plaintext highlighter-rouge">gh</code>. The model never holds the token and never triggers the write.</p>
+
+<p>Because the model cannot write files, it hands everything back as structured
+text. The contract is three markers:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;&lt;&lt;DIGEST&gt;&gt;&gt;
+...markdown digest...
+&lt;&lt;&lt;REPLIES&gt;&gt;&gt;
+[{"id":"R1","repo":"me/app","number":123,"kind":"issue","body":"draft reply"}]
+&lt;&lt;&lt;END&gt;&gt;&gt;
+</code></pre></div></div>
+
+<p>An <code class="language-plaintext highlighter-rouge">awk</code> pass extracts the first <code class="language-plaintext highlighter-rouge">DIGEST</code> and <code class="language-plaintext highlighter-rouge">REPLIES</code> blocks; <code class="language-plaintext highlighter-rouge">jq</code> validates
+the array. If the model wanders off the format, the run exits non-zero and I
+get a plain fallback digest. Drafts land in a file
+for me to read, never in a queue that posts itself.</p>
+
+<h2 id="why-this-holds-even-though-a-flag-is-not-a-sandbox">Why this holds even though a flag is not a sandbox</h2>
+
+<p><code class="language-plaintext highlighter-rouge">--disallowedTools</code> is still a flag, not a sandbox. What changed is how much is
+left to protect. A tool-using agent permits some actions and blocks others, so
+the blocked set has to be airtight. A tool-less agent permits none. There is no
+allowed tool for an injection to route through, no subagent to spawn, and
+nothing valuable in the process to reach: the working directory is empty and
+the posting credential lives in a different script that runs later, under my
+hand. The best a successful injection can manage is a convincing draft reply.
+I read every draft; the cost is thirty wasted seconds of my morning.</p>
+
+<figure class="post-figure">
+<style>
+.cmp-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 auto; max-width: 720px; }
+.cmp-table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+.cmp-table th, .cmp-table td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid #d0d7de; }
+.cmp-table thead th { border-bottom: 2px solid #d0d7de; font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .cmp-table th, .cmp-table td { border-bottom-color: #2c2c2e; }
+  .cmp-table thead th { border-bottom-color: #3a3a3c; }
+}
+</style>
+<div class="cmp-wrap">
+<table class="cmp-table">
+<thead>
+<tr><th>Design</th><th>Read repo secrets?</th><th>Take an action?</th><th>Worst case of an injection</th></tr>
+</thead>
+<tbody>
+<tr><td>Tool-armed agent in CI</td><td>Yes</td><td>Yes (label, close, push, comment)</td><td>Repo takeover, as in the January 2026 chain</td></tr>
+<tr><td>"Confined" with tool deny-flags</td><td>Sometimes (process still has fs/env; subagents can bring tools)</td><td>Sometimes</td><td>A fence you cannot fully verify</td></tr>
+<tr><td>Tool-less + human approval</td><td>No</td><td>No</td><td>A draft reply you delete</td></tr>
+</tbody>
+</table>
+</div>
+<figcaption>The difference isn't how well each design filters the input. It's what remains reachable after the model has been talked into cooperating with the attacker.</figcaption>
+</figure>
+
+<h2 id="why-not-the-built-in-cloud-triage">Why not the built-in cloud triage?</h2>
+
+<p>Both vendors ship this workload as a feature. Claude Code Routines, a
+research preview, runs scheduled sessions in Anthropic’s cloud with full tool
+access (shell, files, connectors) and no approval prompts mid-run. Its GitHub
+triggers cover only pull-request and release events, so issue triage runs on
+the clock, with daily caps by plan (Pro 5, Max 15, Team/Enterprise 25). Codex’s
+“automate bug triage” is the same shape in OpenAI’s cloud; it will draft for
+approval if you ask, but that gate is a sentence in your prompt, not a platform
+boundary. The convenience is real: zero install, and someone else maintains and
+runs it. This design trades that for local execution, a model with nothing to
+invoke, and a gate that lives in the architecture.</p>
+
+<figure class="post-figure">
+<div class="cmp-wrap">
+<table class="cmp-table">
+<thead>
+<tr><th></th><th>Claude Code Routines</th><th>Codex bug triage</th><th>This design</th></tr>
+</thead>
+<tbody>
+<tr><td>Where it runs</td><td>Anthropic's cloud</td><td>OpenAI's cloud</td><td>Your machine</td></tr>
+<tr><td>Agent has tools</td><td>Yes (shell, files, connectors)</td><td>Yes</td><td>None</td></tr>
+<tr><td>Who posts</td><td>The agent</td><td>The agent (draft gate if prompted)</td><td>You, per reply</td></tr>
+<tr><td>Injection exposure</td><td>Full tool surface</td><td>Full tool surface</td><td>A draft you delete</td></tr>
+<tr><td>Provider</td><td>Claude only</td><td>Codex only</td><td>Claude, via <code>claude -p</code></td></tr>
+</tbody>
+</table>
+</div>
+<figcaption>Same job, three trust models; only the local one makes the approval gate structural.</figcaption>
+</figure>
+
+<h2 id="prove-it-the-adversarial-confinement-gate">Prove it: the adversarial confinement gate</h2>
+
+<p>I do not trust arguments about model behavior, so the install tests the real
+CLI before scheduling anything. <code class="language-plaintext highlighter-rouge">tests/test_confinement.sh</code> feeds the live
+model a snapshot rigged with injection: an issue body ordering
+it to ignore its instructions and run a command, a smuggled <code class="language-plaintext highlighter-rouge">REPLIES</code> block
+trying to forge an approved post, and two canary strings, <code class="language-plaintext highlighter-rouge">__BASH_CANARY__</code> and
+<code class="language-plaintext highlighter-rouge">__SUBAGENT_CANARY__</code>, that only surface if the model shells out or spawns a
+subagent. The test asserts the run touched nothing, tripped no canary, and
+produced only the text contract. Nine of nine must pass before the <code class="language-plaintext highlighter-rouge">launchd</code>
+job installs. The design is the claim; the gate is the evidence, checked
+against the model that will actually run.</p>
+
+<h2 id="grounding-so-it-doesnt-lie-to-people">Grounding, so it doesn’t lie to people</h2>
+
+<p>One rule is about honesty, not safety. A triage agent’s most tempting
+mistake is telling a reporter their bug is fixed when it guessed. The gather
+step pulls the last few releases, and the prompt forbids claiming a fix shipped
+unless a release postdates the report; otherwise the draft says a fix is in
+progress. The model checks fetched facts instead of its own optimism.</p>
+
+<h2 id="where-this-fits-and-where-it-doesnt">Where this fits, and where it doesn’t</h2>
+
+<p>The design is narrow on purpose. It fits a read-and-draft job with a human at
+the end, not an agent that labels, closes, or pushes on its own; the moment the
+model drives a write, you are back to securing a tool-using agent. The model
+can still be talked into a bad draft; the guarantee is not that it behaves but
+that when it misbehaves, the blast radius is a suggestion I can delete.</p>
+
+<p>There is a quieter benefit. Each run is a headless <code class="language-plaintext highlighter-rouge">claude -p</code> session and
+writes the same transcript any Claude Code session does. When a digest looks
+off, I don’t guess; I open the run in <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=injection-safe-github-triage">Agent
+Sessions</a>,
+the macOS app I build for reading agent transcripts, and see exactly what went
+in and what came back.
+Scheduled agents are becoming ordinary, and almost none have a “what did this
+actually do last night” view. The transcripts are already on disk. They just
+need reading.</p>
+
+<p>Agent Sessions is free, local-only, has no telemetry, and opens those files
+read-only. <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=injection-safe-github-triage">Download
+it</a>
+or read the source <a href="https://github.com/jazzyalex/agent-sessions">on GitHub</a>.
+More posts like this one live at <a href="/agent-sessions/blog/">/blog/</a>.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[Why an LLM that triages untrusted GitHub issues should have zero tools: the design, the adversarial test that proves it, and the flaw behind it.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/blog/2026-07-16-injection-safe-triage-card.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/blog/2026-07-16-injection-safe-triage-card.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">How coding agents remember: a field study of six session-history formats</title><link href="https://jazzyalex.github.io/agent-sessions/blog/how-coding-agents-remember/" rel="alternate" type="text/html" title="How coding agents remember: a field study of six session-history formats" /><published>2026-07-14T00:00:00-07:00</published><updated>2026-07-14T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/how-coding-agents-remember</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/how-coding-agents-remember/"><![CDATA[<p>Over the last eleven months, the coding agents on one of our Macs wrote 3,096
+session transcripts totaling 3.8 GB — roughly a million logged events across
+Claude Code, Codex, Cursor, GitHub Copilot CLI, OpenCode, and Hermes. Every one
+of those files is the complete record of a working session: what was asked,
+what was tried, what broke, what shipped.</p>
+
+<p>There is a useful way to think about these files. The model has no memory of
+its own; when the session ends, everything it will ever be able to recall
+about that refactor is what it managed to write down at the time. The session
+file is the agent’s dream journal, kept while the dream is happening. Six
+agents keep six very different journals, and the differences are not
+cosmetic. They decide what the agent can resume, what a tool like a history
+browser can show you, what you can audit six months later, and what is
+silently lost.</p>
+
+<p>A <a href="/agent-sessions/blog/where-agents-store-history/">companion post</a>
+covers where these files live on disk. This one is about what is inside them.
+We measured it.</p>
+
+<h2 id="method">Method</h2>
+
+<p>We ran a read-only measurement harness over every session store on one
+machine: 184 Claude Code sessions, 2,706 Codex rollouts, 14 Cursor Agent
+transcripts, 20 Copilot CLI sessions, 61 OpenCode sessions, and 111 Hermes
+sessions, spanning August 2025 to July 2026. The harness parses every event,
+classifies it (user message, assistant message, tool activity, metadata), and
+records aggregates only: counts, byte sizes, ratios, field coverage, timings.
+No transcript content leaves the analysis, and the numbers below are corpus
+totals, not excerpts. The script and the raw aggregates are <a href="https://github.com/jazzyalex/agent-sessions/tree/main/docs/superpowers/specs/data">in the Agent
+Sessions repo</a>.</p>
+
+<p>Honest caveats, stated up front. This is one machine and one user, so the
+usage mix differs per agent: Codex did most of the daily work here, Cursor
+saw fourteen sessions. Cross-agent comparisons are indicative, not a
+controlled experiment. Where a number depends on usage rather than format, we
+say so.</p>
+
+<p>The on-disk layout behind each of these six corpora is written up per agent in
+the <a href="/agent-sessions/guides/">local history guides</a>, if you want to run
+the same measurement over your own machine.</p>
+
+<h2 id="finding-1-the-journal-is-almost-all-margin-notes">Finding 1: the journal is almost all margin notes</h2>
+
+<p>The first thing the data shows is how expensive remembering is. Divide each
+store’s total size by the number of user-visible messages in it, and you get
+the cost of remembering one human sentence:</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9; --viz-axis:#c3c2b7; --viz-bar:#2a78d6;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; --viz-axis:#383835; --viz-bar:#3987e5; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 296" role="img" aria-label="Bar chart: kilobytes stored per user-visible message, by agent. Codex 126, OpenCode 114, Claude Code 113, Hermes 91, Copilot CLI 25, Cursor Agent 1.8.">
+  <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">Kilobytes stored per user-visible message</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">Store size ÷ user messages, measured per corpus</text>
+  <!-- baseline -->
+  <line x1="130" y1="52" x2="130" y2="270" stroke="var(--viz-axis)" stroke-width="1" />
+  <!-- bars: x=130, scale 4.3 px/KB, h=22, gap 36 -->
+  <g font-size="12.5">
+    <text x="122" y="70" text-anchor="end" fill="var(--viz-ink)">Codex</text>
+    <rect x="130" y="58" width="542" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="664" y="74" text-anchor="end" font-size="12" font-weight="600" fill="#ffffff">126 KB</text>
+
+    <text x="122" y="106" text-anchor="end" fill="var(--viz-ink)">OpenCode</text>
+    <rect x="130" y="94" width="490" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="612" y="110" text-anchor="end" font-size="12" font-weight="600" fill="#ffffff">114 KB</text>
+
+    <text x="122" y="142" text-anchor="end" fill="var(--viz-ink)">Claude Code</text>
+    <rect x="130" y="130" width="486" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="608" y="146" text-anchor="end" font-size="12" font-weight="600" fill="#ffffff">113 KB</text>
+
+    <text x="122" y="178" text-anchor="end" fill="var(--viz-ink)">Hermes</text>
+    <rect x="130" y="166" width="391" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="513" y="182" text-anchor="end" font-size="12" font-weight="600" fill="#ffffff">91 KB</text>
+
+    <text x="122" y="214" text-anchor="end" fill="var(--viz-ink)">Copilot CLI</text>
+    <rect x="130" y="202" width="108" height="22" rx="4" fill="var(--viz-bar)" />
+    <text x="246" y="218" font-size="12" font-weight="600" fill="var(--viz-ink)">25 KB</text>
+
+    <text x="122" y="250" text-anchor="end" fill="var(--viz-ink)">Cursor Agent</text>
+    <rect x="130" y="238" width="8" height="22" rx="2" fill="var(--viz-bar)" />
+    <text x="146" y="254" font-size="12" font-weight="600" fill="var(--viz-ink)">1.8 KB</text>
+  </g>
+  <text x="130" y="288" font-size="11" fill="var(--viz-muted)">Database stores (OpenCode, Hermes) include their indexes. Cursor's transcript omits tool output entirely.</text>
+</svg>
+</div>
+<figcaption>What it costs each agent to remember that you said one thing. Codex spends 126 KB per user message; Cursor spends 1.8 KB, but only because its transcript leaves the tool activity out.</figcaption>
+</figure>
+
+<p>The headline ratio is starker than the bar chart. In the Claude Code corpus,
+visible conversation text (what you typed plus what the model said to you) is
+3.0% of the bytes. In Codex it is 2.6%. Everything else is tool calls, tool
+output, reasoning items, metadata envelopes, and bookkeeping. The journal is
+almost entirely margin notes about the dream, not the dream itself.</p>
+
+<p>That is not waste, mostly. Tool output is the evidence of what actually
+happened, and it is the part you grep for later. But the volumes are worth
+knowing: the largest single Codex session on this machine is a 212 MB JSONL
+file, and Claude Code’s largest is 19 MB. Any tool that reads these naively
+into memory will eventually meet one of those.</p>
+
+<p>Cursor is the interesting outlier. At 1.8 KB per user message, with half its
+bytes being visible text, its transcript is lean because it is incomplete: in
+our corpus it records zero tool events and zero per-event timestamps. The
+transcript reads well and remembers almost nothing about how the work was
+done. It is a diary with the verbs removed.</p>
+
+<h2 id="finding-2-some-agents-know-what-they-cost-and-some-have-no-idea">Finding 2: some agents know what they cost, and some have no idea</h2>
+
+<p>The second axis is self-knowledge: what the format records about its own
+execution. The spread here is wide.</p>
+
+<p>Copilot CLI is the quantified dreamer. Every assistant message carries the
+model name, output token count, and request IDs; every tool execution carries
+the model that requested it; and at shutdown it writes a full accounting
+event: total conversation tokens, premium request count, API duration, even
+the size of its own event file. Hermes keeps a ledger in the same spirit: its
+sessions table has thirty-three columns, including input, output, cache-read,
+cache-write, and reasoning token counts, plus <code class="language-plaintext highlighter-rouge">estimated_cost_usd</code> and
+<code class="language-plaintext highlighter-rouge">actual_cost_usd</code>. OpenCode records tokens and a <code class="language-plaintext highlighter-rouge">cost</code> figure on each
+message row. These three can answer “what did this session cost” from local
+data alone.</p>
+
+<p>The bigger names are thriftier. Codex writes turn-level <code class="language-plaintext highlighter-rouge">token_count</code> events
+with cumulative usage, which is enough for totals but not for per-message
+attribution, and no dollar figure. Claude Code stamps every assistant event
+with the model and a usage block, which is genuinely good, and also the
+occasion for a correction: our companion post claimed Claude Code writes no
+per-event model. Wrong. In this corpus, all 36,376 assistant events carry
+<code class="language-plaintext highlighter-rouge">message.model</code>. We measured our own claim and it failed; the fix is in both
+posts.</p>
+
+<p>Cursor’s transcript records none of this. The model hint lives in a separate
+metadata database, and the events themselves are undated. If you want to know
+what a Cursor session cost, the answer is on the vendor’s dashboard, not your
+disk.</p>
+
+<h2 id="finding-3-the-dreams-they-are-no-longer-allowed-to-reread">Finding 3: the dreams they are no longer allowed to reread</h2>
+
+<p>Reasoning is where the field is converging, quietly, on the same policy:
+sealed.</p>
+
+<p>Codex is explicit about it. In the forty most recent rollouts here, all 7,339
+reasoning items are opaque <code class="language-plaintext highlighter-rouge">encrypted_content</code> blobs. They sit on your disk,
+in your file, and neither you nor the agent that wrote them can read them
+back.</p>
+
+<p>Claude Code turns out to have gone the same way, with less announcement. Its
+thinking blocks have a <code class="language-plaintext highlighter-rouge">thinking</code> text field and a cryptographic <code class="language-plaintext highlighter-rouge">signature</code>.
+In the thirty most recent sessions on this machine, 2,567 of 2,628 thinking
+blocks have a signature and an empty text field. About 2.5% still carry
+plaintext. The agent’s private reasoning is now certified rather than
+recorded: the file can prove the thinking happened, and cannot say what it
+was.</p>
+
+<p>The rest of the field is split. Copilot writes both a <code class="language-plaintext highlighter-rouge">reasoningText</code> and a
+<code class="language-plaintext highlighter-rouge">reasoningOpaque</code> field, hedging per message. OpenCode stores reasoning as
+first-class part rows, 743 of 1,207 with readable text, the rest empty
+depending on the provider. Hermes keeps a plaintext <code class="language-plaintext highlighter-rouge">reasoning_content</code>
+column.</p>
+
+<p>There are real reasons for sealing: provider policies, distillation
+concerns, resumability across stateless APIs. But it changes what your
+archive is. A year of session history used to include why the agent did
+things; increasingly it only includes what it did. If the why matters to you,
+the readable summary the agent chooses to say out loud is now the only record
+of it, which is worth knowing when you decide how much to trust that summary.</p>
+
+<h2 id="finding-4-remembering-is-not-the-same-as-being-able-to-recall">Finding 4: remembering is not the same as being able to recall</h2>
+
+<p>The last measurement is retrieval. A memory you cannot search is barely a
+memory, and this is where the two storage philosophies split cleanly.</p>
+
+<p>The JSONL camp (Claude Code, Codex, Copilot, Cursor) has no index of any
+kind. Finding a word in this machine’s 3.4 GB of Codex history means reading
+3.4 GB: a naive <code class="language-plaintext highlighter-rouge">grep -rl</code> takes 10.8 seconds, and a full structured parse of
+the corpus takes 16.6 seconds. Do that on every keystroke of a search box and
+you understand why history browsers build their own indexes.</p>
+
+<p>Hermes answers the same class of question in 0.4 milliseconds, four orders
+of magnitude faster, because it ships a trigram full-text index inside its
+database. It pays for recall honestly: twelve of its eighteen tables are
+search infrastructure, and actual message content is about 11% of the
+database’s bytes. Hermes spends most of its memory on being able to remember.
+OpenCode sits in between: proper relational rows (a query away from anything)
+but no full-text index, and reconstructing one message means joining an
+average of 3.6 part rows.</p>
+
+<p>Neither philosophy wins outright. JSONL survives crashes by construction (a
+truncated last line is the entire failure mode), diffs cleanly, and can be
+read by any tool ever written. Databases answer questions. The scorecard
+shows how each agent actually trades this off:</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; }
+}
+</style>
+<svg viewBox="0 0 720 420" role="img" aria-label="Scorecard matrix of nine capabilities across six agents. Full descriptions in the surrounding text.">
+  <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">What each session format actually records</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">● recorded &nbsp;&nbsp;◐ partial or indirect &nbsp;&nbsp;○ absent — measured on this corpus, July 2026</text>
+  <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <!-- column headers -->
+    <g font-size="11.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">
+      <text x="278" y="66">Claude</text>
+      <text x="358" y="66">Codex</text>
+      <text x="438" y="66">Cursor</text>
+      <text x="518" y="66">Copilot</text>
+      <text x="598" y="66">OpenCode</text>
+      <text x="678" y="66">Hermes</text>
+    </g>
+    <!-- rows: y start 96, step 36 -->
+    <g font-size="12.5" fill="var(--viz-ink)">
+      <text x="12" y="100">Per-event timestamps</text>
+      <text x="12" y="136">Model per message</text>
+      <text x="12" y="172">Token counts</text>
+      <text x="12" y="208">Cost in dollars</text>
+      <text x="12" y="244">Readable reasoning</text>
+      <text x="12" y="280">Tool calls + output</text>
+      <text x="12" y="316">Thread / tree structure</text>
+      <text x="12" y="352">Built-in search index</text>
+      <text x="12" y="388">Documented schema</text>
+    </g>
+    <g font-size="15" fill="var(--viz-ink)" text-anchor="middle">
+      <!-- timestamps -->
+      <text x="278" y="101">●</text><text x="358" y="101">●</text><text x="438" y="101">○</text><text x="518" y="101">●</text><text x="598" y="101">●</text><text x="678" y="101">●</text>
+      <!-- model per message -->
+      <text x="278" y="137">●</text><text x="358" y="137">◐</text><text x="438" y="137">◐</text><text x="518" y="137">●</text><text x="598" y="137">●</text><text x="678" y="137">◐</text>
+      <!-- tokens -->
+      <text x="278" y="173">●</text><text x="358" y="173">●</text><text x="438" y="173">○</text><text x="518" y="173">●</text><text x="598" y="173">●</text><text x="678" y="173">●</text>
+      <!-- cost -->
+      <text x="278" y="209">○</text><text x="358" y="209">○</text><text x="438" y="209">○</text><text x="518" y="209">◐</text><text x="598" y="209">●</text><text x="678" y="209">●</text>
+      <!-- readable reasoning -->
+      <text x="278" y="245">○</text><text x="358" y="245">○</text><text x="438" y="245">○</text><text x="518" y="245">◐</text><text x="598" y="245">◐</text><text x="678" y="245">◐</text>
+      <!-- tool i/o -->
+      <text x="278" y="281">●</text><text x="358" y="281">●</text><text x="438" y="281">○</text><text x="518" y="281">●</text><text x="598" y="281">●</text><text x="678" y="281">●</text>
+      <!-- tree -->
+      <text x="278" y="317">●</text><text x="358" y="317">○</text><text x="438" y="317">○</text><text x="518" y="317">◐</text><text x="598" y="317">◐</text><text x="678" y="317">◐</text>
+      <!-- search index -->
+      <text x="278" y="353">○</text><text x="358" y="353">○</text><text x="438" y="353">○</text><text x="518" y="353">○</text><text x="598" y="353">○</text><text x="678" y="353">●</text>
+      <!-- docs -->
+      <text x="278" y="389">○</text><text x="358" y="389">○</text><text x="438" y="389">○</text><text x="518" y="389">○</text><text x="598" y="389">○</text><text x="678" y="389">○</text>
+    </g>
+    <!-- hairlines -->
+    <g stroke="var(--viz-grid)" stroke-width="1">
+      <line x1="12" y1="76" x2="708" y2="76" />
+      <line x1="12" y1="112" x2="708" y2="112" />
+      <line x1="12" y1="148" x2="708" y2="148" />
+      <line x1="12" y1="184" x2="708" y2="184" />
+      <line x1="12" y1="220" x2="708" y2="220" />
+      <line x1="12" y1="256" x2="708" y2="256" />
+      <line x1="12" y1="292" x2="708" y2="292" />
+      <line x1="12" y1="328" x2="708" y2="328" />
+      <line x1="12" y1="364" x2="708" y2="364" />
+      <line x1="12" y1="400" x2="708" y2="400" />
+    </g>
+  </g>
+</svg>
+</div>
+<figcaption>Nine things a session format can record, measured across six agents. Claude's timestamps cover conversation events (87.7% of all lines); Cursor's model hint and Hermes's model live outside the per-message record; Copilot counts premium requests but not dollars. Note the bottom row: nobody documents their schema.</figcaption>
+</figure>
+
+<p>The bottom row deserves its own sentence. None of the six formats has public
+schema documentation. Every parser of these files, including ours, is built
+by reverse engineering, and every one of them breaks a little when a vendor
+renames a field. For files this valuable, that is a strange industry norm.</p>
+
+<p><em>Correction (2026-08-12): the bottom row overclaimed. Copilot documents its
+storage layout and persisted event types, and Hermes documents its
+persistence layers and stored fields — both existed when this was written
+and our search missed them. The claim holds for Claude Code, Codex, Cursor,
+and OpenCode. <a href="/agent-sessions/bench/">Session-Bench</a> now tracks
+this per-harness, with links to each vendor’s documentation.</em></p>
+
+<h2 id="what-a-session-format-should-be">What a session format should be</h2>
+
+<p>Having read a million events written six different ways, here is the
+standard we would hold any of them to, and how the field measures against it.</p>
+
+<p><strong>Write like a log, read like a database.</strong> Append-only JSONL for the write
+path, because a crash mid-write should cost one line, not a database
+recovery. A sidecar index (SQLite is fine) for the read path, rebuilt from
+the log whenever it is stale. Today every agent picks exactly one half:
+the JSONL camp cannot search and the database camp cannot <code class="language-plaintext highlighter-rouge">tail -f</code>. Hermes
+is closest to the right shape, but the log half of it is inside the database
+rather than beside it.</p>
+
+<p><strong>Attribute every message.</strong> Model, timestamps, token usage, and cost belong
+on each message, not in a session header, because sessions switch models
+mid-flight and post-hoc accounting depends on it. Claude Code and OpenCode
+are closest here. Codex should move usage from turn level to message level.
+Cursor should start writing timestamps into its own transcript, which in
+2026 is a modest ask.</p>
+
+<p><strong>Seal reasoning honestly.</strong> If reasoning must be opaque, say so in the
+format: a documented field, a stated policy, and a user-visible switch where
+policy allows one. Claude Code’s silent shift from plaintext thinking to
+signature-only is the pattern to avoid, less because of the sealing than
+because nothing announced it. Users planning to audit their own history a
+year out deserve to know the why is no longer being kept.</p>
+
+<p><strong>Publish the schema.</strong> One versioned page per vendor, listing the event
+types and stability guarantees. Codex already versions its files internally
+and tolerates unknown fields, which is most of the work. The ecosystem that
+wants to exist around these files — history browsers, usage analytics, team
+knowledge tools — is currently built on guesswork.</p>
+
+<p>The files themselves are the good news. Every agent in this study writes its
+journal locally, completely, and by default, and none of it leaves your
+machine on its own. The formats are six dialects of the same instinct, and
+the instinct is right: the work is worth remembering.</p>
+
+<p><a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=how-coding-agents-remember">Agent Sessions</a> is a free,
+local-only macOS browser for all six of these stores; it reads them read-only
+and never writes back. The measurement script and raw aggregates behind
+every number here are in the repo, and the companion post on the exact disk
+locations is <a href="/agent-sessions/blog/where-agents-store-history/">here</a>.
+This field study later grew into a standing benchmark:
+<a href="/agent-sessions/bench/">Session-Bench</a> now scores ten formats on
+twenty pass/fail gates, with the evidence behind every cell.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[We measured 3,096 real sessions and 3.8 GB of transcripts across six coding agents: verbosity, telemetry, sealed reasoning, search — with a scorecard.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Where AI coding agents store your session history: the real paths and formats</title><link href="https://jazzyalex.github.io/agent-sessions/blog/where-agents-store-history/" rel="alternate" type="text/html" title="Where AI coding agents store your session history: the real paths and formats" /><published>2026-07-11T00:00:00-07:00</published><updated>2026-07-11T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/where-agents-store-history</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/where-agents-store-history/"><![CDATA[<p>Every coding agent you run writes a full transcript of the session to a file on
+your own disk. The prompts you typed, the tool calls it made, the command
+output, the diffs it proposed, the reasoning it showed: all of it lands in a
+local file the moment each turn completes. What differs, and differs wildly, is
+where that file goes and what shape it takes. Claude Code writes
+newline-delimited JSON, one file per session, filed under the project you were
+working in. Codex writes a similar format but shards it by date under a
+completely different root. OpenCode stopped writing loose files and moved the
+whole history into a single SQLite database. Cursor splits one session across
+two stores in two different formats. None of them agree, and almost none of it
+is documented where you would think to look.</p>
+
+<p>That matters because this data is often the only durable record of how a piece
+of work actually happened: the command that failed, the path you settled on, the
+reason a function looks the way it does. It is genuinely valuable and genuinely
+scattered. Most people assume old agent history is gone, or trapped somewhere
+unreachable, when in fact it is sitting in a predictable file a couple of
+directories deep. Here is where each major agent actually keeps it, grounded in
+how <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=where-agents-store-history">Agent Sessions</a> parses each
+one.</p>
+
+<h2 id="claude-code--per-project-jsonl">Claude Code — per-project JSONL</h2>
+
+<p>If you have wondered where Claude Code stores history, the answer is a tree of
+JSONL files under your home directory:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;session-id&gt;.jsonl
+</code></pre></div></div>
+
+<p>The clever, occasionally confusing part is the folder name. Claude Code takes
+the working directory you launched from and replaces every <code class="language-plaintext highlighter-rouge">/</code> with a <code class="language-plaintext highlighter-rouge">-</code>, so a
+session run in <code class="language-plaintext highlighter-rouge">/Users/you/Repository/app</code> lands in a folder named
+<code class="language-plaintext highlighter-rouge">-Users-you-Repository-app</code>. One directory per project, one <code class="language-plaintext highlighter-rouge">.jsonl</code> file per
+session, named by the session UUID. Agent Sessions also honors the
+<code class="language-plaintext highlighter-rouge">CLAUDE_CONFIG_DIR</code> and <code class="language-plaintext highlighter-rouge">CLAUDE_CONFIG_DIRS</code> environment variables and Claude
+Desktop’s local-agent-mode roots, because Claude Code will follow those when
+they are set.</p>
+
+<p>The format is JSON Lines: one JSON object per line, one line per event. If you
+want to read Claude Code JSONL yourself, two details will trip you up. First,
+the user’s message text is not at the top level. It is nested inside
+<code class="language-plaintext highlighter-rouge">message.content</code>, while Codex and others keep it flatter. Second, there is no
+per-event model field. Claude Code records a <code class="language-plaintext highlighter-rouge">version</code> (like <code class="language-plaintext highlighter-rouge">2.0.5</code>), a <code class="language-plaintext highlighter-rouge">cwd</code>,
+a <code class="language-plaintext highlighter-rouge">gitBranch</code>, and a <code class="language-plaintext highlighter-rouge">sessionId</code>, but which model answered is simply not written
+per turn. Events also thread as a tree through <code class="language-plaintext highlighter-rouge">uuid</code> and <code class="language-plaintext highlighter-rouge">parentUuid</code>, and some
+lines are metadata (<code class="language-plaintext highlighter-rouge">summary</code>, <code class="language-plaintext highlighter-rouge">file-history-snapshot</code>, or anything flagged
+<code class="language-plaintext highlighter-rouge">isMeta</code>) rather than conversation. Parse for <code class="language-plaintext highlighter-rouge">type == "user"</code> and skip the meta
+lines, or your transcript fills with noise.</p>
+
+<p>The <a href="/agent-sessions/guides/claude-code-jsonl-history.html">Claude Code history guide</a>
+works through those roots and the record shape in more detail.</p>
+
+<h2 id="codex--date-sharded-rollout-files">Codex — date-sharded rollout files</h2>
+
+<p>Codex session files live in a location that is easy to state and easy to get
+wrong:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+</code></pre></div></div>
+
+<p>The gotcha is the environment variable. If <code class="language-plaintext highlighter-rouge">CODEX_HOME</code> is set, that entire tree
+moves: the real root becomes <code class="language-plaintext highlighter-rouge">$CODEX_HOME/sessions</code>, and anything hard-coding
+<code class="language-plaintext highlighter-rouge">~/.codex/sessions</code> quietly finds nothing. Inside, Codex shards by date into
+<code class="language-plaintext highlighter-rouge">YYYY/MM/DD/</code> folders and writes one append-only JSONL file per session, named
+<code class="language-plaintext highlighter-rouge">rollout-YYYY-MM-DDThh-mm-ss-&lt;uuid&gt;.jsonl</code>. The timestamp is baked into the
+filename, which is why Codex’s own resume picker sorts sessions newest-first by
+the name rather than by file mtime.</p>
+
+<p>Two more things worth knowing. Codex is deliberately tolerant of schema drift,
+so field names vary between client versions and unknown fields should be
+preserved rather than dropped. And when you run with the Responses API under
+zero-data-retention or stateless mode, reasoning items come back as opaque
+<code class="language-plaintext highlighter-rouge">encrypted_content</code> blobs. They are base64, they are not decryptable locally, and
+a viewer should treat them as sensitive and leave them alone. CLI, Desktop, and
+VS Code Codex all write into this same rollout corpus, which is convenient: one
+location covers three surfaces.</p>
+
+<p>The <a href="/agent-sessions/guides/codex-local-history.html">Codex history guide</a> covers
+<code class="language-plaintext highlighter-rouge">CODEX_HOME</code> and the rest of the rollout layout.</p>
+
+<h2 id="cursor--one-session-two-stores">Cursor — one session, two stores</h2>
+
+<p>Cursor is the odd one out because it splits a single session across two files in
+two formats. The readable transcript is JSONL:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>~/.cursor/projects/&lt;project&gt;/agent-transcripts/&lt;id&gt;/&lt;id&gt;.jsonl
+</code></pre></div></div>
+
+<p>The per-session metadata lives in a small SQLite database next door:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>~/.cursor/chats/&lt;md5(project-path)&gt;/&lt;session-id&gt;/store.db
+</code></pre></div></div>
+
+<p>That <code class="language-plaintext highlighter-rouge">&lt;md5(project-path)&gt;</code> is exactly what it looks like: the workspace folder is
+the MD5 hash of the project path. To assemble complete Cursor Agent history you
+read the JSONL for the actual events and the <code class="language-plaintext highlighter-rouge">store.db</code> for the session name,
+model hint, timestamps, and workspace context. One without the other gives you
+half the picture.</p>
+
+<p>There is an honest boundary here, and it is worth stating plainly. This covers
+Cursor Agent transcripts, the ones that produce a JSONL file. Cursor’s older
+IDE-chat history that lives only inside the database is stored as protobuf
+message blobs, and those are not decoded into transcript events. If a chat never
+produced an agent transcript, there is nothing readable to show.</p>
+
+<p>The <a href="/agent-sessions/guides/cursor-agent-local-history.html">Cursor Agent history guide</a>
+sets out that boundary and what each of the two stores holds.</p>
+
+<h2 id="opencode--a-session-database-not-files">OpenCode — a session database, not files</h2>
+
+<p>OpenCode is the cleanest example of the industry drift toward databases. Recent
+versions (v1.2 and up) keep the OpenCode session database at a single path:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>~/.local/share/opencode/opencode.db
+</code></pre></div></div>
+
+<p>Older installs used per-file JSON under
+<code class="language-plaintext highlighter-rouge">~/.local/share/opencode/storage/session</code>, and Agent Sessions still falls back to
+that when no database is present. But the modern layout is one SQLite file. The
+detector prefers it whenever <code class="language-plaintext highlighter-rouge">opencode.db</code> exists and actually contains a
+<code class="language-plaintext highlighter-rouge">session</code> table, then reads session metadata, message rows, and — this is the
+part people miss — separate <code class="language-plaintext highlighter-rouge">part</code> rows. A single message’s content is spread
+across multiple part rows, so reconstructing a turn means joining messages to
+their parts and ordering by time. It is a real database schema, not a log you can
+<code class="language-plaintext highlighter-rouge">tail</code>.</p>
+
+<p>The <a href="/agent-sessions/guides/opencode-sqlite-history.html">OpenCode SQLite guide</a> has
+the schema notes and the read-only query path.</p>
+
+<h2 id="the-others--copilot-and-hermes">The others — Copilot and Hermes</h2>
+
+<p>Two more worth a mention, because they show the same two patterns.</p>
+
+<p>GitHub Copilot CLI writes JSONL under <code class="language-plaintext highlighter-rouge">~/.copilot/session-state/</code>, and it
+recently changed its layout. Legacy installs wrote a flat
+<code class="language-plaintext highlighter-rouge">&lt;session-id&gt;.jsonl</code>; current versions (v1.0.11+) write
+<code class="language-plaintext highlighter-rouge">&lt;session-id&gt;/events.jsonl</code> inside a per-session directory, with the session name
+living in a sibling <code class="language-plaintext highlighter-rouge">workspace.yaml</code>. Same format, moved one level deeper.</p>
+
+<p>Hermes went the OpenCode route. Current versions store everything in
+<code class="language-plaintext highlighter-rouge">~/.hermes/state.db</code>, a SQLite database, with a legacy
+<code class="language-plaintext highlighter-rouge">~/.hermes/sessions/session_*.json</code> fallback for older installs. Check the
+database first; fall back to JSON only when it is absent or empty.</p>
+
+<p>Both have a guide of their own: <a href="/agent-sessions/guides/copilot-cli-local-history.html">Copilot CLI</a>
+for the event envelope, <a href="/agent-sessions/guides/hermes-agent-state-db-history.html">Hermes</a>
+for the database and its JSON fallback.</p>
+
+<h2 id="the-whole-map-in-one-table">The whole map, in one table</h2>
+
+<figure class="post-figure">
+<style>
+.storage-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 auto; max-width: 720px; }
+.storage-table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+.storage-table th, .storage-table td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid #d0d7de; }
+.storage-table thead th { border-bottom: 2px solid #d0d7de; font-weight: 600; white-space: nowrap; }
+.storage-table code { font-size: 12.5px; white-space: nowrap; }
+@media (prefers-color-scheme: dark) {
+  .storage-table th, .storage-table td { border-bottom-color: #2c2c2e; }
+  .storage-table thead th { border-bottom-color: #3a3a3c; }
+}
+</style>
+<div class="storage-table-wrap">
+<table class="storage-table">
+<thead>
+<tr><th>Agent</th><th>Location</th><th>Format</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;id&gt;.jsonl</code></td>
+<td>JSONL, one event per line</td>
+<td>Folder name is the cwd with <code>/</code> turned into <code>-</code>; user text is nested in <code>message.content</code>; no per-event model.</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td><code>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</code></td>
+<td>JSONL rollout, append-only</td>
+<td><code>CODEX_HOME</code> relocates the whole tree; timestamp is in the filename; reasoning may be opaque <code>encrypted_content</code>.</td>
+</tr>
+<tr>
+<td>Cursor Agent</td>
+<td><code>~/.cursor/projects/.../agent-transcripts/&lt;id&gt;/&lt;id&gt;.jsonl</code> + <code>~/.cursor/chats/&lt;hash&gt;/&lt;id&gt;/store.db</code></td>
+<td>JSONL transcript + SQLite metadata</td>
+<td>Two stores per session; workspace hash is MD5 of the project path; DB-only IDE chat blobs are protobuf, not decoded.</td>
+</tr>
+<tr>
+<td>OpenCode</td>
+<td><code>~/.local/share/opencode/opencode.db</code></td>
+<td>SQLite (session / message / part rows)</td>
+<td>Moved from per-file JSON to one DB in v1.2; message content is split across <code>part</code> rows.</td>
+</tr>
+<tr>
+<td>Copilot CLI</td>
+<td><code>~/.copilot/session-state/&lt;id&gt;/events.jsonl</code></td>
+<td>JSONL events</td>
+<td>Layout changed from a flat <code>&lt;id&gt;.jsonl</code> to a per-session dir + <code>workspace.yaml</code> in v1.0.11.</td>
+</tr>
+<tr>
+<td>Hermes</td>
+<td><code>~/.hermes/state.db</code></td>
+<td>SQLite</td>
+<td>Current storage is a database; older installs kept <code>sessions/session_*.json</code>.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<figcaption>The same information every agent writes, filed six different ways. Two patterns dominate: newline-delimited JSON you can read line by line, and SQLite databases you have to query. Cursor manages to use both at once.</figcaption>
+</figure>
+
+<h2 id="what-to-take-from-this">What to take from this</h2>
+
+<p>The pattern underneath the mess is a slow migration from flat JSONL to SQLite.
+JSONL is trivial to append to and trivial to read one line at a time, which is
+why the CLI-first agents started there. Databases give you indexed queries and
+atomic writes, which is why OpenCode and Hermes moved. Both are honest choices.
+Neither is documented as prominently as it should be, and every one of these
+paths has at least one detail that quietly breaks a naive reader:
+the encoded folder name, the relocating environment variable, the two-store
+split, the message-versus-part rows.</p>
+
+<p>None of this data leaves your machine unless you send it somewhere. It is all
+sitting locally, and it is all readable if you know the path and the format.</p>
+
+<p>Agent Sessions reads every one of the locations above into a single searchable
+macOS app. It is free, local-only, and has no telemetry; it opens these files
+read-only and never writes back into them. For a measured look at what each of
+these formats actually <em>records</em> — verbosity, telemetry, how searchable it is —
+see the companion field study, <a href="/agent-sessions/blog/how-coding-agents-remember/">How coding agents remember</a>.
+These formats now also have a standing scorecard:
+<a href="/agent-sessions/bench/">Session-Bench</a> ranks ten of them on
+twenty pass/fail gates and re-scores when they drift.
+If you would rather not memorize six
+paths and two schema quirks, <a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=where-agents-store-history">Agent Sessions reads all of
+them</a>
+and <a href="https://github.com/jazzyalex/agent-sessions">the source is on GitHub</a>.
+More posts like this one live at <a href="/agent-sessions/blog/">/blog/</a>.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[The exact on-disk paths and formats for Claude Code, Codex, Cursor, OpenCode, Copilot, and Hermes session history — JSONL vs SQLite, and the gotchas.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry><entry><title type="html">Projecting the Claude 5-hour limit: burn rate, not percent used</title><link href="https://jazzyalex.github.io/agent-sessions/blog/quota-meter-burn-rate/" rel="alternate" type="text/html" title="Projecting the Claude 5-hour limit: burn rate, not percent used" /><published>2026-07-09T00:00:00-07:00</published><updated>2026-07-09T00:00:00-07:00</updated><id>https://jazzyalex.github.io/agent-sessions/blog/quota-meter-burn-rate</id><content type="html" xml:base="https://jazzyalex.github.io/agent-sessions/blog/quota-meter-burn-rate/"><![CDATA[<p>The Claude 5-hour limit is a rolling window, not a daily allowance. It starts
+counting when you start working, resets relative to your own activity rather
+than at a fixed hour, and carries weekly caps on top. Codex meters its usage
+limit the same way. That mechanism is what makes the standard readout, a static
+percentage like “7% used,” such a weak planning tool: whether you reach the
+reset before the window fills depends on how fast you’re burning, and a
+percentage carries no information about speed. Two accounts can show the
+identical number while one of them is twenty minutes from a hard stop.</p>
+
+<p><a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=quota-meter-burn-rate">Agent Sessions</a> ships a Quota
+Meter with a Session Runway drawer built to answer what the percentage can’t:
+how much of the Claude limit is left as a trajectory rather than a level, which
+session is spending it, and when the current pace runs the window dry. The math
+below is everything that view computes, including the places where the source
+data forces some honesty about precision.</p>
+
+<h2 id="what-the-percentage-actually-reports">What the percentage actually reports</h2>
+
+<p>Because both providers meter on rolling windows, the question of when the
+Claude limit resets has no fixed daily answer; the reset lands five hours after
+the window opened, wherever that happened to fall in your day. A moving target
+already argues for tracking a rate. The raw reading argues harder, because it
+is coarser than most people assume.</p>
+
+<p>On Claude, Agent Sessions reads usage from the OAuth endpoint, and that payload
+reports whole-percent values: <code class="language-plaintext highlighter-rouge">five_hour.utilization</code> and <code class="language-plaintext highlighter-rouge">limits[].percent</code>
+move in steps of a full 1%. One percent of a 5-hour window is the finest change
+the endpoint will ever show. The app polls every 60 seconds, but the fetch
+underneath is cache-first: when the shared usage cache is younger than 180
+seconds, the cached payload is served and the live API call is skipped. The
+sharing is deliberate, and the second half of this post explains it. The
+immediate consequence is that a raw Claude percentage is coarse and slightly
+behind reality at the same time.</p>
+
+<p>A perfectly fresh percentage would still be ambiguous, though, because a level
+admits opposite explanations. As an illustration: “29% used” at 10:00 and
+“29% used” at 10:30 are the same reading, and one can be a quiet morning while
+the other is a session that consumed a quarter of the window in ten minutes and
+just went idle. Nothing in the number separates those cases, because nothing in
+the number involves time.</p>
+
+<figure class="post-figure">
+<img src="/agent-sessions/assets/quota-meter-light.png" alt="Agent Sessions Quota Meter showing Codex and Claude 5-hour and weekly percentages, with a Session Runway list below giving each active session's burn rate in quota-minutes per hour" />
+<figcaption>The Session Runway, under the raw percentages, lists each active session's burn rate in quota-minutes per hour. That per-session rate is the information the top-line percentage leaves out: it is what says which session is draining the window and how fast.</figcaption>
+</figure>
+
+<h2 id="turning-token-logs-into-a-rate">Turning token logs into a rate</h2>
+
+<p>The alternative is arithmetic on data every agent already writes to disk. It
+takes three steps.</p>
+
+<p><strong>Per-session tokens per second.</strong> Every agent turn appends its token usage to
+the session transcript. Agent Sessions tails those files and computes a recent
+tokens-per-second figure for each session. Two adjustments come straight from
+how the logs behave:</p>
+
+<ul>
+  <li>Cache reads are billed at a steep discount, so the parser weights them at 10%
+of their raw count. Without the weighting, a session re-reading a large
+context looks like it is torching the quota while it is mostly paying the
+cache rate.</li>
+  <li>Streaming writes duplicate usage rows that share a message id, so the parser
+dedupes on the id. Otherwise every burst would be counted several times.</li>
+</ul>
+
+<p>There is also a bootstrap problem, since a measured rate needs two samples
+spaced apart. The first completed turn therefore yields a provisional rate from
+that turn’s own duration, so a number appears immediately, and a measured burst
+rate replaces it once a second sample lands. Provisional rates are additionally
+capped at the largest measured rate among peer sessions, because a cache-heavy
+first turn can read as tens of thousands of tokens per second and would
+otherwise claim nearly the whole attribution split by itself.</p>
+
+<p><strong>From tokens to quota.</strong> Tokens per second is not quota. The account-level
+percentage moving over time is the only ground truth for quota burn, so the app
+distributes that account-wide rate across active sessions in proportion to
+their token rates. Each session ends up with a percent-per-second figure,
+displayed as quota minutes per hour. The unit is less exotic than it sounds:
+100% of a 5-hour window is 300 quota minutes, so a session showing 40 m/h (an
+illustrative number) spends forty of those minutes for every hour it keeps
+running.</p>
+
+<p><strong>Projecting run-out.</strong> With a rate in hand, run-out is division: remaining
+percent over burn rate. When the projected run-out lands before the reset, the
+drawer can warn while there is still time to act. One implementation detail
+deserves a warning label, because the obvious version is wrong. When no fresh
+account projection exists, the tempting fallback is to assume run-out at the
+reset time, which makes the implied rate <code class="language-plaintext highlighter-rouge">remaining / time-to-reset</code>. That
+denominator shrinks toward zero as the reset approaches, so the per-session
+numbers inflate at exactly the moment a calm reading matters most. Agent
+Sessions anchors the fallback to average burn instead: percent used divided by
+elapsed window time, with elapsed floored at 10 minutes so a heavy burst right
+after a reset cannot inflate the early-window side by the mirror-image
+mechanism. The average-burn rate never blows up, stays conservative by
+construction, and hands over to measured velocity whenever a fresher projection
+arrives.</p>
+
+<h2 id="coarse-by-design-on-claude">Coarse by design on Claude</h2>
+
+<p>The two providers do not give out equal data, and the app does not pretend
+they do.</p>
+
+<p>Codex writes fine-grained rate-limit samples into its own session logs and
+serves account state over local CLI-RPC, updated frequently. Per-session burn
+can be read directly, projections form readily, and a “fresh” indicator on
+Codex genuinely means fresh. When the question is how fast you are approaching
+the Codex usage limit, the transport supports a live answer.</p>
+
+<p>Claude offers no equivalent. The only account signal is the OAuth usage
+endpoint, and Agent Sessions reads it through a cache file shared with the
+Claude Code statusline (<code class="language-plaintext highlighter-rouge">/tmp/claude/statusline-usage-cache.json</code>). A running
+Claude Code session keeps that file warm, and the app re-serves it rather than
+issuing its own request whenever the file is younger than 180 seconds. That is
+cooperation rather than laziness: polling the endpoint aggressively earns a 429
+with a retry clamp of about five minutes, and independent polling would compete
+with the statusline for the same budget. The cost of cooperating is that
+Claude’s projection extras, the live ETA badge and the sharpening from average
+burn to measured velocity, form far less often than they do for Codex. When the
+underlying number has not moved, the app says it is waiting for a usable
+sample. Inventing a trajectory from a flat number would produce a reading that
+is confident, precise-looking, and made up.</p>
+
+<p>The burn measurement survives all of this on purpose. Per-session burn comes
+from token attribution in the transcripts, which the app reads directly and
+continuously, so the Session Runway bars stay live on Claude regardless of how
+stale the account projection is. An earlier version gated the burn display on a
+fresh projection, and that gate was removed for Claude precisely because it
+made the bars appear late and flicker. What degrades on Claude is projection
+polish; the answer about which session is eating the window, and how fast, does
+not degrade at all, and that answer is the reason the drawer exists.</p>
+
+<h2 id="what-the-drawer-shows">What the drawer shows</h2>
+
+<p>A session that is burning but projected to fit inside the window gets a small
+smiling face in its run-out column, with a quieter dot available in Preferences
+for anyone who wants less personality. A session on track to run past the reset
+carries its projected run-out time and rises up the ranking. Freshness is
+enforced per row as well: when the latest token sample is older than 30
+seconds, the rate falls back to a waiting state rather than showing a stale
+figure, so a stopped session clears quickly. By default the drawer appears only
+when the runway is actually running low; it can also be pinned always on or
+always off.</p>
+
+<p>The practical difference, again with illustrative numbers: instead of
+“7% used,” the readout becomes “this session spends 40 quota minutes per hour,
+it is the main drain on the window, and at this pace it runs out 25 minutes
+before the reset.” That sentence supports a decision. Pause the expensive
+session, or let the small ones ride to the reset.</p>
+
+<h2 id="try-it">Try it</h2>
+
+<p>Agent Sessions is a free, local-only macOS app for browsing and searching
+Claude Code and Codex sessions; the Quota Meter and Session Runway ship with
+it. There is no account and no telemetry, and it reads the same local logs your
+agents already write. The code behind everything described above is public:
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=quota-meter-burn-rate">download it</a>
+or <a href="https://github.com/jazzyalex/agent-sessions">read the source on GitHub</a>.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[A '% used' number can't say when the Claude 5-hour limit will stop you. The burn-rate math behind projecting run-out for Claude and Codex.]]></summary><media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" /><media:content medium="image" url="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" xmlns:media="http://search.yahoo.com/mrss/" /></entry></feed>

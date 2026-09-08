@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="A SQLite query says no such table while the writer holds a megabyte of committed rows. Measured: which WAL readers go blind, and why read-only isn’t one." />
+<meta property="og:description" content="A SQLite query says no such table while the writer holds a megabyte of committed rows. Measured: which WAL readers go blind, and why read-only isn’t one." />
+<link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/" />
+<meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/" />
+<meta property="og:site_name" content="Agent Sessions" />
+<meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-08-29T00:00:00-07:00" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta property="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png" />
+<meta property="twitter:title" content="A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL" />
+<meta name="twitter:site" content="@jazzyalex" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","dateModified":"2026-08-29T00:00:00-07:00","datePublished":"2026-08-29T00:00:00-07:00","description":"A SQLite query says no such table while the writer holds a megabyte of committed rows. Measured: which WAL readers go blind, and why read-only isn’t one.","headline":"A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL","image":"https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-codex-claude-history.png","mainEntityOfPage":{"@type":"WebPage","@id":"https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/"},"url":"https://jazzyalex.github.io/agent-sessions/blog/sqlite-wal-missing-rows/"}</script>
+<!-- End Jekyll SEO tag -->
+
+  <title>SQLite WAL missing rows: which readers go blind</title>
+  <link rel="alternate" type="application/rss+xml" title="The Rollout — Agent Sessions" href="/agent-sessions/feed.xml">
+  <link rel="icon" href="/agent-sessions/assets/app-icon-32.png">
+  <link rel="stylesheet" href="/agent-sessions/guides/guide.css">
+  <link rel="stylesheet" href="/agent-sessions/blog/blog.css">
+  <script defer src="/agent-sessions/guides/guide.js"></script>
+  <!-- GoatCounter: cookieless, privacy-first analytics (no consent banner needed) -->
+  <script data-goatcounter="https://agent-sessions.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="/agent-sessions/">
+        <img src="/agent-sessions/assets/app-icon-512.png" alt="Agent Sessions icon">
+        Agent Sessions
+      </a>
+      <div class="nav-links">
+        <a href="/agent-sessions/guides/">Guides</a>
+        <a href="/agent-sessions/bench/">Bench</a>
+        <a href="/agent-sessions/blog/">The Rollout</a>
+        <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="github-stars-container" style="display:none;"> <span class="gh-star-icon">★</span> <span id="github-stars">–</span></span></a>
+      </div>
+    </div>
+  </nav>
+  <main class="guide-shell">
+    <article class="post">
+  <p class="eyebrow">The Rollout</p>
+  <h1>A 4 KB database, a megabyte of rows: which SQLite readers go blind to the WAL</h1>
+  <p class="post-meta"><time datetime="2026-08-29T00:00:00-07:00">August 29, 2026</time></p>
+  <p>With checkpointing switched off, a SQLite database we had just filled with
+5,000 committed rows measured 4,096 bytes on disk: one page, holding the file
+header and nothing else. The real data, 1.1 MB of it, sat in the <code class="language-plaintext highlighter-rouge">-wal</code> file
+beside it, including the <code class="language-plaintext highlighter-rouge">CREATE TABLE</code> statement. A reader that consults only
+the main file therefore does not report zero rows out of that database; it
+reports <code class="language-plaintext highlighter-rouge">no such table</code>, which is a strange thing to be told about a table you
+just watched being created.</p>
+
+<p>Which readers go blind that way is the useful question, and the answer we would
+have given a week ago is wrong. We know exactly how wrong, because we wrote it
+into our own engineering notes, believed it for over a month, and published it
+on this blog. That post has been retracted. This one is the correction.</p>
+
+<h2 id="three-files-one-database">Three files, one database</h2>
+
+<p>SQLite’s write-ahead-log mode splits a database across three files. The main
+<code class="language-plaintext highlighter-rouge">.db</code> file holds pages as of the last checkpoint. Committed transactions are
+appended to <code class="language-plaintext highlighter-rouge">&lt;name&gt;-wal</code>, the write-ahead log, and folded back into the main
+file only when a checkpoint runs. The third file, <code class="language-plaintext highlighter-rouge">&lt;name&gt;-shm</code>, holds the
+wal-index: a shared map telling a reader which pages have newer versions
+sitting in the log. In exchange for the extra files, readers do not block the
+writer and the writer does not block readers, which is the point of the mode.</p>
+
+<p>The arrangement has one consequence that surprises people the first time. A
+committed row is durable, real, and possibly nowhere near the main database
+file. We ran a writer with <code class="language-plaintext highlighter-rouge">PRAGMA wal_autocheckpoint=0</code> — checkpointing off,
+which is just an exaggerated version of a busy writer that has not checkpointed
+recently — and the entire 5,000-row table lived in the log. The <code class="language-plaintext highlighter-rouge">.db</code> held the
+header page; every row and the schema itself sat in the <code class="language-plaintext highlighter-rouge">-wal</code>.</p>
+
+<figure class="post-figure">
+<div class="viz-root" style="--viz-ink:#0b0b0b; --viz-ink2:#52514e; --viz-muted:#898781; --viz-grid:#e1e0d9; --viz-accent:#2a78d6; --viz-box:#f0efec;">
+<style>
+@media (prefers-color-scheme: dark) {
+  .viz-root { --viz-ink:#ffffff; --viz-ink2:#c3c2b7; --viz-muted:#898781; --viz-grid:#2c2c2a; --viz-accent:#3987e5; --viz-box:#26262a; }
+}
+.viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
+.viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+</style>
+<svg viewBox="0 0 720 330" role="img" aria-label="Diagram: a WAL-mode SQLite database split across three files. The main live.db is 4,096 bytes and holds only the header page; live.db-wal is 1.1 MB and holds every committed row plus the schema; live.db-shm holds the wal-index. An upper reader opened on the plain path or read-only consults the wal-index, merges the main file with the log, and sees all 5,000 rows. A lower reader opened with immutable=1, or on a .db copied without its -wal, never reaches the log: it answers from the header page, or fails outright with error 14.">
+  <text x="12" y="22" font-size="14" font-weight="600" fill="var(--viz-ink)">Where the rows actually are, and who can see them</text>
+  <!-- file boxes -->
+  <g>
+    <rect x="20" y="48" width="220" height="58" rx="8" fill="var(--viz-box)" />
+    <text x="130" y="72" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db — 4,096 bytes</text>
+    <text x="130" y="92" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">header page only</text>
+
+    <rect x="20" y="122" width="220" height="66" rx="8" fill="none" stroke="var(--viz-accent)" stroke-width="2" />
+    <text x="130" y="148" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db-wal — 1.1 MB</text>
+    <text x="130" y="168" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">all 5,000 rows + the schema</text>
+
+    <rect x="20" y="204" width="220" height="58" rx="8" fill="var(--viz-box)" />
+    <text x="130" y="228" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">live.db-shm</text>
+    <text x="130" y="248" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">wal-index: which pages are in the log</text>
+  </g>
+  <!-- reader boxes -->
+  <g>
+    <rect x="460" y="56" width="240" height="80" rx="8" fill="none" stroke="var(--viz-accent)" stroke-width="2" />
+    <text x="580" y="80" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">plain path · mode=ro · -readonly</text>
+    <text x="580" y="100" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">consults the wal-index, merges both</text>
+    <text x="580" y="122" font-size="12" font-weight="600" fill="var(--viz-accent)" text-anchor="middle">sees all 5,000 rows</text>
+
+    <rect x="460" y="196" width="240" height="80" rx="8" fill="none" stroke="var(--viz-muted)" stroke-width="2" stroke-dasharray="5 4" />
+    <text x="580" y="220" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">immutable=1 · a .db copied without its -wal</text>
+    <text x="580" y="240" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">never reaches the log</text>
+    <text x="580" y="262" font-size="12" font-weight="600" fill="var(--viz-muted)" text-anchor="middle">"no such table", or error 14</text>
+  </g>
+  <!-- arrows: upper reader to all three files -->
+  <g stroke="var(--viz-accent)" stroke-width="1.6" fill="none">
+    <path d="M 460 78 C 380 70, 320 70, 244 76" />
+    <path d="M 460 96 C 380 110, 320 130, 244 148" />
+    <path d="M 460 114 C 390 150, 330 190, 244 222" />
+  </g>
+  <!-- arrow: lower reader to main db only -->
+  <g stroke="var(--viz-muted)" stroke-width="1.6" fill="none" stroke-dasharray="5 4">
+    <path d="M 460 232 C 350 220, 300 150, 244 96" />
+  </g>
+  <text x="352" y="316" font-size="11" fill="var(--viz-muted)" text-anchor="middle">Measured 2026-08-29: SQLite 3.43.2 (macOS CLI) and 3.53.4 (Python), identical results.</text>
+</svg>
+</div>
+<figcaption>The database during the measurement. The main file is a 4 KB header; the megabyte is in the log. The upper reader goes through the wal-index and merges the two; the lower one never reaches the log and answers from the header page alone.</figcaption>
+</figure>
+
+<h2 id="the-folk-claim-measured">The folk claim, measured</h2>
+
+<p>The folk claim goes like this: open a WAL database read-only and you can only
+see what has been checkpointed, because rows still in the <code class="language-plaintext highlighter-rouge">-wal</code> are invisible
+to a read-only connection. A version of that sentence sat in our own notes,
+written in July after a verification query against our app’s index database
+came back empty while the app was mid-write. The explanation fit the symptom,
+sounded like a known WAL subtlety, and survived unchallenged for over a month.</p>
+
+<p>It fails a thirty-second test. Below is what every reader configuration
+actually returned, opened fresh against a live writer holding 5,000 committed,
+deliberately uncheckpointed rows. Fresh connections matter: none of these
+readers can be holding a stale snapshot, so whatever each one reports is a
+property of how it opened the file. The macOS system CLI (SQLite 3.43.2) and
+the SQLite 3.53.4 inside Python’s <code class="language-plaintext highlighter-rouge">sqlite3</code> module agree on every row of it.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reader</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>plain path, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">file:…?mode=ro</code>, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">sqlite3 -readonly</code>, <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct</td>
+    </tr>
+    <tr>
+      <td>read-only, <code class="language-plaintext highlighter-rouge">-shm</code> missing but <code class="language-plaintext highlighter-rouge">-wal</code> present</td>
+      <td>5,000 — correct; the reader builds the index itself</td>
+    </tr>
+    <tr>
+      <td>read-only, <code class="language-plaintext highlighter-rouge">-shm</code> present but <code class="language-plaintext highlighter-rouge">-wal</code> missing</td>
+      <td>hard error: <code class="language-plaintext highlighter-rouge">unable to open database file</code> (14)</td>
+    </tr>
+    <tr>
+      <td>read-only on a copy of the <code class="language-plaintext highlighter-rouge">.db</code> alone</td>
+      <td>hard error 14</td>
+    </tr>
+    <tr>
+      <td>read-write on a copy of the <code class="language-plaintext highlighter-rouge">.db</code> alone</td>
+      <td>wrong — answers from the header page</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">file:…?immutable=1</code>, even with the <code class="language-plaintext highlighter-rouge">-wal</code> there</td>
+      <td>wrong — the WAL is ignored</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Read-only is not the problem. The determining factor is much simpler and it is
+easy to get backwards: <strong>the <code class="language-plaintext highlighter-rouge">-wal</code> file’s presence is necessary and
+sufficient.</strong> The <code class="language-plaintext highlighter-rouge">-shm</code> is neither. Given the log, a read-only connection
+builds the wal-index it needs — writing a <code class="language-plaintext highlighter-rouge">-shm</code> if the directory allows, and
+otherwise keeping the index in its own memory. Take the log away and no
+permission or flag saves you.</p>
+
+<p>That reframes which failures are dangerous. A read-only reader that cannot
+reach the log fails <em>loudly</em>, with error 14 at the first query rather than at
+<code class="language-plaintext highlighter-rouge">open</code>, because SQLite opens lazily. Only two configurations answer confidently
+with the wrong data: <code class="language-plaintext highlighter-rouge">immutable=1</code>, which promises the file cannot change and
+so skips the log entirely, and a read-<em>write</em> connection to a copied <code class="language-plaintext highlighter-rouge">.db</code>,
+which is allowed to start a fresh empty log and then reports what the header
+page alone contains.</p>
+
+<p>One practical trap follows from this. A <code class="language-plaintext highlighter-rouge">-wal</code> is often zero bytes, which makes
+it look like an empty file not worth copying. Copying it is precisely what
+makes the read work.</p>
+
+<h2 id="the-two-readers-that-actually-lie">The two readers that actually lie</h2>
+
+<p><code class="language-plaintext highlighter-rouge">immutable=1</code> is a URI parameter that asserts the database file cannot change.
+It exists for databases on read-only media, and SQLite responds by skipping
+locking, change detection, and the WAL. Point it at a live database and the
+assertion is false: in the run above it ignored 1.1 MB of committed data and
+answered <code class="language-plaintext highlighter-rouge">no such table</code> from the header page. The parameter did exactly what
+it promises, on a file that broke the promise, and nothing anywhere warned us.</p>
+
+<p>The copied <code class="language-plaintext highlighter-rouge">.db</code> is the same failure without the URI, and it is the one people
+actually hit: a quick <code class="language-plaintext highlighter-rouge">cp</code> before poking at a live app’s data, a backup script
+globbing <code class="language-plaintext highlighter-rouge">*.db</code>, a database attached to a bug report. The log stays behind.
+Opened read-write, that copy is allowed to begin a fresh empty log, so it opens
+cleanly, parses correctly, and answers from whatever the last checkpoint wrote
+— which can be a single header page.</p>
+
+<p>Opened read-only, the same copy fails instead, with <code class="language-plaintext highlighter-rouge">unable to open database
+file</code> at the first query. That asymmetry is worth internalising, because it is
+the source of a recurring false bug report: <em>“this app’s database won’t open
+read-only, error 14.”</em> Nearly always the repro copied the <code class="language-plaintext highlighter-rouge">.db</code> without its
+<code class="language-plaintext highlighter-rouge">-wal</code>. Re-test against the live path before concluding anything is broken. We
+managed to file that exact false report against our own app while writing this
+post.</p>
+
+<p>What to do instead is short. To inspect a live database, query the real path
+with plain <code class="language-plaintext highlighter-rouge">SELECT</code>s; readers do not block a WAL writer, so the caution behind
+reaching for a read-only flag is already satisfied by the mode itself. To take
+a copy, take the set — <code class="language-plaintext highlighter-rouge">.db</code>, <code class="language-plaintext highlighter-rouge">-wal</code>, <code class="language-plaintext highlighter-rouge">-shm</code> — and copy the <code class="language-plaintext highlighter-rouge">-wal</code> <strong>even when
+it is zero bytes</strong>, because its absence is what turns a read-only open into
+error 14. And when you own the database, <code class="language-plaintext highlighter-rouge">PRAGMA wal_checkpoint(TRUNCATE);</code>
+folds the log into the main file first, after which the single file means what
+it appears to mean.</p>
+
+<h2 id="the-whole-test-runnable">The whole test, runnable</h2>
+
+<p>The measurement fits in one script, and running it beats trusting us:</p>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/bin/sh</span>
+<span class="c"># A live writer commits 5,000 rows in WAL mode with checkpointing off,</span>
+<span class="c"># then every reader opens fresh.</span>
+<span class="nv">W</span><span class="o">=</span><span class="si">$(</span><span class="nb">mktemp</span> <span class="nt">-d</span><span class="si">)</span><span class="p">;</span> <span class="nv">DB</span><span class="o">=</span><span class="s2">"</span><span class="nv">$W</span><span class="s2">/live.db"</span>
+
+python3 - <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">PY</span><span class="sh">' &amp;
+import sqlite3, sys, time
+c = sqlite3.connect(sys.argv[1])
+c.execute("PRAGMA journal_mode=WAL")
+c.execute("PRAGMA wal_autocheckpoint=0")   # park everything in the -wal
+c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)")
+c.executemany("INSERT INTO t (body) VALUES (?)", [("x"*200,) for _ in range(5000)])
+c.commit(); print("committed", flush=True); time.sleep(60)
+</span><span class="no">PY
+</span><span class="nv">WRITER</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span> <span class="nb">sleep </span>2
+<span class="nb">ls</span> <span class="nt">-l</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">"</span>                                 <span class="c"># live.db is 4096 bytes</span>
+
+q<span class="o">()</span> <span class="o">{</span> <span class="nb">printf</span> <span class="s1">'%-22s %s\n'</span> <span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span> <span class="s2">"</span><span class="si">$(</span>sqlite3 <span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span> <span class="s1">'select count(*) from t;'</span> 2&gt;&amp;1<span class="si">)</span><span class="s2">"</span><span class="p">;</span> <span class="o">}</span>
+q <span class="s2">"plain path"</span>          <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span>
+q <span class="s2">"mode=ro"</span>             <span class="s2">"file:</span><span class="nv">$DB</span><span class="s2">?mode=ro"</span>
+q <span class="s2">"immutable=1"</span>         <span class="s2">"file:</span><span class="nv">$DB</span><span class="s2">?immutable=1"</span>
+<span class="c"># Each copy gets its own file: opening one read-write CREATES an empty -wal</span>
+<span class="c"># beside it, which would then let a later read-only probe succeed.</span>
+<span class="nb">cp</span> <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/ro.db"</span><span class="p">;</span> <span class="nb">cp</span> <span class="s2">"</span><span class="nv">$DB</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/rw.db"</span>   <span class="c"># the .db WITHOUT its -wal</span>
+q <span class="s2">".db copy, read-only"</span>  <span class="s2">"file:</span><span class="nv">$W</span><span class="s2">/ro.db?mode=ro"</span>
+q <span class="s2">".db copy, read-write"</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">/rw.db"</span>
+
+<span class="nb">kill</span> <span class="nv">$WRITER</span> 2&gt;/dev/null<span class="p">;</span> <span class="nb">wait</span> <span class="nv">$WRITER</span> 2&gt;/dev/null<span class="p">;</span> <span class="nb">rm</span> <span class="nt">-rf</span> <span class="s2">"</span><span class="nv">$W</span><span class="s2">"</span>
+</code></pre></div></div>
+
+<p>On this machine the first two probes answer <code class="language-plaintext highlighter-rouge">5000</code>. <code class="language-plaintext highlighter-rouge">immutable=1</code> and the
+read-write copy both answer <code class="language-plaintext highlighter-rouge">Error: in prepare, no such table: t</code> — confidently
+wrong. The read-only copy answers <code class="language-plaintext highlighter-rouge">Error: in prepare, unable to open database
+file</code> — wrong, but honestly so. All of it with the writer alive and a megabyte
+of its committed rows sitting in <code class="language-plaintext highlighter-rouge">live.db-wal</code>.</p>
+
+<h2 id="the-clock-freezes-too">The clock freezes too</h2>
+
+<p>There is a second, quieter consequence of writes landing in the sidecar: the
+main <code class="language-plaintext highlighter-rouge">.db</code> file’s modification time moves at checkpoint time, not at commit
+time. Watch that file to learn when the database changes — a file watcher, an
+mtime comparison, a backup tool’s is-it-newer check — and nothing appears to
+happen while a busy writer streams commits into the <code class="language-plaintext highlighter-rouge">-wal</code> next door.</p>
+
+<p>We ship a tool that has to get both blind spots right.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=sqlite-wal-missing-rows">Agent Sessions</a>
+opens other programs’ SQLite session stores read-only — OpenCode’s
+<code class="language-plaintext highlighter-rouge">opencode.db</code>, Hermes’s <code class="language-plaintext highlighter-rouge">state.db</code>, Devin’s session database, Cursor’s chat
+store — while the agent that owns each one may still be writing to it.
+OpenCode’s is WAL-mode and live, which is where these traps first bit us. Its
+change monitor,
+<code class="language-plaintext highlighter-rouge">UnifiedSessionIndexer.fileSignature</code>, treats a <code class="language-plaintext highlighter-rouge">.db</code> file’s signature as the
+newest mtime across the database <em>and</em> its <code class="language-plaintext highlighter-rouge">-wal</code>/<code class="language-plaintext highlighter-rouge">-shm</code> sidecars, so a live
+database still registers as changed between checkpoints. For Hermes the
+freshness check skips file stats entirely:
+<code class="language-plaintext highlighter-rouge">HermesStateDBReader.sessionActivitySignature</code> asks the database itself what a
+session’s latest activity is, because the honest source for “did anything
+change” is a query, not a timestamp. The read path, meanwhile, leans on the
+corrected fact from the table above: those readers all pass
+<code class="language-plaintext highlighter-rouge">SQLITE_OPEN_READONLY</code>, and read-only is not the limitation folklore makes it
+out to be.</p>
+
+<h2 id="why-this-keeps-coming-up">Why this keeps coming up</h2>
+
+<p>Local software keeps drifting into SQLite. Browsers keep history in it,
+messaging apps archive into it, Electron apps persist state in it, and the
+newest arrivals are coding agents, whose on-disk session stores we mapped in
+<a href="/agent-sessions/blog/where-agents-store-history/">an earlier post</a> —
+OpenCode and Hermes both moved their entire history into WAL-mode databases.
+The situation that produces these traps, a database owned by a program that is
+running right now and read by a tool that did not write it, gets more common
+every year.</p>
+
+<p>The failure shape is worth naming, because it is not specific to SQLite.
+<code class="language-plaintext highlighter-rouge">immutable=1</code> and the lone copy both fail by succeeding: valid connection,
+clean parse, wrong data, no error anywhere. An instrument that cannot fail
+loudly will report success while measuring the wrong thing, and the defense is
+a positive control — confirm the reader can see data you know exists before
+trusting what it says is absent. We had over a month between writing down the
+wrong cause and testing it; the test took thirty seconds. As for the July
+incident that started all this, the honest answer is that we no longer know
+what caused it. The explanation we wrote down at the time is the one part we
+can now disprove.</p>
+
+<p>Agent Sessions is a free, local-only macOS app with no telemetry that makes
+every coding agent’s session history searchable, including the WAL-mode
+databases above, all opened read-only.
+<a href="https://jazzyalex.github.io/agent-sessions/?campaign=blog&amp;ref=sqlite-wal-missing-rows">Download it</a>,
+or read the database readers yourself —
+<a href="https://github.com/jazzyalex/agent-sessions">the source is on GitHub</a>, and a
+star there helps the next person doubting a healthy writer find this page.
+More posts like this one live at <a href="/agent-sessions/blog/">/blog/</a>.</p>
+
+  <p class="post-back"><a href="/agent-sessions/blog/">&larr; The Rollout</a></p>
+</article>
+
+  </main>
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
+</body>
+</html>
