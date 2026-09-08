@@ -17764,38 +17764,6 @@
         }
       }
     },
-    "Switch to Enlarged text size": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch to Enlarged text size"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换到放大文本"
-          }
-        }
-      }
-    },
-    "Switch to Standard text size": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch to Standard text size"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换到标准文本"
-          }
-        }
-      }
-    },
     "Switch views depending on what you need.": {
       "localizations": {
         "en": {
