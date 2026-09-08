@@ -3299,6 +3299,7 @@ enum HUDRunwayRequestBuilder {
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .codex),
             now: now,
             maxRows: maxRows,
+            weeklyResetAt: weekResetAt,
             weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
                 .percentPointsPerDollar(provider: "codex", now: now),
             weeklyWindowAvailable: weekResetAt != nil,
@@ -4251,6 +4252,9 @@ private struct HUDRunwayPanel: View {
         .padding(.top, 4)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .help(rateUnit == .weeklyPercentPerHour
+              ? "Estimated weekly burn pace from the last five minutes of local activity."
+              : "")
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.primary.opacity(0.08))

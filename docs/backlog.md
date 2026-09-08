@@ -1331,8 +1331,45 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## QM / Runway
 
+### Quota Meter v2 needs one immutable, end-to-end evidence contract
+> **open** · sev: high · urg: low · verified 2026-09-08
+
+- **What:** replace the remaining parallel display, live-calibration and bootstrap pricing
+  representations with one immutable priced-event contract. Each event must carry its model,
+  request boundary, billing modifiers, event identity, quota-window identity, source/root
+  provenance, coverage state and the exact price quote used to value it.
+- **Where:** `RunwayPriceTable.swift`, `CodexRunwayModel.swift`,
+  `ClaudeRunwayTokenActivityParser.swift`, `WeeklyQuotaCalibration.swift`, and
+  `WeeklyQuotaBootstrap.swift`, plus the persisted calibration schema and migration tests.
+- **Fix shape:** introduce provider-specific semantic price fingerprints; exact manifest aliases
+  and fail-closed unknown modifiers; durable provider request IDs where available; explicit
+  archive/root coverage manifests; bounded quota-quantization candidates; and v2 persistence
+  scoped by provider, account, source family, root, limit identity, price fingerprint and
+  algorithm revision. Display and both calibration paths must consume the same immutable quote.
+- **Why deferred:** the 2026-09-08 correction closes the confirmed inflated-rate and denominator
+  inconsistency without a persistence migration. V2 is one coordinated data-model, provenance
+  and migration project; splitting it into isolated follow-ups would recreate the same
+  cross-path disagreement under different types.
+- **Risk if wrong:** an account/root switch, incomplete archive scan, price refresh, unknown
+  billing modifier or reused request identity could admit stale or underpriced evidence and show
+  a confident but false weekly rate. Ambiguous evidence must fail closed.
+- **To close:** ship the v2 schema and migration with cross-provider request fixtures,
+  source/root/coverage invalidation tests, bounded quantization tests, semantic-price migration
+  tests, and preservation tests for 5h, weekly, token, dollar, cache, child-session, idle and
+  stopped behavior. Record a full XCResult and exact test-name delta.
+
 ### Weekly quota pricing and calibration need immutable, scoped v2 evidence
-> **partial** · sev: high · urg: med · verified 2026-09-03
+> **partial** · sev: high · urg: med · verified 2026-09-08
+
+- **2026-09-08 investigation and correction:** historical bootstrap and live ledger reported
+  conflicting dollar denominators for apparently nested intervals. Bootstrap used per-turn
+  usage while live ingestion differenced cumulative counters, live events were assigned to
+  discovery polls, and historical scans admitted post-observation records. The historical
+  event set is no longer recoverable, so neither denominator is treated as the oracle; the
+  earlier screenshot replay also omitted the bootstrap quantization midpoint. The scoped
+  [spec](superpowers/specs/2026-09-08-codex-weekly-calibration-integrity.md) and
+  [implementation plan](superpowers/plans/2026-09-08-codex-weekly-calibration-integrity.md)
+  record the evidence, accounting contract, implementation and regression gates.
 
 - **What is fixed locally:** the `Wk` path no longer annualizes and holds the newest
   10-second token pair. It uses a weekly-only, linearly decayed five-minute window with
@@ -1340,29 +1377,21 @@ this. The entry sat `verified —` and read as open work for two weeks.
   quota ticks; retains a better-conditioned bootstrap; differences only Codex's cumulative
   `token_count` family instead of mixing in its per-request twin; keeps completed Codex
   sessions attributable for the whole five-minute window; invalidates live Codex calibration
-  learned under the old activity accounting; applies Sol's strict `>272K` request tier;
+  learned under the old activity accounting; normalizes bootstrap from cumulative counters;
+  preserves live event time separately from poll time; requires the current weekly anchor;
+  treats quota-anchor transitions as baselines; rejects malformed, post-cutoff, late,
+  scan-truncated, contradictory nested and unresolved long-context evidence; keeps overlapping
+  poll clocks monotonic; invalidates old live and bootstrap Codex evidence; applies Sol's strict `>272K` request tier;
   rejects unsafe GPT prefix matches; uses a stable semantic price hash; and adaptively
-  recovers Wk row history hidden behind oversized image/tool transcript records.
-- **What remains:** one immutable request-pricing snapshot shared by display, live
-  calibration, and bootstrap; provider-specific semantic fingerprints; exact manifest
-  aliases and fail-closed unknown billing modifiers; stable request IDs, gap-proof calibration
-  ledger ingestion, and end-to-end five-minute coverage across every consumer; bounded
-  quota-quantization evidence; and v2
-  persistence scoped by provider, account, source, root, limit identity, price fingerprint,
-  and algorithm version.
+  recovers Wk row history hidden behind oversized image/tool transcript records. Numeric Wk
+  rates retain their plain numeric format, while the row tooltip explains the five-minute
+  activity window. The remaining architecture is tracked in the v2 entry above.
 - **Where:** `RunwayPriceTable.swift`, `CodexRunwayModel.swift`,
   `ClaudeRunwayTokenActivityParser.swift`, `WeeklyQuotaCalibration.swift`, and
   `WeeklyQuotaBootstrap.swift`.
-- **Why deferred:** Sol Pro's review showed that these are one coordinated data-model and
-  persistence migration, not safe follow-up one-liners. The immediate inflated-rate path
-  can be corrected independently without changing 5h, token, or dollar timing.
-- **Risk if wrong:** a price refresh during a scan, an unknown billing modifier, incomplete
-  transcript coverage, or account/source ambiguity can still produce a stale or incorrectly
-  scoped weekly calibration. Those cases must fail closed rather than show a confident rate.
-- **To close:** land manifest and persistence v2 with immutable request quotes, bounded
-  calibration candidates, scope invalidation, migration tests, coverage/identity tests, and
-  preservation tests for existing 5h, token, dollar, cache, child-session, idle, and stopped
-  behavior.
+- **Why still partial:** the corrected implementation is committed locally but not yet shipped.
+- **Risk if wrong:** the regression would return inflated or contradictory weekly rates.
+- **To close:** ship the correction and record the release version; v2 is tracked separately.
 
 ### OpenAI long-context pricing was historically unreachable from the Codex CLI
 > **partial** · sev: low · urg: low · verified 2026-09-03

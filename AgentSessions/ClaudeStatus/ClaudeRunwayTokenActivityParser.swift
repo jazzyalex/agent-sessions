@@ -35,6 +35,7 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
     var modelSlug: String? = nil
     /// Billing tier from `usage.speed`. Fast mode bills Opus 5 / 4.8 at double.
     var speed: RunwaySpeedTier = .standard
+    var eventID: String? = nil
 }
 
 enum ClaudeRunwayTokenActivityParser {
@@ -87,6 +88,7 @@ enum ClaudeRunwayTokenActivityParser {
             for sample in recentSamples(fromLogPath: path, now: now) {
                 result.append(WeeklyQuotaTokenEvent(
                     logPath: path,
+                    eventID: sample.eventID,
                     capturedAt: sample.capturedAt,
                     input: sample.input,
                     cachedInput: sample.cacheRead,
@@ -512,7 +514,8 @@ enum ClaudeRunwayTokenActivityParser {
               let usage = message["usage"] as? [String: Any] else {
             return (timestamp, nil)
         }
-        if let messageID = message["id"] as? String {
+        let messageID = message["id"] as? String
+        if let messageID {
             if seenMessageIDs.contains(messageID) { return (timestamp, nil) }
             seenMessageIDs.insert(messageID)
         }
@@ -535,7 +538,8 @@ enum ClaudeRunwayTokenActivityParser {
             cacheCreation1h: writes.oneHour,
             cacheRead: v("cache_read_input_tokens"),
             modelSlug: model,
-            speed: RunwaySpeedTier(usageValue: usage["speed"])
+            speed: RunwaySpeedTier(usageValue: usage["speed"]),
+            eventID: messageID
         ))
     }
 

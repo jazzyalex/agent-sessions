@@ -3514,6 +3514,29 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(identities.first?.displayName.hasPrefix("audit exported pricing"), true)
     }
 
+    func testCodexRunwayRecentSessionScannerReportsTruncatedCoverage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-scan-cap-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for index in 0...CodexRunwayRecentSessionScanner.maximumMetadataFiles {
+            let log = dir.appendingPathComponent("rollout-\(index).jsonl")
+            let text = """
+            {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-\(index)","cwd":"/tmp"}}
+            {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+            """
+            try text.write(to: log, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+        }
+
+        let scan = CodexRunwayRecentSessionScanner.scan(root: root, now: now)
+
+        XCTAssertFalse(scan.coverageComplete)
+        XCTAssertEqual(scan.identities.count, CodexRunwayRecentSessionScanner.maximumFiles)
+    }
+
     func testCodexRunwayRecentSessionScannerPrefersCliRenameOverFirstPrompt() throws {
         let codexHome = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-rename-\(UUID().uuidString)")
         let root = codexHome.appendingPathComponent("sessions", isDirectory: true)
@@ -4554,6 +4577,45 @@ final class CodexUsageParserTests: XCTestCase {
             priceTable: prices, percentPointsPerDollar: 0, maxRows: 5))
     }
 
+    func testAstraRunwayPricingAndWeeklyBurn() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        let price = try XCTUnwrap(table.price(forModel: "gpt-6-astra"))
+        XCTAssertEqual(table.price(forModel: "gpt-6-astra-2026-09-07"), price)
+        XCTAssertNil(table.price(forModel: "gpt-6-astra-pro"))
+        let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))
+        XCTAssertEqual(standard.inputPerMTok, 10)
+        XCTAssertEqual(standard.cachedInputPerMTok, 1)
+        XCTAssertEqual(standard.outputPerMTok, 50)
+        XCTAssertEqual(standard.cacheWritePerMTok, 12.5)
+        let long = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_001))
+        XCTAssertEqual(long.inputPerMTok, 20)
+        XCTAssertEqual(long.cachedInputPerMTok, 2)
+        XCTAssertEqual(long.outputPerMTok, 75)
+        let fastLong = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_001))
+        XCTAssertEqual(fastLong.inputPerMTok, 40)
+        XCTAssertEqual(fastLong.cachedInputPerMTok, 4)
+        XCTAssertEqual(fastLong.outputPerMTok, 150)
+
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let activity = RunwaySessionActivity(
+            identity: .init(id: "astra", displayName: "Astra", isGoal: false, logPaths: ["/astra"]),
+            tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 10, cachedInputPerSecond: 1000, outputPerSecond: 10,
+            modelSlug: "gpt-6-astra", contextInputTokens: 200_000)
+        let dollars = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(for: activity, priceTable: table))
+        XCTAssertEqual(dollars, 5.76, accuracy: 0.000001)
+        let weekly = try XCTUnwrap(CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: weeklyBaseline(now: now), activities: [activity], priceTable: table,
+            percentPointsPerDollar: 2, maxRows: 5))
+        XCTAssertTrue(weekly.unpriceableIDs.isEmpty)
+        XCTAssertEqual(try XCTUnwrap(weekly.snapshot.rows.first).displayRate, 11.52, accuracy: 0.000001)
+
+        // A cached pre-Astra manifest must not remove the new model after restart.
+        let old = #"{"version":1,"updated":"2026-09-03","models":{"gpt-5.6-sol":{"inputPerMTok":4,"cachedInputPerMTok":0.4,"outputPerMTok":20}}}"#
+        XCTAssertFalse(table.loadForTesting(json: Data(old.utf8)))
+        XCTAssertEqual(table.price(forModel: "gpt-6-astra"), price)
+    }
+
     func testPriceTableBundledAndPrefixMatch() {
         let t = RunwayPriceTable.makeForTesting()
         XCTAssertFalse(t.isEmpty)
@@ -5106,7 +5168,7 @@ final class CodexUsageParserTests: XCTestCase {
             id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
         var events = CodexRunwayTokenActivityParser.ledgerEvents(
             identities: [identity], now: second.addingTimeInterval(2))
-        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.count, 2)
         XCTAssertEqual(events.first?.modelSlug, "gpt-5.6-sol")
 
         let token3 = "{\"timestamp\":\"\(iso(third))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":3000,\"cached_input_tokens\":2400,\"output_tokens\":300,\"total_tokens\":3300}}}}"
@@ -5122,7 +5184,9 @@ final class CodexUsageParserTests: XCTestCase {
         ])
         events = CodexRunwayTokenActivityParser.ledgerEvents(
             identities: [identity], now: third.addingTimeInterval(1))
-        XCTAssertEqual(events.map(\.modelSlug), ["gpt-5.6-sol", "gpt-5.6-luna"])
+        XCTAssertEqual(events.map(\.modelSlug), [
+            "gpt-5.6-sol", "gpt-5.6-sol", "gpt-5.6-luna"
+        ])
     }
 
     func testCodexRunwayBoundaryModelCacheInvalidatesSameInodeRewrite() throws {
@@ -5219,12 +5283,12 @@ final class CodexUsageParserTests: XCTestCase {
             id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
         let events = CodexRunwayTokenActivityParser.ledgerEvents(
             identities: [identity], now: now)
-        XCTAssertEqual(events.count, 1)
-        let event = try XCTUnwrap(events.first)
-        XCTAssertEqual(event.input, 200)
-        XCTAssertEqual(event.cachedInput, 800)
-        XCTAssertEqual(event.output, 100)
-        XCTAssertEqual(event.contextInputTokens, 1_000)
+        XCTAssertEqual(events.count, 2, "the complete file's first cumulative record counts once")
+        XCTAssertEqual(events.reduce(0) { $0 + $1.input }, 400)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.cachedInput }, 1_600)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.output }, 200)
+        XCTAssertTrue(events.allSatisfy { $0.contextInputTokens == nil },
+                      "without reconciled request metadata the boundary remains unresolved")
 
         let profile = CodexRunwayTokenActivityParser.weeklyProfile(
             identities: [identity], now: now)
@@ -5247,6 +5311,45 @@ final class CodexUsageParserTests: XCTestCase {
         let dollarsPerHour = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(
             for: activity, priceTable: RunwayPriceTable.makeForTesting()))
         XCTAssertEqual(dollarsPerHour, expectedDollarsPerHour, accuracy: 0.000_001)
+    }
+
+    func testCodexCalibrationEventsRequireTheCurrentWeeklyAnchor() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-ledger-anchor-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let expectedReset = first.addingTimeInterval(604_800)
+        let foreignReset = expectedReset.addingTimeInterval(-604_800)
+        func token(at: Date, total: Int, reset: Date) -> String {
+            "{\"timestamp\":\"\(iso(at))\",\"type\":\"event_msg\",\"payload\":{" +
+            "\"type\":\"token_count\",\"info\":{\"total_token_usage\":{" +
+            "\"input_tokens\":0,\"cached_input_tokens\":0,\"output_tokens\":\(total)," +
+            "\"total_tokens\":\(total)}},\"rate_limits\":{\"primary\":{" +
+            "\"used_percent\":1,\"window_minutes\":10080,\"resets_at\":\(reset.timeIntervalSince1970)}}}}"
+        }
+        let lines = [
+            "{\"timestamp\":\"\(iso(first.addingTimeInterval(-1)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6\"}}",
+            token(at: first, total: 1_000_000, reset: foreignReset),
+            token(at: first.addingTimeInterval(30), total: 2_000_000, reset: expectedReset),
+            token(at: first.addingTimeInterval(60), total: 3_000_000, reset: expectedReset)
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(
+            to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let events = CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], expectedWeeklyResetAt: expectedReset,
+            now: first.addingTimeInterval(61))
+
+        XCTAssertEqual(events.count, 1,
+                       "the first matching sample is a baseline across a window boundary")
+        XCTAssertEqual(events.first?.output, 1_000_000)
     }
 
     /// Regression: image and tool-result records can be larger than the ordinary
@@ -5281,8 +5384,11 @@ final class CodexUsageParserTests: XCTestCase {
         // Prime the ordinary cache exactly as the loader does before weeklyProfile.
         XCTAssertTrue(CodexRunwayTokenActivityParser.activities(
             identities: [identity], now: now).isEmpty)
-        XCTAssertTrue(CodexRunwayTokenActivityParser.ledgerEvents(
-            identities: [identity], now: now).isEmpty)
+        let ledgerScan = CodexRunwayTokenActivityParser.ledgerEventScan(
+            identities: [identity], now: now)
+        XCTAssertTrue(ledgerScan.coverageComplete)
+        XCTAssertEqual(ledgerScan.events.count, 3,
+                       "the ledger must widen far enough to establish a priced baseline")
 
         let profile = CodexRunwayTokenActivityParser.weeklyProfile(
             identities: [identity], now: now)
@@ -5300,10 +5406,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(activity.cachedInputPerSecond, 2_400 * weight / normalization, accuracy: 0.000_001)
         XCTAssertEqual(activity.outputPerSecond, 300 * weight / normalization, accuracy: 0.000_001)
 
-        // A wider display read must not retroactively hand the old pair to the
-        // calibration ledger on this same unchanged-file poll.
-        XCTAssertTrue(CodexRunwayTokenActivityParser.ledgerEvents(
-            identities: [identity], now: now).isEmpty)
+        XCTAssertEqual(CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: now).count, 3)
 
         // Appending another oversized record invalidates the Wk cache. The fresh
         // adaptive read must still recover history without reusing the narrow one.

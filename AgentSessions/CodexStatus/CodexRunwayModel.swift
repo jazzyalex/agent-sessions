@@ -251,6 +251,23 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
     var cachedInput: Double = 0
     var output: Double = 0
     var modelSlug: String? = nil
+    /// Weekly quota anchor carried by the same token_count record. Calibration
+    /// may only ingest an event when this matches the account observation.
+    var weeklyResetAt: Date? = nil
+    /// Stable bytes-derived identity for cumulative records that happen to share
+    /// a timestamp. Timestamp alone is not a safe deduplication key.
+    var eventID: String? = nil
+    /// Per-request components from `last_token_usage`. They are used only when
+    /// they reconcile with the cumulative delta; otherwise the request boundary
+    /// remains unknown and tiered pricing fails closed.
+    var requestInput: Double? = nil
+    var requestCachedInput: Double? = nil
+    var requestOutput: Double? = nil
+}
+
+struct CodexRunwayRecentSessionScan: Sendable {
+    let identities: [RunwaySessionIdentity]
+    let coverageComplete: Bool
 }
 
 /// One model's slice of a session's token rate, in the same normalized per-type
@@ -422,6 +439,9 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     let now: Date
     let maxRows: Int
     let recentSessionsRoot: URL?
+    /// Current weekly reset anchor even when the visible presentation is 5h.
+    /// Codex transcript activity is scoped against this before calibration.
+    let weeklyResetAt: Date?
     /// Learned pp-per-API-dollar conversion for `Wk`. nil = not calibrated yet, so
     /// weekly rows wait on the clock rather than inventing a number.
     let weeklyPercentPointsPerDollar: Double?
@@ -437,6 +457,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
          now: Date,
          maxRows: Int,
          recentSessionsRoot: URL? = nil,
+         weeklyResetAt: Date? = nil,
          weeklyPercentPointsPerDollar: Double? = nil,
          weeklyWindowAvailable: Bool = true,
          weeklyCalibrationAbandoned: Bool = false) {
@@ -445,6 +466,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
         self.now = now
         self.maxRows = maxRows
         self.recentSessionsRoot = recentSessionsRoot
+        self.weeklyResetAt = weeklyResetAt
         self.weeklyPercentPointsPerDollar = weeklyPercentPointsPerDollar
         self.weeklyWindowAvailable = weeklyWindowAvailable
         self.weeklyCalibrationAbandoned = weeklyCalibrationAbandoned
@@ -465,6 +487,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
             baseline.observedAt.timeIntervalSinceReferenceDate.description,
             "\(maxRows)",
             recentSessionsRoot?.path ?? "",
+            weeklyResetAt?.timeIntervalSinceReferenceDate.description ?? "no-week-anchor",
             "\(refreshBucket)",
             weeklyPercentPointsPerDollar.map { String(format: "%.6f", $0) } ?? "uncalibrated",
             weeklyWindowAvailable ? "wk" : "nowk",
@@ -536,12 +559,13 @@ enum CodexRunwaySnapshotLoader {
                 let scannerRetention = request.baseline.rateUnit == .weeklyPercentPerHour
                     ? CodexRunwayTokenActivityParser.weeklyWindow
                     : CodexRunwayRecentSessionScanner.maximumActiveSampleAge
-                let scannerIdentities = CodexRunwayRecentSessionScanner.identities(
+                let sessionScan = CodexRunwayRecentSessionScanner.scan(
                     root: request.recentSessionsRoot,
                     now: request.now,
                     activeSampleAge: scannerRetention,
                     completionGrace: scannerRetention
                 )
+                let scannerIdentities = sessionScan.identities
                 let identities = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
                 // Once-per-cycle prune: keep only the small in-window path set so
                 // the per-parser sample caches track active sessions, not history.
@@ -565,13 +589,18 @@ enum CodexRunwaySnapshotLoader {
                 // timeline is also the poll-continuity record, so skipping cycles
                 // while the user is on 5h would make the next weekly interval look
                 // like a sleep gap and be rejected.
+                let ledgerScan = request.weeklyResetAt.map {
+                    CodexRunwayTokenActivityParser.ledgerEventScan(
+                            identities: identities,
+                            expectedWeeklyResetAt: $0,
+                            now: request.now
+                        )
+                    } ?? (events: [], coverageComplete: false)
                 WeeklyQuotaCalibrationStore.shared.ledger(provider: "codex").recordIncremental(
-                    events: CodexRunwayTokenActivityParser.ledgerEvents(
-                        identities: identities,
-                        now: request.now
-                    ),
+                    events: ledgerScan.events,
                     priceTable: RunwayPriceTable.shared,
-                    now: request.now
+                    now: request.now,
+                    coverageComplete: sessionScan.coverageComplete && ledgerScan.coverageComplete
                 )
                 let core: CodexRunwaySnapshot?
                 // The rendered unit comes from the snapshot's baseline; on a
@@ -1653,6 +1682,15 @@ enum CodexRunwayRecentSessionScanner {
                            activeSampleAge: TimeInterval = maximumActiveSampleAge,
                            completionGrace: TimeInterval = maximumGoalCompletionGrace,
                            fileManager: FileManager = .default) -> [RunwaySessionIdentity] {
+        scan(root: root, now: now, activeSampleAge: activeSampleAge,
+             completionGrace: completionGrace, fileManager: fileManager).identities
+    }
+
+    static func scan(root: URL? = nil,
+                     now: Date = Date(),
+                     activeSampleAge: TimeInterval = maximumActiveSampleAge,
+                     completionGrace: TimeInterval = maximumGoalCompletionGrace,
+                     fileManager: FileManager = .default) -> CodexRunwayRecentSessionScan {
         let rootURL = root ?? URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".codex/sessions", isDirectory: true)
         let cutoff = now.addingTimeInterval(-maximumFileAge)
@@ -1664,7 +1702,7 @@ enum CodexRunwayRecentSessionScanner {
                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
               ) else {
-            return []
+            return CodexRunwayRecentSessionScan(identities: [], coverageComplete: false)
         }
 
         for case let url as URL in enumerator {
@@ -1698,7 +1736,12 @@ enum CodexRunwayRecentSessionScanner {
                     signature: $0.signature
                 )
             }
-        return Array(mergeParentCandidates(recentCandidates).prefix(maximumFiles))
+        let merged = mergeParentCandidates(recentCandidates)
+        return CodexRunwayRecentSessionScan(
+            identities: Array(merged.prefix(maximumFiles)),
+            coverageComplete: candidates.count <= maximumMetadataFiles
+                && merged.count <= maximumFiles
+        )
     }
 
     // The parse struct lives at file scope (not nested): a static stored
@@ -2047,11 +2090,25 @@ private struct CodexRawTokenLine: Sendable {
     let cachedInput: Double
     let output: Double
     let modelSlug: String?
+    let weeklyResetAt: Date?
+    let eventID: String
+    let requestInput: Double?
+    let requestCachedInput: Double?
+    let requestOutput: Double?
 
     func withModelSlug(_ model: String?) -> CodexRawTokenLine {
         CodexRawTokenLine(logPath: logPath, createdAtReal: createdAtReal, totalTokens: totalTokens,
-                          input: input, cachedInput: cachedInput, output: output, modelSlug: model)
+                          input: input, cachedInput: cachedInput, output: output, modelSlug: model,
+                          weeklyResetAt: weeklyResetAt, eventID: eventID,
+                          requestInput: requestInput, requestCachedInput: requestCachedInput,
+                          requestOutput: requestOutput)
     }
+}
+
+private struct CodexWeeklySampleScan {
+    let samples: [CodexRunwayTokenActivitySample]
+    let coverageComplete: Bool
+    let startsAtBeginning: Bool
 }
 
 /// Bytes-derived token/context parse. `trailingModel` deliberately survives a
@@ -2197,11 +2254,22 @@ enum CodexRunwayTokenActivityParser {
     /// The read widens until it crosses the five-minute cutoff (or reaches the
     /// bounded scan cap). Unchanged files reuse the parsed result; append-only
     /// growth reads and parses only the newly appended byte range.
-    /// This cache is deliberately not used by `ledgerEvents` (see above).
+    /// Calibration reuses this cache so display and ledger coverage cross the
+    /// same oversized records without rereading the file.
     static func recentWeeklySamples(fromLogPath path: String,
                                     initialMaxBytes: Int = 512 * 1024,
                                     now: Date = Date()) -> [CodexRunwayTokenActivitySample] {
-        let parsed = weeklyRawParse(
+        recentWeeklySampleScan(
+            fromLogPath: path,
+            initialMaxBytes: initialMaxBytes,
+            now: now
+        ).samples
+    }
+
+    private static func recentWeeklySampleScan(fromLogPath path: String,
+                                               initialMaxBytes: Int = 512 * 1024,
+                                               now: Date = Date()) -> CodexWeeklySampleScan {
+        let raw = weeklyRawParse(
             fromLogPath: path,
             initialMaxBytes: initialMaxBytes,
             now: now
@@ -2209,9 +2277,14 @@ enum CodexRunwayTokenActivityParser {
         // Weekly parsing widens until the relevant leading token has its actual
         // preceding context (or reaches the hard cap). Do not fill a missing model
         // from the unrelated global EOF cache: unresolved is deliberately unpriced.
-        return parsed.lines
+        let samples = raw.parse.lines
             .compactMap { finalize($0, now: now) }
             .sorted { $0.capturedAt < $1.capturedAt }
+        return CodexWeeklySampleScan(
+            samples: samples,
+            coverageComplete: raw.coverageComplete,
+            startsAtBeginning: raw.startsAtBeginning
+        )
     }
 
     /// Model in force immediately before the first complete record in the ordinary
@@ -2421,7 +2494,8 @@ enum CodexRunwayTokenActivityParser {
 
     private static func weeklyRawParse(fromLogPath path: String,
                                        initialMaxBytes: Int,
-                                       now: Date) -> CodexRawTokenParse {
+                                       now: Date)
+        -> (parse: CodexRawTokenParse, coverageComplete: Bool, startsAtBeginning: Bool) {
         let box = weeklyHistoryStore.box(for: path)
         box.lock.lock(); defer { box.lock.unlock() }
 
@@ -2430,7 +2504,9 @@ enum CodexRunwayTokenActivityParser {
         // candidate assembled from two file generations could fabricate a delta.
         for attempt in 0..<2 {
             guard let signature = RunwayFileSignature.read(path: path),
-                  let startingIdentity = fileIdentity(path: path) else { return .empty }
+                  let startingIdentity = fileIdentity(path: path) else {
+                return (.empty, false, false)
+            }
             var artifact: CodexWeeklyHistoryArtifact?
             if let cached = box.artifact,
                cached.signature == signature,
@@ -2451,7 +2527,7 @@ enum CodexRunwayTokenActivityParser {
                     maxBytes: min(max(1, initialMaxBytes), weeklyHistoryScanCap)
                 )
             }
-            guard var artifact else { return .empty }
+            guard var artifact else { return (.empty, false, false) }
 
             // The cached object remains time-independent. An older/out-of-order
             // `now` asks it for more byte history and replaces it with a larger
@@ -2473,12 +2549,18 @@ enum CodexRunwayTokenActivityParser {
                   endingIdentity.device == artifact.device,
                   endingIdentity.inode == artifact.inode else {
                 if attempt == 0 { continue }
-                return .empty
+                return (.empty, false, false)
             }
             box.artifact = artifact
-            return materializedWeeklyParse(artifact, path: path)
+            let parsed = materializedWeeklyParse(artifact, path: path)
+            let startsAtBeginning = artifact.scanStart == 0
+            return (
+                parsed,
+                startsAtBeginning || rawCrossesWeeklyCutoff(parsed.lines, now: now),
+                startsAtBeginning
+            )
         }
-        return .empty
+        return (.empty, false, false)
     }
 
     private static func coldWeeklyArtifact(path: String,
@@ -2875,7 +2957,12 @@ enum CodexRunwayTokenActivityParser {
             input: raw.input,
             cachedInput: raw.cachedInput,
             output: raw.output,
-            modelSlug: raw.modelSlug
+            modelSlug: raw.modelSlug,
+            weeklyResetAt: raw.weeklyResetAt,
+            eventID: raw.eventID,
+            requestInput: raw.requestInput,
+            requestCachedInput: raw.requestCachedInput,
+            requestOutput: raw.requestOutput
         )
     }
 
@@ -2974,31 +3061,74 @@ enum CodexRunwayTokenActivityParser {
     /// pricing apply Sol's long-context tier to the whole request when its input
     /// exceeds 272K, rather than treating a polling bucket as one request.
     static func ledgerEvents(identities: [RunwaySessionIdentity],
+                             expectedWeeklyResetAt: Date? = nil,
                              now: Date = Date()) -> [WeeklyQuotaTokenEvent] {
+        ledgerEventScan(
+            identities: identities,
+            expectedWeeklyResetAt: expectedWeeklyResetAt,
+            now: now
+        ).events
+    }
+
+    static func ledgerEventScan(identities: [RunwaySessionIdentity],
+                                expectedWeeklyResetAt: Date? = nil,
+                                now: Date = Date())
+        -> (events: [WeeklyQuotaTokenEvent], coverageComplete: Bool) {
         var seen: Set<String> = []
         var result: [WeeklyQuotaTokenEvent] = []
+        var coverageComplete = true
         for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
             seen.insert(path)
-            let samples = recentSamples(fromLogPath: path, now: now)
-            for (previous, current) in zip(samples, samples.dropFirst()) {
-                let totalInput = max(0, current.input - previous.input)
-                let cached = max(0, current.cachedInput - previous.cachedInput)
+            let scan = recentWeeklySampleScan(fromLogPath: path, now: now)
+            let samples = scan.samples
+            coverageComplete = coverageComplete && scan.coverageComplete
+            for (index, current) in samples.enumerated() {
+                func isExpectedAnchor(_ reset: Date?) -> Bool {
+                    expectedWeeklyResetAt.map { expected in
+                        reset.map {
+                            abs($0.timeIntervalSince(expected))
+                                < CodexWeeklyQuotaBootstrapScanner.anchorTolerance
+                        } ?? false
+                    } ?? true
+                }
+                guard isExpectedAnchor(current.weeklyResetAt) else { continue }
+                let previous = index > 0 ? samples[index - 1] : nil
+                // A complete file begins from known zero counters. A byte tail
+                // does not: its first sample is only a baseline, never invented
+                // spend. This is the same first-sample rule as CumulativeCounters.
+                guard previous != nil || scan.startsAtBeginning else { continue }
+                // Crossing into this quota window establishes a baseline. The
+                // counters are session-cumulative, so treating the first matching
+                // record as zero-based would import the previous window.
+                if previous != nil, !isExpectedAnchor(previous?.weeklyResetAt) { continue }
+                let countersReset = previous.map {
+                    current.input < $0.input
+                        || current.cachedInput < $0.cachedInput
+                        || current.output < $0.output
+                } ?? false
+                let baseline = countersReset ? nil : previous
+                let totalInput = max(0, current.input - (baseline?.input ?? 0))
+                let cached = max(0, current.cachedInput - (baseline?.cachedInput ?? 0))
                 let fresh = max(0, totalInput - cached)
-                let output = max(0, current.output - previous.output)
+                let output = max(0, current.output - (baseline?.output ?? 0))
                 guard fresh + cached + output > 0 else { continue }
+                let requestBoundaryMatches = current.requestInput == totalInput
+                    && current.requestCachedInput == cached
+                    && current.requestOutput == output
                 result.append(WeeklyQuotaTokenEvent(
                     logPath: path,
+                    eventID: current.eventID,
                     capturedAt: current.capturedAt,
                     input: fresh,
                     cachedInput: cached,
                     output: output,
                     cacheCreation: 0,
                     modelSlug: current.modelSlug,
-                    contextInputTokens: totalInput
+                    contextInputTokens: requestBoundaryMatches ? totalInput : nil
                 ))
             }
         }
-        return result
+        return (result, coverageComplete)
     }
 
     static func burns(activities: [RunwaySessionActivity],
@@ -3111,15 +3241,48 @@ enum CodexRunwayTokenActivityParser {
             return nil
         }
         let perType = perTypeTokens(from: payload) ?? perTypeTokens(from: obj)
+        let request = lastUsageTokens(from: payload) ?? lastUsageTokens(from: obj)
+        let input = perType?.input ?? 0
+        let cached = perType?.cachedInput ?? 0
+        let output = perType?.output ?? 0
         return CodexRawTokenLine(
             logPath: logPath,
             createdAtReal: createdAtReal,
             totalTokens: totalTokens,
-            input: perType?.input ?? 0,
-            cachedInput: perType?.cachedInput ?? 0,
-            output: perType?.output ?? 0,
-            modelSlug: model
+            input: input,
+            cachedInput: cached,
+            output: output,
+            modelSlug: model,
+            weeklyResetAt: weeklyResetAt(from: payload) ?? weeklyResetAt(from: obj),
+            eventID: "\(createdAtReal?.timeIntervalSinceReferenceDate.description ?? "missing-time")|\(totalTokens)|\(input)|\(cached)|\(output)",
+            requestInput: request?.input,
+            requestCachedInput: request?.cachedInput,
+            requestOutput: request?.output
         )
+    }
+
+    private static func lastUsageTokens(from dict: [String: Any])
+        -> (input: Double, cachedInput: Double, output: Double)? {
+        if let info = dict["info"] as? [String: Any],
+           let found = lastUsageTokens(from: info) { return found }
+        guard let last = dict["last_token_usage"] as? [String: Any] else { return nil }
+        return perTypeDirect(from: last)
+    }
+
+    private static func weeklyResetAt(from dict: [String: Any]) -> Date? {
+        if let info = dict["info"] as? [String: Any], let found = weeklyResetAt(from: info) {
+            return found
+        }
+        guard let limits = dict["rate_limits"] as? [String: Any] else { return nil }
+        for slot in ["primary", "secondary"] {
+            guard let window = limits[slot] as? [String: Any],
+                  let minutes = CodexRunwayRateLimitParser.double(window["window_minutes"]),
+                  Int(minutes) == 10_080 else { continue }
+            if let reset = CodexRunwayRateLimitParser.flexibleDate(window["resets_at"]) {
+                return reset
+            }
+        }
+        return nil
     }
 
     /// Cumulative per-type counts (input incl. cached, cached subset, output),

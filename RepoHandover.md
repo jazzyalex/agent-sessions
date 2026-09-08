@@ -1,3 +1,26 @@
+## 2026-09-08 12:38 · steward-sample-reporting · Unified optional sample reporting committed
+status: done
+
+**State:** The small reporting fix is committed locally; issue #72 was closed with the agreed resolution. No push or release was performed.
+
+**Verified:**
+- Branch `main`, HEAD `9ad98b6886603969bf0404674ee1d67947a1b60c` (`fix: clarify optional steward sample outcomes`); five files committed, 73 insertions / 11 deletions, with unrelated documentation hunks excluded.
+- Completed validation before commit: `python3 -m pytest -q scripts/tests` reported 274 passed and 5 subtests passed. Includes 56 new cases (14 agents x four outcomes); no existing test names removed. Extraction is controlled in these cases, so this is not live exporter validation. No tests rerun for this handover.
+- GitHub update returned #72 `closed`, reason `completed`, with a resolution stating the commit is not pushed/released. URL: https://github.com/jazzyalex/agent-sessions/issues/72. Not refreshed during handover.
+
+**Decided / don't redo:**
+- All agents use the same generated/withheld/unavailable/disabled sample reporting. Samples are optional for reporting drift; maintainers decide whether more evidence is needed. No hand-redaction requests. Format verdicts, redaction rules, registries and exporters remain unchanged.
+- The user rejected architectural expansion from the fx follow-up. Earlier registry additions, privacy filtering, onboarding requirements and synthetic fx fixture changes were fully rolled back. Do not revive the shared-corpus/registry redesign as required work for #72; its original proposal is explicitly superseded by the narrow reporting resolution.
+- fx verification remains 0.0.7 from earlier commit `e3db75d4`; the five-field fixture refresh was rolled back and remains outside this completed reporting fix.
+
+**Uncommitted / ownership:**
+- `AgentSessions/CodexStatus/RunwayPriceTable.swift`, `AgentSessionsTests/CodexUsageParserTests.swift`, `docs/prices.json`, and remaining `docs/CHANGELOG.md` / `docs/summaries/2026-09.md` hunks — concurrent Astra pricing task; preserved.
+- `agents.md` — concurrent removal of sizing instructions, not this task. `docs/_site/` — pre-existing untracked generated site, owner unverified. `RepoHandover.md` — this checkpoint, intentionally uncommitted.
+
+**Key files:**
+- `scripts/steward_check.py` — shared sample status in `_issue_body`, with `write_sample` forwarded by `_report`.
+- `scripts/tests/test_steward_check.py` — common four-outcome contract test for every monitored agent; `STEWARDS.md` — contributor guidance on optional samples.
+
 ## 2026-09-03 19:44 · quota-meter-weekly-burn · Weekly burn parser fixed and verified
 status: done
 

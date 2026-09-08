@@ -150,6 +150,9 @@ struct WeeklyQuotaTokenObservation: Equatable, Sendable {
 /// long-context tier can be priced without merging requests.
 struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let logPath: String
+    /// Provider record identity. When absent, the ledger derives a conservative
+    /// content identity; callers should supply one whenever the transcript does.
+    let eventID: String?
     let capturedAt: Date
     let input: Double
     let cachedInput: Double
@@ -164,6 +167,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let contextInputTokens: Double?
 
     init(logPath: String,
+         eventID: String? = nil,
          capturedAt: Date,
          input: Double,
          cachedInput: Double,
@@ -174,6 +178,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
          speed: RunwaySpeedTier = .standard,
          contextInputTokens: Double? = nil) {
         self.logPath = logPath
+        self.eventID = eventID
         self.capturedAt = capturedAt
         self.input = input
         self.cachedInput = cachedInput
@@ -198,6 +203,8 @@ final class WeeklyQuotaActivityLedger {
         let at: Date
         let dollars: Double
         let hadUnpriced: Bool
+        let hadIncompleteCoverage: Bool
+        let isPollObservation: Bool
     }
 
     private struct Cumulative {
@@ -215,6 +222,8 @@ final class WeeklyQuotaActivityLedger {
     /// Dedup for the incremental (Claude) path — see `recordIncremental`.
     private var seenEvents: Set<String> = []
     private var seenEventOrder: [(key: String, at: Date)] = []
+    private var lastPollAt: Date?
+    private var firstPollAt: Date?
     private let lock = NSLock()
 
     func reset() {
@@ -223,6 +232,8 @@ final class WeeklyQuotaActivityLedger {
         buckets.removeAll()
         seenEvents.removeAll()
         seenEventOrder.removeAll()
+        lastPollAt = nil
+        firstPollAt = nil
     }
 
     /// Bank one cycle's worth of activity. Every call appends a bucket — even a
@@ -271,47 +282,81 @@ final class WeeklyQuotaActivityLedger {
                 + dWrite * (price.cacheWritePerMTok ?? price.inputPerMTok) / 1_000_000
         }
 
-        buckets.append(Bucket(at: now, dollars: dollars, hadUnpriced: hadUnpriced))
-        let cutoff = now.addingTimeInterval(-Self.retention)
+        buckets.append(Bucket(at: now, dollars: dollars, hadUnpriced: hadUnpriced,
+                              hadIncompleteCoverage: false, isPollObservation: true))
+        firstPollAt = min(firstPollAt ?? now, now)
+        lastPollAt = max(lastPollAt ?? now, now)
+        let cutoff = (lastPollAt ?? now).addingTimeInterval(-Self.retention)
         buckets.removeAll { $0.at < cutoff }
     }
 
-    /// Bank already-incremental usage records. Deduplicated by
-    /// path+timestamp because the parser re-reads an overlapping tail every cycle
-    /// and double-counting would silently deflate the calibration.
+    /// Bank already-incremental usage records. Deduplicated by a stable event ID
+    /// (with a content fallback for legacy parsers) because each poll re-reads an
+    /// overlapping tail and double-counting would silently deflate calibration.
     func recordIncremental(events: [WeeklyQuotaTokenEvent],
                            priceTable: RunwayPriceTable,
-                           now: Date) {
+                           now: Date,
+                           coverageComplete: Bool = true) {
         lock.lock(); defer { lock.unlock() }
 
-        var dollars = 0.0
-        var hadUnpriced = false
+        let snapshot = priceTable.snapshot()
+        let previousPollAt = lastPollAt
+        let effectivePollAt = max(previousPollAt ?? now, now)
         for event in events {
-            let key = "\(event.logPath)|\(event.capturedAt.timeIntervalSinceReferenceDate)"
+            let fallbackID = [
+                event.capturedAt.timeIntervalSinceReferenceDate.description,
+                event.input.description, event.cachedInput.description,
+                event.output.description, event.cacheCreation.description,
+                event.cacheCreation1h.description, event.modelSlug ?? ""
+            ].joined(separator: "|")
+            let key = "\(event.logPath)|\(event.eventID ?? fallbackID)"
             guard !seenEvents.contains(key) else { continue }
             seenEvents.insert(key)
-            seenEventOrder.append((key: key, at: now))
+            seenEventOrder.append((key: key, at: effectivePollAt))
 
             let volume = event.input + event.cachedInput + event.output
                 + event.cacheCreation + event.cacheCreation1h
+            let contextInputVolume = event.input + event.cachedInput
+                + event.cacheCreation + event.cacheCreation1h
             guard volume > 0 else { continue }
+            // An event discovered after a poll that should already have seen it
+            // makes coverage of the intervening interval unknowable. Keep its
+            // real timestamp and poison affected calibration rather than charging
+            // historical work at `now`.
+            let discoveredLate = previousPollAt.map { event.capturedAt <= $0 } ?? false
             // Same poison flag as an unknown model when the record's billing tier has
             // no rates: the calibration must not be built on a knowingly halved cost.
-            guard let price = priceTable.price(forModel: event.modelSlug),
+            guard let price = snapshot.price(forModel: event.modelSlug),
+                  !(price.longContext.map {
+                      event.contextInputTokens == nil
+                          && contextInputVolume > $0.thresholdInputTokens
+                  } ?? false),
                   let rates = price.rates(for: event.speed,
                                           contextInputTokens: event.contextInputTokens) else {
-                hadUnpriced = true
+                buckets.append(Bucket(at: event.capturedAt, dollars: 0,
+                                      hadUnpriced: true,
+                                      hadIncompleteCoverage: discoveredLate,
+                                      isPollObservation: false))
                 continue
             }
-            dollars += rates.dollars(input: event.input,
-                                     cachedInput: event.cachedInput,
-                                     output: event.output,
-                                     cacheWrite5m: event.cacheCreation,
-                                     cacheWrite1h: event.cacheCreation1h)
+            let dollars = rates.dollars(input: event.input,
+                                        cachedInput: event.cachedInput,
+                                        output: event.output,
+                                        cacheWrite5m: event.cacheCreation,
+                                        cacheWrite1h: event.cacheCreation1h)
+            buckets.append(Bucket(at: event.capturedAt, dollars: dollars,
+                                  hadUnpriced: false,
+                                  hadIncompleteCoverage: discoveredLate,
+                                  isPollObservation: false))
         }
 
-        buckets.append(Bucket(at: now, dollars: dollars, hadUnpriced: hadUnpriced))
-        let cutoff = now.addingTimeInterval(-Self.retention)
+        // Heartbeats prove polling continuity independently from event time.
+        buckets.append(Bucket(at: now, dollars: 0, hadUnpriced: false,
+                              hadIncompleteCoverage: !coverageComplete,
+                              isPollObservation: true))
+        firstPollAt = min(firstPollAt ?? now, now)
+        lastPollAt = effectivePollAt
+        let cutoff = effectivePollAt.addingTimeInterval(-Self.retention)
         buckets.removeAll { $0.at < cutoff }
         while let first = seenEventOrder.first, first.at < cutoff {
             seenEvents.remove(first.key)
@@ -322,6 +367,7 @@ final class WeeklyQuotaActivityLedger {
     struct IntervalActivity: Equatable {
         let dollars: Double
         let hadUnpriced: Bool
+        let hadIncompleteCoverage: Bool
         /// Largest gap between consecutive observations inside the interval. A big
         /// gap means we stopped watching (sleep, app quiescence) and cannot claim
         /// the denominator covers the whole interval.
@@ -331,20 +377,27 @@ final class WeeklyQuotaActivityLedger {
     func activity(from start: Date, to end: Date) -> IntervalActivity? {
         lock.lock(); defer { lock.unlock() }
         let inRange = buckets.filter { $0.at > start && $0.at <= end }
+            .sorted { $0.at < $1.at }
         guard !inRange.isEmpty else { return nil }
 
         var dollars = 0.0
         var hadUnpriced = false
+        var hadIncompleteCoverage = firstPollAt.map { start < $0 } ?? true
         var maxGap: TimeInterval = 0
-        var cursor = start
         for bucket in inRange {
-            maxGap = max(maxGap, bucket.at.timeIntervalSince(cursor))
-            cursor = bucket.at
             dollars += bucket.dollars
             hadUnpriced = hadUnpriced || bucket.hadUnpriced
+            hadIncompleteCoverage = hadIncompleteCoverage || bucket.hadIncompleteCoverage
+        }
+        var cursor = start
+        for poll in inRange where poll.isPollObservation {
+            maxGap = max(maxGap, poll.at.timeIntervalSince(cursor))
+            cursor = poll.at
         }
         maxGap = max(maxGap, end.timeIntervalSince(cursor))
-        return IntervalActivity(dollars: dollars, hadUnpriced: hadUnpriced, maxPollGap: maxGap)
+        return IntervalActivity(dollars: dollars, hadUnpriced: hadUnpriced,
+                                hadIncompleteCoverage: hadIncompleteCoverage,
+                                maxPollGap: maxGap)
     }
 }
 
@@ -481,6 +534,7 @@ struct WeeklyQuotaCalibrationTracker {
         // Unpriceable material activity poisons the whole interval — see the ledger.
         guard activity.dollars > 0,
               !activity.hadUnpriced,
+              !activity.hadIncompleteCoverage,
               activity.maxPollGap <= Self.maximumPollGap else {
             anchor = Anchor(remainingPercent: remainingPercent, observedAt: observedAt, resetAt: resetAt)
             return nil
@@ -518,10 +572,11 @@ struct WeeklyQuotaCalibrationTracker {
     /// also drop a whole ordinary tail when its first byte split a UTF-8 scalar;
     /// version 3 preserved those records but could assign a later model switch to
     /// leading token records. Version 4 preserves record and model chronology.
-    /// No older denominator may survive the parser corrections. Claude already
-    /// supplied incremental events and remains compatible with v1.
+    /// Version 5 adds weekly-anchor filtering, stable event identity and event-time
+    /// ledger semantics. No older denominator may survive these corrections.
+    /// Claude already supplied incremental events and remains compatible with v1.
     private static let legacyActivityAccountingRevision = 1
-    private static let codexActivityAccountingRevision = 4
+    private static let codexActivityAccountingRevision = 6
 
     private static func activityAccountingRevision(for provider: String) -> Int {
         provider == "codex"
@@ -804,7 +859,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         guard let expected = bootstrapCompatibility(for: provider) else { return true }
         return bootstrap.isCompatible(priceRevision: expected.priceRevision,
                                       limitShape: expected.limitShape,
-                                      sourceFamily: expected.sourceFamily)
+                                      sourceFamily: expected.sourceFamily,
+                                      activityAccountingRevision: provider == "codex"
+                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil)
     }
 
     /// Caller holds `lock`.
@@ -816,6 +873,21 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let livePoints = tracker?.conditioningPercentPoints(now: now) ?? 0
         if let bootstrap = bestConditionedBootstrap(provider: provider, now: now),
            compatibleBootstrap(bootstrap, for: provider) {
+            if let live,
+               let liveResetAt = live.resetAt,
+               abs(liveResetAt.timeIntervalSince(bootstrap.resetsAt))
+                    < CodexWeeklyQuotaBootstrapScanner.anchorTolerance,
+               live.acquiredAt <= bootstrap.scannedAt,
+               live.acquiredAt.addingTimeInterval(-live.intervalSeconds) >= bootstrap.windowStart,
+               live.percentPointsPerDollar > 0 {
+                let containedDollars = live.dropPercentPoints / live.percentPointsPerDollar
+                if bootstrap.dollars + 0.000_001 < containedDollars {
+                    // A full-window denominator cannot be smaller than a proven
+                    // contained interval. Either candidate may be wrong, so fail
+                    // closed instead of choosing whichever ratio looks nicer.
+                    return nil
+                }
+            }
             let requiredLivePoints = min(
                 Self.wellConditionedPercentPoints,
                 bootstrap.usedPercentPoints
@@ -939,6 +1011,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         guard now.timeIntervalSince(bootstrap.scannedAt) <= WeeklyQuotaActivityLedger.retention,
               let ledger = ledgers[provider],
               let since = ledger.activity(from: bootstrap.scannedAt, to: now),
+              !since.hadIncompleteCoverage,
+              !since.hadUnpriced,
               since.maxPollGap <= WeeklyQuotaCalibrationTracker.maximumPollGap else { return nil }
         return since
     }
@@ -1183,9 +1257,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                   // different plan shape, describes a different conversion. Without
                   // this an old plan could win forever purely by having reached a
                   // larger percentage.
-                  cached.isCompatible(priceRevision: priceRevision,
+            cached.isCompatible(priceRevision: priceRevision,
                                       limitShape: limitShape,
-                                      sourceFamily: sourceFamily) else { continue }
+                                      sourceFamily: sourceFamily,
+                                      activityAccountingRevision: provider == "codex"
+                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) else { continue }
             if cached.usedPercentPoints > (best?.usedPercentPoints ?? 0) { best = cached }
         }
         guard let best else { return }
@@ -1264,7 +1340,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            cached.percentPointsPerDollar != nil,
            cached.isCompatible(priceRevision: priceRevision,
                                limitShape: limitShape,
-                               sourceFamily: sourceFamily) {
+                               sourceFamily: sourceFamily,
+                               activityAccountingRevision: provider == "codex"
+                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
@@ -1290,7 +1368,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            cached.percentPointsPerDollar != nil,
            cached.isCompatible(priceRevision: priceRevision,
                                limitShape: limitShape,
-                               sourceFamily: sourceFamily) {
+                               sourceFamily: sourceFamily,
+                               activityAccountingRevision: provider == "codex"
+                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) {
             bootstraps[provider] = cached
         }
         // Promote on RESTORE too, not only after a scan. A launch that restores
@@ -1389,6 +1469,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             var stamped = result
             stamped.limitShape = limitShape
             stamped.sourceFamily = sourceFamily
+            if provider == "codex" {
+                stamped.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+            }
             self.lock.lock()
             // The account may have changed while this walk was running. Its
             // result describes the PREVIOUS account and must not land here — the

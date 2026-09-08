@@ -20,12 +20,13 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
 
     private let anchor = Date(timeIntervalSince1970: 1_788_651_434)
 
-    /// One turn: `last_token_usage` is the turn's OWN usage, and `rate_limits`
-    /// rides on the same line, which is what makes a transcript a quota trace.
-    private func turn(output: Int, resetsAt: Date, at: Date, slot: String = "primary") -> String {
+    /// One cumulative sample plus its request-scoped context and quota anchor.
+    private func turn(output: Int, lastOutput: Int? = nil,
+                      resetsAt: Date, at: Date, slot: String = "primary") -> String {
         let other = slot == "primary" ? "secondary" : "primary"
+        let requestOutput = lastOutput ?? output
         return """
-        {"timestamp":"\(ISO8601DateFormatter().string(from: at))","type":"token_count","payload":{"info":{"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":\(output),"total_tokens":\(output)}},"rate_limits":{"\(slot)":{"used_percent":5.0,"window_minutes":10080,"resets_at":\(resetsAt.timeIntervalSince1970)},"\(other)":null}}}
+        {"timestamp":"\(ISO8601DateFormatter().string(from: at))","type":"token_count","payload":{"info":{"total_token_usage":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":\(output),"total_tokens":\(output)},"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":\(requestOutput),"total_tokens":\(requestOutput)}},"rate_limits":{"\(slot)":{"used_percent":5.0,"window_minutes":10080,"resets_at":\(resetsAt.timeIntervalSince1970)},"\(other)":null}}}
         """
     }
 
@@ -107,6 +108,46 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertEqual(result?.percentPointsPerDollar ?? 0, 5.0 / 20.0, accuracy: 0.0001)
     }
 
+    func testCumulativeCountersRemainAuthorityWhenLastUsageDisagrees() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, lastOutput: 9_000_000,
+                        resetsAt: anchor, at: at)], name: "mismatch.jsonl")
+        XCTAssertEqual(scan()?.dollars ?? 0, 20, accuracy: 0.001,
+                       "request metadata cannot replace the cumulative delta")
+    }
+
+    func testDoesNotBackfillEarlierUsageFromALaterModelContext() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([
+            turn(output: 1_000_000, resetsAt: anchor, at: at),
+            modelLine("gpt-5.6", at: at.addingTimeInterval(1)),
+            turn(output: 2_000_000, lastOutput: 1_000_000,
+                 resetsAt: anchor, at: at.addingTimeInterval(2))
+        ], name: "chronology.jsonl")
+        let result = scan()
+        XCTAssertEqual(result?.dollars ?? 0, 20, accuracy: 0.001)
+        XCTAssertEqual(result?.unpricedVolumeShare ?? 0, 0.5, accuracy: 0.001)
+    }
+
+    func testExcludesRecordsAfterTheQuotaObservationCutoff() throws {
+        let before = anchor.addingTimeInterval(-2 * 3600)
+        let cutoff = anchor.addingTimeInterval(-3600)
+        let after = anchor.addingTimeInterval(-1800)
+        try write([
+            modelLine("gpt-5.6", at: before),
+            turn(output: 1_000_000, resetsAt: anchor, at: before),
+            turn(output: 10_000_000, lastOutput: 9_000_000,
+                 resetsAt: anchor, at: after)
+        ], name: "cutoff.jsonl")
+        let result = CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: cutoff)
+        XCTAssertEqual(result?.dollars ?? 0, 20, accuracy: 0.001,
+                       "future transcript growth cannot enter an earlier observation")
+    }
+
     /// The account filter. Two accounts share one machine, so their sessions
     /// interleave in one directory; another anchor's dollars in the denominator
     /// would bias the calibration low.
@@ -119,6 +160,44 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
                   name: "theirs.jsonl")
         XCTAssertEqual(scan()?.dollars ?? 0, 20.0, accuracy: 0.001,
                        "another account's activity must stay out of the denominator")
+    }
+
+    func testSameFileAnchorTransitionUsesFirstCurrentRecordAsBaseline() throws {
+        let start = anchor.addingTimeInterval(-7 * 24 * 3600)
+        let foreign = anchor.addingTimeInterval(-7 * 24 * 3600)
+        try write([
+            modelLine("gpt-5.6", at: start),
+            turn(output: 1_000_000, resetsAt: foreign, at: start),
+            turn(output: 2_000_000, lastOutput: 1_000_000,
+                 resetsAt: anchor, at: start.addingTimeInterval(30)),
+            turn(output: 3_000_000, lastOutput: 1_000_000,
+                 resetsAt: anchor, at: start.addingTimeInterval(60))
+        ], name: "anchor-transition.jsonl")
+
+        XCTAssertEqual(scan()?.dollars ?? 0, 20, accuracy: 0.001,
+                       "bootstrap must match live's first-current-record baseline rule")
+    }
+
+    func testRejectsMalformedRelevantRecord() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([
+            modelLine("gpt-5.6", at: at),
+            turn(output: 1_000_000, resetsAt: anchor, at: at),
+            "{\"type\":\"token_count\",\"payload\":"
+        ], name: "malformed.jsonl")
+
+        XCTAssertNil(scan(), "missing token evidence is not zero-cost evidence")
+    }
+
+    func testUnresolvedLargeRequestBoundaryIsUnpriceable() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let iso = ISO8601DateFormatter().string(from: at)
+        let unresolved = """
+        {"timestamp":"\(iso)","type":"token_count","payload":{"info":{"total_token_usage":{"input_tokens":300001,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":100,"total_tokens":300101},"last_token_usage":{"input_tokens":100000,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":100,"total_tokens":100100}},"rate_limits":{"primary":{"used_percent":5.0,"window_minutes":10080,"resets_at":\(anchor.timeIntervalSince1970)},"secondary":null}}}
+        """
+        try write([modelLine("gpt-5.6-sol", at: at), unresolved], name: "unknown-boundary.jsonl")
+
+        XCTAssertNil(scan(), "an aggregate above the tier threshold cannot be priced as one request")
     }
 
     /// Weekly is `primary` on an account with no 5h window and `secondary` on one
@@ -146,7 +225,9 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
     func testReportsUnpricedShareRatherThanVoiding() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         try write([modelLine("gpt-5.6", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at),
-                   modelLine("mystery-model-xyz", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)],
+                   modelLine("mystery-model-xyz", at: at),
+                   turn(output: 2_000_000, lastOutput: 1_000_000,
+                        resetsAt: anchor, at: at)],
                   name: "mixed.jsonl")
         let result = scan()
         XCTAssertEqual(result?.dollars ?? 0, 20.0, accuracy: 0.001)

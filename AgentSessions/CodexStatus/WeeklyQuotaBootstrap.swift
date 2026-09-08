@@ -46,6 +46,11 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Optional for records written before source-family provenance existed; such
     /// records are not compatible when a caller supplies a current family.
     var sourceFamily: String?
+    /// Normalization contract used to create the denominator. Codex revision 6
+    /// unifies bootstrap/live cumulative accounting and event-time semantics.
+    var activityAccountingRevision: Int? = nil
+
+    static let codexActivityAccountingRevision = 6
 
     /// Both providers report weekly consumption as whole percentage points, so a
     /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
@@ -57,8 +62,11 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// unstamped legacy record because its evidence path cannot be established.
     func isCompatible(priceRevision: Int,
                       limitShape: String?,
-                      sourceFamily: String? = nil) -> Bool {
+                      sourceFamily: String? = nil,
+                      activityAccountingRevision: Int? = nil) -> Bool {
         if let stamped = self.priceRevision, stamped != priceRevision { return false }
+        if let required = activityAccountingRevision,
+           self.activityAccountingRevision != required { return false }
         if let stamped = self.limitShape, let current = limitShape, stamped != current { return false }
         if let current = sourceFamily {
             guard self.sourceFamily == current else { return false }
@@ -131,13 +139,10 @@ enum CodexWeeklyQuotaBootstrapScanner {
 
     /// Scan `root` for activity inside the weekly window ending at `resetsAt`.
     ///
-    /// `resetsAt` also acts as an ACCOUNT FILTER, which matters more than it looks:
-    /// two accounts can share one machine (OpenClaw shares the Codex OAuth store),
-    /// and their sessions interleave in the same directory. A naive "everything
-    /// modified this week" sum would put another account's dollars in the
-    /// denominator and bias the calibration low. Banking a turn only when the
-    /// transcript's own live weekly anchor matches keeps the ratio self-consistent,
-    /// and handles mid-week re-anchors for free.
+    /// `resetsAt` constrains transcript records to the observed weekly window.
+    /// This prevents a different or superseded window from entering the denominator,
+    /// but is not proof of durable account identity: two accounts can have matching
+    /// reset instants. Account/source scope is enforced by the surrounding store.
     static func scan(root: URL,
                      resetsAt: Date,
                      windowMinutes: Int,
@@ -159,50 +164,60 @@ enum CodexWeeklyQuotaBootstrapScanner {
         var seenFiles = 0
         var seenAnchors: Set<Int> = []
         var matchedTurns = 0
+        var hadIncompleteCandidate = false
+        let priceSnapshot = priceTable.snapshot()
 
         for url in candidateFiles(root: root, modifiedAfter: windowStart, fileManager: fileManager) {
             seenFiles += 1
             guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
                 debugLog("open FAILED \(url.lastPathComponent)")
+                hadIncompleteCandidate = true
                 continue
             }
 
-            // A resumed transcript can open with `token_count` lines whose model was
-            // declared in an earlier segment. Without a seed those tokens price as
-            // "unknown" and can trip the 5% unpriced cap, throwing away an
-            // otherwise good scan. Seed from the first model the file mentions;
-            // later `turn_context` lines still override as the file progresses.
             // Stdlib split + Substring.contains, matching how the existing parsers
             // walk these transcripts (see `lastTurnContextModel`). A hand-rolled
             // byte matcher was tried here and is NOT an optimisation: it allocated
             // per line and ran O(line x needle), managing ~1 MB/s in a Debug build
             // and never finishing a 44 MB window. This form is memchr-backed.
             let text = String(decoding: data, as: UTF8.self)
-            var currentModel: String? = Self.firstModelSlug(in: text)
+            // Model attribution is chronological. A later turn_context must not
+            // price earlier token records in the same file.
+            var currentModel: String?
             var currentAnchor: Date?
+            var previousTokenAnchor: Date?
+            var cumulative = CumulativeCounters()
             for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
                 let isTokenCount = line.contains("token_count")
                 let isTurnContext = line.contains("turn_context")
                 guard isTokenCount || isTurnContext else { continue }
-                ingest(line: line,
+                let complete = ingest(line: line,
                        isTokenCount: isTokenCount,
                        isTurnContext: isTurnContext,
                        currentModel: &currentModel,
                        currentAnchor: &currentAnchor,
+                       previousTokenAnchor: &previousTokenAnchor,
                        resetsAt: resetsAt,
                        windowMinutes: windowMinutes,
                        windowStart: windowStart,
-                       priceTable: priceTable,
+                       observationCutoff: now,
+                       priceSnapshot: priceSnapshot,
+                       cumulative: &cumulative,
                        dollars: &dollars,
                        pricedVolume: &pricedVolume,
                        unpricedVolume: &unpricedVolume,
                        seenAnchors: &seenAnchors,
                        matchedTurns: &matchedTurns)
+                hadIncompleteCandidate = hadIncompleteCandidate || !complete
             }
         }
 
         let totalVolume = pricedVolume + unpricedVolume
         debugLog("scan done files=\(seenFiles) anchorsSeen=\(seenAnchors.sorted()) matched=\(matchedTurns) dollars=\(dollars) priced=\(pricedVolume) unpriced=\(unpricedVolume)")
+        guard !hadIncompleteCandidate else {
+            debugLog("scan REJECT: incomplete or malformed candidate")
+            return nil
+        }
         guard dollars > 0, totalVolume > 0 else { debugLog("scan REJECT: no dollars"); return nil }
         return WeeklyQuotaBootstrapResult(
             usedPercentPoints: usedPercentPoints,
@@ -211,7 +226,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
             windowStart: windowStart,
             resetsAt: resetsAt,
             scannedAt: now,
-            priceRevision: priceTable.revision
+            priceRevision: priceSnapshot.revision,
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         )
     }
 
@@ -238,8 +254,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
         return result
     }
 
-    /// First `"model":"…"` mentioned anywhere in the file, used only as the initial
-    /// value before the first `turn_context` line is reached.
+    /// Retained for fixture diagnostics only. Production attribution deliberately
+    /// does not use a future model mention to seed earlier usage.
     static func firstModelSlug(in text: String) -> String? {
         guard let range = text.range(of: "\"model\":\"") else { return nil }
         let rest = text[range.upperBound...]
@@ -248,30 +264,42 @@ enum CodexWeeklyQuotaBootstrapScanner {
         return slug.isEmpty ? nil : slug
     }
 
+    @discardableResult
     private static func ingest(line: Substring,
                                isTokenCount: Bool,
                                isTurnContext: Bool,
                                currentModel: inout String?,
                                currentAnchor: inout Date?,
+                               previousTokenAnchor: inout Date?,
                                resetsAt: Date,
                                windowMinutes: Int,
                                windowStart: Date,
-                               priceTable: RunwayPriceTable,
+                               observationCutoff: Date,
+                               priceSnapshot: RunwayPriceSnapshot,
+                               cumulative: inout CumulativeCounters,
                                dollars: inout Double,
                                pricedVolume: inout Double,
                                unpricedVolume: inout Double,
                                seenAnchors: inout Set<Int>,
-                               matchedTurns: inout Int) {
+                               matchedTurns: inout Int) -> Bool {
         // The caller already prefiltered; only relevant lines are ever JSON-parsed,
         // which is what keeps a multi-megabyte transcript cheap to walk.
         guard let lineData = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { return }
+              let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+            return false
+        }
         let payload = (object["payload"] as? [String: Any]) ?? object
 
-        if isTurnContext, let model = payload["model"] as? String, !model.isEmpty {
+        let structuredTurnContext = (payload["type"] as? String) == "turn_context"
+            || (object["type"] as? String) == "turn_context"
+        let structuredTokenCount = (payload["type"] as? String) == "token_count"
+            || (object["type"] as? String) == "token_count"
+        if isTurnContext, structuredTurnContext,
+           let model = payload["model"] as? String, !model.isEmpty {
             currentModel = model
         }
-        guard isTokenCount else { return }
+        guard isTokenCount, structuredTokenCount else { return true }
+        currentAnchor = nil
 
         // The rate_limits block rides along on the same line, so the anchor is
         // always the one that was live when these tokens were spent.
@@ -291,32 +319,59 @@ enum CodexWeeklyQuotaBootstrapScanner {
                 break
             }
         }
-        // Another account's session, or a superseded window. Not our denominator.
+        let info = (payload["info"] as? [String: Any]) ?? payload
+        guard let total = info["total_token_usage"] as? [String: Any],
+              let timestamp = timestamp(object: object, payload: payload) else { return false }
+        let sample = CumulativeCounters.Sample(usage: total)
+        if cumulative.isReset(by: sample) { cumulative = CumulativeCounters() }
+        var delta = cumulative.advance(to: sample)
+        if let last = info["last_token_usage"] as? [String: Any] {
+            let request = CumulativeCounters.Sample(usage: last)
+            let requestDelta = UsageDelta(sample: request)
+            delta = delta.withContextInput(
+                request.hasComponents
+                    && requestDelta.fresh == delta.fresh
+                    && requestDelta.cacheRead == delta.cacheRead
+                    && requestDelta.cacheWrite == delta.cacheWrite
+                    && requestDelta.output == delta.output
+                    ? request.input : nil)
+        } else {
+            delta = delta.withContextInput(nil)
+        }
+
+        // Another account's session, a superseded window, or data written after
+        // the quota observation cannot enter this denominator. Normalization
+        // still advanced above so a later matching record cannot import it.
         if let a = currentAnchor { seenAnchors.insert(Int(a.timeIntervalSince1970)) }
         guard let anchor = currentAnchor,
-              abs(anchor.timeIntervalSince(resetsAt)) < anchorTolerance else { return }
+              abs(anchor.timeIntervalSince(resetsAt)) < anchorTolerance,
+              timestamp >= windowStart,
+              timestamp <= observationCutoff else {
+            previousTokenAnchor = currentAnchor
+            return currentAnchor != nil
+        }
+        let crossedAnchor = previousTokenAnchor.map {
+            abs($0.timeIntervalSince(resetsAt)) >= anchorTolerance
+        } ?? false
+        previousTokenAnchor = currentAnchor
+        guard !crossedAnchor else { return true }
         matchedTurns += 1
 
-        guard let timestamp = timestamp(object: object, payload: payload), timestamp >= windowStart else { return }
-        let info = (payload["info"] as? [String: Any]) ?? payload
-        // `last_token_usage` is the turn's OWN usage, so no cumulative diffing is
-        // needed and a resumed session cannot double-count its history.
-        guard let last = info["last_token_usage"] as? [String: Any] else { return }
-
-        func value(_ key: String) -> Double { (last[key] as? Double) ?? Double((last[key] as? Int) ?? 0) }
-        let cached = value("cached_input_tokens")
-        // Codex `input_tokens` INCLUDES cached reads; fresh input is the remainder.
-        let freshInput = max(0, value("input_tokens") - cached)
-        let output = value("output_tokens")
-        let cacheWrite = value("cache_write_input_tokens")
+        let freshInput = Double(delta.fresh)
+        let cached = Double(delta.cacheRead)
+        let output = Double(delta.output)
+        let cacheWrite = Double(delta.cacheWrite)
         let volume = freshInput + cached + output + cacheWrite
-        guard volume > 0 else { return }
+        guard volume > 0 else { return true }
 
-        guard let price = priceTable.price(forModel: currentModel),
+        guard let price = priceSnapshot.price(forModel: currentModel),
+              !(price.longContext.map {
+                  delta.contextInput == nil && Double(delta.topLine - delta.output) > $0.thresholdInputTokens
+              } ?? false),
               let rates = price.rates(for: .standard,
-                                      contextInputTokens: value("input_tokens")) else {
+                                      contextInputTokens: delta.contextInput.map(Double.init)) else {
             unpricedVolume += volume
-            return
+            return true
         }
         pricedVolume += volume
         dollars += rates.dollars(input: freshInput,
@@ -324,6 +379,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
                                  output: output,
                                  cacheWrite5m: cacheWrite,
                                  cacheWrite1h: 0)
+        return true
     }
 
     /// Codex writes ISO-8601 strings on transcript lines, but older rollouts and

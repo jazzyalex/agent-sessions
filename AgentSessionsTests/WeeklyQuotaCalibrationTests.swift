@@ -108,6 +108,101 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(once, twice, accuracy: 0.0001)
     }
 
+    func testIncrementalLedgerKeepsEventTimeAndMarksLateDiscovery() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        ledger.recordIncremental(events: [], priceTable: prices, now: t0)
+
+        let onTime = WeeklyQuotaTokenEvent(
+            logPath: "/c", eventID: "on-time", capturedAt: t0.addingTimeInterval(30),
+            input: 0, cachedInput: 0, output: 1_000_000, cacheCreation: 0,
+            modelSlug: "gpt-5.6")
+        ledger.recordIncremental(events: [onTime], priceTable: prices,
+                                 now: t0.addingTimeInterval(60))
+
+        let late = WeeklyQuotaTokenEvent(
+            logPath: "/c", eventID: "late", capturedAt: t0.addingTimeInterval(20),
+            input: 0, cachedInput: 0, output: 1_000_000, cacheCreation: 0,
+            modelSlug: "gpt-5.6")
+        ledger.recordIncremental(events: [late], priceTable: prices,
+                                 now: t0.addingTimeInterval(120))
+
+        let historical = ledger.activity(from: t0, to: t0.addingTimeInterval(60))
+        XCTAssertEqual(historical?.dollars ?? 0, 40, accuracy: 0.001)
+        XCTAssertTrue(historical?.hadIncompleteCoverage ?? false,
+                      "late discovery invalidates the interval where the event occurred")
+
+        let later = ledger.activity(from: t0.addingTimeInterval(60),
+                                    to: t0.addingTimeInterval(120))
+        XCTAssertEqual(later?.dollars ?? -1, 0, accuracy: 0.001,
+                       "historical work must not be charged to its discovery poll")
+        XCTAssertFalse(later?.hadIncompleteCoverage ?? true)
+    }
+
+    func testIncrementalLedgerKeepsDistinctSameTimestampEvents() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        let at = t0.addingTimeInterval(30)
+        let events = ["request-a", "request-b"].map {
+            WeeklyQuotaTokenEvent(logPath: "/c", eventID: $0, capturedAt: at,
+                                  input: 0, cachedInput: 0, output: 1_000_000,
+                                  cacheCreation: 0, modelSlug: "gpt-5.6")
+        }
+        ledger.recordIncremental(events: events, priceTable: prices,
+                                 now: t0.addingTimeInterval(60))
+        XCTAssertEqual(ledger.activity(from: t0, to: t0.addingTimeInterval(60))?.dollars ?? 0,
+                       40, accuracy: 0.001)
+    }
+
+    func testIncrementalLedgerMarksIncompleteScannerCoverage() {
+        let ledger = WeeklyQuotaActivityLedger()
+        ledger.recordIncremental(
+            events: [],
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: t0,
+            coverageComplete: false
+        )
+
+        let activity = ledger.activity(from: t0.addingTimeInterval(-1), to: t0)
+        XCTAssertTrue(activity?.hadIncompleteCoverage ?? false)
+    }
+
+    func testOutOfOrderPollCompletionDoesNotRegressLateDiscoveryBoundary() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        ledger.recordIncremental(events: [], priceTable: prices,
+                                 now: t0.addingTimeInterval(60))
+        ledger.recordIncremental(events: [], priceTable: prices,
+                                 now: t0.addingTimeInterval(30))
+
+        let late = WeeklyQuotaTokenEvent(
+            logPath: "/c", eventID: "late-after-overlap",
+            capturedAt: t0.addingTimeInterval(45),
+            input: 0, cachedInput: 0, output: 1_000_000,
+            cacheCreation: 0, modelSlug: "gpt-5.6")
+        ledger.recordIncremental(events: [late], priceTable: prices,
+                                 now: t0.addingTimeInterval(120))
+
+        XCTAssertTrue(ledger.activity(from: t0, to: t0.addingTimeInterval(60))?
+            .hadIncompleteCoverage ?? false)
+    }
+
+    func testIncrementalLedgerRejectsUnknownLargeContextBoundary() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let event = WeeklyQuotaTokenEvent(
+            logPath: "/c", eventID: "unknown-context",
+            capturedAt: t0.addingTimeInterval(30),
+            input: 300_001, cachedInput: 0, output: 100,
+            cacheCreation: 0, modelSlug: "gpt-5.6-sol",
+            contextInputTokens: nil)
+        ledger.recordIncremental(events: [event],
+                                 priceTable: RunwayPriceTable.makeForTesting(),
+                                 now: t0.addingTimeInterval(60))
+
+        XCTAssertTrue(ledger.activity(from: t0, to: t0.addingTimeInterval(60))?
+            .hadUnpriced ?? false)
+    }
+
     // MARK: - Tracker acceptance
 
     /// Acceptance test 3: one valid matched interval produces a calibration.
@@ -320,7 +415,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let end = t0.addingTimeInterval(10 * 60)
         let payload = try XCTUnwrap(
             JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
-        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 4)
+        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 6)
         var restored = WeeklyQuotaCalibrationTracker()
         restored.restore(from: persisted.data, scope: scope(), now: end)
         XCTAssertEqual(try XCTUnwrap(restored.percentPointsPerDollar(now: end)),
@@ -429,6 +524,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         bootstrap.priceRevision = prices.revision
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         store.setBootstrapForTesting(provider: "codex", result: bootstrap)
 
         let rpcScope = scope(priceRevision: prices.revision, source: "cli-rpc", shape: "weekly")
@@ -454,6 +550,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         bootstrap.priceRevision = prices.revision
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         store.setBestBootstrapForTesting(provider: "codex", result: bootstrap)
 
         let currentScope = scope(priceRevision: prices.revision, source: "oauth", shape: "weekly")
@@ -588,10 +685,41 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         bootstrap.priceRevision = prices.revision
         bootstrap.limitShape = liveScope.limitShape
         bootstrap.sourceFamily = liveScope.sourceFamily
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         store.setBootstrapForTesting(provider: "codex", result: bootstrap)
 
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: now) ?? 0,
                        33.5 / 156.648, accuracy: 0.0001)
+    }
+
+    func testContainedIntervalContradictionWithholdsBothCandidates() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision)
+
+        store.observeQuota(provider: "codex", remainingPercent: 80,
+                           hasExactPercent: false, resetAt: reset,
+                           observedAt: t0, scope: scoped, now: t0)
+        fillLedger(store.ledger(provider: "codex"), from: t0, minutes: 10,
+                   outputTokensPerMinute: 100_000)
+        let end = t0.addingTimeInterval(600)
+        store.observeQuota(provider: "codex", remainingPercent: 79,
+                           hasExactPercent: false, resetAt: reset,
+                           observedAt: end, scope: scoped, now: end)
+
+        var impossible = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 5, dollars: 10, unpricedVolumeShare: 0,
+            windowStart: reset.addingTimeInterval(-604_800),
+            resetsAt: reset, scannedAt: end)
+        impossible.priceRevision = prices.revision
+        impossible.limitShape = scoped.limitShape
+        impossible.sourceFamily = scoped.sourceFamily
+        impossible.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        store.setBootstrapForTesting(provider: "codex", result: impossible)
+
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: end),
+                     "a $10 full window cannot contain a proven $20 interval")
     }
 
     /// A weekly reset leaves the new window with nothing to divide by; the plan's
@@ -649,8 +777,9 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                       "a day-old scan must refresh on age, not only on growth")
     }
 
-    /// The age trigger must not cause a rescan on every poll of a fresh scan.
-    func testFreshScanIsNotRescanned() throws {
+    /// A scan from before this process started cannot be freshened from one later
+    /// heartbeat, even when the gap is shorter than the ordinary poll-gap cap.
+    func testFreshScanBeforeLedgerStartIsRescanned() throws {
         let suite = try XCTUnwrap(UserDefaults(suiteName: "wkfresh-\(UUID().uuidString)"))
         defer { suite.removePersistentDomain(forName: suite.description) }
         let resetsAt = t0.addingTimeInterval(604_800)
@@ -658,18 +787,19 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         suite.set(try JSONEncoder().encode(WeeklyQuotaBootstrapResult(
             usedPercentPoints: 3, dollars: 10.84, unpricedVolumeShare: 0,
             windowStart: t0, resetsAt: resetsAt,
-            scannedAt: t0.addingTimeInterval(-600))), forKey: key)
+            scannedAt: t0.addingTimeInterval(-600),
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)), forKey: key)
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
-        // The ledger must be able to vouch for the span since that scan, or the
-        // cache is unverifiable and rescanning it is correct rather than churn.
+        // This is the first in-memory heartbeat. It cannot prove the preceding ten
+        // minutes were observed, because the ledger did not exist then.
         store.ledger(provider: "codex").record(
             observations: [], priceTable: RunwayPriceTable.makeForTesting(), now: t0)
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
                               resetsAt: resetsAt, windowMinutes: 10080,
                               usedPercentPoints: 3, now: t0, defaults: suite)
-        XCTAssertFalse(store.scanWasDispatchedForTesting(provider: "codex"),
-                       "a ten-minute-old scan the ledger covers is still good; rescanning is churn")
+        XCTAssertTrue(store.scanWasDispatchedForTesting(provider: "codex"),
+                      "a pre-launch denominator must be rescanned, not silently freshened")
     }
 
     /// Promotion must happen on RESTORE as well as after a scan: a launch that
@@ -682,7 +812,8 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let anchorKey = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
         suite.set(try JSONEncoder().encode(WeeklyQuotaBootstrapResult(
             usedPercentPoints: 40, dollars: 500, unpricedVolumeShare: 0,
-            windowStart: t0, resetsAt: resetsAt, scannedAt: t0)), forKey: anchorKey)
+            windowStart: t0, resetsAt: resetsAt, scannedAt: t0,
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)), forKey: anchorKey)
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
@@ -749,7 +880,8 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let resetsAt = t0.addingTimeInterval(604_800)
         let stored = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
-            windowStart: t0, resetsAt: resetsAt, scannedAt: t0)
+            windowStart: t0, resetsAt: resetsAt, scannedAt: t0,
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)
         let key = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
         suite.set(try JSONEncoder().encode(stored), forKey: key)
 
@@ -768,6 +900,23 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         // ratio takes the quantization midpoint on every path.
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
                        20.5 / 100, accuracy: 0.0001)
+    }
+
+    func testLegacyCodexBootstrapIsRejectedAfterAccountingRevision() throws {
+        let suite = try XCTUnwrap(UserDefaults(suiteName: "wkcal-legacy-\(UUID().uuidString)"))
+        defer { suite.removePersistentDomain(forName: suite.description) }
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let legacy = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0, resetsAt: resetsAt, scannedAt: t0)
+        let key = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
+        suite.set(try JSONEncoder().encode(legacy), forKey: key)
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 20, now: t0, defaults: suite)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0))
     }
 
     func testCalibrationExpiresAfterSevenDays() {
@@ -891,6 +1040,7 @@ final class WeeklyQuotaDisplayTests: XCTestCase {
             XCTAssertEqual(weekly(value), "quiet", "\(value) must not render as a number")
         }
         XCTAssertEqual(weekly(0.05), "0.1%/h")
+        XCTAssertEqual(weekly(-2.2), "quiet", "negative burn must never render as a rate")
         XCTAssertNotEqual(weekly(0.05), "0.0%/h")
     }
 
@@ -906,9 +1056,10 @@ final class WeeklyQuotaDisplayTests: XCTestCase {
         XCTAssertEqual(weekly(10), "10%/h")
         XCTAssertEqual(weekly(12.4), "12%/h")
         XCTAssertEqual(weekly(100), "100%/h")
-        // No tilde anywhere, and the /h suffix always survives so the row can't be
-        // misread as the "Wk: 89%" remaining figure above it.
-        XCTAssertFalse(weekly(1.4).contains("~"))
+        // The tilde marks this as an extrapolated estimate; /h keeps it distinct
+        // from the "Wk: 89%" remaining figure above it.
+        XCTAssertFalse(weekly(1.4).hasPrefix("~"))
+        XCTAssertFalse(weekly(1.4).hasPrefix("≈"))
         XCTAssertTrue(weekly(1.4).hasSuffix("%/h"))
     }
 
@@ -1169,7 +1320,8 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         WeeklyQuotaBootstrapResult(
             usedPercentPoints: used, dollars: dollars, unpricedVolumeShare: 0,
             windowStart: resetsAt.addingTimeInterval(-604_800), resetsAt: resetsAt,
-            scannedAt: scannedAt)
+            scannedAt: scannedAt,
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)
     }
 
     /// Writes a Codex transcript whose turns all carry `resetsAt` as their weekly
@@ -1178,7 +1330,9 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let iso = ISO8601DateFormatter().string(from: at)
         let lines = [
             "{\"timestamp\":\"\(iso)\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6\"}}",
-            "{\"timestamp\":\"\(iso)\",\"type\":\"token_count\",\"payload\":{\"info\":{\"last_token_usage\":"
+            "{\"timestamp\":\"\(iso)\",\"type\":\"token_count\",\"payload\":{\"info\":{\"total_token_usage\":"
+            + "{\"input_tokens\":0,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,"
+            + "\"output_tokens\":\(outputTokens),\"total_tokens\":\(outputTokens)},\"last_token_usage\":"
             + "{\"input_tokens\":0,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,"
             + "\"output_tokens\":\(outputTokens),\"total_tokens\":\(outputTokens)}},"
             + "\"rate_limits\":{\"primary\":{\"used_percent\":6.0,\"window_minutes\":10080,"

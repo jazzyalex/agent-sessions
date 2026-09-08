@@ -464,8 +464,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-09-03",
-      "_note": "USD per million tokens. Rates verified 2026-09-03 from platform.claude.com and developers.openai.com. Sol requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family prefixes remain supported. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object is Anthropic fast mode. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "updated": "2026-09-07",
+      "_note": "USD per million tokens. Rates verified 2026-09-03 from platform.claude.com and developers.openai.com. Astra rates verified 2026-09-07 from developers.openai.com/api/docs/models/gpt-6-astra. Astra and Sol requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family prefixes remain supported. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object supplies model-specific fast-mode rates. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
         "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
@@ -481,6 +481,9 @@ final class RunwayPriceTable: @unchecked Sendable {
         "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
         "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
         "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0,  "cacheWrite1hPerMTok": 1.6 },
+        "gpt-6-astra":     { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5,
+                             "fast": { "inputPerMTok": 20.0, "cachedInputPerMTok": 2.0, "outputPerMTok": 100.0, "cacheWritePerMTok": 25.0 },
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5,

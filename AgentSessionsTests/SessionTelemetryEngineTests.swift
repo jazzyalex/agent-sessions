@@ -61,6 +61,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.priceRevision = prices.revision
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(
             provider: "codex",
@@ -347,6 +348,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.priceRevision = prices.revision
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "codex",
                                                 accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),
