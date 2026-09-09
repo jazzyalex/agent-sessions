@@ -1505,6 +1505,23 @@
         }
       }
     },
+    "Estimated weekly burn pace from the last five minutes of local activity.": {
+      "comment": "Tooltip explaining the estimated weekly quota burn rate and its five-minute local activity window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated weekly burn pace from the last five minutes of local activity."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据最近五分钟的本地活动估算的每周配额消耗速率。"
+          }
+        }
+      }
+    },
     "Help translate": {
       "comment": "Primary action on the translation contribution card.",
       "localizations": {
@@ -6505,22 +6522,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "关闭%@通知"
-          }
-        }
-      }
-    },
-    "Dismiss for now": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dismiss for now"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂时关闭"
           }
         }
       }

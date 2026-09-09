@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added the missing Simplified Chinese translation for the weekly burn estimate tooltip.
+
 ## [5.2] - 2026-09-09
 
 ### Highlights
