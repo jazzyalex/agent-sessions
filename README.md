@@ -21,7 +21,7 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 ```
 
 <p align="center">
-  <img src="https://jazzyalex.github.io/agent-sessions/assets/sessions-main-window.png" alt="Agent Sessions showing local coding-agent sessions in a searchable list with a transcript open beside them" width="100%" style="max-width:960px;border-radius:8px;"/>
+  <img src="https://jazzyalex.github.io/agent-sessions/assets/sessions-main-window-with-quota.png" alt="Agent Sessions showing searchable local coding-agent sessions and a floating Codex and Claude Quota Meter" width="100%" style="max-width:960px;border-radius:8px;"/>
 </p>
 
 ## What's New in 5.2
