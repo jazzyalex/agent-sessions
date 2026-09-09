@@ -270,7 +270,7 @@ def test_clean_run_on_a_newer_cli_suggests_a_version_bump(tmp_path, capsys):
     assert "matrix entry can be bumped" in out
 
 
-def test_clean_but_stale_run_on_a_newer_cli_holds_verified_version(tmp_path, capsys):
+def test_clean_but_stale_run_cannot_claim_health(tmp_path, capsys):
     result = _result(
         verified_version="0.0.5",
         installed={"argv": ["fx", "--version"], "parsed_version": "0.0.7", "stderr": ""},
@@ -284,10 +284,164 @@ def test_clean_but_stale_run_on_a_newer_cli_holds_verified_version(tmp_path, cap
     code = steward_check._report("fx", result, tmp_path)
     out = capsys.readouterr().out
 
-    assert code == 0
-    assert "newer than the verified" in out
-    assert "Keep the verified version unchanged" in out
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "sample is stale" in out
+    assert "does not verify the CLI version now installed" in out
+    assert "All good" not in out
     assert "matrix entry can be bumped" not in out
+
+
+def test_clean_but_thin_scope_none_run_cannot_claim_health(tmp_path, capsys):
+    result = _result(
+        verified_version="0.0.7",
+        installed={"argv": ["fx", "--version"], "parsed_version": "0.0.8", "stderr": ""},
+        compatibility={
+            "verdict": "blocked_thin_sample",
+            "scope": "none",
+            "blockers": ["sample_coverage_too_thin", "no_real_session_driver_configured"],
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "sample exercised too little of the known format" in out
+    assert "All good" not in out
+    assert "matrix entry can be bumped" not in out
+
+
+def test_clean_match_with_failed_discovery_contract_cannot_claim_health(tmp_path, capsys):
+    result = _result(weekly={
+        "local_schema": {"file": "/x/checkpoint.json", "sampled_files": ["/x/checkpoint.json"]},
+        "discovery_path_contract": {"ok": False, "error": "path_mismatch"},
+    })
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "discovery contract did not pass (path_mismatch)" in out
+    assert "All good" not in out
+
+
+def test_clean_match_with_scope_none_cannot_claim_health(tmp_path, capsys):
+    result = _result(compatibility={
+        "verdict": "blocked_no_fresh_evidence",
+        "scope": "none",
+        "blockers": ["no_real_session_driver_configured"],
+    })
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "blocked_no_fresh_evidence with no verified support scope" in out
+    assert "All good" not in out
+
+
+def test_clean_match_with_legacy_thin_schema_diff_cannot_claim_health(tmp_path, capsys):
+    result = _result(evidence={
+        "schema_matches_baseline": True,
+        "schema_diff": {
+            "coverage_ratio": 0.1,
+            "observed_event_count": 2,
+            "unknown_only_is_empty": True,
+        },
+        "sample_freshness": {"is_stale": False},
+    })
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "sample exercised too little of the known format" in out
+    assert "All good" not in out
+    assert "matrix entry can be bumped" not in out
+
+
+def test_clean_match_with_explicit_stale_verdict_and_missing_scope_cannot_claim_health(
+        tmp_path, capsys):
+    result = _result(compatibility={
+        "verdict": "blocked_stale_sample",
+        "blockers": ["sample_predates_cli"],
+    })
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "compatibility assessment says the sample is stale" in out
+    assert "All good" not in out
+    assert "matrix entry can be bumped" not in out
+
+
+def test_clean_match_with_malformed_compatibility_cannot_claim_health(tmp_path, capsys):
+    result = _result(compatibility="monitoring_broken")
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_CANNOT_CHECK == 2
+    assert "compatibility assessment is malformed" in out
+    assert "All good" not in out
+
+
+def test_clean_match_with_rich_current_assessment_still_says_all_good(tmp_path, capsys):
+    result = _result(
+        weekly={
+            "local_schema": {
+                "file": "/x/events.jsonl",
+                "sampled_files": ["/x/events.jsonl"] * 5,
+            },
+            "discovery_path_contract": {"ok": True},
+        },
+        evidence={
+            "schema_matches_baseline": True,
+            "schema_diff": {
+                "coverage_ratio": 0.8,
+                "observed_event_count": 100,
+                "unknown_only_is_empty": True,
+            },
+            "sample_freshness": {"is_stale": False},
+        },
+        compatibility={
+            "verdict": "supports_installed_only",
+            "scope": "installed",
+            "blockers": [],
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_OK == 0
+    assert "All good: fx format matches the baseline" in out
+
+
+def test_present_compatibility_assessment_overrides_thin_selected_diff(tmp_path, capsys):
+    result = _result(
+        evidence={
+            "schema_matches_baseline": True,
+            "schema_diff": {
+                "coverage_ratio": 0.1,
+                "observed_event_count": 2,
+                "unknown_only_is_empty": True,
+            },
+            "sample_freshness": {"is_stale": False},
+        },
+        compatibility={
+            "verdict": "supports_installed_only",
+            "scope": "installed",
+            "blockers": [],
+        },
+    )
+
+    code = steward_check._report("codex", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == steward_check.EXIT_OK == 0
+    assert "All good: codex format matches the baseline" in out
 
 
 def test_drift_exits_one_and_writes_a_pasteable_issue(tmp_path, capsys):

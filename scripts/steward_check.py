@@ -15,12 +15,15 @@ What it does
 Runs the ordinary weekly scan restricted to that one agent, against the
 steward's own local sessions, then reports one of three outcomes:
 
-  exit 0  all good -- the local sessions match the committed baseline.
+  exit 0  all good -- current, sufficiently rich local sessions match the
+          committed baseline and their discovery contract passes.
   exit 1  drift -- something new showed up. Prints the difference in plain
           words, attempts a REDACTED sample, and prints a GitHub issue body
           with the sample outcome. A sample is optional for reporting drift.
-  exit 2  cannot check -- the agent's CLI is not installed, or there are no
-          sessions on disk yet. Says which, and what to do about it.
+  exit 2  cannot check -- the agent's CLI is not installed, there are no
+          sessions on disk yet, or the available evidence is stale, too thin,
+          outside the discovery contract, or otherwise has no support scope.
+          Says which, and what to do about it.
 
 Nothing is written to the repository's baseline fixtures. Deciding that drift is
 real, and rebuilding a baseline for it, stays a maintainer job
@@ -350,6 +353,99 @@ def _cannot_check_reason(agent: str, result: dict) -> str | None:
     return None
 
 
+def _clean_match_blocker_reason(agent: str, result: dict) -> str | None:
+    """Reject a schema match that the compatibility assessment cannot support.
+
+    A matching fingerprint is only one input to the verdict. It cannot turn a
+    stale or thin sample, a broken discovery contract, or a scope-none result
+    into steward approval. Drift is handled separately by `_report`, so this
+    helper is called only after `schema_matches_baseline` is known to be true.
+    """
+    weekly = result.get("weekly") or {}
+    discovery = weekly.get("discovery_path_contract") or {}
+    if isinstance(discovery, dict) and discovery.get("ok") is False:
+        error = discovery.get("error")
+        detail = f" ({error})" if isinstance(error, str) and error else ""
+        return (
+            f"The {agent} session discovery contract did not pass{detail}.\n"
+            "The matching sample cannot prove that the app can find current sessions.\n"
+            "Update or repair discovery, then run this check again."
+        )
+
+    evidence = result.get("evidence") or {}
+    freshness = evidence.get("sample_freshness") or {}
+    if isinstance(freshness, dict) and freshness.get("is_stale") is True:
+        stale_reason = freshness.get("stale_reason")
+        detail = f" ({stale_reason})" if isinstance(stale_reason, str) and stale_reason else ""
+        return (
+            f"The {agent} sample is stale{detail}.\n"
+            "A matching older session does not verify the CLI version now installed.\n"
+            "Create a fresh tool-using session and run this check again."
+        )
+
+    raw_compatibility = result.get("compatibility")
+    if raw_compatibility is not None and not isinstance(raw_compatibility, dict):
+        return (
+            f"The {agent} compatibility assessment is malformed.\n"
+            "A matching fingerprint cannot be trusted without a readable compatibility result.\n"
+            "Repair the monitoring result, then run this check again."
+        )
+
+    compatibility = raw_compatibility or {}
+    blockers = compatibility.get("blockers") or []
+    blocker_names = {value for value in blockers if isinstance(value, str)}
+    verdict = compatibility.get("verdict")
+    if verdict == "blocked_thin_sample" or "sample_coverage_too_thin" in blocker_names:
+        return (
+            f"The {agent} sample exercised too little of the known format.\n"
+            "A matching thin sample cannot verify compatibility.\n"
+            "Create a richer session with a reply and real tool calls, then run this check again."
+        )
+
+    if verdict == "blocked_stale_sample":
+        return (
+            f"The {agent} compatibility assessment says the sample is stale.\n"
+            "A matching older session does not verify the CLI version now installed.\n"
+            "Create a fresh tool-using session and run this check again."
+        )
+
+    if compatibility.get("scope") == "none":
+        label = verdict if isinstance(verdict, str) and verdict else "an unsupported verdict"
+        return (
+            f"The {agent} compatibility result is {label} with no verified support scope.\n"
+            "A matching fingerprint alone is not an all-good result.\n"
+            "Resolve the reported blockers, then run this check again."
+        )
+
+    blocking_verdicts = {
+        "blocked_no_fresh_evidence",
+        "format_drift_detected",
+        "monitoring_broken",
+        "not_evaluated_daily",
+    }
+    if verdict in blocking_verdicts:
+        return (
+            f"The {agent} compatibility result is {verdict} and cannot support an all-good result.\n"
+            "A matching fingerprint alone is not sufficient evidence.\n"
+            "Resolve the reported blockers, then run this check again."
+        )
+
+    # Older reports predate the compatibility assessment. Preserve their clean
+    # path unless their own schema diff explicitly proves the sample was both
+    # narrow and tiny. A present compatibility object stays authoritative because
+    # it can combine a thin prebump with a rich weekly union.
+    if raw_compatibility is None:
+        schema_diff = evidence.get("schema_diff")
+        if agent_watch._sample_is_thin(schema_diff):
+            return (
+                f"The {agent} sample exercised too little of the known format.\n"
+                "A matching thin sample cannot verify compatibility.\n"
+                "Create a richer session with a reply and real tool calls, then run this check again."
+            )
+
+    return None
+
+
 def _issue_body(agent: str, result: dict, diff: dict, sample_path: Path | None,
                 leaks: list[str], *, write_sample: bool = True) -> str:
     verified = result.get("verified_version")
@@ -428,6 +524,13 @@ def _report(agent: str, result: dict, out_dir: Path, write_sample: bool = True) 
     count = _sample_count(result)
 
     if evidence.get("schema_matches_baseline") is True:
+        blocked_reason = _clean_match_blocker_reason(agent, result)
+        if blocked_reason:
+            print(f"Cannot check {agent} yet.")
+            print()
+            print(blocked_reason)
+            return EXIT_CANNOT_CHECK
+
         print(f"All good: {agent} format matches the baseline ({count} sessions sampled).")
         print(f"Verified version in the support matrix: {verified}")
         verified_semver = agent_watch._extract_semver(verified) if verified else None
