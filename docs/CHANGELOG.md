@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.2] - 2026-09-09
+
 ### Highlights
 - **Agent Sessions now speaks Simplified Chinese, and Quota Meter evidence got stricter.** The app's interface and permission copy are translated while transcripts, paths, commands, IDs, and provider names remain verbatim. Weekly runway rates now require recent, internally consistent quota evidence; unknown or incomplete inputs fail closed instead of producing a confident number.
 
