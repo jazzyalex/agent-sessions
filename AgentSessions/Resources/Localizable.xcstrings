@@ -20308,6 +20308,54 @@
         }
       }
     },
+    "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增简体中文支持，用量计的每周速率采用更严格的证据模型。"
+          }
+        }
+      }
+    },
+    "Quota Meter rates you can trust": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota Meter rates you can trust"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可信的用量计速率"
+          }
+        }
+      }
+    },
+    "Weekly rates now wait for enough recent evidence, reject mismatched quota data, and keep completed sessions attributable for five minutes. Astra and Sol long-context pricing are included, and unavailable inputs stay unavailable instead of producing a confident number.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly rates now wait for enough recent evidence, reject mismatched quota data, and keep completed sessions attributable for five minutes. Astra and Sol long-context pricing are included, and unavailable inputs stay unavailable instead of producing a confident number."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周速率现在会等待足够的近期证据，拒绝不匹配的配额数据，并在会话结束后继续归因五分钟。现已包含 Astra 和 Sol 长上下文定价；输入不可用时会明确显示不可用，而不会给出看似确定的数值。"
+          }
+        }
+      }
+    },
     "Weekly pace is measured, not averaged": {
       "localizations": {
         "en": {

@@ -221,7 +221,7 @@ final class OnboardingFeedbackTriggerTests: XCTestCase {
 
 final class WhatsNewCatalogTests: XCTestCase {
     func testAssembleForCurrentReleaseHasHighlights() {
-        let items = WhatsNewCatalog.assemble(for: "4.3")
+        let items = WhatsNewCatalog.assemble(for: "5.2")
         XCTAssertFalse(items.isEmpty)
         XCTAssertTrue(items.contains { $0.kind == .highlight })
         // At most one promo, always.
@@ -242,12 +242,22 @@ final class WhatsNewCatalogTests: XCTestCase {
     }
 
     func testHasContentForCurrentRelease() {
-        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "4.3"))
+        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.2"))
     }
 
     func testTeaserPresentForCurrentRelease() {
-        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.3"))
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.2"))
         XCTAssertNil(WhatsNewCatalog.teaser(for: "99.9"))
+    }
+
+    func testRelease52HasLocalizedAuthoredHighlightsAndSupport() {
+        let items = WhatsNewCatalog.assemble(for: "5.2")
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
+            "Help translate",
+            "Quota Meter rates you can trust",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.map(\.kind), [.highlight, .highlight, .support])
     }
 
     /// 4.7 is the first release where an authored bundle and an auto-generated

@@ -108,3 +108,6 @@ tools/agent-watch/out/
 
 # Local page mockups — built to preview before touching the real site
 docs/_preview/
+
+# Generated GitHub Pages output; canonical sources live directly under docs/.
+docs/_site/

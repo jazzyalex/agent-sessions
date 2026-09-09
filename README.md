@@ -24,6 +24,12 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
   <img src="docs/assets/sessions-main-window.png" alt="Agent Sessions showing local coding-agent sessions in a searchable list with a transcript open beside them" width="100%" style="max-width:960px;border-radius:8px;"/>
 </p>
 
+## What's New in 5.2
+
+- Agent Sessions is now available in English and Simplified Chinese, with an in-app invitation for established users to help add another language.
+- Quota Meter weekly rates use stricter, recent evidence; Astra and Sol long-context pricing are included, and uncertain inputs fail closed.
+- Session-list invitations wait for every enabled source to settle, respect dismissal consistently, and avoid repeating or rotating too quickly.
+
 ## What it does
 
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.

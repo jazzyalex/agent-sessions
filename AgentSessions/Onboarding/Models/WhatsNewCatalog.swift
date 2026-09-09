@@ -110,10 +110,33 @@ enum WhatsNewCatalog {
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
         "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe.",
-        "5.1": "Two more agents join the lineup: Devin CLI and fx."
+        "5.1": "Two more agents join the lineup: Devin CLI and fx.",
+        "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.2": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "globe",
+                title: "Help translate",
+                body: "Agent Sessions is now available in English and Simplified Chinese. Help bring it to your language—no Swift required."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "speedometer",
+                title: "Quota Meter rates you can trust",
+                body: "Weekly rates now wait for enough recent evidence, reject mismatched quota data, and keep completed sessions attributable for five minutes. Astra and Sol long-context pricing are included, and unavailable inputs stay unavailable instead of producing a confident number."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.1": [
             // Devin and fx are NOT authored here: `providerHighlights(for:)` generates
             // their rows from `versionIntroduced == "5.1"`, same split as 5.0 and 4.8.
