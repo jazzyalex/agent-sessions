@@ -7,11 +7,8 @@ All notable changes to this project will be documented in this file.
 ## [5.2] - 2026-09-09
 
 ### Highlights
-- **Agent Sessions now speaks Simplified Chinese, and Quota Meter evidence got stricter.** The app's interface and permission copy are translated while transcripts, paths, commands, IDs, and provider names remain verbatim. Weekly runway rates now require recent, internally consistent quota evidence; unknown or incomplete inputs fail closed instead of producing a confident number.
-
-### Features
-- **Agent Sessions asks multilingual users to help add their language.** A targeted, dismissible session-list card points established users whose preferred macOS language is not yet supported to the translation workflow and localization guide. Shipped locales are read from the app bundle, no locale or session data is sent, and the invitation stops permanently after one delayed retry or an explicit dismissal.
-- Expanded Simplified Chinese localization across the remaining user-visible app surfaces, including Settings, session and transcript controls, the Quota Meter, analytics, menus, alerts, notifications, file panels, onboarding, accessibility labels, and macOS permission prompts, while keeping transcripts, paths, commands, IDs, and product/provider names verbatim.
+- **Agent Sessions now supports localization, with Simplified Chinese as its first translated language.** The app interface, settings, onboarding, accessibility labels, and permission messages are translated while transcripts, file paths, commands, IDs, and provider names remain unchanged.
+- **Want to help bring Agent Sessions to another language?** Contributions are welcome, and no Swift experience is required. See the [localization guide](https://github.com/jazzyalex/agent-sessions/blob/main/docs/localization.md) to get started.
 
 ### Bug Fixes
 - **Session-list cards take silence and dismissal seriously.** The app waits for every active source to settle, freezes one card per launch, and leaves five quiet days before changing campaigns. Star, translation, and add-an-agent invitations are staggered at 25, 40, and 60 distinct opened sessions. Bounded cards advance only once per launch, × means never ask again, and the wrapping layout preserves full copy and useful accessibility labels at the narrowest width.
