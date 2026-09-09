@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - Added the missing Simplified Chinese translation for the weekly burn estimate tooltip.
 - Format verification now honors the newest prebump outcome across clean and failed runs, directly tests Claude's bounded usage-page scrolling, and keeps redacted Kimi fixture timestamps from becoming 1970 session dates.
+- Corrected the Cursor support surface to Agents Window and CLI sessions; IDE sidepane chats without an Agent transcript remain outside the supported history boundary.
 
 ## [5.2] - 2026-09-09
 

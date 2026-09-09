@@ -6,7 +6,7 @@
 
 Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude Code](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), and **12 other coding agents** in one Mac app. Read the transcript, find supported image outputs, and resume supported CLI sessions. For Codex and Claude, see which sessions are burning through your quota.
 
-Free and open source. macOS 14+. No app telemetry.
+Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
   <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.2/AgentSessions-5.2.dmg"><b>Download Agent Sessions 5.2</b></a>
@@ -21,14 +21,10 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 ```
 
 <p align="center">
-  <img src="https://jazzyalex.github.io/agent-sessions/assets/sessions-main-window-with-quota.png" alt="Agent Sessions showing searchable local coding-agent sessions and a floating Codex and Claude Quota Meter" width="100%" style="max-width:960px;border-radius:8px;"/>
+  <img src="https://jazzyalex.github.io/agent-sessions/assets/sessions-main-window-with-current-quota.png" alt="Agent Sessions showing searchable local coding-agent sessions and a floating Codex and Claude Quota Meter" width="100%" style="max-width:960px;border-radius:8px;"/>
 </p>
 
-## What's New in 5.2
-
-- Agent Sessions is now available in English and Simplified Chinese, with an in-app invitation for established users to help add another language.
-- Quota Meter weekly rates use stricter, recent evidence; Astra and Sol long-context pricing are included, and uncertain inputs fail closed.
-- Session-list invitations wait for every enabled source to settle, respect dismissal consistently, and avoid repeating or rotating too quickly.
+<p align="center"><em>Search 15 local agent histories, resume supported sessions, and track Codex and Claude quota burn.</em></p>
 
 ## What it does
 
@@ -36,6 +32,12 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 5.2
+
+- Agent Sessions is now available in English and Simplified Chinese, with an in-app invitation for established users to help add another language.
+- Quota Meter weekly rates use stricter, recent evidence; Astra and Sol long-context pricing are included, and uncertain inputs fail closed.
+- Session-list invitations wait for every enabled source to settle, respect dismissal consistently, and avoid repeating or rotating too quickly.
 
 ## Supported sources
 
@@ -73,7 +75,7 @@ An account meter can tell you that 60% is used. Agent Sessions shows which activ
 The dollar view is an API-equivalent estimate, not your subscription bill.
 
 <p align="center">
-  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude usage windows with per-session burn-rate rows" width="100%" style="max-width:770px;border-radius:8px;"/>
+  <img src="docs/assets/quota-meter-session-burn.png" alt="Quota Meter showing weekly burn rates for active Codex sessions and a Claude session" width="100%" style="max-width:770px;border-radius:8px;"/>
 </p>
 
 ## Install

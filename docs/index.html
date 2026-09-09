@@ -38,7 +38,7 @@
     "operatingSystem": "macOS 14.0 or later",
     "description": "Search local conversations from Codex, Claude Code, Cursor, and 12 other coding agents on macOS. Resume supported CLI sessions and track Codex and Claude quota burn.",
     "image": "https://jazzyalex.github.io/agent-sessions/assets/social-banners/agent-sessions-open-graph.png",
-    "screenshot": "https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png",
+    "screenshot": "https://jazzyalex.github.io/agent-sessions/assets/quota-meter-session-burn.png",
     "downloadUrl": "https://github.com/jazzyalex/agent-sessions/releases/latest",
     "softwareHelp": "https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html",
     "license": "https://github.com/jazzyalex/agent-sessions/blob/main/LICENSE",
@@ -271,6 +271,13 @@
        the size it actually occupies on screen, the way it does when pinned */
     .hero-stack { position: relative; }
     .hero-stack .hero-main { width: 100%; height: auto; }
+    .hero-caption {
+      margin: 18px auto 0;
+      max-width: 760px;
+      color: var(--ink-2);
+      font-size: 14px;
+      text-align: center;
+    }
     .hero-qm {
       margin: 0;
       position: absolute;
@@ -507,7 +514,7 @@
       <a class="btn primary" data-track-event="download-home-hero" href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.2/AgentSessions-5.2.dmg">Download Agent Sessions 5.2</a>
       <a class="btn ghost" data-track-event="github-home-hero" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
     </div>
-    <p class="meta-line">Version 5.2<span class="dot">·</span>Free &amp; open source<span class="dot">·</span>No telemetry</p>
+    <p class="meta-line">Open source<span class="dot">·</span>Your session history stays on your Mac<span class="dot">·</span>No telemetry</p>
     <div class="brew">
       <span class="prompt">$</span>
       <code>brew install --cask jazzyalex/agent-sessions/agent-sessions</code>
@@ -516,10 +523,11 @@
 
   <div class="hero-shot">
     <div class="hero-stack">
-      <img class="hero-main" src="assets/sessions-main-window-with-quota.png"
+      <img class="hero-main" src="assets/sessions-main-window-with-current-quota.png"
            alt="Agent Sessions showing searchable local coding-agent sessions and a floating Codex and Claude Quota Meter"
-           width="1538" height="1022">
+           width="2240" height="1568">
     </div>
+    <p class="hero-caption">Search 15 local agent histories. Resume supported sessions. Track Codex and Claude quota burn.</p>
   </div>
 
   <section class="band" id="features">
@@ -539,7 +547,7 @@
       <tbody>
       <tr class="primary"><td class="name">Codex</td><td class="surf">Desktop &middot; CLI &middot; VS Code</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="yes">5h &middot; weekly &middot; $/h</span></td></tr>
       <tr class="primary"><td class="name">Claude</td><td class="surf">Desktop &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="yes">5h &middot; weekly &middot; $/h</span></td></tr>
-      <tr class="primary"><td class="name">Cursor</td><td class="surf">IDE &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr class="primary"><td class="name">Cursor</td><td class="surf">Agents Window &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Antigravity</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">GitHub Copilot</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">OpenCode</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
@@ -607,9 +615,8 @@
           </ul>
         </div>
         <div class="shots">
-          <img src="assets/quota-meter-light.png" alt="Quota Meter with Session Runway per-session burn-rate bars for Codex and Claude">
-          <img src="assets/quota-meter-light.png"
-               alt="Quota Meter showing Codex and Claude usage windows with per-session burn-rate rows">
+          <img src="assets/quota-meter-session-burn.png"
+               alt="Quota Meter showing weekly burn rates for active Codex sessions and a Claude session">
         </div>
       </div>
     </div>

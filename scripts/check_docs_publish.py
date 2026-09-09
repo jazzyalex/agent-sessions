@@ -156,6 +156,19 @@ def check_marketing_contract():
 
     if "quota-meter-runway-rate-small.gif" in readme:
         problems.append("README.md references the retired quota-meter runway GIF.")
+    shared_hero = "sessions-main-window-with-current-quota.png"
+    for name, contents in (("README.md", readme), ("docs/index.html", homepage)):
+        if shared_hero not in contents:
+            problems.append("%s must use the shared current hero asset." % name)
+
+    current_quota = "quota-meter-session-burn.png"
+    for name, contents in (("README.md", readme), ("docs/index.html", homepage)):
+        if current_quota not in contents:
+            problems.append("%s must use the current Quota Meter screenshot." % name)
+    if "Agents Window &middot; CLI" not in homepage:
+        problems.append("docs/index.html must describe Cursor support as Agents Window and CLI.")
+    if "IDE &middot; CLI" in homepage:
+        problems.append("docs/index.html must not claim broad Cursor IDE chat support.")
     return problems
 
 
