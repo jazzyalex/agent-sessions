@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Free and open source. macOS 14+. No app telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg"><b>Download Agent Sessions 5.1.1</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.2/AgentSessions-5.2.dmg"><b>Download Agent Sessions 5.2</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -78,7 +78,7 @@ The dollar view is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.1.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.2/AgentSessions-5.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
