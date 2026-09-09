@@ -525,6 +525,26 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Transcript UI
 
+### Copilot split assistant messages cannot be coalesced by their logical message ID
+> **open** · sev: low · urg: low · verified 2026-09-09
+
+- **What:** Copilot assistant records carry `data.messageId`, `chunkIndex`, and
+  `chunkCount`, but the parser assigns `SessionEvent.messageID` from the JSONL envelope's
+  per-line `id`. If Copilot starts emitting more than one chunk for a logical message,
+  each chunk will have a different event identity and render as a separate assistant row.
+- **Where:** [CopilotSessionParser.swift:155](../AgentSessions/Services/CopilotSessionParser.swift)
+  reads the envelope ID, and
+  [SessionTranscriptBuilder.swift:482](../AgentSessions/Services/SessionTranscriptBuilder.swift)
+  coalesces assistant blocks only when their message IDs match. The normal Copilot fixture
+  preserves the logical `data.messageId` and chunk fields.
+- **Why deferred:** every locally observed record is currently a single chunk, so this is
+  a latent compatibility risk rather than a transcript known to render incorrectly.
+- **Fix shape:** use non-empty `data.messageId` for assistant events, fall back to the
+  envelope ID for older records, and mark multi-part records as deltas when their chunk
+  metadata demonstrates splitting.
+- **To close:** parser and transcript tests cover two records with distinct envelope IDs
+  but one logical message ID, plus a legacy record without `data.messageId`.
+
 ### Grok backend tool rows discard operation names and inputs
 > **open** · sev: low · urg: low · verified 2026-09-08
 

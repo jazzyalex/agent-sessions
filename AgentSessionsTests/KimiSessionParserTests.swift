@@ -72,6 +72,8 @@ final class KimiSessionParserTests: XCTestCase {
         let end = try XCTUnwrap(session.endTime)
         XCTAssertEqual(start.timeIntervalSince1970, 1784950509.920, accuracy: 0.002)
         XCTAssertLessThanOrEqual(start, end)
+        XCTAssertGreaterThan(start.timeIntervalSince1970, 1_700_000_000,
+                             "redacted time=0 records must not move the session to 1970")
     }
 
     func testParseFileFullBuildsUserEventsFromAppendMessageOps() throws {

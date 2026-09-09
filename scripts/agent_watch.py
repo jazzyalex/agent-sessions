@@ -2615,10 +2615,11 @@ def _latest_successful_prebump_evidence(
     if not candidates:
         return None
 
-    _, report_path, entry = max(candidates, key=lambda item: item[0])
+    report_mtime, report_path, entry = max(candidates, key=lambda item: item[0])
     evidence = dict(entry.get("evidence") or {})
     evidence["source"] = "latest_prebump_report"
     evidence["report"] = _safe_relpath(report_path)
+    evidence["report_mtime_epoch"] = report_mtime
     evidence["session_path"] = entry.get("session_path")
     return evidence
 
@@ -2687,7 +2688,7 @@ def _latest_failed_prebump_evidence(
     if not candidates:
         return None
 
-    _, report_path, entry = max(candidates, key=lambda item: item[0])
+    report_mtime, report_path, entry = max(candidates, key=lambda item: item[0])
     entry_evidence = entry.get("evidence")
     schema_mismatch = (
         isinstance(entry_evidence, dict)
@@ -2697,6 +2698,7 @@ def _latest_failed_prebump_evidence(
     result = {
         "source": "latest_failed_prebump_report",
         "report": _safe_relpath(report_path),
+        "report_mtime_epoch": report_mtime,
         "failure_class": failure_class,
         "error": entry.get("error"),
         "session_path": entry.get("session_path"),
@@ -2708,6 +2710,40 @@ def _latest_failed_prebump_evidence(
         if isinstance(schema_diff, dict):
             result["schema_diff"] = schema_diff
     return result
+
+
+def _latest_prebump_evidence(
+    *,
+    agent_name: str,
+    reports_root: Path,
+    cli_binary_mtime: float | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return exactly one newest usable prebump outcome.
+
+    Success and failure helpers intentionally filter different report shapes. Comparing
+    their mtimes here prevents an older clean run from hiding a newer driver failure or
+    schema mismatch, while still allowing a later clean rerun to supersede the failure.
+    """
+    successful = _latest_successful_prebump_evidence(
+        agent_name=agent_name,
+        reports_root=reports_root,
+        cli_binary_mtime=cli_binary_mtime,
+    )
+    failed = _latest_failed_prebump_evidence(
+        agent_name=agent_name,
+        reports_root=reports_root,
+        cli_binary_mtime=cli_binary_mtime,
+    )
+    if successful is None:
+        return None, failed
+    if failed is None:
+        return successful, None
+
+    success_mtime = float(successful.get("report_mtime_epoch") or 0)
+    failure_mtime = float(failed.get("report_mtime_epoch") or 0)
+    if failure_mtime >= success_mtime:
+        return None, failed
+    return successful, None
 
 
 def _format_summary_line(
@@ -4031,7 +4067,7 @@ def main(argv: list[str]) -> int:
                 force_fresh=bool(getattr(args, "force_fresh", False)),
             )
             if isinstance(agent_cfg.get("prebump"), dict):
-                prebump_evidence = _latest_successful_prebump_evidence(
+                prebump_evidence, failed_prebump_evidence = _latest_prebump_evidence(
                     agent_name=agent_name,
                     reports_root=report_dir.parent,
                     cli_binary_mtime=cli_mtime,
@@ -4050,12 +4086,6 @@ def main(argv: list[str]) -> int:
                         schema_diff = prebump_evidence.get("schema_diff") if isinstance(prebump_evidence.get("schema_diff"), dict) else schema_diff
                     fresh_evidence_available = True
                     fresh_evidence_source = "latest_prebump_report"
-                else:
-                    failed_prebump_evidence = _latest_failed_prebump_evidence(
-                        agent_name=agent_name,
-                        reports_root=report_dir.parent,
-                        cli_binary_mtime=cli_mtime,
-                    )
 
         # If we have concrete evidence that the newest local schema matches our fixture baseline,
         # downgrade "installed newer" to low and suggest bumping verified version.

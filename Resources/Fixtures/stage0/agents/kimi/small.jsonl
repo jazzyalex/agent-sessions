@@ -34,4 +34,4 @@
 {"type":"runtime.set_binding","workspaceId":"wd_kimi-wd_stage0","runtimeId":"local","agentId":"main","time":1784950509920}
 {"type":"token_counting.measured","agentId":"main","length":3,"tokens":23231,"time":1784950509930}
 {"type":"token_counting.turn_recorded","agentId":"main","turnId":0,"length":3,"tokens":23231,"time":1784950509931}
-{"type":"prompt.completed","agentId":"[trimmed for fixture]","promptId":"[trimmed for fixture]","finishedAt":"[trimmed for fixture]","reason":"[trimmed for fixture]","time":1786664319436}
+{"type":"prompt.completed","agentId":"[trimmed for fixture]","promptId":"[trimmed for fixture]","finishedAt":"[trimmed for fixture]","reason":"[trimmed for fixture]","time":0}

@@ -245,6 +245,58 @@ EOF
 EOF
 }
 
+# Capture one rendered Usage page. The fixture override below replaces this function,
+# which lets tests exercise the same bounded PageDown/join state machine without tmux.
+capture_usage() {
+  "$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo ""
+}
+
+advance_usage_page() {
+  "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
+}
+
+wait_for_usage_redraw() {
+  sleep 0.25
+}
+
+capture_usage_with_scroll() {
+  local combined page i
+  combined="$(capture_usage)"
+  if echo "$combined" | grep -q "Current session" \
+      && ! echo "$combined" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
+    # The Usage pane is scrollable. Claude 2.1.263 can place plugin-footprint
+    # diagnostics between the session stats and quota windows, leaving the weekly
+    # window below the viewport. Capture each redraw and join them for parsing.
+    for i in 1 2 3 4; do
+      advance_usage_page
+      wait_for_usage_redraw
+      page="$(capture_usage)"
+      combined="$combined
+$page"
+      if echo "$page" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
+        break
+      fi
+    done
+  fi
+  echo "$combined"
+}
+
+# A directory containing page-0.txt, page-1.txt, ... exercises scrolling itself.
+if [[ -n "${CLAUDE_USAGE_SCROLL_FIXTURE_DIR:-}" ]]; then
+    usage_fixture_page=0
+    capture_usage() {
+      local page_file="${CLAUDE_USAGE_SCROLL_FIXTURE_DIR}/page-${usage_fixture_page}.txt"
+      [[ -f "$page_file" ]] && cat "$page_file"
+    }
+    advance_usage_page() {
+      usage_fixture_page=$((usage_fixture_page + 1))
+    }
+    wait_for_usage_redraw() { :; }
+    usage_output="$(capture_usage_with_scroll)"
+    emit_usage_json
+    exit $?
+fi
+
 if [[ -n "${CLAUDE_USAGE_CAPTURE_FIXTURE:-}" ]]; then
     usage_output="$(cat "$CLAUDE_USAGE_CAPTURE_FIXTURE")"
     emit_usage_json
@@ -499,33 +551,6 @@ done
 ###############################################################################
 # Capture and robustly parse the Usage screen
 ###############################################################################
-# Capture the usage screen
-capture_usage() {
-  "$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo ""
-}
-
-capture_usage_with_scroll() {
-  local combined page i
-  combined="$(capture_usage)"
-  if echo "$combined" | grep -q "Current session" \
-      && ! echo "$combined" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
-    # The Usage pane is scrollable. Claude 2.1.263 can place plugin-footprint
-    # diagnostics between the session stats and quota windows, leaving the weekly
-    # window below the viewport. Capture each redraw and join them for parsing.
-    for i in 1 2 3 4; do
-      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
-      sleep 0.25
-      page="$(capture_usage)"
-      combined="$combined
-$page"
-      if echo "$page" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
-        break
-      fi
-    done
-  fi
-  echo "$combined"
-}
-
 usage_output=$(capture_usage_with_scroll)
 
 # If we don't see the anchors, try to re-open /usage a couple of times

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Added the missing Simplified Chinese translation for the weekly burn estimate tooltip.
+- Format verification now honors the newest prebump outcome across clean and failed runs, directly tests Claude's bounded usage-page scrolling, and keeps redacted Kimi fixture timestamps from becoming 1970 session dates.
 
 ## [5.2] - 2026-09-09
 

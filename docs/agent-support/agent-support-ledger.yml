@@ -42,7 +42,7 @@ entries:
           max_verified_version: "1.0.83"
           scope: "supports_latest"
           evidence: ["scripts/probe_scan_output/agent_watch/20260908-232625-833600Z-p47854-prebump/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
-          notes: "Additive user.message.data.messageId plus assistant phase and serverTools.provider are fixture-covered. messageId remains the already-filed low-severity chunk-coalescing candidate; current observed sessions do not demonstrate a transcript break."
+          notes: "Additive user.message.data.messageId plus assistant phase and serverTools.provider are fixture-covered. messageId remains the low-severity chunk-coalescing candidate filed in docs/backlog.md; current observed sessions do not demonstrate a transcript break."
       opencode:
         sessions:
           max_verified_version: "1.18.29"

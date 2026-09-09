@@ -314,20 +314,21 @@ final class ClaudeStatusServiceTests: XCTestCase {
     }
 
     func testClaudeUsageCaptureFixtureParsesQuotaWindowsAcrossJoinedScrolledPages() throws {
-        let fixture = """
-        Installed plugins
-        Some plugin-provided skill content occupies the first page.
+        let result = try runClaudeUsageCaptureScrollFixture([
+            """
+            Installed plugins
+            Some plugin-provided skill content occupies the first page.
 
-        Current session
-        █████▌                                             11% used
-        Resets 8:49pm (America/Los_Angeles)
-
-        Current week (all models)
-        ███████                                            14% used
-        Resets Sep 13 at 4:59am (America/Los_Angeles)
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
+            Current session
+            █████▌                                             11% used
+            Resets 8:49pm (America/Los_Angeles)
+            """,
+            """
+            Current week (all models)
+            ███████                                            14% used
+            Resets Sep 13 at 4:59am (America/Los_Angeles)
+            """
+        ])
 
         XCTAssertEqual(result.status, 0, result.stderr)
         XCTAssertTrue(result.stdout.contains(#""ok": true"#), result.stdout)
@@ -477,6 +478,28 @@ final class ClaudeStatusServiceTests: XCTestCase {
             try? FileManager.default.removeItem(at: tempURL)
         }
 
+        return try runClaudeUsageCapture(environment: ["CLAUDE_USAGE_CAPTURE_FIXTURE": tempURL.path])
+    }
+
+    private func runClaudeUsageCaptureScrollFixture(_ pages: [String]) throws -> (status: Int32, stdout: String, stderr: String) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-usage-pages-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (index, page) in pages.enumerated() {
+            try page.write(
+                to: directory.appendingPathComponent("page-\(index).txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        return try runClaudeUsageCapture(environment: ["CLAUDE_USAGE_SCROLL_FIXTURE_DIR": directory.path])
+    }
+
+    private func runClaudeUsageCapture(environment additions: [String: String]) throws -> (status: Int32, stdout: String, stderr: String) {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -489,7 +512,9 @@ final class ClaudeStatusServiceTests: XCTestCase {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [scriptURL.path]
         var environment = ProcessInfo.processInfo.environment
-        environment["CLAUDE_USAGE_CAPTURE_FIXTURE"] = tempURL.path
+        for (key, value) in additions {
+            environment[key] = value
+        }
         process.environment = environment
 
         let stdoutPipe = Pipe()

@@ -155,8 +155,14 @@ enum KimiSessionParser {
 
     /// `time` and `created_at` are both epoch milliseconds.
     private static func timestamp(from object: [String: Any]) -> Date? {
-        if let ms = object["time"] as? Double { return Date(timeIntervalSince1970: ms / 1000) }
-        if let ms = object["created_at"] as? Double { return Date(timeIntervalSince1970: ms / 1000) }
+        // The fixture rebuilder replaces numeric values with zero. Treat that redaction
+        // sentinel as absent so appending schema coverage cannot move a session to 1970.
+        if let ms = object["time"] as? Double, ms > 0 {
+            return Date(timeIntervalSince1970: ms / 1000)
+        }
+        if let ms = object["created_at"] as? Double, ms > 0 {
+            return Date(timeIntervalSince1970: ms / 1000)
+        }
         return nil
     }
 

@@ -328,6 +328,66 @@ def test_latest_failed_prebump_evidence_preserves_schema_drift(tmp_path):
     assert evidence["schema_diff"] == schema_diff
 
 
+def test_latest_prebump_evidence_uses_newest_outcome_across_success_and_drift(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    clean_path = reports_root / "clean-prebump" / "report.json"
+    drift_path = reports_root / "drift-prebump" / "report.json"
+    clean_path.parent.mkdir(parents=True)
+    drift_path.parent.mkdir(parents=True)
+
+    clean_path.write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "kimi": {
+                "ok": True,
+                "session_path": "/tmp/clean.jsonl",
+                "evidence": {
+                    "fresh_session_matches_baseline": True,
+                    "schema_matches_baseline": True,
+                    "sample_freshness": {"is_stale": False},
+                },
+            }
+        },
+    }))
+    drift_path.write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "kimi": {
+                "ok": True,
+                "session_path": "/tmp/drift.jsonl",
+                "evidence": {
+                    "fresh_session_matches_baseline": False,
+                    "schema_matches_baseline": False,
+                    "schema_diff": {
+                        "unknown_only_is_empty": False,
+                        "unknown_types": ["future.event"],
+                        "unknown_keys": {},
+                    },
+                    "sample_freshness": {"is_stale": False},
+                },
+            }
+        },
+    }))
+
+    os.utime(clean_path, (1_000.0, 1_000.0))
+    os.utime(drift_path, (2_000.0, 2_000.0))
+    successful, failed = agent_watch._latest_prebump_evidence(
+        agent_name="kimi", reports_root=reports_root, cli_binary_mtime=None,
+    )
+    assert successful is None
+    assert failed is not None
+    assert failed["failure_class"] == "schema_drift"
+    assert failed["session_path"] == "/tmp/drift.jsonl"
+
+    os.utime(clean_path, (3_000.0, 3_000.0))
+    successful, failed = agent_watch._latest_prebump_evidence(
+        agent_name="kimi", reports_root=reports_root, cli_binary_mtime=None,
+    )
+    assert failed is None
+    assert successful is not None
+    assert successful["session_path"] == "/tmp/clean.jsonl"
+
+
 def test_resolve_cli_binary_mtime_returns_path_and_mtime(tmp_path):
     fake_bin = tmp_path / "codex"
     fake_bin.write_text("#!/bin/sh\nexit 0\n")
@@ -993,6 +1053,99 @@ def test_weekly_report_uses_prebump_even_when_local_sample_is_fresh(tmp_path, mo
     assert codex["compatibility"]["latest_real_session_evidence"] is True
     assert codex["compatibility"]["verdict"] == "supports_latest"
     assert codex["compatibility"]["scope"] == "latest"
+
+
+def test_weekly_report_newer_drift_prebump_overrides_older_clean_prebump(tmp_path, monkeypatch):
+    sample_root = tmp_path / "sessions"
+    sample_root.mkdir()
+    sample = sample_root / "rollout-fresh.jsonl"
+    sample.write_text(_json.dumps({"type": "session_meta", "payload": {"id": "s1"}}) + "\n")
+
+    report_root = tmp_path / "out"
+    clean_path = report_root / "20260601-120000Z-prebump" / "report.json"
+    drift_path = report_root / "20260602-120000Z-prebump" / "report.json"
+    clean_path.parent.mkdir(parents=True)
+    drift_path.parent.mkdir(parents=True)
+    clean_path.write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "codex": {
+                "ok": True,
+                "session_path": "/tmp/clean.jsonl",
+                "evidence": {
+                    "schema_matches_baseline": True,
+                    "fresh_session_matches_baseline": True,
+                    "sample_freshness": {"is_stale": False},
+                },
+            }
+        },
+    }))
+    drift_path.write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "codex": {
+                "ok": True,
+                "session_path": "/tmp/drift.jsonl",
+                "evidence": {
+                    "schema_matches_baseline": False,
+                    "fresh_session_matches_baseline": False,
+                    "schema_diff": {
+                        "unknown_only_is_empty": False,
+                        "unknown_types": ["future.event"],
+                        "unknown_keys": {},
+                    },
+                    "sample_freshness": {"is_stale": False},
+                },
+            }
+        },
+    }))
+    os.utime(clean_path, (1_000.0, 1_000.0))
+    os.utime(drift_path, (2_000.0, 2_000.0))
+
+    cfg = {
+        "report_root": str(report_root),
+        "agents": {
+            "codex": {
+                "cadence": {"weekly": True},
+                "installed_version_cmd": ["codex", "--version"],
+                "upstream": [],
+                "risk_keywords": {"schema": [], "usage": []},
+                "weekly": {
+                    "local_schema": {
+                        "kind": "jsonl_newest",
+                        "roots": [str(sample_root)],
+                        "glob": "*.jsonl",
+                        "max_lines": 100,
+                    }
+                },
+                "prebump": {"driver": "codex_exec"},
+            }
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(_json.dumps(cfg))
+
+    monkeypatch.chdir(_Path(__file__).resolve().parents[2])
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_installed_version_cmds",
+        lambda _cfg: (["codex", "--version"], 0, "codex 0.135.0", "", "0.135.0"),
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_resolve_cli_binary_mtime",
+        lambda _argv: ("/tmp/fake-codex", None),
+    )
+
+    assert agent_watch.main(["--mode", "weekly", "--config", str(cfg_path)]) == 0
+    report_path = sorted(p for p in report_root.glob("*/report.json") if "-prebump" not in str(p))[-1]
+    codex = _json.loads(report_path.read_text())["results"]["codex"]
+    failure = codex["evidence"]["failed_prebump_evidence"]
+    assert failure["failure_class"] == "schema_drift"
+    assert failure["session_path"] == "/tmp/drift.jsonl"
+    assert codex["evidence"]["prebump_evidence"] is None
+    assert codex["compatibility"]["verdict"] == "format_drift_detected"
+    assert codex["severity"] == "high"
 
 
 def test_weekly_report_uses_cached_upstream_after_rate_limit_without_hiding_error(tmp_path, monkeypatch):
