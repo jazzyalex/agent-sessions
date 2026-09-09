@@ -313,6 +313,29 @@ final class ClaudeStatusServiceTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains(#""resets": "Jun 28 at 5am (America/Los_Angeles)""#), result.stdout)
     }
 
+    func testClaudeUsageCaptureFixtureParsesQuotaWindowsAcrossJoinedScrolledPages() throws {
+        let fixture = """
+        Installed plugins
+        Some plugin-provided skill content occupies the first page.
+
+        Current session
+        █████▌                                             11% used
+        Resets 8:49pm (America/Los_Angeles)
+
+        Current week (all models)
+        ███████                                            14% used
+        Resets Sep 13 at 4:59am (America/Los_Angeles)
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok": true"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 89"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 86"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""resets": "Sep 13 at 4:59am (America/Los_Angeles)""#), result.stdout)
+    }
+
     func testClaudeUsageCaptureFixtureDetectsV2UnavailableQuotaOutput() throws {
         let fixture = """
         Claude Code v2.1.169

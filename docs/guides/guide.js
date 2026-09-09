@@ -23,3 +23,18 @@ async function loadGitHubStars() {
 }
 
 loadGitHubStars();
+
+for (const link of document.querySelectorAll("a.btn")) {
+  link.addEventListener("click", () => {
+    if (!window.goatcounter || typeof window.goatcounter.count !== "function") return;
+    const destination = link.href.includes("/releases/") || link.textContent.includes("Download")
+      ? "download"
+      : link.href.includes("github.com") ? "github" : "product";
+    const slug = window.location.pathname.split("/").filter(Boolean).pop()?.replace(/\.html$/, "") || "guides";
+    window.goatcounter.count({
+      path: `${destination}-guide-${slug}`,
+      title: link.textContent.trim(),
+      event: true
+    });
+  });
+}

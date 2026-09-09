@@ -1,319 +1,125 @@
-# Agent Sessions (macOS)
+# Agent Sessions for macOS
 
 [![Build](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml)
 
-<table>
-<tr>
-<td width="100" align="center">
-  <img src="docs/assets/app-icon-512.png" alt="App Icon" width="80" height="80"/>
-</td>
-<td>
+## Find the agent session you need
 
-**Live per-session quota burn for Codex and Claude — see *which* session is eating your 5-hour and weekly limits, priced per model.**
-Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [OpenCode](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), [GitHub Copilot CLI](https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html?campaign=github&ref=readme-guide), Pi, Kimi Code, Grok CLI, Qwen Code, Devin CLI, fx, [Antigravity CLI](https://jazzyalex.github.io/agent-sessions/guides/antigravity-cli-local-history.html?campaign=github&ref=readme-guide), [Hermes](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide), and [OpenClaw](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide), with image browsing and one-click resume where the source supports them. macOS, local-only.
+Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude Code](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), and **12 other coding agents** in one Mac app. Read the transcript, find supported image outputs, and resume supported CLI sessions. For Codex and Claude, see which sessions are burning through your quota.
 
-[**Session-Bench**](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme): how ten agents' session formats score — 20 pass/fail gates, evidence behind every cell.
-
-</td>
-</tr>
-</table>
-
-> If Agent Sessions hands you back something you thought you'd lost, **[star the repo](https://github.com/jazzyalex/agent-sessions)**. It is the only thing this project asks for.
-
-- Requires: macOS 14+
-- License: MIT
-- Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
+Free and open source. macOS 14+. No app telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg"><b>Download Agent Sessions 5.1.1 (DMG)</b></a>
-  •
-  <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
-  •
-  <a href="#install">Install</a>
-  •
-  <a href="#resume-workflows">Resume Workflows</a>
-  •
-  <a href="#development">Development</a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg"><b>Download Agent Sessions 5.1.1</b></a>
+  ·
+  <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
+  ·
+  <a href="https://github.com/jazzyalex/agent-sessions/releases">All releases</a>
 </p>
 
-> **New in 5.1.1** — A small version number and a big fix list. Twelve fixes, three of them silent: Claude sessions were unsearchable since 2026-08-21, Claude `$` read a sixth low, and a stray `QWEN_HOME` emptied the Qwen list. Plus a weekly lens on the Session Runway. [See what's new ↓](#whats-new-in-511)
+```bash
+brew install --cask jazzyalex/agent-sessions/agent-sessions
+```
 
-## Overview
+<p align="center">
+  <img src="docs/assets/sessions-main-window.png" alt="Agent Sessions showing local coding-agent sessions in a searchable list with a transcript open beside them" width="100%" style="max-width:960px;border-radius:8px;"/>
+</p>
 
-Run three agents at once and a normal quota meter tells you "60% used" — not which one spent it. Agent Sessions attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows. Pick the lens you want (5-hour, weekly, tokens/hour, or dollars); the `$` lens prices each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended into one number.
+## What it does
 
-It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, Devin CLI, and fx histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
+- **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
+- **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
+- **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost.
+- **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
-<div align="center">
-  <p style="margin:0 0 0px 0;"><em>Session Runway — read the same burn as % of quota, tokens/hour, or cost/hour</em></p>
-  <img src="docs/assets/quota-meter-runway-rate-small.gif" alt="Quota Meter Session Runway switching its rate unit from percent of quota per hour to tokens per hour to estimated API-equivalent cost per hour" width="100%" style="max-width:640px;border-radius:8px;margin:5px 0;"/>
+## Supported sources
 
-  <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sessions-overview-dark.png">
-    <img src="docs/assets/sessions-overview-light.png" alt="Main Sessions window with local agent history and transcript preview" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
-  </picture>
+Agent Sessions reads 14 active agent formats plus legacy Droid sessions. Capabilities differ by source and installed CLI version.
 
-  <p style="margin:0 0 0px 0;"><em>Saved Sessions with restore actions</em></p>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/saved-sessions-dark.png">
-    <img src="docs/assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
-  </picture>
+| Source | Browse and search | Resume |
+|---|---:|---:|
+| Codex | Yes | Supported sessions |
+| Claude Code | Yes | Supported sessions |
+| Cursor | Yes | Supported sessions |
+| GitHub Copilot CLI | Yes | Supported sessions |
+| OpenCode | Yes | Supported sessions |
+| Antigravity | Yes | Supported sessions |
+| Pi | Yes | Supported sessions |
+| Kimi Code | Yes | Supported sessions |
+| Grok CLI | Yes | Supported sessions |
+| Hermes | Yes | Supported sessions |
+| OpenClaw | Yes | No |
+| Qwen Code | Yes | Active sessions; end-to-end unverified |
+| Devin CLI | Yes | Supported active sessions |
+| fx | Yes | Command plan tested; interactive reopen unverified |
+| Droid | Legacy sessions | No active monitoring |
 
-  <p style="margin:0 0 0px 0;"><em>Image Browser for visual session outputs</em></p>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/image-browser-dark.png">
-    <img src="docs/assets/image-browser-light.png" alt="Image Browser window with thumbnail grid and selected screenshot preview" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
-  </picture>
-</div>
+Format-maintenance owners, verification dates, and tested versions are in [STEWARDS.md](STEWARDS.md). [Session-Bench](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme-bench) compares ten agents across 20 evidence-backed format gates.
 
-## Security & Privacy
+## Quota Meter
 
-- Local-first: session data stays on your Mac.
-- No telemetry, analytics, remote logging, advertising identifiers, or session-history uploads.
-- Reads local session folders you choose, plus supported default CLI locations.
-- Builds local indexes/databases for search and navigation.
-- Explicit actions may open Terminal/iTerm2 resume commands or run status/probe cleanup workflows.
-- The only network activity is optional Sparkle update checks and an optional read-only fetch of a public model-price list (for the runway's $ estimate) — neither sends any personal or session data.
+An account meter can tell you that 60% is used. Agent Sessions shows which active Codex or Claude session is spending it.
 
-Details: `docs/PRIVACY.md` and `docs/security.md`.
+- Per-session burn against available 5-hour and weekly windows.
+- Four views: 5-hour, weekly, tokens per hour, and estimated API-equivalent dollars per hour.
+- Per-model pricing when one session uses more than one model.
+- Explicit unavailable states when a provider does not expose a usable limit.
 
-## What's New in 5.1.1
+The dollar view is an API-equivalent estimate, not your subscription bill.
 
-**TL;DR** - A small version number and a big fix list. Twelve fixes, three of them silent
-failures you had no way to notice. Plus a weekly lens on the Session Runway.
-
-Fixed in 5.1.1 — the three you could not have seen:
-- **Claude sessions are searchable again.** Since 2026-08-21 new Claude sessions were listed
-  with the right title, project and dates, but searching their text returned nothing and
-  nothing said so. 256 sessions on the development machine — nine days' worth. They are
-  picked up on the first launch after updating; nothing to re-index by hand.
-- **Claude `$` figures were about a sixth low.** Every cache write was charged at the
-  five-minute rate, when Claude Code almost only writes hour-long entries — which cost
-  twice as much. Anthropic's fast mode is priced at its own rates now too.
-- **A stray `QWEN_HOME` no longer empties your Qwen list.** Qwen 0.14.x ignores that
-  variable; the app did not. Anyone on 0.14.x who had exported it, for any unrelated reason,
-  saw zero Qwen sessions and no explanation.
-
-Also fixed: Copilot sessions carry their real title instead of `|-`, a custom Antigravity
-brain directory is actually read, Analytics counts the same agents the session list does,
-Droid is on only if you run it, and the What's New card stops asking once you have answered
-it. Full detail in the [changelog](docs/CHANGELOG.md).
-
-New in 5.1.1:
-- **A `Wk` unit on the Session Runway** — per session, in percent of your weekly quota per
-  hour. It reads each session's own activity rather than splitting one account-wide rate, so
-  a session working twice as hard reads twice as fast, and it learns the spend-to-quota
-  conversion from the weekly usage already on disk — a figure appears within seconds of
-  launch instead of hours later. Idle sessions read `quiet`; a provider with no weekly
-  window reads `n/a`.
-- **Claude's model-scoped weekly limit is visible** — the third window Claude reports
-  alongside the 5-hour and weekly ones, named in the menu-bar dropdown ("Wk Fable: 70% ·
-  resets …"). Agent Sessions could not see it at all: it moved to a new list in the usage
-  response while the fields the app read went empty.
-
-Also in 5.1:
-- **Devin CLI, the fourteenth agent source** — browsing, search, filtering, Analytics and
-  the transcript view over Devin's shared SQLite store. Devin keeps every retry and edit as
-  a branch, so a session shows the live conversation rather than every path it took to get
-  there. Settings adds binary and storage-root controls, and Copy Resume Command produces
-  `devin --resume <id>`. Devin keeps only active sessions, so there is no archived history
-  to browse, and image extraction is not yet supported. Resume verified 2026-08-27 on 3000.5.20 via `devin --resume <id> -p` ([verification report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)).
-- **fx (vercel-labs), the fifteenth** — one directory per session under `~/.fx/sessions`,
-  with every kind of turn rendered: ordinary replies and their narrated tool steps,
-  background commands and where their output went, the summary that replaces auto-compacted
-  history, and interrupted turns with whatever finished before the cut. Text fx stored as
-  raw bytes rather than UTF-8 decodes back to readable output instead of disappearing.
-- **Both agents are contributed, not ported** — @thedavidweng added them against the
-  documented recipe from 5.0, which is the first real test of whether that recipe works for
-  someone outside the project. He stewards both, and checked each against his own sessions:
-  Devin's resume was confirmed end to end, while fx's reaches the TTY gate — the flag and
-  session id resolve, but a full interactive reopen needs a terminal.
-
-
-**Recent releases** — 5.1: Devin CLI and fx join as the fourteenth and fifteenth sources. 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
-counts every agent you have enabled. 4.7: Kimi Code joins as the tenth source, and active
-Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit
-retired, leaving the Quota Meter as the only mode. 4.6: paste-a-cookie Claude web usage,
-no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
-
-## Core Features
-
-- Browse and search [Codex CLI, Codex Desktop, and Codex VS Code sessions](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide) in one place.
-- Browse [Claude CLI and Claude Desktop sessions](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide) with consistent labels and project context.
-- Browse [Cursor Agent transcripts](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide) from Cursor's local storage, enriched with Cursor chat metadata when available.
-- [Hermes Agent sessions](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
-- [OpenClaw sessions](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, image browsing, and deleted-session visibility while ignoring trajectory traces. OpenClaw resume is not supported.
-- Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
-- Qwen Code sessions (new in 5.0) participate in browsing, search, filtering, and Analytics, including active-chain tool calls and reasoning recorded in local JSONL history. Active-chat resume actions are implemented from the installed CLI's help and reader behavior, but remain end-to-end untested because authentication blocked a disposable 0.21.13 run; archived Qwen histories remain browse-only. Qwen image extraction is not yet supported.
-- Devin CLI sessions (new in 5.1) participate in browsing, search, filtering, Analytics, and resume workflows from the shared SQLite `sessions.db` under the CLI data directory, with working directories read from the sessions table's `working_directory` column. Devin keeps only active sessions in that database, so there is no archived-history surface; the records carry inline base64 images, but image extraction is not yet supported. Resume was verified end to end on CLI 3000.5.20, while format compatibility is steward-verified through 3000.6.7.
-- fx (vercel-labs) sessions (new in 5.1) participate in browsing, search, filtering, Analytics, and resume workflows from the per-session `checkpoint.json` transcripts under `~/.fx/sessions`, with working directories read from each session's `session.json`. Resume command plans are tested against probe-advertised capabilities but remain end-to-end untested against an authenticated run; image extraction is not yet supported.
-- Unified browsing across supported agents, with strict filtering, saved sessions, and a single session list.
-- Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
-- Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
-- Quota Meter with Session Runway shows **live burn rate per session** against your Codex and Claude 5-hour and weekly limits — in percent, tokens/hour, or dollars priced per model.
-- Local-only indexing designed for large histories.
-
-## Agent Support Status
-
-Every agent here is read from its own local session files. Status says who keeps that
-reading correct as the agent's format changes.
-
-| Agent | Status |
-|---|---|
-| Codex | Maintained |
-| Claude Code | Maintained |
-| Cursor Agent | Steward wanted |
-| GitHub Copilot CLI | Steward wanted |
-| OpenCode | Steward wanted |
-| Antigravity CLI | Steward wanted |
-| Pi | Steward wanted |
-| Kimi Code | Steward wanted |
-| Grok CLI | Steward wanted |
-| OpenClaw | Steward wanted |
-| Hermes | Steward wanted |
-| Qwen Code | Steward wanted |
-| Devin CLI | Steward-verified |
-| fx (vercel-labs) | Steward-verified |
-
-**Maintained** — the maintainer verifies it himself. **Steward-verified** — a named steward
-re-checks the format. **Steward wanted** — nobody has adopted it yet. Names, dates, and
-verified versions are in [STEWARDS.md](STEWARDS.md).
-
-### Help add — and keep — your agent
-
-Missing agent? Open the
-[new agent source form](https://github.com/jazzyalex/agent-sessions/issues/new?template=new-agent-source.yml)
-— [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) explains what evidence makes a proposal
-usable, and you do not need to write Swift. Already using one of the agents above? Become
-its steward: you get pinged two or three times a year to run one command against your own
-sessions and say whether the format still reads correctly. It takes about ten minutes, needs
-no commit rights, and your name goes on the entry. Details and signup in
-[STEWARDS.md](STEWARDS.md).
-
-## Quota Meter — Session Runway
-
-An ordinary quota meter says "60% used." It won't say which of your three running agents spent it. The Quota Meter attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows.
-
-- **Per-session burn bars** — each active session gets its own rate against the live window, so you know which one to stop.
-- **Four lenses** — 5-hour, weekly, tokens/hour, or dollars; chosen from the meter and remembered.
-- **Priced per model** — the `$` lens rates each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed at what each actually runs at rather than blended into one number.
-- **Honest states** — a calm "no limit" when a provider drops a window, and "can't verify" rather than a wrong number if usage data changes shape.
-- **Stays where you put it** — drag it anywhere, right-click for controls. Show or hide it from the View menu (⌘⌥⇧C).
-
-<div align="center">
-  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude 5h/weekly limits with Session Runway per-session burn-rate bars" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
-</div>
-
-## Quota Meter Setup
-
-### Prerequisites
-
-- Agent Sessions with live session detection enabled
-- Agents running in a terminal, or in Codex or Claude Desktop
-
-### Ideal Setup
-
-Session rows read best when your terminal names them clearly:
-
-- Set the terminal window title to the repo name
-- Run that repo's agents in that window
-- Give each tab/session its own clear name
-- Use the same name for the tab, session, and badge
-
-### Layout
-
-- One repo per desktop/Space if possible
-- Or keep several on one desktop if you prefer
-- Keep the Quota Meter pinned in a corner so you can always see activity
+<p align="center">
+  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude usage windows with per-session burn-rate rows" width="100%" style="max-width:770px;border-radius:8px;"/>
+</p>
 
 ## Install
 
-### Option A — Download DMG
-1. [Download AgentSessions-5.1.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg)
-2. Drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.1.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
-### Option B — Homebrew
+Or use Homebrew:
+
 ```bash
-brew tap jazzyalex/agent-sessions
-brew install --cask agent-sessions
+brew install --cask jazzyalex/agent-sessions/agent-sessions
 ```
 
-### Automatic Updates (Sparkle)
+Updates are signed, notarized, and delivered through Sparkle.
 
-Agent Sessions uses Sparkle for automatic updates (signed + notarized).
+## Local-history guides
 
-To force an update check (for testing):
-```bash
-defaults delete com.triada.AgentSessions SULastCheckTime
-open "/Applications/Agent Sessions.app"
-```
+- [Find and search old Codex CLI, Desktop, and VS Code sessions](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide)
+- [Find and search Claude Code JSONL history](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide)
+- [Search Cursor Agent transcripts](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide)
+- [Browse OpenCode SQLite history](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide)
+- [Browse GitHub Copilot CLI history](https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html?campaign=github&ref=readme-guide)
+- [Browse Antigravity CLI history](https://jazzyalex.github.io/agent-sessions/guides/antigravity-cli-local-history.html?campaign=github&ref=readme-guide)
+- [Browse Hermes Agent history](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide)
+- [Browse OpenClaw history](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide)
 
-## Documentation
+See the [changelog](docs/CHANGELOG.md), [privacy policy](docs/PRIVACY.md), and [security notes](docs/security.md).
 
-- Guides:
-  - [Codex local history: search Codex CLI, Desktop, and VS Code sessions](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide)
-  - [OpenCode SQLite history: browsing old runs](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide)
-  - [Claude Code JSONL history: what you can recover locally](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide)
-  - [Cursor Agent local history: search Cursor Agent transcripts](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide)
-  - [Hermes Agent state database history](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide)
-  - [OpenClaw local agent history](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide)
-  - [GitHub Copilot CLI local history: where Copilot writes `events.jsonl`](https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html?campaign=github&ref=readme-guide)
-  - [Antigravity CLI local history: transcripts and brain artifacts under `~/.gemini`](https://jazzyalex.github.io/agent-sessions/guides/antigravity-cli-local-history.html?campaign=github&ref=readme-guide)
-- Release notes: `docs/CHANGELOG.md`
-- Monthly summaries: `docs/summaries/`
-- Privacy: `docs/PRIVACY.md`
-- Security: `docs/security.md`
-- Maintainers: `docs/deployment.md`
+## Privacy and network access
 
-## Resume Workflows
+- Transcript discovery, parsing, indexing, search, and navigation happen locally.
+- Agent session folders are read rather than rewritten.
+- Explicit actions can open resume commands or manage saved copies.
+- Optional network access checks for signed Sparkle updates and fetches a public model-price list. Neither request contains transcript data.
 
-- Right-click any supported CLI session and choose **Copy Resume Command** to get the exact CLI command for that session.
-- Open supported Resume sessions in your preferred terminal: Terminal.app, iTerm2, or Warp.
-- Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
+## Contributing
 
-## Privacy & Security
+Missing your agent? Use the [new source form](https://github.com/jazzyalex/agent-sessions/issues/new?template=new-agent-source.yml). You can contribute a sanitized fixture without writing Swift, adopt an existing format as a steward, or follow the [contribution guide](docs/CONTRIBUTING.md).
 
-- Local-only. No telemetry.
-- Reads agent session directories in read-only mode:
-  - `~/.codex/sessions`
-  - `~/.claude/projects`
-  - `~/.gemini/antigravity/brain`
-  - `~/.copilot/session-state`
-  - `~/.cursor/projects` and `~/.cursor/chats`
-  - `~/.factory/sessions` and `~/.factory/projects`
-  - `~/.hermes/state.db` and `~/.hermes/sessions`
-  - `~/.openclaw/agents` and legacy `~/.clawdbot/agents`
-  - `~/.pi/agent/sessions`
-  - `~/.local/share/opencode/opencode.db` and `~/.local/share/opencode/storage/session`
-- Details: `docs/PRIVACY.md` and `docs/security.md`
+Build locally with Xcode 16 or later:
 
-## Development
-
-Prerequisites:
-- Xcode (macOS 14+)
-
-Build:
 ```bash
 xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS' build
 ```
 
-Tests:
+Run the stable test wrapper:
+
 ```bash
-xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessionsTests -destination 'platform=macOS' test
+./scripts/xcode_test_stable.sh
 ```
 
-Contributing:
-- [Contribution guide](docs/CONTRIBUTING.md)
-- [Add a session source](docs/adding-a-session-source.md)
-- [Brief your coding agent to prepare a source PR](docs/prompts/add-an-agent-source.md)
-
-Don’t see your coding agent? You can propose it, contribute a sanitized format fixture,
-or use the AI-agent brief to prepare a draft integration PR. Every source remains ordinary
-reviewed code; Agent Sessions does not download provider plugins or infer support from an
-installed binary.
+Found a session you thought you had lost? [Star Agent Sessions](https://github.com/jazzyalex/agent-sessions) to help other developers find it.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).

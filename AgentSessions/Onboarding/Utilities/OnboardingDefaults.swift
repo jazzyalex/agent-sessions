@@ -10,10 +10,17 @@ extension UserDefaults {
         static let whatsNewImpressionsVersion = "OnboardingWhatsNewImpressionsVersion"
         static let firstLaunchDate = "OnboardingFirstLaunchDate"
         static let sessionsOpenedCount = "OnboardingSessionsOpenedCount"
+        static let openedSessionFingerprints = "OnboardingOpenedSessionFingerprints"
+        static let lastTopSlotCardIdentifier = "OnboardingLastTopSlotCardIdentifier"
+        static let lastTopSlotCardShownAt = "OnboardingLastTopSlotCardShownAt"
         static let feedbackAskState = "OnboardingFeedbackAskState"
         static let feedbackDeclinedAtMajorMinor = "OnboardingFeedbackDeclinedAtMajorMinor"
+        static let feedbackAskImpressions = "OnboardingFeedbackAskImpressions"
+        static let feedbackAskImpressionsVersion = "OnboardingFeedbackAskImpressionsVersion"
         static let quotaMeterAskState = "OnboardingQuotaMeterAskState"
         static let quotaMeterDeclinedAtMajorMinor = "OnboardingQuotaMeterDeclinedAtMajorMinor"
+        static let quotaMeterAskImpressions = "OnboardingQuotaMeterAskImpressions"
+        static let quotaMeterAskImpressionsVersion = "OnboardingQuotaMeterAskImpressionsVersion"
         static let cockpitEverOpened = "OnboardingCockpitEverOpened"
         static let starAskState = "OnboardingStarAskState"
         static let starAskSnoozedUntil = "OnboardingStarAskSnoozedUntil"
@@ -23,6 +30,11 @@ extension UserDefaults {
         static let contributeAskSnoozedUntil = "OnboardingContributeAskSnoozedUntil"
         static let contributeAskImpressions = "OnboardingContributeAskImpressions"
         static let contributeAskDueSince = "OnboardingContributeAskDueSince"
+        static let languageAskState = "OnboardingLanguageAskState"
+        static let languageAskSnoozedUntil = "OnboardingLanguageAskSnoozedUntil"
+        static let languageAskImpressions = "OnboardingLanguageAskImpressions"
+        static let languageAskDueSince = "OnboardingLanguageAskDueSince"
+        static let languageAskTargetIdentifier = "OnboardingLanguageAskTargetIdentifier"
         static let stewardAskState = "OnboardingStewardAskState"
         static let stewardAskAskedAtMajorMinor = "OnboardingStewardAskAskedAtMajorMinor"
         static let stewardAskImpressions = "OnboardingStewardAskImpressions"
@@ -65,6 +77,18 @@ extension UserDefaults {
         case opened
     }
 
+    /// Lifecycle of the one-time invitation to help translate the app.
+    ///
+    /// This mirrors the contribute-an-agent ask: one quiet retry after a
+    /// snooze, then a permanent stop. Translation is an invitation, not a
+    /// recurring campaign.
+    enum LanguageAskState: String {
+        case notAsked
+        case snoozed
+        case dismissedForever
+        case opened
+    }
+
     /// Lifecycle of the one-time GitHub star ask.
     ///
     /// Unlike the feedback and Quota Meter cards, the retry is on a clock rather
@@ -86,9 +110,9 @@ extension UserDefaults {
     enum QuotaMeterAskState: String {
         /// Not yet shown — eligible once the audience test passes.
         case notAsked
-        /// Dismissed once — eligible again after the next major.minor bump.
+        /// One release-round ended — eligible again after the next major.minor bump.
         case dismissedOnce
-        /// Dismissed a second time (after a bump) — never ask again.
+        /// Explicitly dismissed, or a second round ended — never ask again.
         case dismissedForever
         /// The user opened the Quota Meter — never ask again.
         case activated
@@ -98,9 +122,9 @@ extension UserDefaults {
     enum FeedbackAskState: String {
         /// Not yet shown — eligible once the usage trigger fires.
         case notAsked
-        /// User picked "Not now" once — eligible again after the next major.minor bump.
+        /// One release-round ended — eligible again after the next major.minor bump.
         case declinedOnce
-        /// User picked "Not now" a second time (after a bump) — never ask again.
+        /// Explicitly dismissed, or a second round ended — never ask again.
         case dismissedForever
         /// Feedback was sent — never ask again.
         case completed
@@ -174,6 +198,27 @@ extension UserDefaults {
         set { set(newValue, forKey: OnboardingKeys.sessionsOpenedCount) }
     }
 
+    /// Privacy-preserving identities of sessions already counted toward the
+    /// retention gates. Only SHA-256 fingerprints are stored; raw session IDs
+    /// and paths never enter preferences.
+    var onboardingOpenedSessionFingerprints: [String] {
+        get { stringArray(forKey: OnboardingKeys.openedSessionFingerprints) ?? [] }
+        set { set(newValue, forKey: OnboardingKeys.openedSessionFingerprints) }
+    }
+
+    /// The most recently rendered top-slot card and when it appeared. Together
+    /// these enforce a quiet handoff between different campaigns without
+    /// slowing the current card's bounded impression round.
+    var onboardingLastTopSlotCardIdentifier: String? {
+        get { string(forKey: OnboardingKeys.lastTopSlotCardIdentifier) }
+        set { set(newValue, forKey: OnboardingKeys.lastTopSlotCardIdentifier) }
+    }
+
+    var onboardingLastTopSlotCardShownAt: Date? {
+        get { object(forKey: OnboardingKeys.lastTopSlotCardShownAt) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.lastTopSlotCardShownAt) }
+    }
+
     /// Lifecycle state of the one-time native feedback ask.
     var onboardingFeedbackAskState: FeedbackAskState {
         get { FeedbackAskState(rawValue: string(forKey: OnboardingKeys.feedbackAskState) ?? "") ?? .notAsked }
@@ -187,6 +232,16 @@ extension UserDefaults {
         set { set(newValue, forKey: OnboardingKeys.feedbackDeclinedAtMajorMinor) }
     }
 
+    var onboardingFeedbackAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.feedbackAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.feedbackAskImpressions) }
+    }
+
+    var onboardingFeedbackAskImpressionsVersion: String? {
+        get { string(forKey: OnboardingKeys.feedbackAskImpressionsVersion) }
+        set { set(newValue, forKey: OnboardingKeys.feedbackAskImpressionsVersion) }
+    }
+
     /// Lifecycle of the Quota Meter activation card.
     var onboardingQuotaMeterAskState: QuotaMeterAskState {
         get { QuotaMeterAskState(rawValue: string(forKey: OnboardingKeys.quotaMeterAskState) ?? "") ?? .notAsked }
@@ -197,6 +252,16 @@ extension UserDefaults {
     var onboardingQuotaMeterDeclinedAtMajorMinor: String? {
         get { string(forKey: OnboardingKeys.quotaMeterDeclinedAtMajorMinor) }
         set { set(newValue, forKey: OnboardingKeys.quotaMeterDeclinedAtMajorMinor) }
+    }
+
+    var onboardingQuotaMeterAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.quotaMeterAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.quotaMeterAskImpressions) }
+    }
+
+    var onboardingQuotaMeterAskImpressionsVersion: String? {
+        get { string(forKey: OnboardingKeys.quotaMeterAskImpressionsVersion) }
+        set { set(newValue, forKey: OnboardingKeys.quotaMeterAskImpressionsVersion) }
     }
 
     /// True once the cockpit window has ever been opened. Distinguishes the
@@ -258,6 +323,37 @@ extension UserDefaults {
     var onboardingContributeAskDueSince: Date? {
         get { object(forKey: OnboardingKeys.contributeAskDueSince) as? Date }
         set { set(newValue, forKey: OnboardingKeys.contributeAskDueSince) }
+    }
+
+    /// Lifecycle state of the one-time translation contribution invitation.
+    var onboardingLanguageAskState: LanguageAskState {
+        get { LanguageAskState(rawValue: string(forKey: OnboardingKeys.languageAskState) ?? "") ?? .notAsked }
+        set { set(newValue.rawValue, forKey: OnboardingKeys.languageAskState) }
+    }
+
+    /// When a "Maybe later" on the language ask expires.
+    var onboardingLanguageAskSnoozedUntil: Date? {
+        get { object(forKey: OnboardingKeys.languageAskSnoozedUntil) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.languageAskSnoozedUntil) }
+    }
+
+    /// Launches that have shown the language card in the current round.
+    var onboardingLanguageAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.languageAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.languageAskImpressions) }
+    }
+
+    /// When the language ask first became due, for feedback-card aging.
+    var onboardingLanguageAskDueSince: Date? {
+        get { object(forKey: OnboardingKeys.languageAskDueSince) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.languageAskDueSince) }
+    }
+
+    /// The normalized preferred locale whose wait clock is currently running.
+    /// A different target starts a fresh clock instead of inheriting urgency.
+    var onboardingLanguageAskTargetIdentifier: String? {
+        get { string(forKey: OnboardingKeys.languageAskTargetIdentifier) }
+        set { set(newValue, forKey: OnboardingKeys.languageAskTargetIdentifier) }
     }
 
     /// Lifecycle state of the invitation to steward one supported agent.

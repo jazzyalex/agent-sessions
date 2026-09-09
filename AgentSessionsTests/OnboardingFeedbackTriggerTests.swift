@@ -130,17 +130,92 @@ final class OnboardingFeedbackTriggerTests: XCTestCase {
         XCTAssertFalse(dueAfterSecondDecline)
     }
 
-    func testNoteSessionOpenedIncrementsCounter() async {
+    func testSessionCounterCountsDistinctIDsOnly() async {
         let defaults = makeDefaults("Feedback.counter")
         let now = Date(timeIntervalSince1970: 2_000_000)
 
         await MainActor.run {
             let coordinator = makeCoordinator(defaults: defaults, now: { now })
-            coordinator.noteSessionOpened()
-            coordinator.noteSessionOpened()
-            coordinator.noteSessionOpened()
+            coordinator.noteSessionOpened(id: "session-a")
+            coordinator.noteSessionOpened(id: "session-a")
+            coordinator.noteSessionOpened(id: "session-b")
         }
-        XCTAssertEqual(defaults.onboardingSessionsOpenedCount, 3)
+        XCTAssertEqual(defaults.onboardingSessionsOpenedCount, 2)
+        XCTAssertEqual(defaults.onboardingOpenedSessionFingerprints.count, 2)
+        XCTAssertFalse(defaults.onboardingOpenedSessionFingerprints.contains("session-a"))
+    }
+
+
+    func testThreeIgnoredFeedbackCardsCountAsFirstDecline() async {
+        let defaults = makeDefaults("Feedback.impressions")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        defaults.onboardingSessionsOpenedCount = 10
+
+        await MainActor.run {
+            for _ in 0..<OnboardingCoordinator.feedbackAskMaxImpressionsPerRound {
+                makeCoordinator(defaults: defaults, now: { now }).noteFeedbackCardShown()
+            }
+        }
+
+        XCTAssertEqual(defaults.onboardingFeedbackAskState, .declinedOnce)
+        XCTAssertEqual(defaults.onboardingFeedbackDeclinedAtMajorMinor, "4.3")
+    }
+
+    func testThirdImpressionThenNotNowDoesNotSpendTheRetryRound() async {
+        let defaults = makeDefaults("Feedback.thirdThenNotNow")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        defaults.onboardingSessionsOpenedCount = 10
+
+        await MainActor.run {
+            for _ in 0..<(OnboardingCoordinator.feedbackAskMaxImpressionsPerRound - 1) {
+                makeCoordinator(defaults: defaults, now: { now }).noteFeedbackCardShown()
+            }
+            let thirdLaunch = makeCoordinator(defaults: defaults, now: { now })
+            thirdLaunch.noteFeedbackCardShown()
+            XCTAssertEqual(defaults.onboardingFeedbackAskState, .declinedOnce)
+
+            thirdLaunch.recordFeedbackDeclined()
+            XCTAssertTrue(thirdLaunch.didConsumeTopSlotAskThisLaunch)
+        }
+
+        XCTAssertEqual(defaults.onboardingFeedbackAskState, .declinedOnce)
+        let retryIsDue = await MainActor.run {
+            makeCoordinator(defaults: defaults, version: "4.4", now: { now }).isFeedbackAskDue()
+        }
+        XCTAssertTrue(retryIsDue)
+    }
+
+    func testSubmittingFeedbackConsumesTheFrozenSlot() async {
+        let defaults = makeDefaults("Feedback.submitConsumesSlot")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+
+        await MainActor.run {
+            let coordinator = makeCoordinator(defaults: defaults, now: { now })
+            coordinator.isFeedbackPromptPresented = true
+            coordinator.recordFeedbackSubmitted()
+
+            XCTAssertTrue(coordinator.didConsumeTopSlotAskThisLaunch)
+            XCTAssertTrue(coordinator.feedbackCardSuppressedThisLaunch)
+            XCTAssertFalse(coordinator.isFeedbackPromptPresented)
+        }
+        XCTAssertEqual(defaults.onboardingFeedbackAskState, .completed)
+    }
+
+    func testPermanentDismissDoesNotReturnAfterAVersionBump() async {
+        let defaults = makeDefaults("Feedback.dismissForever")
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        defaults.onboardingSessionsOpenedCount = 10
+
+        await MainActor.run {
+            makeCoordinator(defaults: defaults, version: "4.3", now: { now })
+                .dismissFeedbackAskForever()
+        }
+
+        XCTAssertEqual(defaults.onboardingFeedbackAskState, .dismissedForever)
+        let dueAfterBump = await MainActor.run {
+            makeCoordinator(defaults: defaults, version: "9.0", now: { now }).isFeedbackAskDue()
+        }
+        XCTAssertFalse(dueAfterBump)
     }
 }
 

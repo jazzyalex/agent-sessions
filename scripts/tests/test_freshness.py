@@ -1,12 +1,18 @@
 # scripts/tests/test_freshness.py
 import json as _json
 import os
+import re
 import sqlite3
 from pathlib import Path as _Path
 from unittest import mock
 
 import agent_watch
 from agent_watch import _resolve_cli_binary_mtime  # added in Task 1.2
+
+
+def test_report_slug_has_subsecond_and_process_identity():
+    slug = agent_watch._now_utc_slug()
+    assert re.fullmatch(r"\d{8}-\d{6}-\d{6}Z-p\d+", slug)
 
 
 def test_freshness_module_under_test_is_importable():
@@ -283,6 +289,43 @@ def test_latest_failed_prebump_evidence_classifies_auth_failure(tmp_path):
     assert evidence["source"] == "latest_failed_prebump_report"
     assert evidence["failure_class"] == "auth_failed"
     assert evidence["error"] == "claude_print_failed rc=1"
+
+
+def test_latest_failed_prebump_evidence_preserves_schema_drift(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    report_dir = reports_root / "20260908-120000Z-prebump"
+    report_dir.mkdir(parents=True)
+    schema_diff = {
+        "unknown_only_is_empty": False,
+        "unknown_types": ["prompt.completed"],
+        "unknown_keys": {"turn.prompt": ["promptId"]},
+    }
+    (report_dir / "report.json").write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "kimi": {
+                "ok": True,
+                "error": None,
+                "session_path": "/tmp/wire.jsonl",
+                "evidence": {
+                    "schema_matches_baseline": False,
+                    "fresh_session_matches_baseline": False,
+                    "schema_diff": schema_diff,
+                    "sample_freshness": {"is_stale": False},
+                },
+            }
+        },
+    }))
+
+    evidence = agent_watch._latest_failed_prebump_evidence(
+        agent_name="kimi",
+        reports_root=reports_root,
+        cli_binary_mtime=None,
+    )
+
+    assert evidence is not None
+    assert evidence["failure_class"] == "schema_drift"
+    assert evidence["schema_diff"] == schema_diff
 
 
 def test_resolve_cli_binary_mtime_returns_path_and_mtime(tmp_path):
@@ -581,6 +624,44 @@ def test_compatibility_supports_latest_with_fresh_matching_evidence():
     assert result["supports_latest"] is True
     assert result["confidence"] == "high"
     assert result["latest_status"] == "current_fetch_known"
+
+
+def test_current_weekly_drift_overrides_older_clean_prebump():
+    result = _compat(
+        fresh_evidence_source="latest_prebump_report",
+        weekly_schema_diff={
+            "unknown_only_is_empty": False,
+            "unknown_types": [],
+            "unknown_keys": {"summary": ["last_recap"]},
+        },
+    )
+    assert result["verdict"] == "format_drift_detected"
+    assert result["supports_latest"] is False
+    assert "schema_unknowns_detected" in result["blockers"]
+
+
+def test_failed_prebump_schema_drift_overrides_stale_weekly_sample():
+    failed = {
+        "source": "latest_failed_prebump_report",
+        "failure_class": "schema_drift",
+        "schema_diff": {
+            "unknown_only_is_empty": False,
+            "unknown_types": ["prompt.completed"],
+            "unknown_keys": {},
+        },
+    }
+    result = _compat(
+        verified="0.39.1",
+        installed="0.41.0",
+        upstream="0.41.0",
+        installed_newer_than_verified=True,
+        upstream_newer_than_verified=True,
+        sample_freshness={"is_stale": True, "stale_reason": "sample_older_than_cli"},
+        failed_prebump_evidence=failed,
+    )
+    assert result["verdict"] == "format_drift_detected"
+    assert result["latest_real_session_failure"] == failed
+    assert result["supports_latest"] is False
 
 
 def test_compatibility_cached_latest_does_not_hide_degraded_source():

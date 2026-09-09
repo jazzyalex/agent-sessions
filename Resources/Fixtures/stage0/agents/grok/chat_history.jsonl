@@ -9,3 +9,5 @@
 {"type":"tool_result","tool_call_id":"call-00000000-0000-4000-8000-000000000002-1","content":"hello from the grok fixture\n"}
 {"type":"reasoning","id":"rs_00000000-0000-4000-8000-000000000003","summary":[{"type":"summary_text","text":"Confirmed the output. I can answer now."}],"encrypted_content":"<opaque>","status":"completed"}
 {"type":"user","content":[{"type":"image","url":"data:image/png;base64,<scrubbed>"},{"type":"text","text":"Here is a screenshot for reference."}],"prompt_index":1}
+{"type":"backend_tool_call","kind":{"tool_type":"[trimmed for fixture]","call_id":"[trimmed for fixture]","input":"[trimmed for fixture]","name":"[trimmed for fixture]","id":"[trimmed for fixture]"}}
+{"type":"backend_tool_call","kind":{"tool_type":"[trimmed for fixture]","action":{"type":"open_page","url":"[trimmed for fixture]"},"id":"[trimmed for fixture]","status":"[trimmed for fixture]"}}

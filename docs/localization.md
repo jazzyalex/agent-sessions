@@ -12,6 +12,10 @@ the catalogs; expanding that source coverage is separate follow-up work.
   `AgentSessions/Resources/InfoPlist.xcstrings`.
 - Both catalogs declare `en` as their source language. Do not add a locale to a
   catalog until its translation is ready for review.
+- Add every reviewed locale to the Xcode project's known regions and to
+  `PLANNED_TRANSLATION_LOCALES` in `scripts/validate_localization_catalogs.py`.
+  The translation-contributor card derives coverage from the built bundle; it
+  has no separate locale allowlist to update.
 - CI permits the `zh-Hans` locale only when it is present, non-empty,
   and marked translated for every key in both catalogs. Partial locale imports
   and unreviewed locale identifiers fail validation.

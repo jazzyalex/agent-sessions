@@ -2488,6 +2488,13 @@ final class UnifiedSessionIndexer: ObservableObject {
             overallPhase == .ready && hasDisplayedSessions
         }
 
+        /// Safe point for audience-targeted launch UI. `overallPhase` is the
+        /// maximum phase, so it cannot prove that every active source finished;
+        /// the explicit blocking list can.
+        var isAudienceReady: Bool {
+            blockingSources.isEmpty && hasDisplayedSessions
+        }
+
         var statusDescription: String {
             if isInteractive { return "Ready" }
             var text = String(localized: overallPhase.statusDescription)

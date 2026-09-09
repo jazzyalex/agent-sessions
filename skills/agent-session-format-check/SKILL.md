@@ -47,6 +47,12 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
    - `compatibility.latest_real_session_failure` when a prebump attempt failed
    - `severity` and `recommendation` only as legacy escalation fields
 
+   Sanity-check version identity before acting on it. If a monotonic CLI reports an
+   installed version newer than `upstream.parsed_version`, or the fetched tag belongs to a
+   different release family (for example an SDK release instead of the CLI), treat the
+   latest source as broken/unknown. Do not follow a generated prebump recommendation for
+   an agent with no driver, and do not lower a verified ceiling to match a bad source.
+
 3. **Usage / limits reading (Codex + Claude) — always verify every weekly run.**
    These drift independently of session schema (see §2), so a clean schema does
    **not** imply healthy usage reading. Each agent's
@@ -66,14 +72,19 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
 
 4. **Classify every new field for value, not just for safety (§1e).** A field that parses
    cleanly is *safe*, which is not the same as *handled*. Do not close a drift finding
-   until each new key or type has been called noise, watch, or feature-candidate — and
-   candidates filed in `docs/backlog.md`, not left as a remark in the ledger.
+   until each new key or type has been called handled, noise, watch, or feature-candidate
+   — and candidates filed in `docs/backlog.md`, not left as a remark in the ledger.
 
 Interpretation:
 - `supports_latest`: latest known build is covered by
   `evidence.fresh_evidence_source == "latest_prebump_report"` and
   `compatibility.latest_real_session_evidence == true` with
-  `compatibility.latest_status == "current_fetch_known"`.
+  `compatibility.latest_status == "current_fetch_known"`. This verdict is not a clean
+  bill by itself: also require the **current** `weekly.schema_diff.unknown_types == []`,
+  `weekly.schema_diff.unknown_keys == {}`, healthy probes, and a passing discovery
+  contract. The compatibility layer can reuse an older clean prebump report while a newer
+  weekly sample has already drifted; in that case report and investigate the current drift
+  rather than repeating `supports_latest`.
 - `supports_installed_only`: installed build is covered by non-stale real local
   evidence, but latest is newer, cached from a prior report, unknown, or lacks
   fresh real-session proof.
@@ -85,7 +96,7 @@ Interpretation:
 - `blocked_no_fresh_evidence`: a version changed but no fresh matching sample proves support.
 - `format_drift_detected`: unknown schema/storage/usage fields appeared; update fixtures/parsers.
 - `blocked_thin_sample`: the sample was both narrow and tiny, so it evidenced nothing either
-  way (§5a). Generate a session that actually uses tools — not a one-line prompt.
+  way (§5). Generate a session that actually uses tools — not a one-line prompt.
 - `monitoring_broken`: latest source, usage probe, or discovery contract failed.
 - `real_session_auth_failed` in blockers: the real-session driver ran but the
   sandboxed agent was not authenticated; re-auth or provide the configured env
@@ -123,6 +134,11 @@ Exit-code contract:
   `--allow-real-home` only if you understand your real config dir will
   be mutated for that one invocation.
 
+Keep the direct prebump `report.json` for every non-zero run and report its schema diff or
+driver error from that artifact. A later weekly scan may select older clean evidence or
+fall back to a stale local sample and omit the failed fresh diff; it does not erase what the
+just-completed driver observed.
+
 Flags:
 - `--agent <name>` (repeatable) — restrict to specific agents. An
   unknown agent or one without a `prebump` config block exits 4.
@@ -153,17 +169,18 @@ a tool turn.
 session may contain only the four most basic event types and still report
 `fresh_matches_baseline=True` — it proves the CLI still writes parseable output, not that
 rich event families are unchanged. For `real_home_session: true` agents that session also
-lands in the real store and becomes the newest sample; §5a's multi-session union is what
+lands in the real store and becomes the newest sample; §5's multi-session union is what
 stops it from masking drift. Check the fresh session's type count before treating a pass as
 broad evidence.
 
 Configured real-session drivers today are `codex`, `claude`, `antigravity`,
 `copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, `pi`, `kimi`, and `grok`.
-Droid is legacy-only and excluded from active checks. Qwen has no driver — it
-reports `no_real_session_driver_configured` and can never claim `supports_latest`;
-judge it on the weekly schema diff instead. That is not a gap to fill with code:
-Qwen's OAuth free tier was discontinued 2026-04-15, so no session can be generated
-at all until a paid plan or alternate provider is configured (see §1c).
+Droid is legacy-only and excluded from active checks. Qwen, Devin, and fx have no
+drivers. Judge them on current weekly evidence plus their stewardship record (§1g), and
+never claim latest-build support without a session written by that build. Qwen cannot
+produce a newer session on this machine because its OAuth free tier was discontinued
+2026-04-15; that remains blocked until a paid plan or alternate provider is configured
+(see §1c).
 
 **Staleness short-circuits the schema verdict.** `blocked_stale_sample` is reported
 *instead of* drift, so a stale agent can be hiding real drift behind it. Kimi sat at
@@ -247,8 +264,9 @@ engineering work right up until you try to authenticate.
 ## 1d  Building a Prebump Driver
 
 Drivers live in `scripts/agent_watch_prebump_drivers.py` and register into `DRIVERS`;
-their config block is `agents.<name>.prebump` in `agent-watch-config.json`. Copy the
-nearest existing driver rather than starting from the Protocol.
+their config block is `agents.<name>.prebump` in
+`docs/agent-support/agent-watch-config.json`. Copy the nearest existing driver rather
+than starting from the Protocol.
 
 Non-obvious requirements, each learned from a real failure:
 
@@ -295,10 +313,11 @@ because a ledger note is a remark, not work. And Qwen shipped with
 transcripts carried full per-call token accounting — 53 records in one ordinary session.
 The data was never missing. Nobody opened it.
 
-**So classify every new key or type into exactly one of three buckets, and record which:**
+**So classify every new key or type into exactly one of four buckets, and record which:**
 
 | Bucket | Meaning | Action |
 |---|---|---|
+| **handled** | current code already reads the field for a user-visible or integrity path | cite the code and a behavior test; refresh the normal fixture, but do not file duplicate work |
 | **noise** | internal plumbing, ids, or telemetry nobody would look at | fixture only; say so once so it is not re-litigated |
 | **watch** | meaningful but not actionable yet — a field that will matter if it starts appearing widely, or that only one source emits | fixture + a line in the ledger note |
 | **candidate** | carries information a user would want on screen | fixture **+ an entry in `docs/backlog.md`** |
@@ -310,6 +329,9 @@ transition the UI hides** (mode changes, rewinds, compaction).
 
 Two rules that keep this honest:
 
+- **Prove `handled`, do not infer it from a similar field name.** Cite the read path and a
+  test whose behavior depends on the new shape. A parser's tolerant fall-through or raw
+  JSON retention means safe, not handled.
 - **Check the value before believing the matrix.** `unsupported_surfaces` describes what
   the *app* does, never what the *agent emits*. Qwen's entry made a present surface look
   absent for a full release. When a value pass contradicts a matrix line, the matrix line
@@ -328,9 +350,10 @@ upstream started telling us that we are not yet using.
 
 ## 1f  Steward Check (what a community steward runs)
 
-Each agent has a steward: a contributor who uses that agent daily and re-verifies
-its format a few times a year, or after a big vendor release. A steward is not
-expected to know any of the above. They run one command:
+An agent may have a steward: a contributor who uses that agent regularly and re-verifies
+its format a few times a year, or after a big vendor release. Maintained agents are checked
+by the maintainer; best-effort agents have no steward yet. A steward is not expected to
+know any of the above. They run one command:
 
 ```
 ./scripts/steward_check.py <agent>       # ./scripts/steward_check.py --list-agents
@@ -352,7 +375,7 @@ exits:
 
 What it deliberately does **not** do: write or rebuild any baseline fixture.
 Deciding that drift is real and rebuilding a baseline stays a maintainer job
-(`scripts/rebuild_stage0_baseline.py --agent <agent> --emit`, §5a/§7).
+(`scripts/rebuild_stage0_baseline.py --agent <agent> --emit`, §5/§7).
 
 The sample reuses `rebuild_stage0_baseline._redact` — the same trimming that
 produces committed fixtures — and then re-scans the result for home directories,
@@ -430,7 +453,7 @@ Usage and limits tracking can drift **independently** of session schema. Monitor
 
 ### Codex
 - **Passive channel:** session JSONL `token_count` / `rate_limits` event structure. This is
-  covered by the schema fingerprint **only because codex is fingerprinted nested** (§5a) —
+  covered by the schema fingerprint **only because codex is fingerprinted nested** (§5) —
   these events live under `event_msg.payload`, and the flat fingerprint that ran until
   2026-08-03 stopped at `{payload,timestamp,type}` and could never see them. If codex is
   ever moved back to the flat fingerprint, this channel goes unwatched again.
@@ -579,7 +602,7 @@ the legacy JSON tree when no database is present.
   `session`, `message`, and `part` rows from `opencode.db`.
 - If no database is present, `_opencode_storage_session_tree_schema_fingerprint()`
   walks the legacy JSON tree for a session and reports keys per record kind.
-- Risk keywords in `agent-watch-config.json` still flag release notes mentioning
+- Risk keywords in `docs/agent-support/agent-watch-config.json` still flag release notes mentioning
   storage migrations such as SQLite, BoltDB/bbolt, Badger, or database changes.
 
 ---
@@ -618,7 +641,8 @@ older.
 
 ## 4  Discovery Path Contracts
 
-Each agent has a `discovery_path_contract` in `agent-watch-config.json` defining the
+Each agent has a `discovery_path_contract` in
+`docs/agent-support/agent-watch-config.json` defining the
 expected file layout Agent Sessions uses to discover sessions. If an upstream agent moves
 or renames its storage, discovery breaks even if the parser still works.
 
@@ -627,18 +651,24 @@ Weekly monitoring checks these contracts. When a contract fails:
 - The session viewer will silently stop finding new sessions for that agent.
 - Investigate whether the agent changed its storage location or naming convention.
 
-Key contracts (simplified from regexes in `agent-watch-config.json`):
+Key contracts (simplified from regexes in
+`docs/agent-support/agent-watch-config.json`):
 | Agent    | Expected pattern |
 |----------|-----------------|
 | Codex    | `*/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
-| OpenCode | `*/opencode/storage/session/*/ses_*.json` |
-| Hermes   | `~/.hermes/sessions/session_*.json` |
-| Antigravity | `~/.gemini/antigravity/brain/<conversation-id>/*.md` |
-| Copilot  | `~/.copilot/session-state/*.jsonl` |
+| OpenCode | `*/opencode/opencode.db` or legacy `*/opencode/storage/session/*/ses_*.json` |
+| Hermes   | `~/.hermes/state.db` or legacy `~/.hermes/sessions/session_*.json` |
+| Antigravity | `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` |
+| Copilot  | `~/.copilot/session-state/*.jsonl` or `*/events.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
-| Cursor   | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |
+| Cursor   | `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` |
+| Pi       | `~/.pi/agent/sessions/**/*.jsonl` |
+| Kimi     | `~/.kimi-code/sessions/wd_*/session_*/agents/main/wire.jsonl` |
 | Grok     | `~/.grok/sessions/<enc-workdir>/<sessionId>/chat_history.jsonl` |
+| Qwen     | `*/projects/<project>/chats/<id>.jsonl` or `chats/archive/<id>.jsonl` |
+| Devin    | `~/.local/share/devin/cli/sessions.db` |
+| fx       | `~/.fx/sessions/<id>/checkpoint.json` |
 
 ### `required_companion_files` — sidecars discovery refuses to work without
 
@@ -682,7 +712,7 @@ title and both timestamps. `_grok_session_schema_fingerprint()` also records a
 `summary_error` (`missing` / `unreadable` / `invalid_json` / `not_json_object`) so the
 fingerprint stops pretending it read a sidecar it could not.
 
-**Grok's parser is now tolerant like the other twelve.** `GrokSessionParser` used to
+**Grok's parser is tolerant of additive fields.** `GrokSessionParser` used to
 decode `summary.json` through a `Codable` struct, so one field arriving with a new type
 threw and `try?` dropped the *whole* sidecar — id, cwd, title, model and both timestamps
 at once. It reads `JSONSerialization` dictionaries field by field now, so vendor
@@ -691,7 +721,7 @@ therefore an alert here (this scan), never a crash — pinned by
 `GrokSessionParserTests.testUnknownNewFieldsAreIgnored` and
 `testSidecarFieldOfTheWrongTypeCostsOnlyThatField`.
 
-Grok is fingerprinted **nested** (§5a). Flat would stop at `{type, content, ...}` and hide
+Grok is fingerprinted **nested** (§5). Flat would stop at `{type, content, ...}` and hide
 the content-part types (`user.content:text`, `user.content:image`) and
 `backend_tool_call.kind.action`, which is where its format actually moves. `arguments` is
 opaque — it is a tool's parameter object, not Grok format.
@@ -725,15 +755,15 @@ contract failure (`discovery_contract_failed` is gated on a file having been fou
 
 ---
 
-## 5a  How the Fingerprint Works (and what it cannot see)
+## 5  How the Fingerprint Works (and what it cannot see)
 
 Read this before trusting a clean `unknown_types=[]`.
 
 **Nested vs flat.** `_schema_fingerprint_for_agent()` in `scripts/agent_watch.py` is the one
-place that decides depth. Codex, Copilot and Claude use `_nested_jsonl_schema_fingerprint`
-(depth 3); Kimi uses its own loop-event walker; everyone else is flat. Baseline and observed
-sample always go through this same function — fingerprinting one side flat and the other
-nested diffs two different alphabets.
+place that decides depth. Codex, Copilot, Claude, Grok, and Qwen use nested fingerprints
+(depth 3); Kimi and several storage-backed agents use bespoke fingerprint functions;
+remaining JSONL agents are flat. Baseline and observed sample always go through this same
+function — fingerprinting one side flat and the other nested diffs two different alphabets.
 
 Lists are **unioned across every element** (capped at `_NESTED_LIST_SAMPLE_LIMIT`), not
 sampled by their first item. Claude's `message.content` mixes text/thinking/tool_use blocks,
@@ -750,12 +780,15 @@ Two rules keep nesting from manufacturing drift:
   config variants (`sandbox_policy:read-only`), and splitting on those makes an ordinary
   settings change look like schema drift.
 
-Claude's opaque keys are `input` and `toolUseResult` — both are TOOL-defined payloads, not
-Claude format, so walking them would make every new tool read as schema drift.
+Claude's opaque keys include `input` and `toolUseResult` — both are TOOL-defined payloads,
+not Claude format, so walking them would make every new tool read as schema drift. Qwen's
+`function_args` is opaque for the same reason. Read `_NESTED_OPAQUE_KEYS` for the complete
+current list rather than copying it into this skill.
 
-**Still flat:** OpenClaw, Pi, Droid, plus the bespoke Hermes/OpenCode/Cursor/Kimi
-fingerprinters. Their payload interiors are unwatched; nothing has been lost to that yet,
-but the same blind spot applies in principle.
+**Still flat or bespoke:** OpenClaw, Pi, Droid, Hermes, OpenCode, Cursor, Kimi, Devin, and
+fx do not use the generic nested walker. Their format-specific fingerprint functions may
+intentionally inspect deeper storage records, but any payload interior they do not expose
+remains a blind spot. Verify the adapter before assuming either flat or nested coverage.
 
 **Multi-session sampling.** Weekly fingerprints the newest `_LOCAL_SCHEMA_SAMPLE_COUNT` (5)
 sessions and unions them. This exists because sampling one session let whichever session was
@@ -797,11 +830,11 @@ and `session.usage_checkpoint` did exactly that from 2026-07-22 until 2026-08-03
 
 ---
 
-## 5  What to Collect as Evidence
+## 5a  What to Collect as Evidence
 
 Alongside the report fields below, record the **value-pass ruling** (§1e) for every new
-key or type: noise, watch, or candidate. A finding is not closed until it has one, and
-candidates are not closed until they are in `docs/backlog.md`.
+key or type: handled, noise, watch, or candidate. A finding is not closed until it has
+one, and candidates are not closed until they are in `docs/backlog.md`.
 
 
 From the weekly report (all agents):
@@ -820,7 +853,7 @@ Optional (recommended when a bump is needed):
 ## 6  Verification Update Checklist (after approval)
 
 1. **Refresh fixtures** for the affected agent under `Resources/Fixtures/stage0/agents/<agent>/`.
-   Put verified-and-handled types in the **normal** fixture, not `schema_drift.jsonl` — see §5a.
+   Put verified-and-handled types in the **normal** fixture, not `schema_drift.jsonl` — see §5.
    Make the fixture a **superset** of the old key sets; silently dropping keys shrinks the baseline.
 2. Ensure fixtures include the "important" event families when present:
    - Session metadata / `session_meta` payload keys.
@@ -836,12 +869,13 @@ Optional (recommended when a bump is needed):
    - `docs/agent-support/agent-support-matrix.yml` (`agents.<key>.max_verified_version`)
    - Append a new entry in `docs/agent-support/agent-support-ledger.yml`
    - Add a line to `docs/agent-json-tracking.md` under "Upstream Version Check Log"
-4. Run tests locally:
+4. Run tests locally with the repository's stable wrapper:
    ```
-   xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions \
-     -destination 'platform=macOS' test
+   ./scripts/xcode_test_stable.sh
    ```
-5. Run discovery-contract tests:
+   Read the total from the generated XCResult and explain any decrease from the previous
+   verified run; stdout contains per-bundle counts and is not the suite total.
+5. For a focused discovery/parser rerun:
    ```
    ./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests
    ```

@@ -4,25 +4,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Sessions - Live Codex and Claude Quota Burn on macOS</title>
+  <title>Agent Sessions — Search AI Coding History on macOS</title>
   <meta name="description"
-    content="See which agent session is burning your Codex and Claude limits. Live per-session burn rate plus searchable local history. macOS, local-only." />
+    content="Search Codex, Claude Code, Cursor and 12 other coding-agent histories on your Mac. Resume supported CLI sessions and track Codex and Claude quota burn." />
   <meta name="keywords"
     content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Cursor Agent history, Cursor agent transcripts, Hermes state.db, Hermes Agent sessions, OpenClaw sessions, OpenClaw JSONL, AI coding agent history, local session browser, Claude Desktop, OpenCode SQLite, Antigravity CLI, GitHub Copilot CLI, Kimi Code history, Grok CLI history, Qwen Code history, macOS agent history" />
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/">
-  <meta property="og:title" content="Three agents running. One is eating your week.">
+  <meta property="og:title" content="Find the agent session you need.">
   <meta property="og:description"
-    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry.">
+    content="Search local conversations from Codex, Claude Code, Cursor, and 12 other coding agents in one Mac app. Free and open source, with no app telemetry.">
   <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/social-banners/agent-sessions-open-graph.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Agent Sessions — open source native macOS app for browsing local AI coding sessions">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@jazzyalex">
-  <meta name="twitter:title" content="Three agents running. One is eating your week.">
+  <meta name="twitter:title" content="Find the agent session you need.">
   <meta name="twitter:description"
-    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry.">
+    content="Search local conversations from Codex, Claude Code, Cursor, and 12 other coding agents in one Mac app. Free and open source, with no app telemetry.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/social-banners/agent-sessions-open-graph.png">
   <meta name="twitter:image:alt" content="Agent Sessions — open source native macOS app for browsing local AI coding sessions">
   <meta name="google-site-verification" content="sx86AJZLiif5yT1NrsL-uk3rhwxeg6S6-TLjnVoVtpw" />
@@ -36,7 +36,7 @@
     "url": "https://jazzyalex.github.io/agent-sessions/",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS 14.0 or later",
-    "description": "See which agent session is burning your Codex and Claude limits. Live per-session burn rate plus searchable local history across every coding agent you run. macOS, local-only, no telemetry.",
+    "description": "Search local conversations from Codex, Claude Code, Cursor, and 12 other coding agents on macOS. Resume supported CLI sessions and track Codex and Claude quota burn.",
     "image": "https://jazzyalex.github.io/agent-sessions/assets/social-banners/agent-sessions-open-graph.png",
     "screenshot": "https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png",
     "downloadUrl": "https://github.com/jazzyalex/agent-sessions/releases/latest",
@@ -279,6 +279,7 @@
       width: 42%;
       max-width: 440px;
     }
+    .hero-qm img,
     .hero-qm video {
       width: 100%;
       height: auto;
@@ -500,11 +501,11 @@
   <a id="top"></a>
   <header class="hero">
     <p class="eyebrow">macOS · Open Source · Local-first</p>
-    <h1>Fifteen agents. One searchable history.</h1>
-    <p class="sub">Codex, Claude, Cursor and twelve more write sessions to your Mac all day. Agent Sessions reads every one of them — full-text search, transcripts with tool calls and images, and a resume command that puts you back in the CLI you left.<br><span class="sub-2"><b>Codex and Claude also get a burn meter:</b> live per-session rate against your 5-hour and weekly limits, priced per model.</span></p>
+    <h1>Find the agent session you need.</h1>
+    <p class="sub">Search local conversations from Codex, Claude Code, Cursor, and 12 other coding agents in one Mac app. Read the transcript, find supported image outputs, and resume supported CLI sessions.<br><span class="sub-2"><b>For Codex and Claude:</b> see which sessions are burning through your quota.</span></p>
     <div class="cta-row">
-      <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg">Download Agent Sessions 5.1.1</a>
-      <a class="btn ghost" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+      <a class="btn primary" data-track-event="download-home-hero" href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg">Download Agent Sessions 5.1.1</a>
+      <a class="btn ghost" data-track-event="github-home-hero" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
     </div>
     <p class="meta-line">Version 5.1.1<span class="dot">·</span>Free &amp; open source<span class="dot">·</span>No telemetry</p>
     <div class="brew">
@@ -519,9 +520,8 @@
            alt="Agent Sessions main window: Codex and Claude sessions in one list with surface badges and model pills, subagents nested under the session that spawned them, and the transcript open beside it"
            width="2240" height="1488">
       <figure class="hero-qm">
-        <video src="assets/quota-meter-runway-rate.mp4" autoplay loop muted playsinline
-               poster="assets/quota-meter-light.png"
-               aria-label="Quota Meter Session Runway switching its rate unit from percent of quota per hour to tokens per hour to estimated API-equivalent cost per hour"></video>
+        <img src="assets/quota-meter-light.png"
+             alt="Quota Meter showing Codex and Claude usage windows with per-session burn-rate rows">
         <figcaption>Quota Meter, about actual size</figcaption>
       </figure>
     </div>
@@ -530,7 +530,7 @@
   <section class="band" id="features">
     <div class="band-head">
       <h2>One window for every agent's memory.</h2>
-      <p>Desktop apps and CLI tools side by side, each labelled with the surface it came from. <b>New in 5.0:</b> agents are plug-in adapters, Qwen Code joins as the thirteenth source, and adding the agent you use is a documented recipe.</p>
+      <p>Fourteen active agent formats and legacy Droid sessions, side by side and labelled with the surface they came from. Search and browsing work across every source; resume and image support depend on the source and installed CLI version.</p>
     </div>
     <table class="support">
       <thead>
@@ -554,6 +554,9 @@
       <tr><td class="name">Grok CLI</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Qwen Code<em>new in 5.0</em></td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">OpenClaw</td><td class="surf">CLI</td><td class="cap colhide"><span class="dash">&mdash;</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Devin CLI</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Active sessions</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">fx</td><td class="surf">CLI</td><td class="cap colhide">Command tested</td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Droid<em>legacy</em></td><td class="surf">CLI</td><td class="cap colhide"><span class="dash">&mdash;</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
         <tr class="addrow"><td class="name"><a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/CONTRIBUTING.md">Add your agent&nbsp;&rarr;</a></td><td class="surf">Twelve files, each with a test</td><td class="cap colhide"></td><td class="cap colhide"></td></tr>
       </tbody>
     </table>
@@ -567,7 +570,7 @@
       </div>
       <div class="feat span3">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M21 13a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg></div>
-        <h3>Resume any session</h3>
+        <h3>Pick up where you left off</h3>
         <p>Right-click a supported CLI session to copy the exact resume command, or open it directly in Terminal.app, iTerm2, or Warp.</p>
       </div>
       <div class="feat">
@@ -610,10 +613,20 @@
         </div>
         <div class="shots">
           <img src="assets/quota-meter-light.png" alt="Quota Meter with Session Runway per-session burn-rate bars for Codex and Claude">
-          <video src="assets/quota-meter-runway-rate.mp4" autoplay loop muted playsinline
-                 poster="assets/quota-meter-light.png"
-                 aria-label="Animated Session Runway with the rate unit switching between percent of quota, tokens per hour, and estimated cost per hour"></video>
+          <img src="assets/quota-meter-light.png"
+               alt="Quota Meter showing Codex and Claude usage windows with per-session burn-rate rows">
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="download-agent-sessions">
+    <div class="band-head">
+      <h2 id="download-agent-sessions">Your agent history is already on your Mac.</h2>
+      <p>Make it searchable, then return to the work that matters.</p>
+      <div class="cta-row">
+        <a class="btn primary" data-track-event="download-home-final" href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg">Download Agent Sessions 5.1.1</a>
+        <a class="btn ghost" data-track-event="github-home-final" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
       </div>
     </div>
   </section>
@@ -685,6 +698,17 @@
 
   <script>
     document.getElementById("year").textContent = new Date().getFullYear();
+
+    document.querySelectorAll('[data-track-event]').forEach((link) => {
+      link.addEventListener('click', () => {
+        if (!window.goatcounter || typeof window.goatcounter.count !== 'function') return;
+        window.goatcounter.count({
+          path: link.dataset.trackEvent,
+          title: link.textContent.trim(),
+          event: true
+        });
+      });
+    });
 
     (async function () {
       const el = document.getElementById('gh-stars');

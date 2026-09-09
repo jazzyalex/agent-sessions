@@ -360,6 +360,7 @@ struct UnifiedSessionsView: View {
     /// Gates the Quota Meter card and scopes what activation may switch on — it
     /// reports Codex and Claude quota only.
     @State private var quotaMeterProviders = QuotaMeterProviderAvailability()
+    @State private var topSlotAudienceReady = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.openWindow) private var openWindow
@@ -879,12 +880,15 @@ struct UnifiedSessionsView: View {
 	    }
 
 	    /// Session-list pane with the onboarding top-card slot (What's New / feedback)
-	    /// mounted above the table. Renders nothing extra when there's nothing to show.
+	    /// mounted above the table, outside its scrolling content. A rendered card
+	    /// is therefore actually on screen and may safely count as an impression.
+	    /// Renders nothing extra when there's nothing to show.
 	    private var listPaneWithTopSlot: some View {
 	        VStack(spacing: 0) {
 	            OnboardingListTopSlot(
 	                coordinator: onboardingCoordinator,
-	                providers: quotaMeterProviders
+	                providers: quotaMeterProviders,
+	                audienceReady: topSlotAudienceReady
 	            )
 	            listPane
 	        }
@@ -912,6 +916,16 @@ struct UnifiedSessionsView: View {
 	            let stewardTarget = StewardAskEligibility.target(sessionCounts: counts)
 	            if onboardingCoordinator.stewardAskTarget != stewardTarget {
 	                onboardingCoordinator.stewardAskTarget = stewardTarget
+	            }
+	        }
+	        // `$allSessions` publishes its initial empty value immediately. That is
+	        // not an audience snapshot: choosing then would either target nobody or
+	        // freeze an empty selection before the launch scan finds their sessions.
+	        // Arm selection only after every active source has finished its first
+	        // pass (or reported an error) and the merged list has been published.
+	        .onReceive(unified.$launchState) { state in
+	            if state.isAudienceReady {
+	                topSlotAudienceReady = true
 	            }
 	        }
 	    }
@@ -2358,7 +2372,7 @@ struct UnifiedSessionsView: View {
             settledSelection = id
             // Count a session-open for the feedback-ask trigger (debounced settle
             // fires once per rested selection, not per key-repeat scrub).
-            onboardingCoordinator.noteSessionOpened()
+            onboardingCoordinator.noteSessionOpened(id: id)
             // Auto-jump to the first search-term occurrence in the transcript, but only once
             // the transcript pane's own selection (settledSelection) is about to match this id —
             // TranscriptPlainView gates its match on searchState.autoJumpSessionID == session.id,

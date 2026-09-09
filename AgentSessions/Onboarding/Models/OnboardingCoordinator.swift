@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// What the coordinator asks the modal onboarding window to present.
@@ -7,6 +8,30 @@ enum OnboardingPresentation: Equatable {
     case firstRunSetup
     /// Legacy multi-slide Power Tips tour (Help → Power Tips). Untouched by the rework.
     case powerTips(OnboardingContent)
+}
+
+/// The single top-slot surface selected for this launch. The view freezes this
+/// value once chosen so an unrelated list rebuild cannot swap in another ask.
+enum TopSlotCardSelection: Equatable {
+    case whatsNew(String)
+    case quotaMeter
+    case star
+    case feedback
+    case language
+    case steward(StewardAgent)
+    case contribute
+
+    var persistenceIdentifier: String {
+        switch self {
+        case .whatsNew: return "whats-new"
+        case .quotaMeter: return "quota-meter"
+        case .star: return "star"
+        case .feedback: return "feedback"
+        case .language: return "language"
+        case .steward: return "steward"
+        case .contribute: return "contribute"
+        }
+    }
 }
 
 @MainActor
@@ -46,6 +71,12 @@ final class OnboardingCoordinator: ObservableObject {
     /// an answer, and without this the card returns on every launch until the
     /// next minor, holding the slot against every ask queued behind it.
     static let whatsNewMaxImpressionsPerVersion = 3
+    static let quotaMeterAskMaxImpressionsPerRound = 3
+    static let feedbackAskMaxImpressionsPerRound = 3
+
+    /// Minimum quiet time before the slot switches to a different campaign.
+    /// Repeated launches of the same bounded round are unaffected.
+    static let topSlotInterCardQuietPeriod: TimeInterval = 5 * 86_400
 
     /// Where "Contribute an agent" sends the user: the repository's structured
     /// proposal form. Built from `githubRepositoryURL` so the card, the menu
@@ -68,7 +99,7 @@ final class OnboardingCoordinator: ObservableObject {
 
     /// Sessions opened before the contribute ask is due. Someone who has browsed
     /// this much has an opinion about which agents are missing.
-    static let contributeAskSessionsThreshold = 25
+    static let contributeAskSessionsThreshold = 60
 
     /// Days since first launch that make the contribute ask due on their own.
     /// Higher than the star ask's 30 so the two never come due together.
@@ -82,6 +113,25 @@ final class OnboardingCoordinator: ObservableObject {
     /// the slot for itself. Same value and same reasoning as the star ask's wait
     /// behind the Quota Meter card.
     static let contributeAskPriorityAfterDays: Double = 14
+
+    /// The translation invitation lands on the contributor-facing workflow,
+    /// not the implementation conventions alone. The fragment keeps the user
+    /// at the exact job the card offered.
+    static let languageContributionURL = URL(
+        string: "\(githubRepositoryURL.absoluteString)/blob/main/docs/CONTRIBUTING.md#translate-agent-sessions"
+    )!
+
+    /// Detailed catalog and review rules for contributors who want to inspect
+    /// the work before deciding to take it on.
+    static let localizationGuideURL = URL(
+        string: "\(githubRepositoryURL.absoluteString)/blob/main/docs/localization.md"
+    )!
+
+    static let languageAskSnoozeInterval: TimeInterval = 14 * 86_400
+    static let languageAskSessionsThreshold = 40
+    static let languageAskDaysThreshold: Double = 45
+    static let languageAskMaxImpressionsPerRound = 3
+    static let languageAskPriorityAfterDays: Double = 14
 
     /// The steward job description, linked from the card's "What's involved".
     static let stewardGuideURL = URL(
@@ -146,10 +196,9 @@ final class OnboardingCoordinator: ObservableObject {
     /// Presents the standalone native feedback prompt (from the feedback card).
     @Published var isFeedbackPromptPresented: Bool = false
 
-    /// Set when the user dismisses the feedback card with its ✕. In-memory only —
-    /// hides the card for the rest of this launch without advancing the permanent
-    /// decline lifecycle (only the prompt's explicit "Not now" does that), so an
-    /// accidental ✕ never costs a strike.
+    /// Set after either feedback-card exit so it cannot reappear during this
+    /// launch. "Not now" advances the bounded release-round lifecycle; the
+    /// close button ends the ask permanently.
     @Published var feedbackCardSuppressedThisLaunch: Bool = false
 
     /// Presents the Quota Meter explainer sheet (from the Quota Meter card).
@@ -165,6 +214,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// Hides the contribute card for the rest of this launch. In-memory only;
     /// the persistent decision lives in `UserDefaults.onboardingContributeAskState`.
     @Published var contributeCardSuppressedThisLaunch: Bool = false
+
+    /// Hides the translation card for the rest of this launch. The persistent
+    /// decision lives in `UserDefaults.onboardingLanguageAskState`.
+    @Published var languageCardSuppressedThisLaunch: Bool = false
 
     /// The stewardless agent this user actually runs, or nil when none qualifies.
     ///
@@ -189,6 +242,8 @@ final class OnboardingCoordinator: ObservableObject {
     private let currentMajorMinorProvider: () -> String?
     private let isFreshInstallProvider: () -> Bool
     private let whatsNewAvailableProvider: (String) -> Bool
+    private let preferredLanguagesProvider: () -> [String]
+    private let shippedLocalizationsProvider: () -> [String]
     private let now: () -> Date
     private var hasChecked: Bool = false
     /// One impression per launch, not per render: `.onAppear` fires again every
@@ -196,8 +251,13 @@ final class OnboardingCoordinator: ObservableObject {
     private var didCountStarImpressionThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the What's New card.
     private var didCountWhatsNewImpressionThisLaunch: Bool = false
+    private var didCountQuotaMeterImpressionThisLaunch: Bool = false
+    private var didCountFeedbackImpressionThisLaunch: Bool = false
+    private var didRecordTopSlotCardAppearanceThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the contribute card.
     private var didCountContributeImpressionThisLaunch: Bool = false
+    /// Same one-impression-per-launch rule for the translation card.
+    private var didCountLanguageImpressionThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the steward card.
     private var didCountStewardImpressionThisLaunch: Bool = false
     /// Set when any card's round ended during this launch.
@@ -222,12 +282,16 @@ final class OnboardingCoordinator: ObservableObject {
         currentMajorMinorProvider: @escaping () -> String? = OnboardingContent.currentMajorMinor,
         isFreshInstallProvider: @escaping () -> Bool = OnboardingCoordinator.defaultIsFreshInstall,
         whatsNewAvailableProvider: @escaping (String) -> Bool = { WhatsNewCatalog.hasContent(for: $0) },
+        preferredLanguagesProvider: @escaping () -> [String] = { Locale.preferredLanguages },
+        shippedLocalizationsProvider: @escaping () -> [String] = { Bundle.main.localizations },
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         self.currentMajorMinorProvider = currentMajorMinorProvider
         self.isFreshInstallProvider = isFreshInstallProvider
         self.whatsNewAvailableProvider = whatsNewAvailableProvider
+        self.preferredLanguagesProvider = preferredLanguagesProvider
+        self.shippedLocalizationsProvider = shippedLocalizationsProvider
         self.now = now
     }
 
@@ -256,6 +320,11 @@ final class OnboardingCoordinator: ObservableObject {
         // the bottom of the chain and may wait many launches without rendering.
         if defaults.onboardingContributeAskDueSince == nil, contributeAskTriggerMet() {
             defaults.onboardingContributeAskDueSince = now()
+        }
+
+        refreshLanguageAskTarget()
+        if defaults.onboardingLanguageAskDueSince == nil, languageAskTriggerMet() {
+            defaults.onboardingLanguageAskDueSince = now()
         }
 
         // And for the steward ask. Stamped on the retention gate alone: whether
@@ -403,8 +472,19 @@ final class OnboardingCoordinator: ObservableObject {
 
     // MARK: - Feedback timing
 
-    /// Increments the sessions-opened counter that drives the 10-session trigger.
-    func noteSessionOpened() {
+    /// Counts a distinct session once toward retention gates. Existing installs
+    /// keep their historical count; new activity is deduplicated by a local hash.
+    func noteSessionOpened(id: String) {
+        guard defaults.onboardingSessionsOpenedCount < Self.contributeAskSessionsThreshold else { return }
+        let fingerprint = SHA256.hash(data: Data(id.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        var fingerprints = Set(defaults.onboardingOpenedSessionFingerprints)
+        guard fingerprints.insert(fingerprint).inserted else { return }
+
+        // No card has a sessions threshold above 60, so retaining more hashes
+        // serves no targeting purpose.
+        defaults.onboardingOpenedSessionFingerprints = fingerprints.sorted()
         defaults.onboardingSessionsOpenedCount += 1
     }
 
@@ -431,8 +511,9 @@ final class OnboardingCoordinator: ObservableObject {
     }
 
     /// Whether the feedback card should occupy the session-list top slot.
-    /// What's New always wins the slot, and a ✕ dismissal hides it for this launch.
+    /// What's New always wins the slot, and "Not now" ends this release's round.
     func shouldShowFeedbackCard() -> Bool {
+        if languageAskOutranksFeedbackCard() { return false }
         if stewardAskOutranksFeedbackCard() { return false }
         if contributeAskOutranksFeedbackCard() { return false }
         return whatsNewMajorMinor == nil
@@ -441,11 +522,34 @@ final class OnboardingCoordinator: ObservableObject {
             && isFeedbackAskDue()
     }
 
-    /// Soft-dismiss the feedback card (its ✕). Hides it for this launch only; the
-    /// permanent decline lifecycle is untouched, so it can return next launch.
+    /// Silence is the first decline. Three ignored launches end this release's
+    /// round exactly as pressing "Not now" in the prompt would.
+    func noteFeedbackCardShown() {
+        guard !didCountFeedbackImpressionThisLaunch else { return }
+        guard let current = currentMajorMinorProvider() else { return }
+        didCountFeedbackImpressionThisLaunch = true
+
+        if defaults.onboardingFeedbackAskImpressionsVersion != current {
+            defaults.onboardingFeedbackAskImpressionsVersion = current
+            defaults.onboardingFeedbackAskImpressions = 0
+        }
+        defaults.onboardingFeedbackAskImpressions += 1
+        if defaults.onboardingFeedbackAskImpressions >= Self.feedbackAskMaxImpressionsPerRound {
+            endFeedbackAskRound()
+        }
+    }
+
+    /// "Not now" on the feedback card. Ends this release's round, then allows
+    /// one final round after a major/minor bump.
     func suppressFeedbackCardThisLaunch() {
+        recordFeedbackDeclined()
+    }
+
+    func dismissFeedbackAskForever() {
         feedbackCardSuppressedThisLaunch = true
         didConsumeTopSlotAskThisLaunch = true
+        defaults.onboardingFeedbackAskState = .dismissedForever
+        isFeedbackPromptPresented = false
     }
 
     // MARK: - Quota Meter activation
@@ -488,12 +592,34 @@ final class OnboardingCoordinator: ObservableObject {
         }
     }
 
-    /// Soft-dismiss the card (its ✕). Costs a strike, since unlike the feedback
-    /// card there is no second surface where a real decline is recorded.
+    /// Caps an ignored Quota Meter invitation to three launches per release.
+    /// Its second release-round ends the campaign permanently.
+    func noteQuotaMeterCardShown() {
+        guard !didCountQuotaMeterImpressionThisLaunch else { return }
+        guard let current = currentMajorMinorProvider() else { return }
+        didCountQuotaMeterImpressionThisLaunch = true
+
+        if defaults.onboardingQuotaMeterAskImpressionsVersion != current {
+            defaults.onboardingQuotaMeterAskImpressionsVersion = current
+            defaults.onboardingQuotaMeterAskImpressions = 0
+        }
+        defaults.onboardingQuotaMeterAskImpressions += 1
+        if defaults.onboardingQuotaMeterAskImpressions >= Self.quotaMeterAskMaxImpressionsPerRound {
+            endQuotaMeterAskRound()
+        }
+    }
+
+    /// "Not now" ends this release's round. The close button is a separate,
+    /// permanent exit.
     func suppressQuotaMeterCardThisLaunch() {
+        recordQuotaMeterDeclined()
+    }
+
+    func dismissQuotaMeterAskForever() {
         quotaMeterCardSuppressedThisLaunch = true
         didConsumeTopSlotAskThisLaunch = true
-        recordQuotaMeterDeclined()
+        defaults.onboardingQuotaMeterAskState = .dismissedForever
+        isQuotaMeterPromoPresented = false
     }
 
     /// The user opened the Quota Meter — never ask again. Also spends the
@@ -507,6 +633,17 @@ final class OnboardingCoordinator: ObservableObject {
 
     /// Dismissed: ask once more after the next major.minor bump, then never again.
     func recordQuotaMeterDeclined() {
+        quotaMeterCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endQuotaMeterAskRound()
+        isQuotaMeterPromoPresented = false
+    }
+
+    /// Advances at most once in a launch. The third impression ends the round
+    /// while leaving the card readable; a later "Not now" on that same rendered
+    /// card consumes the slot without accidentally spending the next round too.
+    private func endQuotaMeterAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
         switch defaults.onboardingQuotaMeterAskState {
         case .notAsked:
             defaults.onboardingQuotaMeterAskState = .dismissedOnce
@@ -514,8 +651,9 @@ final class OnboardingCoordinator: ObservableObject {
         case .dismissedOnce:
             defaults.onboardingQuotaMeterAskState = .dismissedForever
         case .activated, .dismissedForever:
-            break
+            return
         }
+        didEndAnAskRoundThisLaunch = true
     }
 
     /// Records that the cockpit has been seen, retiring the card's audience test.
@@ -533,8 +671,9 @@ final class OnboardingCoordinator: ObservableObject {
     /// Slot order is What's New > Quota Meter > star > feedback. The star sits
     /// above feedback because it terminates: every path out of it — starred,
     /// dismissed, or a second "Maybe later" — is permanent, so it can occupy the
-    /// slot at most twice. The feedback card's ✕ is soft and returns every
-    /// launch, so putting it first would starve the star ask indefinitely. Its
+    /// slot at most twice. Feedback has its own bounded release-round lifecycle;
+    /// the star still goes first because its higher retention bar asks the more
+    /// established audience. Its
     /// higher retention bar also means feedback (10 sessions or 14 days) has
     /// normally had its turn long before this comes due.
     ///
@@ -598,6 +737,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// The one transition both "Maybe later" and silence take: first round buys
     /// two weeks and a retry, second round is a no.
     private func endStarAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
         switch defaults.onboardingStarAskState {
         case .notAsked:
             defaults.onboardingStarAskState = .snoozed
@@ -627,12 +767,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the star ask has waited long enough to take the slot from the
     /// Quota Meter card.
     ///
-    /// Fixed priority alone is not enough. The Quota Meter card only leaves the
-    /// slot when the user activates it or dismisses it — someone who does
-    /// neither, and simply ignores it, holds the slot on every launch
-    /// indefinitely. The star ask sits below it and would never be seen. After
-    /// two weeks of waiting it goes first; it then spends itself within two
-    /// rounds and hands the slot straight back, so this cannot deadlock the
+    /// Fixed priority alone is not enough: even with the Quota Meter's bounded
+    /// release rounds, the star ask can repeatedly lose the slot while eligible.
+    /// After two weeks of waiting it goes first; it then spends itself within
+    /// two rounds and hands the slot straight back, so this cannot deadlock the
     /// other direction.
     func starAskOutranksQuotaMeterCard() -> Bool {
         guard let dueSince = defaults.onboardingStarAskDueSince else { return false }
@@ -647,6 +785,208 @@ final class OnboardingCoordinator: ObservableObject {
         guard let first = defaults.onboardingFirstLaunchDate else { return false }
         let days = now().timeIntervalSince(first) / 86_400
         return days >= Self.starAskDaysThreshold
+    }
+
+    // MARK: - Contribute a translation
+
+    /// Whether the translation invitation should occupy the session-list slot.
+    /// It is aimed only at an established user whose first preferred macOS
+    /// language is not covered by a localization in the current app bundle.
+    func shouldShowLanguageCard() -> Bool {
+        guard whatsNewMajorMinor == nil else { return false }
+        guard !didConsumeTopSlotAskThisLaunch else { return false }
+        guard !languageCardSuppressedThisLaunch else { return false }
+        guard !didPresentFreshInstallThisLaunch else { return false }
+        guard hasUnsupportedPreferredLanguage else { return false }
+
+        switch defaults.onboardingLanguageAskState {
+        case .opened, .dismissedForever:
+            return false
+        case .notAsked:
+            break
+        case .snoozed:
+            if let until = defaults.onboardingLanguageAskSnoozedUntil, now() < until {
+                return false
+            }
+        }
+
+        return languageAskTriggerMet()
+    }
+
+    /// The user opened either translation page — terminal, never ask again.
+    func recordLanguageContributionOpened() {
+        defaults.onboardingLanguageAskState = .opened
+        languageCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+    }
+
+    func snoozeLanguageAsk() {
+        languageCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endLanguageAskRound()
+    }
+
+    func noteLanguageCardShown() {
+        guard !didCountLanguageImpressionThisLaunch else { return }
+        guard !didEndAnAskRoundThisLaunch else { return }
+        didCountLanguageImpressionThisLaunch = true
+
+        let seen = defaults.onboardingLanguageAskImpressions + 1
+        defaults.onboardingLanguageAskImpressions = seen
+        guard seen >= Self.languageAskMaxImpressionsPerRound else { return }
+        endLanguageAskRound()
+    }
+
+    private func endLanguageAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
+        switch defaults.onboardingLanguageAskState {
+        case .notAsked:
+            defaults.onboardingLanguageAskState = .snoozed
+            defaults.onboardingLanguageAskSnoozedUntil =
+                now().addingTimeInterval(Self.languageAskSnoozeInterval)
+            defaults.onboardingLanguageAskImpressions = 0
+        case .snoozed:
+            defaults.onboardingLanguageAskState = .dismissedForever
+        case .opened, .dismissedForever:
+            return
+        }
+        didEndAnAskRoundThisLaunch = true
+    }
+
+    func dismissLanguageAskForever() {
+        languageCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+
+        guard defaults.onboardingLanguageAskState != .opened else { return }
+        defaults.onboardingLanguageAskState = .dismissedForever
+    }
+
+    func languageAskOutranksFeedbackCard() -> Bool {
+        guard let dueSince = defaults.onboardingLanguageAskDueSince else { return false }
+        guard now().timeIntervalSince(dueSince) / 86_400 >= Self.languageAskPriorityAfterDays else { return false }
+        return shouldShowLanguageCard()
+    }
+
+    /// Earliest of 40 opened sessions or 45 days installed, and only for a
+    /// preferred language that the shipped catalogs do not currently cover.
+    private func languageAskTriggerMet() -> Bool {
+        guard hasUnsupportedPreferredLanguage else { return false }
+        if defaults.onboardingSessionsOpenedCount >= Self.languageAskSessionsThreshold { return true }
+        guard let first = defaults.onboardingFirstLaunchDate else { return false }
+        return now().timeIntervalSince(first) / 86_400 >= Self.languageAskDaysThreshold
+    }
+
+    private var hasUnsupportedPreferredLanguage: Bool {
+        unsupportedPreferredLanguageIdentifier != nil
+    }
+
+    private var unsupportedPreferredLanguageIdentifier: String? {
+        guard let preferred = preferredLanguagesProvider().first else { return nil }
+        return Self.isSupportedLanguageIdentifier(
+            preferred,
+            shippedLocalizations: shippedLocalizationsProvider()
+        ) ? nil : Self.normalizedLanguageIdentifier(preferred)
+    }
+
+    private func refreshLanguageAskTarget() {
+        let target = unsupportedPreferredLanguageIdentifier
+        guard defaults.onboardingLanguageAskTargetIdentifier != target else { return }
+        defaults.onboardingLanguageAskTargetIdentifier = target
+        defaults.onboardingLanguageAskDueSince = nil
+        defaults.onboardingLanguageAskImpressions = 0
+    }
+
+    /// Locale coverage comes from the bundle being run, so adding a catalog
+    /// automatically retires the ask for that language. Language variants share
+    /// coverage except Chinese, where Simplified and Traditional are distinct.
+    static func isSupportedLanguageIdentifier(
+        _ identifier: String,
+        shippedLocalizations: [String]
+    ) -> Bool {
+        let preferred = normalizedLanguageIdentifier(identifier)
+        return shippedLocalizations.contains { localization in
+            let shipped = normalizedLanguageIdentifier(localization)
+            guard shipped != "base" else { return false }
+            let preferredLanguage = preferred.split(separator: "-").first
+            let shippedLanguage = shipped.split(separator: "-").first
+            guard preferredLanguage == shippedLanguage else { return false }
+            guard preferredLanguage == "zh" else { return true }
+
+            let preferredScript = chineseScript(for: preferred)
+            let shippedScript = chineseScript(for: shipped)
+            return preferredScript == nil || shippedScript == nil || preferredScript == shippedScript
+        }
+    }
+
+    private static func normalizedLanguageIdentifier(_ identifier: String) -> String {
+        identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+    }
+
+    private static func chineseScript(for identifier: String) -> String? {
+        let parts = Set(identifier.split(separator: "-").map(String.init))
+        // An explicit script is authoritative even when paired with an unusual
+        // region, for example zh-Hans-TW. Infer from region only when absent.
+        if parts.contains("hant") { return "hant" }
+        if parts.contains("hans") { return "hans" }
+        if !parts.isDisjoint(with: ["tw", "hk", "mo"]) { return "hant" }
+        if !parts.isDisjoint(with: ["cn", "sg", "my"]) { return "hans" }
+        return nil
+    }
+
+    /// Central priority policy. The view calls this once after session inventory
+    /// is ready, then keeps the answer fixed for the remainder of the launch.
+    func selectTopSlotCard(
+        hasCodexOrClaudeSessions: Bool,
+        isQuotaMeterActive: Bool
+    ) -> TopSlotCardSelection? {
+        let candidate: TopSlotCardSelection?
+        if let version = whatsNewMajorMinor {
+            candidate = .whatsNew(version)
+        } else if shouldShowQuotaMeterCard(
+            hasCodexOrClaudeSessions: hasCodexOrClaudeSessions,
+            isQuotaMeterActive: isQuotaMeterActive
+        ) {
+            candidate = .quotaMeter
+        } else if shouldShowStarCard() {
+            candidate = .star
+        } else if shouldShowFeedbackCard() {
+            candidate = .feedback
+        } else if shouldShowLanguageCard() {
+            candidate = .language
+        } else if let target = stewardAskTarget, shouldShowStewardCard() {
+            candidate = .steward(target)
+        } else if shouldShowContributeCard() {
+            candidate = .contribute
+        } else {
+            candidate = nil
+        }
+
+        guard let candidate, canShowAfterPreviousTopSlotCard(candidate) else { return nil }
+        return candidate
+    }
+
+    /// What's New can be selected before session indexing completes, but still
+    /// observes the same inter-card quiet period as every other card.
+    func selectWhatsNewTopSlotCard() -> TopSlotCardSelection? {
+        guard let version = whatsNewMajorMinor else { return nil }
+        let candidate = TopSlotCardSelection.whatsNew(version)
+        return canShowAfterPreviousTopSlotCard(candidate) ? candidate : nil
+    }
+
+    func noteTopSlotCardShown(_ card: TopSlotCardSelection) {
+        guard !didRecordTopSlotCardAppearanceThisLaunch else { return }
+        didRecordTopSlotCardAppearanceThisLaunch = true
+        defaults.onboardingLastTopSlotCardIdentifier = card.persistenceIdentifier
+        defaults.onboardingLastTopSlotCardShownAt = now()
+    }
+
+    private func canShowAfterPreviousTopSlotCard(_ card: TopSlotCardSelection) -> Bool {
+        guard let previous = defaults.onboardingLastTopSlotCardIdentifier,
+              previous != card.persistenceIdentifier,
+              let shownAt = defaults.onboardingLastTopSlotCardShownAt else {
+            return true
+        }
+        return now().timeIntervalSince(shownAt) >= Self.topSlotInterCardQuietPeriod
     }
 
     // MARK: - Contribute an agent source
@@ -720,6 +1060,7 @@ final class OnboardingCoordinator: ObservableObject {
 
     /// One round only: the first buys two weeks and a retry, the second is a no.
     private func endContributeAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
         switch defaults.onboardingContributeAskState {
         case .notAsked:
             defaults.onboardingContributeAskState = .snoozed
@@ -750,12 +1091,8 @@ final class OnboardingCoordinator: ObservableObject {
     /// the feedback card.
     ///
     /// Fixed priority alone is not enough, for the same reason the star ask ages
-    /// past the Quota Meter card. The feedback card's ✕ is soft: it returns every
-    /// launch, and a user who neither submits feedback nor declines it in the
-    /// prompt holds the slot indefinitely, so the contribute ask below it would
-    /// never be seen. After two weeks of waiting it goes first; it then spends
-    /// itself within two rounds and hands the slot straight back, so this cannot
-    /// deadlock the other direction.
+    /// past the feedback card. After two weeks of waiting it goes first; it then
+    /// spends itself within two rounds and hands the slot straight back.
     ///
     /// This outranks the feedback card only — never What's New, the Quota Meter
     /// card, or the star ask, all of which still come first unconditionally.
@@ -765,7 +1102,7 @@ final class OnboardingCoordinator: ObservableObject {
         return shouldShowContributeCard()
     }
 
-    /// Retention test for the contribute ask: earliest of 25 sessions opened or
+    /// Retention test for the contribute ask: earliest of 60 sessions opened or
     /// 45 days since first launch.
     private func contributeAskTriggerMet() -> Bool {
         if defaults.onboardingSessionsOpenedCount >= Self.contributeAskSessionsThreshold { return true }
@@ -851,6 +1188,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// Spends one round: quiet until the next major.minor bump, and permanently
     /// quiet once `stewardAskMaxRounds` of them have gone unanswered.
     private func endStewardAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
         switch defaults.onboardingStewardAskState {
         case .signedUp, .dismissedForever:
             return
@@ -886,11 +1224,8 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the steward ask has waited long enough to take the slot from the
     /// feedback card.
     ///
-    /// Same problem the contribute ask has, and the same fix: the feedback card's
-    /// ✕ is soft and returns every launch, so a user who neither submits feedback
-    /// nor declines it in the prompt would hold this off forever. After two weeks
-    /// it goes first, and it spends itself within three rounds, so this cannot
-    /// deadlock the other direction.
+    /// Same aging rule as the contribute ask: after two weeks it goes first, and
+    /// it spends itself within three rounds.
     ///
     /// This outranks the feedback card only — What's New, the Quota Meter card,
     /// and the star ask all still come first unconditionally.
@@ -919,11 +1254,23 @@ final class OnboardingCoordinator: ObservableObject {
 
     func recordFeedbackSubmitted() {
         defaults.onboardingFeedbackAskState = .completed
+        feedbackCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
         isFeedbackPromptPresented = false
     }
 
     /// "Not now": ask once more after the next major.minor bump, then never again.
     func recordFeedbackDeclined() {
+        feedbackCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endFeedbackAskRound()
+        isFeedbackPromptPresented = false
+    }
+
+    /// Advances at most once in a launch. This keeps an explicit decline after
+    /// the third impression from consuming both release rounds at once.
+    private func endFeedbackAskRound() {
+        guard !didEndAnAskRoundThisLaunch else { return }
         switch defaults.onboardingFeedbackAskState {
         case .notAsked:
             defaults.onboardingFeedbackAskState = .declinedOnce
@@ -931,9 +1278,9 @@ final class OnboardingCoordinator: ObservableObject {
         case .declinedOnce:
             defaults.onboardingFeedbackAskState = .dismissedForever
         case .completed, .dismissedForever:
-            break
+            return
         }
-        isFeedbackPromptPresented = false
+        didEndAnAskRoundThisLaunch = true
     }
 }
 

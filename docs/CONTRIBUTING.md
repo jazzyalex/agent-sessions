@@ -42,6 +42,29 @@ verifies the local storage root, SQLite schema/version, CLI-versus-IDE source ma
 behavior, and a synthetic or fully sanitized session fixture. Do not implement from public
 documentation alone.
 
+## Translate Agent Sessions
+
+Agent Sessions currently ships in English and Simplified Chinese. You do not need to know
+Swift to help add another language, but every translation needs a fluent human reviewer who
+will own the final wording and check it in the app.
+
+To propose a language, [open a GitHub issue](https://github.com/jazzyalex/agent-sessions/issues/new)
+naming the locale and whether you can translate, review, or do both. Before opening a pull request, read the
+[localization conventions](localization.md). A complete contribution translates both
+`AgentSessions/Resources/Localizable.xcstrings` and
+`AgentSessions/Resources/InfoPlist.xcstrings`; partial locale imports cannot merge because the
+catalog validator requires every key to be reviewed and marked translated.
+
+The same pull request must add the locale to the Xcode project's known regions and to
+`PLANNED_TRANSLATION_LOCALES` in `scripts/validate_localization_catalogs.py`, then update the
+validator's reviewed key baseline. The in-app translation invitation reads supported locales
+from the built bundle, so it stops targeting that language automatically; do not add a separate
+hardcoded locale check in Swift.
+
+The final review includes a catalog validation, an app build, and visual checks in the new
+language, English, Simplified Chinese, and Double-Length Pseudolanguage. Machine translation
+can prepare a draft, but it cannot replace the fluent reviewer.
+
 ## Become a steward
 
 Adding an agent is one job. Keeping it working is another, and it is the one that decides

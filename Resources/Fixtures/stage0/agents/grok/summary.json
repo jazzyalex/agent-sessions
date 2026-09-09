@@ -1,29 +1,32 @@
 {
-  "info": {
-    "id": "019f6851-7ec4-7ef0-97d3-03f3eee38755",
-    "cwd": "/tmp/as-agent-lab/grok/project"
-  },
-  "session_summary": "Read hello.py and summarize what it prints",
-  "created_at": "2026-07-31T10:13:27.574131Z",
-  "updated_at": "2026-07-31T10:15:02.118940Z",
-  "num_messages": 42,
-  "num_chat_messages": 11,
-  "current_model_id": "grok-4.5",
-  "next_trace_turn": 2,
+  "agent_id": "[trimmed for fixture]",
+  "agent_name": "grok",
+  "attempt_id": "[trimmed for fixture]",
   "chat_format_version": 1,
-  "git_root_dir": "/tmp/as-agent-lab/grok/project/",
+  "created_at": "2026-07-31T10:13:27.574131Z",
+  "current_model_id": "grok-4.5",
+  "generated_title": "Read hello.py and summarize what it prints",
   "git_remotes": [
     "git@github.com:example-user/example.git"
   ],
-  "head_commit": "0000000000000000000000000000000000000000",
-  "head_branch": "main",
-  "request_id": "00000000-0000-4000-8000-000000000000",
+  "git_root_dir": "/tmp/as-agent-lab/grok/project/",
   "grok_home": "/Users/agent/.grok",
+  "head_branch": "main",
+  "head_commit": "0000000000000000000000000000000000000000",
+  "info": {
+    "cwd": "/tmp/as-agent-lab/grok/project",
+    "id": "019f6851-7ec4-7ef0-97d3-03f3eee38755"
+  },
   "last_active_at": "2026-07-31T10:15:02.118940Z",
-  "generated_title": "Read hello.py and summarize what it prints",
-  "agent_name": "grok",
-  "sandbox_profile": "off",
-  "reasoning_effort": "high",
+  "last_recap": "[trimmed for fixture]",
   "last_turn_summary": "Read hello.py and reported its printed output.",
-  "last_turn_summary_prompt_id": "00000000-0000-4000-8000-000000000000"
+  "last_turn_summary_prompt_id": "00000000-0000-4000-8000-000000000000",
+  "next_trace_turn": 2,
+  "num_chat_messages": 11,
+  "num_messages": 42,
+  "reasoning_effort": "high",
+  "request_id": "00000000-0000-4000-8000-000000000000",
+  "sandbox_profile": "off",
+  "session_summary": "Read hello.py and summarize what it prints",
+  "updated_at": "2026-07-31T10:15:02.118940Z"
 }

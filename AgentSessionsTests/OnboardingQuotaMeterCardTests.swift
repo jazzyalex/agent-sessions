@@ -69,7 +69,7 @@ final class OnboardingQuotaMeterCardTests: XCTestCase {
     // MARK: - Lifecycle
 
     @MainActor
-    func testDismissCostsAStrikeAndHidesForTheLaunch() {
+    func testNotNowEndsTheRoundAndHidesForTheLaunch() {
         let defaults = makeDefaults("QM.dismissOnce")
         let coordinator = makeCoordinator(defaults: defaults)
 
@@ -118,6 +118,44 @@ final class OnboardingQuotaMeterCardTests: XCTestCase {
         XCTAssertFalse(shows(makeCoordinator(defaults: defaults, version: "5.0")))
     }
 
+    @MainActor
+    func testThreeIgnoredCardsEndTheReleaseRound() {
+        let defaults = makeDefaults("QM.impressions")
+        for _ in 0..<OnboardingCoordinator.quotaMeterAskMaxImpressionsPerRound {
+            makeCoordinator(defaults: defaults).noteQuotaMeterCardShown()
+        }
+
+        XCTAssertEqual(defaults.onboardingQuotaMeterAskState, .dismissedOnce)
+        XCTAssertEqual(defaults.onboardingQuotaMeterDeclinedAtMajorMinor, "4.3")
+        XCTAssertFalse(shows(makeCoordinator(defaults: defaults)))
+        XCTAssertTrue(shows(makeCoordinator(defaults: defaults, version: "4.4")))
+    }
+
+    @MainActor
+    func testThirdImpressionThenNotNowDoesNotSpendTheRetryRound() {
+        let defaults = makeDefaults("QM.thirdThenNotNow")
+        for _ in 0..<(OnboardingCoordinator.quotaMeterAskMaxImpressionsPerRound - 1) {
+            makeCoordinator(defaults: defaults).noteQuotaMeterCardShown()
+        }
+        let thirdLaunch = makeCoordinator(defaults: defaults)
+        thirdLaunch.noteQuotaMeterCardShown()
+        XCTAssertEqual(defaults.onboardingQuotaMeterAskState, .dismissedOnce)
+
+        thirdLaunch.recordQuotaMeterDeclined()
+
+        XCTAssertTrue(thirdLaunch.didConsumeTopSlotAskThisLaunch)
+        XCTAssertEqual(defaults.onboardingQuotaMeterAskState, .dismissedOnce)
+        XCTAssertTrue(shows(makeCoordinator(defaults: defaults, version: "4.4")))
+    }
+
+    @MainActor
+    func testPermanentDismissDoesNotWaitForASecondRelease() {
+        let defaults = makeDefaults("QM.explicitForever")
+        makeCoordinator(defaults: defaults).dismissQuotaMeterAskForever()
+        XCTAssertEqual(defaults.onboardingQuotaMeterAskState, .dismissedForever)
+        XCTAssertFalse(shows(makeCoordinator(defaults: defaults, version: "9.0")))
+    }
+
     // MARK: - One ask per launch
 
     /// The slot's if/else chain orders the queue but does not limit the number
@@ -137,7 +175,7 @@ final class OnboardingQuotaMeterCardTests: XCTestCase {
         coordinator.suppressQuotaMeterCardThisLaunch()
 
         XCTAssertFalse(shows(coordinator))
-        XCTAssertFalse(coordinator.shouldShowFeedbackCard(), "A ✕ must not immediately produce a second ask.")
+        XCTAssertFalse(coordinator.shouldShowFeedbackCard(), "Not now must not immediately produce a second ask.")
     }
 
     /// Same hazard from the other direction: What's New wins the slot, and

@@ -336,6 +336,38 @@ def test_run_prebump_uses_registered_driver_and_writes_report(tmp_path, monkeypa
     assert fake.last_env["HOME"] != os.environ.get("HOME", "")
 
 
+def test_run_prebump_preserves_sandbox_when_fresh_schema_drifts(tmp_path, monkeypatch):
+    import agent_watch
+    import agent_watch_prebump_drivers as drv_mod
+
+    class _DriftDriver(_FakeGoodDriver):
+        def run(self, sandbox, env, prompt, timeout):
+            result = super().run(sandbox, env, prompt, timeout)
+            result.session_path.write_text(
+                '{"type":"session_meta","id":"x","brand_new_key":true}\n'
+            )
+            return result
+
+    kept = []
+    monkeypatch.setitem(drv_mod.DRIVERS, "fake", _DriftDriver())
+    monkeypatch.setattr(
+        drv_mod,
+        "teardown_sandbox",
+        lambda sandbox, keep=False: kept.append((sandbox, keep)),
+    )
+    cfg = _make_codex_cfg(tmp_path)
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.chdir(REPO)
+
+    rc = agent_watch.main([
+        "--mode", "prebump", "--config", str(cfg_path), "--agent", "codex",
+    ])
+
+    assert rc == 2
+    assert kept[-1][1] is True
+
+
 def test_run_prebump_timeout_cli_overrides_config(tmp_path, monkeypatch):
     import agent_watch
     import agent_watch_prebump_drivers as drv_mod

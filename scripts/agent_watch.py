@@ -36,7 +36,11 @@ DEFAULT_TIMEOUT_SECONDS = 120
 
 
 def _now_utc_slug() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    # Seconds alone let parallel agent-specific runs choose the same directory and
+    # overwrite report.json. Microseconds plus PID keep artifacts distinct across
+    # both rapid calls in one process and concurrent checker processes.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%fZ")
+    return f"{stamp}-p{os.getpid()}"
 
 
 def _read_json(path: Path) -> Any:
@@ -910,7 +914,10 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # drift. Third instance of this same trap in one sweep, after `artifacts` here and
     # copilot's `promptCacheBreakState.models` — and note the fixture guard test only
     # matches UUID-shaped keys, so a slug-keyed map like this one slips past it.
-    "claude": {"input", "toolUseResult", "headers", "mcpMeta", "artifacts", "modelUsage"},
+    "claude": {
+        "input", "input_schema", "toolUseResult", "headers", "mcpMeta", "artifacts",
+        "modelUsage",
+    },
     # Grok's transcript nests the parts that matter (content blocks, tool_calls,
     # reasoning summaries, backend_tool_call kinds), so it is worth walking. The one
     # exclusion is `arguments` — a tool's own parameter object, where every new tool
@@ -2666,7 +2673,14 @@ def _latest_failed_prebump_evidence(
         if not isinstance(results, dict):
             continue
         entry = results.get(agent_name)
-        if not isinstance(entry, dict) or entry.get("ok") is True:
+        if not isinstance(entry, dict):
+            continue
+        evidence = entry.get("evidence")
+        schema_mismatch = (
+            isinstance(evidence, dict)
+            and evidence.get("fresh_session_matches_baseline") is False
+        )
+        if entry.get("ok") is True and not schema_mismatch:
             continue
         candidates.append((report_mtime, report_path, entry))
 
@@ -2674,15 +2688,26 @@ def _latest_failed_prebump_evidence(
         return None
 
     _, report_path, entry = max(candidates, key=lambda item: item[0])
-    return {
+    entry_evidence = entry.get("evidence")
+    schema_mismatch = (
+        isinstance(entry_evidence, dict)
+        and entry_evidence.get("fresh_session_matches_baseline") is False
+    )
+    failure_class = "schema_drift" if schema_mismatch else _classify_prebump_failure(entry)
+    result = {
         "source": "latest_failed_prebump_report",
         "report": _safe_relpath(report_path),
-        "failure_class": _classify_prebump_failure(entry),
+        "failure_class": failure_class,
         "error": entry.get("error"),
         "session_path": entry.get("session_path"),
         "stdout_file": entry.get("stdout_file"),
         "stderr_file": entry.get("stderr_file"),
     }
+    if schema_mismatch:
+        schema_diff = entry_evidence.get("schema_diff")
+        if isinstance(schema_diff, dict):
+            result["schema_diff"] = schema_diff
+    return result
 
 
 def _format_summary_line(
@@ -2823,10 +2848,14 @@ def _build_compatibility_assessment(
         and (fresh_evidence_source == "latest_prebump_report" or not cli_binary_unresolved)
     )
     latest_real_session_evidence = fresh_evidence_source == "latest_prebump_report"
-    unknown_schema_drift = (
+    selected_schema_drift = (
         schema_matches_baseline is False
         and isinstance(schema_diff, dict)
         and schema_diff.get("unknown_only_is_empty") is False
+    )
+    weekly_schema_drift = (
+        isinstance(weekly_schema_diff, dict)
+        and weekly_schema_diff.get("unknown_only_is_empty") is False
     )
     # A sample that exercised almost none of the known format proves nothing. This
     # is not hypothetical: a "Say hello" prebump session landed in the real store,
@@ -2838,6 +2867,15 @@ def _build_compatibility_assessment(
     # agent that also had a rich, clean weekly union: on 2026-08-13 codex reported
     # blocked_thin_sample off a 20-event prebump while its weekly union carried 2808
     # clean events. Adding evidence must never make the verdict worse.
+    failed_prebump_schema_drift = (
+        isinstance(failed_prebump_evidence, dict)
+        and failed_prebump_evidence.get("failure_class") == "schema_drift"
+        and isinstance(failed_prebump_evidence.get("schema_diff"), dict)
+        and failed_prebump_evidence["schema_diff"].get("unknown_only_is_empty") is False
+    )
+    unknown_schema_drift = (
+        selected_schema_drift or weekly_schema_drift or failed_prebump_schema_drift
+    )
     thin_sample = all(
         _sample_is_thin(d) for d in (schema_diff, weekly_schema_diff) if isinstance(d, dict)
     ) and isinstance(schema_diff, dict) and not unknown_schema_drift
@@ -3542,7 +3580,13 @@ def _run_prebump(
             auth_warnings=auth_warnings,
         )
         entries.append(entry)
-        drv_mod.teardown_sandbox(sandbox, keep=(args.keep_sandbox or not result.ok))
+        # A successful CLI invocation can still produce schema drift. Preserve that
+        # sandbox so the report's session_path remains inspectable; otherwise the
+        # most important prebump evidence is deleted immediately after we record it.
+        drv_mod.teardown_sandbox(
+            sandbox,
+            keep=(args.keep_sandbox or not result.ok or fresh_matches is False),
+        )
 
     report = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

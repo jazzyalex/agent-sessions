@@ -137,6 +137,28 @@ def check_relative_links(excludes):
     return problems
 
 
+def check_marketing_contract():
+    """Keep the two public entry points aligned on source count and current media."""
+    problems = []
+    readme = open(os.path.join(REPO_ROOT, "README.md"), encoding="utf-8").read()
+    homepage = open(os.path.join(DOCS, "index.html"), encoding="utf-8").read()
+
+    shared_phrase = "12 other coding agents"
+    for name, contents in (("README.md", readme), ("docs/index.html", homepage)):
+        if shared_phrase not in contents:
+            problems.append("%s must use the shared 15-source promise: %r." % (name, shared_phrase))
+
+    source_rows = re.findall(
+        r'<tr(?! class="addrow")[^>]*><td class="name">', homepage
+    )
+    if len(source_rows) != 15:
+        problems.append("docs/index.html support table has %d source rows; expected 15." % len(source_rows))
+
+    if "quota-meter-runway-rate-small.gif" in readme:
+        problems.append("README.md references the retired quota-meter runway GIF.")
+    return problems
+
+
 def main():
     excludes = set(parse_excludes(CONFIG))
 
@@ -168,6 +190,7 @@ def main():
             )
 
     problems += check_relative_links(excludes)
+    problems += check_marketing_contract()
 
     if problems:
         for problem in problems:

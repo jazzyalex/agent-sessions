@@ -167,6 +167,7 @@ final class OnboardingStewardCardTests: XCTestCase {
         let coordinator = makeCoordinator(defaults: defaults)
         coordinator.dismissStewardAskForever()
         XCTAssertEqual(defaults.onboardingContributeAskState, .notAsked)
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.contributeAskSessionsThreshold
 
         // Not on this launch — one ask per launch — but on the next one.
         XCTAssertFalse(coordinator.shouldShowContributeCard())
@@ -188,6 +189,7 @@ final class OnboardingStewardCardTests: XCTestCase {
 
         let nextLaunch = makeCoordinator(defaults: defaults, target: nil)
         defaults.onboardingFeedbackAskState = .completed
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.contributeAskSessionsThreshold
         XCTAssertTrue(nextLaunch.shouldShowContributeCard())
     }
 
@@ -217,8 +219,8 @@ final class OnboardingStewardCardTests: XCTestCase {
         XCTAssertTrue(coordinator.shouldShowFeedbackCard())
     }
 
-    /// The feedback card's ✕ is soft and returns every launch, so without aging a
-    /// user who never answers it would hold this off forever.
+    /// Aging remains a deterministic priority rule even though feedback silence
+    /// is now capped independently.
     @MainActor
     func testStewardTakesTheSlotAfterWaitingTwoWeeks() {
         let defaults = makeDefaults("Steward.aged")
@@ -335,6 +337,22 @@ final class OnboardingStewardCardTests: XCTestCase {
 
         XCTAssertEqual(defaults.onboardingStewardAskState, .askedThisRelease)
         XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowStewardCard())
+    }
+
+    @MainActor
+    func testThirdImpressionThenGuideDoesNotSpendTheNextReleaseRound() {
+        let defaults = makeDefaults("Steward.thirdImpressionThenGuide")
+        markEligible(defaults)
+        defaults.onboardingStewardAskImpressions =
+            OnboardingCoordinator.stewardAskMaxImpressionsPerRound - 1
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        coordinator.noteStewardCardShown()
+        coordinator.recordStewardGuideOpened()
+
+        XCTAssertEqual(defaults.onboardingStewardAskState, .askedThisRelease)
+        XCTAssertEqual(defaults.onboardingStewardAskRoundsSpent, 1)
+        XCTAssertEqual(defaults.onboardingStewardAskAskedAtMajorMinor, "5.0")
     }
 
     /// The card re-renders many times per launch; only the first counts.

@@ -66,6 +66,10 @@ TARGET_FIXTURE = {
     "qwen": "qwen/system_telemetry.jsonl",
 }
 
+SIDECAR_FIXTURE = {
+    "grok": "grok/summary.json",
+}
+
 # agent name -> its section in agent-support-matrix.yml. IMPORTED, never re-declared:
 # this used to be a third private copy of the same map, and copies drift. grok was
 # missing here on 2026-08-13 and qwen on 2026-08-17, and in both cases _baseline_paths
@@ -152,6 +156,18 @@ def _gaps(observed: dict[str, list[str]], baseline: dict[str, list[str]]) -> set
     return missing
 
 
+def _merge_missing_structure(existing, observed):
+    """Add missing dict structure without replacing curated fixture values."""
+    if not isinstance(existing, dict) or not isinstance(observed, dict):
+        return existing
+    for key, value in observed.items():
+        if key not in existing:
+            existing[key] = value
+        elif isinstance(existing[key], dict) and isinstance(value, dict):
+            _merge_missing_structure(existing[key], value)
+    return existing
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -201,6 +217,43 @@ def main(argv: list[str]) -> int:
     tmp = Path(probe_dir) / "probe.jsonl"
     harvested: list[dict] = []
     remaining = set(missing)
+
+    # Grok's schema includes summary.json beside chat_history.jsonl. The old emitter
+    # detected sidecar gaps but only harvested transcript lines, so it could never
+    # close those gaps and exited 1 after partially changing the fixture.
+    if agent == "grok" and any(bucket.startswith("summary") for bucket, _ in remaining):
+        sidecar_target = FIXTURES / SIDECAR_FIXTURE[agent]
+        sidecar_fixture = json.loads(sidecar_target.read_text(encoding="utf-8"))
+        sidecar_probe_dir = Path(probe_dir) / "grok-sidecar"
+        sidecar_probe_dir.mkdir(parents=True, exist_ok=True)
+        sidecar_transcript = sidecar_probe_dir / "chat_history.jsonl"
+        sidecar_transcript.write_text('{"type":"system"}\n', encoding="utf-8")
+        for session in sessions:
+            observed_sidecar, _error = agent_watch._read_json_object(session.parent / "summary.json")
+            if not isinstance(observed_sidecar, dict):
+                continue
+            redacted_sidecar = _redact(observed_sidecar, opaque)
+            (sidecar_probe_dir / "summary.json").write_text(
+                json.dumps(redacted_sidecar) + "\n", encoding="utf-8"
+            )
+            sidecar_keys = agent_watch._grok_session_schema_fingerprint(
+                sidecar_transcript, max_lines=5
+            ).get("type_keys") or {}
+            closes = {
+                (bucket, key)
+                for bucket, keys in sidecar_keys.items()
+                if bucket.startswith("summary")
+                for key in keys
+            } & remaining
+            if closes:
+                _merge_missing_structure(sidecar_fixture, redacted_sidecar)
+                remaining -= closes
+            if not any(bucket.startswith("summary") for bucket, _ in remaining):
+                break
+        sidecar_target.write_text(
+            json.dumps(sidecar_fixture, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     # Greedy set cover: keep a record only if it closes a gap nothing else has.
     try:

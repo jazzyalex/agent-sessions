@@ -367,7 +367,10 @@ final class OnboardingCoordinatorTests: XCTestCase {
         }
 
         guard case .star? = parse("star") else { return XCTFail("star") }
+        guard case .quotaMeter? = parse("quota") else { return XCTFail("quota") }
+        guard case .feedback? = parse("feedback") else { return XCTFail("feedback") }
         guard case .contribute? = parse("contribute") else { return XCTFail("contribute") }
+        guard case .language? = parse("language") else { return XCTFail("language") }
 
         // A bare `whatsnew` takes the build's version; an explicit one wins.
         guard case .whatsNew("5.1")? = parse("whatsnew") else { return XCTFail("whatsnew") }
@@ -478,6 +481,85 @@ final class OnboardingCoordinatorTests: XCTestCase {
 
         XCTAssertNil(defaults.onboardingLastActionMajorMinor)
         XCTAssertFalse(defaults.onboardingFullTourCompleted)
+    }
+
+    // MARK: - Top-slot campaign pacing
+
+    @MainActor
+    func testSameCardMayContinueButDifferentCardWaitsFiveDays() {
+        let defaults = makeDefaults("Onboarding.interCardQuietPeriod")
+        let firstShownAt = Date(timeIntervalSince1970: 2_000_000_000)
+        defaults.onboardingSessionsOpenedCount = 10
+        defaults.onboardingFirstLaunchDate = firstShownAt.addingTimeInterval(-30 * 86_400)
+        defaults.onboardingStarAskState = .starred
+
+        func coordinator(at date: Date) -> OnboardingCoordinator {
+            OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "5.2" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in false },
+                preferredLanguagesProvider: { ["en"] },
+                shippedLocalizationsProvider: { ["en", "zh-Hans"] },
+                now: { date }
+            )
+        }
+
+        let first = coordinator(at: firstShownAt)
+        XCTAssertEqual(
+            first.selectTopSlotCard(hasCodexOrClaudeSessions: false, isQuotaMeterActive: false),
+            .feedback
+        )
+        first.noteTopSlotCardShown(.feedback)
+
+        let secondShownAt = firstShownAt.addingTimeInterval(86_400)
+        let sameCard = coordinator(at: secondShownAt)
+        XCTAssertEqual(
+            sameCard.selectTopSlotCard(hasCodexOrClaudeSessions: false, isQuotaMeterActive: false),
+            .feedback,
+            "The quiet period must not slow a card's own bounded round."
+        )
+        sameCard.noteTopSlotCardShown(.feedback)
+
+        defaults.onboardingFeedbackAskState = .completed
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.contributeAskSessionsThreshold
+
+        let tooSoon = coordinator(at: secondShownAt.addingTimeInterval(4 * 86_400))
+        XCTAssertNil(tooSoon.selectTopSlotCard(hasCodexOrClaudeSessions: false, isQuotaMeterActive: false))
+
+        let afterFloor = coordinator(
+            at: secondShownAt.addingTimeInterval(OnboardingCoordinator.topSlotInterCardQuietPeriod)
+        )
+        XCTAssertEqual(
+            afterFloor.selectTopSlotCard(hasCodexOrClaudeSessions: false, isQuotaMeterActive: false),
+            .contribute
+        )
+    }
+
+    @MainActor
+    func testWhatsNewObservesTheInterCardQuietPeriod() {
+        let defaults = makeDefaults("Onboarding.whatsNewQuietPeriod")
+        let shownAt = Date(timeIntervalSince1970: 2_000_000_000)
+        defaults.onboardingLastTopSlotCardIdentifier = TopSlotCardSelection.feedback.persistenceIdentifier
+        defaults.onboardingLastTopSlotCardShownAt = shownAt
+
+        func coordinator(at date: Date) -> OnboardingCoordinator {
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "5.2" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true },
+                now: { date }
+            )
+            coordinator.whatsNewMajorMinor = "5.2"
+            return coordinator
+        }
+
+        XCTAssertNil(coordinator(at: shownAt.addingTimeInterval(86_400)).selectWhatsNewTopSlotCard())
+        XCTAssertEqual(
+            coordinator(at: shownAt.addingTimeInterval(5 * 86_400)).selectWhatsNewTopSlotCard(),
+            .whatsNew("5.2")
+        )
     }
 
     // MARK: - OnboardingContent catalogs (Power Tips untouched)

@@ -525,6 +525,25 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Transcript UI
 
+### Grok backend tool rows discard operation names and inputs
+> **open** · sev: low · urg: low · verified 2026-09-08
+
+- **What:** Grok 1.0.13 `backend_tool_call.kind` records can carry `name` and `input`.
+  The parser reads only `tool_type` and `action`, so an x-search-style backend operation
+  can be anonymous even though its raw event identifies the operation and query.
+- **Where:** [GrokSessionParser.swift:297](../AgentSessions/Services/GrokSessionParser.swift)
+  builds the tool event without either field. The redacted normal fixture now preserves
+  both keys in `Resources/Fixtures/stage0/agents/grok/chat_history.jsonl`.
+- **Fix shape:** use `name` as the optional tool label and serialize `input` as the
+  fallback tool input when `action` is absent. Preserve the existing behavior for older
+  records and never treat either field as required.
+- **Why deferred:** current backend actions still retain their structured `action`,
+  including the newly observed URL, so this is provenance/detail loss rather than a
+  broken transcript.
+- **To close:** parser tests cover records with `action`, with only `name`/`input`, and
+  with neither, and the transcript shows the optional operation label without changing
+  legacy rows.
+
 ### Copilot 1.0.82 emits reasoning blocks and the transcript shows none of them
 > **open** · sev: med · urg: low · verified 2026-08-31
 
@@ -676,12 +695,14 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   parent session.
 
 ### MCP tool calls render anonymously though Codex now names the connector
-> **open** · sev: low · urg: low · verified 2026-08-17
+> **open** · sev: low · urg: low · verified 2026-09-08
 
 - **What:** Codex `mcp_tool_call_end` events gained `app_name`, `connector_id`,
   `action_name` and `link_id` (found 2026-08-17 sweeping 1209 local sessions). Every MCP
   tool row in the transcript currently shows the raw tool name with no indication of
-  which connector ran it, even though the record now says.
+  which connector ran it, even though the record now says. Codex 0.153.4 also emits the
+  parallel `item_completed.item.pluginId`, reinforcing the same candidate rather than
+  creating a separate feature request.
 - **Where:** the Codex tool-event path in
   [SessionTranscriptBuilder.swift](../AgentSessions/Services/SessionTranscriptBuilder.swift);
   none of the four keys appear anywhere in `AgentSessions/`.

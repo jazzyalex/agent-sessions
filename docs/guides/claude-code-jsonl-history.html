@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Where Claude Code Stores JSONL History on macOS</title>
-  <meta name="description" content="Claude Code writes JSONL transcripts to ~/.claude/projects. Where they live, what Claude Desktop stores, and how to search them all locally.">
+  <title>Find and Search Claude Code Session History on macOS</title>
+  <meta name="description" content="Find old Claude Code sessions on your Mac. Learn where Claude stores JSONL transcripts and how to search prompts, tool output, errors, and file paths locally.">
   <meta name="keywords" content="Claude Code history, Claude Code JSONL, Claude local sessions, Claude Desktop local sessions, ~/.claude/projects, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html">
   <link rel="icon" href="../assets/app-icon-32.png">
@@ -24,9 +24,9 @@
       {
         "@type": "TechArticle",
         "@id": "https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html#article",
-        "headline": "Claude Code JSONL History",
-        "name": "Claude Code JSONL History",
-        "description": "Claude Code writes JSONL transcripts to ~/.claude/projects. Where they live, what Claude Desktop stores, and how to search them all locally.",
+        "headline": "Find and Search Claude Code Session History on macOS",
+        "name": "Find and Search Claude Code Session History on macOS",
+        "description": "Find old Claude Code sessions on your Mac, including JSONL transcripts under configured Claude roots.",
         "url": "https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html",
         "mainEntityOfPage": {
           "@type": "WebPage",
@@ -99,7 +99,7 @@
 
   <main class="guide-shell">
     <p class="eyebrow">Local History Guide / Claude Code</p>
-    <h1>Claude Code JSONL History: Search Local Claude Code Sessions on macOS</h1>
+    <h1>Find and Search Claude Code Session History on macOS</h1>
     <p class="lede">Claude Code transcripts often become the only durable record of an implementation: prompts, assistant responses, tool calls, command output, file paths, and errors. Agent Sessions indexes those local JSONL transcripts so old Claude Code work is searchable beside the other coding agents on your Mac.</p>
     <p class="note">Agent Sessions reads local transcript files in read-only mode. It does not upload Claude transcripts or claim access to hidden model/runtime state.</p>
     <div class="button-row">
@@ -115,6 +115,15 @@
       <div class="meta-card"><strong>Formats</strong>Claude Code project-scoped <code>*.jsonl</code> transcript files.</div>
       <div class="meta-card"><strong>Surfaces</strong>Claude Code CLI and Claude Desktop local-agent-mode sessions.</div>
     </section>
+
+    <h2>How to Find an Old Claude Code Session</h2>
+    <ol>
+      <li>Open Agent Sessions and choose Claude Code in the source filter.</li>
+      <li>Search for a remembered prompt, command output, error, file path, or response.</li>
+      <li>Open the matching transcript and use in-session Find to move between matches.</li>
+      <li>When the installed Claude CLI exposes a compatible resume mode, copy or open the resume command.</li>
+    </ol>
+    <p>If the session is absent, check configured Claude roots and <code>CLAUDE_CONFIG_DIR</code>. Agent Sessions cannot recover a JSONL file that Claude deleted or never persisted.</p>
 
     <h2>Where Claude Code Stores Local Data</h2>
     <p>Standard Claude Code session history lives under:</p>

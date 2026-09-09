@@ -390,7 +390,10 @@ fi
 "$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE_APP "com.triada.AgentSessions" 2>/dev/null || true
 
 # Resize pane for predictable rendering
-"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 120 -y 32
+# Claude 2.1.263 added plugin-footprint content above the quota windows. A 32-row
+# pane now clips the weekly window below the viewport, so the parser receives a
+# valid but incomplete screen. Keep enough rows for both quota windows.
+"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 120 -y 60
 PANE_PID=$("$TMUX_CMD" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
 
 # ============================================================================
@@ -501,7 +504,29 @@ capture_usage() {
   "$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo ""
 }
 
-usage_output=$(capture_usage)
+capture_usage_with_scroll() {
+  local combined page i
+  combined="$(capture_usage)"
+  if echo "$combined" | grep -q "Current session" \
+      && ! echo "$combined" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
+    # The Usage pane is scrollable. Claude 2.1.263 can place plugin-footprint
+    # diagnostics between the session stats and quota windows, leaving the weekly
+    # window below the viewport. Capture each redraw and join them for parsing.
+    for i in 1 2 3 4; do
+      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
+      sleep 0.25
+      page="$(capture_usage)"
+      combined="$combined
+$page"
+      if echo "$page" | grep -qiE 'Current week \(all models\)|Current week \(all-models\)|Current week'; then
+        break
+      fi
+    done
+  fi
+  echo "$combined"
+}
+
+usage_output=$(capture_usage_with_scroll)
 
 # If we don't see the anchors, try to re-open /usage a couple of times
 ensure_usage_visible() {
@@ -516,7 +541,7 @@ ensure_usage_visible() {
       sleep 0.25
     done
     sleep 0.8
-    usage_output=$(capture_usage)
+    usage_output=$(capture_usage_with_scroll)
     tries=$((tries+1))
   done
 }
@@ -536,7 +561,7 @@ if ! has_rate_limit_usage_error && ! is_v2_usage_only && ! has_complete_v1_usage
     sleep 0.2
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
     sleep "$SLEEP_AFTER_USAGE"
-    usage_output=$(capture_usage)
+    usage_output=$(capture_usage_with_scroll)
 fi
 
 emit_usage_json

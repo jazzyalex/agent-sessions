@@ -79,6 +79,26 @@ def test_qwen_function_args_is_named_but_never_walked(tmp_path):
     assert not [k for k in keys if "/Users/" in k]
 
 
+def test_claude_input_schema_is_named_but_never_walked(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "attachment",
+        "attachment": {
+            "type": "deferred_tools_record",
+            "entries": [{
+                "name": "FutureTool",
+                "input_schema": {
+                    "properties": {"future_parameter": {"type": "string"}},
+                },
+            }],
+        },
+    }])
+    keys = agent_watch._schema_fingerprint_for_agent("claude", p, max_lines=100)["type_keys"]
+    entries = "attachment.attachment:deferred_tools_record.entries"
+    assert "input_schema" in keys[entries]
+    assert f"{entries}.input_schema" not in keys
+    assert not [bucket for bucket in keys if "future_parameter" in bucket]
+
+
 def test_lists_union_every_element_not_just_the_first(tmp_path):
     # Claude's message.content mixes block types. Sampling only the first element hid
     # every later one — exactly the drift the nesting exists to catch.
@@ -162,3 +182,26 @@ def test_every_monitored_agent_is_registered_in_the_rebuild_tool():
             f"tool would report the whole schema as missing")
         assert rebuild._baseline_paths(agent), (
             f"{agent}: resolved no evidence_fixtures from the matrix")
+
+
+def test_qwen_latest_source_tracks_the_cli_package_not_sdk_releases():
+    cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json")
+                     .read_text(encoding="utf-8"))
+    assert cfg["agents"]["qwen"]["upstream"] == [
+        {"kind": "npm_latest", "package": "@qwen-code/qwen-code"}
+    ]
+
+
+def test_rebuild_merges_missing_grok_sidecar_structure_without_overwriting_values():
+    import rebuild_stage0_baseline as rebuild
+
+    existing = {"info": {"id": "fixture-id"}, "agent_name": "grok"}
+    observed = {
+        "info": {"id": "[trimmed]", "new_key": "[trimmed]"},
+        "last_recap": "[trimmed]",
+    }
+    assert rebuild._merge_missing_structure(existing, observed) == {
+        "info": {"id": "fixture-id", "new_key": "[trimmed]"},
+        "agent_name": "grok",
+        "last_recap": "[trimmed]",
+    }

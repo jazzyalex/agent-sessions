@@ -33,18 +33,18 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// Past the retention bar on the sessions leg, and with the star ask already
     /// spent so it does not hold the slot.
     private func markEligible(_ defaults: UserDefaults) {
-        defaults.onboardingSessionsOpenedCount = 25
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.contributeAskSessionsThreshold
         defaults.onboardingFirstLaunchDate = OnboardingContributeCardTests.referenceNow
         defaults.onboardingStarAskState = .starred
     }
 
     // MARK: - Retention gate
 
-    /// The sessions leg: 25 opened sessions.
+    /// The sessions leg: 60 opened sessions.
     @MainActor
     func testShownAtTheSessionsThreshold() {
         let defaults = makeDefaults("Contribute.sessions")
-        defaults.onboardingSessionsOpenedCount = 25
+        defaults.onboardingSessionsOpenedCount = 60
         defaults.onboardingFirstLaunchDate = Self.referenceNow
         XCTAssertTrue(makeCoordinator(defaults: defaults).shouldShowContributeCard())
     }
@@ -61,7 +61,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     @MainActor
     func testNotShownJustBelowEitherThreshold() {
         let defaults = makeDefaults("Contribute.belowBars")
-        defaults.onboardingSessionsOpenedCount = 24
+        defaults.onboardingSessionsOpenedCount = 59
         defaults.onboardingFirstLaunchDate = Self.referenceNow.addingTimeInterval(-44 * 86_400)
         XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowContributeCard())
     }
@@ -77,7 +77,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// Pinned literally rather than read back off the coordinator.
     @MainActor
     func testThresholdsArePinned() {
-        XCTAssertEqual(OnboardingCoordinator.contributeAskSessionsThreshold, 25)
+        XCTAssertEqual(OnboardingCoordinator.contributeAskSessionsThreshold, 60)
         XCTAssertEqual(OnboardingCoordinator.contributeAskDaysThreshold, 45)
         XCTAssertEqual(OnboardingCoordinator.contributeAskMaxImpressionsPerRound, 3)
     }
@@ -126,7 +126,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     @MainActor
     func testStarCardStillOutranksTheContributeCard() {
         let defaults = makeDefaults("Contribute.starWins")
-        defaults.onboardingSessionsOpenedCount = 25
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.contributeAskSessionsThreshold
         defaults.onboardingFirstLaunchDate = Self.referenceNow
 
         let coordinator = makeCoordinator(defaults: defaults)
@@ -142,7 +142,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// Both asks due on the same launch, before the contribute ask has aged:
     /// feedback is above contribute in the chain, so it takes the slot, and the
     /// contribute card must not also render. Once feedback is permanently
-    /// resolved, the slot falls through.
+    /// deferred for the release, the slot falls through on the next launch.
     @MainActor
     func testFeedbackWinsTheSlotWhenBothAreDueBeforeAging() {
         let defaults = makeDefaults("Contribute.bothDue")
@@ -159,15 +159,10 @@ final class OnboardingContributeCardTests: XCTestCase {
         coordinator.suppressFeedbackCardThisLaunch()
         XCTAssertFalse(coordinator.shouldShowContributeCard())
 
-        // Feedback's ✕ is soft: next launch it is back, and still ahead.
+        // "Not now" spends feedback's release round, so the next launch advances.
         let nextLaunch = makeCoordinator(defaults: defaults)
-        XCTAssertTrue(nextLaunch.shouldShowFeedbackCard())
-
-        // Once feedback is resolved for good, the slot is contribute's.
-        defaults.onboardingFeedbackAskState = .completed
-        let afterFeedback = makeCoordinator(defaults: defaults)
-        XCTAssertFalse(afterFeedback.shouldShowFeedbackCard())
-        XCTAssertTrue(afterFeedback.shouldShowContributeCard())
+        XCTAssertFalse(nextLaunch.shouldShowFeedbackCard())
+        XCTAssertTrue(nextLaunch.shouldShowContributeCard())
     }
 
     /// Users who never become eligible must see exactly the behaviour they saw
@@ -186,8 +181,8 @@ final class OnboardingContributeCardTests: XCTestCase {
 
     // MARK: - Aging past the feedback card
 
-    /// The feedback card's ✕ is soft and returns every launch, so without this a
-    /// user who never answers it would hold the contribute ask off forever.
+    /// Aging remains a deterministic priority rule even though feedback silence
+    /// is now capped independently.
     @MainActor
     func testContributeTakesTheSlotAfterWaitingTwoWeeks() {
         let defaults = makeDefaults("Contribute.agedPastFeedback")
@@ -414,6 +409,22 @@ final class OnboardingContributeCardTests: XCTestCase {
         XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowContributeCard())
     }
 
+    @MainActor
+    func testThirdImpressionThenMaybeLaterDoesNotSpendTheRetryRound() {
+        let defaults = makeDefaults("Contribute.thirdImpressionThenSnooze")
+        markEligible(defaults)
+        defaults.onboardingContributeAskImpressions =
+            OnboardingCoordinator.contributeAskMaxImpressionsPerRound - 1
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        coordinator.noteContributeCardShown()
+        let snoozedUntil = defaults.onboardingContributeAskSnoozedUntil
+        coordinator.snoozeContributeAsk()
+
+        XCTAssertEqual(defaults.onboardingContributeAskState, .snoozed)
+        XCTAssertEqual(defaults.onboardingContributeAskSnoozedUntil, snoozedUntil)
+    }
+
     /// One invitation, not a campaign: the second round-out is permanent.
     @MainActor
     func testIgnoringTheRetryRoundSilencesItForever() {
@@ -490,7 +501,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// The whole copy, pinned literally.
     @MainActor
     func testCardCopyIsFrozen() {
-        XCTAssertEqual(String(localized: ContributeCard.titleText), "Help add your agent")
+        XCTAssertEqual(String(localized: ContributeCard.titleText), "Help add another agent")
         XCTAssertEqual(
             String(localized: ContributeCard.bodyText),
             "Agent Sessions adds new agents from user contributions — a pull request, your coding agent "
@@ -524,5 +535,214 @@ final class OnboardingContributeCardTests: XCTestCase {
         for word in countWords {
             XCTAssertFalse(words.contains(word), "copy must not pin a source count, found \"\(word)\"")
         }
+    }
+}
+
+/// The translation invitation is shown only to established users whose first
+/// preferred macOS language is not covered by the shipped catalogs.
+final class OnboardingLanguageCardTests: XCTestCase {
+    private static let referenceNow = Date(timeIntervalSince1970: 2_000_000_000)
+
+    private func makeDefaults(_ suite: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    @MainActor
+    private func makeCoordinator(
+        defaults: UserDefaults,
+        language: String = "fr-FR",
+        now: Date = OnboardingLanguageCardTests.referenceNow
+    ) -> OnboardingCoordinator {
+        OnboardingCoordinator(
+            defaults: defaults,
+            currentMajorMinorProvider: { "5.2" },
+            isFreshInstallProvider: { false },
+            whatsNewAvailableProvider: { _ in false },
+            preferredLanguagesProvider: { [language] },
+            shippedLocalizationsProvider: { ["en", "zh-Hans"] },
+            now: { now }
+        )
+    }
+
+    private func markEligible(_ defaults: UserDefaults) {
+        defaults.onboardingSessionsOpenedCount = OnboardingCoordinator.languageAskSessionsThreshold
+        defaults.onboardingFirstLaunchDate = Self.referenceNow
+        defaults.onboardingStarAskState = .starred
+    }
+
+    @MainActor
+    func testTargetsOnlyUnsupportedPreferredLanguages() {
+        let defaults = makeDefaults("Language.targeting")
+        markEligible(defaults)
+
+        XCTAssertTrue(makeCoordinator(defaults: defaults, language: "fr-FR").shouldShowLanguageCard())
+        XCTAssertTrue(makeCoordinator(defaults: defaults, language: "zh-Hant").shouldShowLanguageCard())
+        XCTAssertFalse(makeCoordinator(defaults: defaults, language: "en-GB").shouldShowLanguageCard())
+        XCTAssertFalse(makeCoordinator(defaults: defaults, language: "zh-Hans").shouldShowLanguageCard())
+        XCTAssertFalse(makeCoordinator(defaults: defaults, language: "zh_CN").shouldShowLanguageCard())
+        XCTAssertFalse(makeCoordinator(defaults: defaults, language: "zh-Hans-TW").shouldShowLanguageCard())
+        XCTAssertTrue(makeCoordinator(defaults: defaults, language: "zh-Hant-CN").shouldShowLanguageCard())
+    }
+
+    @MainActor
+    func testNewlyShippedLocaleAutomaticallyRetiresItsAsk() {
+        let defaults = makeDefaults("Language.bundleDriven")
+        markEligible(defaults)
+        let coordinator = OnboardingCoordinator(
+            defaults: defaults,
+            currentMajorMinorProvider: { "5.2" },
+            isFreshInstallProvider: { false },
+            whatsNewAvailableProvider: { _ in false },
+            preferredLanguagesProvider: { ["fr-CA"] },
+            shippedLocalizationsProvider: { ["Base", "en", "fr"] },
+            now: { Self.referenceNow }
+        )
+        XCTAssertFalse(coordinator.shouldShowLanguageCard())
+    }
+
+    @MainActor
+    func testRequiresEstablishedUse() {
+        let defaults = makeDefaults("Language.retention")
+        defaults.onboardingSessionsOpenedCount = 39
+        defaults.onboardingFirstLaunchDate = Self.referenceNow.addingTimeInterval(-44 * 86_400)
+        XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowLanguageCard())
+
+        defaults.onboardingSessionsOpenedCount = 40
+        XCTAssertTrue(makeCoordinator(defaults: defaults).shouldShowLanguageCard())
+        XCTAssertEqual(OnboardingCoordinator.languageAskSessionsThreshold, 40)
+        XCTAssertEqual(OnboardingCoordinator.languageAskDaysThreshold, 45)
+    }
+
+    @MainActor
+    func testFeedbackWinsUntilLanguageAskHasWaitedTwoWeeks() {
+        let defaults = makeDefaults("Language.priority")
+        markEligible(defaults)
+        defaults.onboardingLanguageAskDueSince = Self.referenceNow
+
+        let fresh = makeCoordinator(defaults: defaults)
+        XCTAssertTrue(fresh.shouldShowFeedbackCard())
+        XCTAssertTrue(fresh.shouldShowLanguageCard())
+
+        defaults.onboardingLanguageAskDueSince = Self.referenceNow.addingTimeInterval(-15 * 86_400)
+        let aged = makeCoordinator(defaults: defaults)
+        XCTAssertTrue(aged.languageAskOutranksFeedbackCard())
+        XCTAssertFalse(aged.shouldShowFeedbackCard())
+        XCTAssertTrue(aged.shouldShowLanguageCard())
+        XCTAssertEqual(OnboardingCoordinator.languageAskPriorityAfterDays, 14)
+    }
+
+    @MainActor
+    func testLaunchCheckStampsDueDateOnlyForAnUnsupportedLanguage() {
+        let defaults = makeDefaults("Language.dueStamp")
+        markEligible(defaults)
+        makeCoordinator(defaults: defaults).checkAndPresentIfNeeded()
+        XCTAssertEqual(defaults.onboardingLanguageAskDueSince, Self.referenceNow)
+
+        let supported = makeDefaults("Language.noDueStamp")
+        markEligible(supported)
+        makeCoordinator(defaults: supported, language: "en-US").checkAndPresentIfNeeded()
+        XCTAssertNil(supported.onboardingLanguageAskDueSince)
+    }
+
+    @MainActor
+    func testChangingTargetLanguageStartsAFreshPriorityClock() {
+        let defaults = makeDefaults("Language.targetClock")
+        markEligible(defaults)
+        makeCoordinator(defaults: defaults, language: "fr-FR").checkAndPresentIfNeeded()
+        XCTAssertEqual(defaults.onboardingLanguageAskTargetIdentifier, "fr-fr")
+
+        let later = Self.referenceNow.addingTimeInterval(20 * 86_400)
+        makeCoordinator(defaults: defaults, language: "de-DE", now: later).checkAndPresentIfNeeded()
+        XCTAssertEqual(defaults.onboardingLanguageAskTargetIdentifier, "de-de")
+        XCTAssertEqual(defaults.onboardingLanguageAskDueSince, later)
+    }
+
+    @MainActor
+    func testOpeningAndDismissalAreTerminal() {
+        let opened = makeDefaults("Language.opened")
+        markEligible(opened)
+        makeCoordinator(defaults: opened).recordLanguageContributionOpened()
+        XCTAssertEqual(opened.onboardingLanguageAskState, .opened)
+        XCTAssertFalse(makeCoordinator(defaults: opened).shouldShowLanguageCard())
+
+        let dismissed = makeDefaults("Language.dismissed")
+        markEligible(dismissed)
+        makeCoordinator(defaults: dismissed).dismissLanguageAskForever()
+        XCTAssertEqual(dismissed.onboardingLanguageAskState, .dismissedForever)
+        XCTAssertFalse(makeCoordinator(defaults: dismissed).shouldShowLanguageCard())
+    }
+
+    @MainActor
+    func testMaybeLaterAllowsOneDelayedRetry() {
+        let defaults = makeDefaults("Language.snooze")
+        markEligible(defaults)
+        makeCoordinator(defaults: defaults).snoozeLanguageAsk()
+
+        XCTAssertEqual(defaults.onboardingLanguageAskState, .snoozed)
+        XCTAssertEqual(
+            defaults.onboardingLanguageAskSnoozedUntil,
+            Self.referenceNow.addingTimeInterval(14 * 86_400)
+        )
+        XCTAssertFalse(
+            makeCoordinator(defaults: defaults, now: Self.referenceNow.addingTimeInterval(86_400))
+                .shouldShowLanguageCard()
+        )
+        XCTAssertTrue(
+            makeCoordinator(defaults: defaults, now: Self.referenceNow.addingTimeInterval(15 * 86_400))
+                .shouldShowLanguageCard()
+        )
+    }
+
+    @MainActor
+    func testThreeIgnoredLaunchesSpendEachRound() {
+        let defaults = makeDefaults("Language.impressions")
+        markEligible(defaults)
+
+        for _ in 0..<3 { makeCoordinator(defaults: defaults).noteLanguageCardShown() }
+        XCTAssertEqual(defaults.onboardingLanguageAskState, .snoozed)
+        XCTAssertEqual(defaults.onboardingLanguageAskImpressions, 0)
+
+        let afterSnooze = Self.referenceNow.addingTimeInterval(15 * 86_400)
+        for _ in 0..<3 { makeCoordinator(defaults: defaults, now: afterSnooze).noteLanguageCardShown() }
+        XCTAssertEqual(defaults.onboardingLanguageAskState, .dismissedForever)
+    }
+
+    @MainActor
+    func testLanguageThirdImpressionThenMaybeLaterDoesNotSpendTheRetryRound() {
+        let defaults = makeDefaults("Language.thirdImpressionThenSnooze")
+        markEligible(defaults)
+        defaults.onboardingLanguageAskImpressions =
+            OnboardingCoordinator.languageAskMaxImpressionsPerRound - 1
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        coordinator.noteLanguageCardShown()
+        let snoozedUntil = defaults.onboardingLanguageAskSnoozedUntil
+        coordinator.snoozeLanguageAsk()
+
+        XCTAssertEqual(defaults.onboardingLanguageAskState, .snoozed)
+        XCTAssertEqual(defaults.onboardingLanguageAskSnoozedUntil, snoozedUntil)
+    }
+
+    func testDestinationsStayInsideThePublicRepository() {
+        XCTAssertEqual(
+            OnboardingCoordinator.languageContributionURL.absoluteString,
+            "https://github.com/jazzyalex/agent-sessions/blob/main/docs/CONTRIBUTING.md#translate-agent-sessions"
+        )
+        XCTAssertEqual(
+            OnboardingCoordinator.localizationGuideURL.absoluteString,
+            "https://github.com/jazzyalex/agent-sessions/blob/main/docs/localization.md"
+        )
+    }
+
+    @MainActor
+    func testCardCopyIsFrozen() {
+        XCTAssertEqual(String(localized: LanguageContributeCard.titleText), "Speak another language?")
+        XCTAssertEqual(
+            String(localized: LanguageContributeCard.bodyText),
+            "Agent Sessions is now available in English and Simplified Chinese. Help bring it to your "
+                + "language—no Swift required."
+        )
     }
 }

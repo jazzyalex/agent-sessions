@@ -9,6 +9,97 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.1.1"
+    as_of_date_utc: "2026-09-08"
+    as_of_commit: "da13918e"
+    note: "Full 14-agent format check. Ten verified ceilings advanced after fresh native sessions matched refreshed normal fixtures. Checker evidence-integrity defects found during the run were fixed and regression-tested."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.153.4"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-232321Z-prebump/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Additive token_usage_record, compaction guardian/history snapshots, response metadata and item provenance are fixture-covered. token_usage_record remains deliberately excluded from usage accounting because the cumulative token_count path is authoritative and mixing the two double-counts."
+      claude:
+        sessions:
+          max_verified_version: "2.1.263"
+          scope: "supports installed session format; upstream 2.1.266 not installed"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-232643-862007Z-p48164-prebump/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl"]
+          notes: "Context and attachment families are additive metadata. Tool-defined input_schema interiors are now opaque to the checker so new tool parameters do not masquerade as Claude format drift. The separate usage capture was repaired after plugin content pushed the weekly pane below the initial terminal viewport; live capture now returns both current-session and all-models weekly limits."
+        usage_limits:
+          max_verified_version: "2.1.263"
+          scope: "live tmux capture; installed version"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-235525-879296Z-p58511/report.json", "AgentSessionsTests/ClaudeStatusServiceTests.swift"]
+          notes: "The bounded /usage capture scrolls and joins redraws when the current-session anchor is visible but the weekly anchor is below the first page. Live output returned 89% session and 86% weekly remaining; the fixture test pins the joined-page parser contract."
+      antigravity:
+        sessions:
+          max_verified_version: "1.1.27"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-230051Z-prebump/report.json"]
+          notes: "The CLI self-updated during the sweep; the fresh post-update session matched baseline."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.83"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-232625-833600Z-p47854-prebump/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
+          notes: "Additive user.message.data.messageId plus assistant phase and serverTools.provider are fixture-covered. messageId remains the already-filed low-severity chunk-coalescing candidate; current observed sessions do not demonstrate a transcript break."
+      opencode:
+        sessions:
+          max_verified_version: "1.18.29"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-230051Z-prebump/report.json"]
+          notes: "Fresh native session matched baseline. The CLI package was repaired before this sweep because npm postinstall had not run; that install issue was not format drift."
+      hermes:
+        sessions:
+          max_verified_version: "0.21.1"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-234358-647335Z-p53928-prebump/report.json"]
+          notes: "Updated from 0.17.0 and produced a clean fresh session with real-home credentials. The updater preserved pre-existing local work in a stash after its automatic restore conflicted; the same 15-line reasoning override was reapplied to the refactored call site and the stash was retained as a recovery copy."
+      cursor:
+        sessions:
+          max_verified_version: "2026.9.8"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-233933-921989Z-p51574-prebump/report.json"]
+          notes: "Fresh native session matched baseline with no additive drift."
+      pi:
+        sessions:
+          max_verified_version: "0.85.1"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-230051Z-prebump/report.json"]
+          notes: "Fresh native session matched baseline with no additive drift."
+      kimi:
+        sessions:
+          max_verified_version: "0.41.0"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-232321Z-prebump/report.json", "Resources/Fixtures/stage0/agents/kimi/small.jsonl"]
+          notes: "prompt.completed and turn.prompt.promptId are additive lifecycle/correlation metadata preserved through the parser's meta fallback and normal fixture coverage."
+      grok:
+        sessions:
+          max_verified_version: "1.0.24"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260908-234002-989757Z-p52371-prebump/report.json", "Resources/Fixtures/stage0/agents/grok/chat_history.jsonl", "Resources/Fixtures/stage0/agents/grok/summary.json"]
+          notes: "Additive backend call name/input/URL, summary.last_recap, agent_id and attempt_id are fixture-covered. Action URLs were already retained through toolInput; optional name/input presentation is filed as low-severity follow-up."
+    not_verified:
+      openclaw:
+        sessions:
+          held_at_version: "2026.7.1"
+          installed_version: "2026.9.3"
+          reason: "fresh driver blocked by vendor workspace migration; no format claim"
+      qwen:
+        sessions:
+          held_at_version: "0.14.3"
+          installed_version: "0.23.1"
+          reason: "no native modern transcript and no prebump driver; upstream source corrected to the CLI npm package"
+      devin:
+        sessions:
+          held_at_version: "3000.6.7 (260a97c8)"
+          reason: "steward-owned; 2026-09-01 verification remains current"
+      fx:
+        sessions:
+          held_at_version: "0.0.7"
+          reason: "steward-owned; upstream 0.0.8 re-check requested"
+          evidence: ["https://github.com/jazzyalex/agent-sessions/issues/66#issuecomment-5593227130"]
+
   - agent_sessions_version: "5.1.0"
     as_of_date_utc: "2026-08-31"
     as_of_commit: "2f360432"

@@ -1376,18 +1376,18 @@
         }
       }
     },
-    "A star helps others find this project. One click, nothing sent.": {
+    "A star helps others find this project. Opens GitHub; nothing is sent.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A star helps others find this project. One click, nothing sent."
+            "value": "A star helps others find this project. Opens GitHub; nothing is sent."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "加星可帮助他人发现此项目。只需点按一次，不会发送任何内容。"
+            "value": "加星可帮助他人发现此项目。此操作会打开 GitHub，不会发送任何内容。"
           }
         }
       }
@@ -1501,6 +1501,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "活跃注册表目录（可选）"
+          }
+        }
+      }
+    },
+    "Help translate": {
+      "comment": "Primary action on the translation contribution card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Help translate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "协助翻译"
           }
         }
       }
@@ -1815,6 +1832,23 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Agent Sessions is now available in English and Simplified Chinese. Help bring it to your language—no Swift required.": {
+      "comment": "Body of the translation contribution card. Simplified Chinese names the currently shipped Chinese locale specifically.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions is now available in English and Simplified Chinese. Help bring it to your language—no Swift required."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions 现已支持英语和简体中文。帮助我们将它翻译成你的语言——无需会 Swift。"
           }
         }
       }
@@ -6507,6 +6541,23 @@
         }
       }
     },
+    "Dismiss this update": {
+      "comment": "Accessibility label for the close button on a What's New card; dismisses only the displayed app update.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss this update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭此次更新提示"
+          }
+        }
+      }
+    },
     "Display Style": {
       "localizations": {
         "en": {
@@ -8231,18 +8282,18 @@
         }
       }
     },
-    "Help add your agent": {
+    "Help add another agent": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Help add your agent"
+            "value": "Help add another agent"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "帮助添加你的智能体"
+            "value": "帮助添加其他智能体"
           }
         }
       }
@@ -16561,18 +16612,19 @@
         }
       }
     },
-    "Show me": {
+    "Preview": {
+      "comment": "Primary action on the Quota Meter card when usage tracking is already enabled; opens an explainer before showing the meter.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show me"
+            "value": "Preview"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "带我看看"
+            "value": "预览"
           }
         }
       }
@@ -17409,6 +17461,23 @@
         }
       }
     },
+    "Speak another language?": {
+      "comment": "Title of the translation contribution card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speak another language?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会说其他语言吗？"
+          }
+        }
+      }
+    },
     "Sponsor on GitHub": {
       "localizations": {
         "en": {
@@ -17489,18 +17558,19 @@
         }
       }
     },
-    "Star on GitHub": {
+    "Open GitHub": {
+      "comment": "Primary action on the GitHub star invitation; opens the repository but does not star it automatically.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Star on GitHub"
+            "value": "Open GitHub"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 GitHub 上加星"
+            "value": "打开 GitHub"
           }
         }
       }
@@ -18677,6 +18747,23 @@
         }
       }
     },
+    "Translation guide": {
+      "comment": "Secondary action on the translation contribution card; opens the contributor guide.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation guide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "了解翻译流程"
+          }
+        }
+      }
+    },
     "Transcript": {
       "comment": "Title of a transcript context menu.",
       "localizations": {
@@ -18838,18 +18925,19 @@
         }
       }
     },
-    "Turn on": {
+    "Set up": {
+      "comment": "Primary action on the Quota Meter card when usage tracking is disabled; opens an explainer and consent step.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Turn on"
+            "value": "Set up"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开启"
+            "value": "设置"
           }
         }
       }

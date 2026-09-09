@@ -203,7 +203,7 @@
       "prebump": {
         "driver": "hermes_oneshot",
         "sandbox": {"mode": "home_override", "subdir": "hermes_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Say hi, then list the files in the current directory using your tools.",
         "real_home_session": true,
         "timeout_seconds": 180,
         "env_vars": [
@@ -635,7 +635,7 @@
       "installed_version_cmd": ["qwen", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.qwen_code.max_verified_version",
       "upstream": [
-        { "kind": "github_latest_release", "repo": "QwenLM/qwen-code" }
+        { "kind": "npm_latest", "package": "@qwen-code/qwen-code" }
       ],
       "risk_keywords": {
         "schema": ["session", "jsonl", "format", "schema", "transcript", "storage", "migration", "chats", "archive", "uuid", "sessionid"],

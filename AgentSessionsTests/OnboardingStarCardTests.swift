@@ -132,8 +132,8 @@ final class OnboardingStarCardTests: XCTestCase {
         XCTAssertFalse(coordinator.shouldShowStarCard())
     }
 
-    /// The star ask outranks feedback: its exits are all permanent, so it clears
-    /// the slot for good, while a feedback ✕ returns every launch.
+    /// The star ask outranks feedback. Once it is resolved, the bounded feedback
+    /// round gets the slot on a later launch.
     @MainActor
     func testStarOutranksFeedbackButYieldsOnceResolved() {
         let defaults = makeDefaults("Star.beatsFeedback")
@@ -292,6 +292,21 @@ final class OnboardingStarCardTests: XCTestCase {
         XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowStarCard())
     }
 
+    @MainActor
+    func testThirdImpressionThenMaybeLaterDoesNotSpendTheRetryRound() {
+        let defaults = makeDefaults("Star.thirdImpressionThenSnooze")
+        markRetained(defaults)
+        defaults.onboardingStarAskImpressions = OnboardingCoordinator.starAskMaxImpressionsPerRound - 1
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        coordinator.noteStarCardShown()
+        let snoozedUntil = defaults.onboardingStarAskSnoozedUntil
+        coordinator.snoozeStarAsk()
+
+        XCTAssertEqual(defaults.onboardingStarAskState, .snoozed)
+        XCTAssertEqual(defaults.onboardingStarAskSnoozedUntil, snoozedUntil)
+    }
+
     /// The retry round is bounded too, so the whole ask terminates without the
     /// user ever answering it.
     @MainActor
@@ -378,8 +393,8 @@ final class OnboardingStarCardTests: XCTestCase {
         XCTAssertFalse(coordinator.starAskOutranksQuotaMeterCard())
     }
 
-    /// The Quota Meter card only leaves the slot when the user acts on it, so a
-    /// user who ignores it would otherwise hold the star ask off forever.
+    /// Even a bounded Quota Meter campaign can repeatedly win while the star ask
+    /// waits, so aging eventually lets the established-user ask take its turn.
     @MainActor
     func testStarAskTakesTheSlotAfterWaitingTwoWeeks() {
         let defaults = makeDefaults("Star.agedPastQuota")

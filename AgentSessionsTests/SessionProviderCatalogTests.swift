@@ -323,6 +323,24 @@ final class SessionProviderCatalogTests: XCTestCase {
 
     // MARK: - SPEC §10.4 / §8.1: the launch-phase pipeline covers every source
 
+    func testAudienceReadinessWaitsForEveryBlockingSource() {
+        let state = LaunchState(
+            sourcePhases: [.codex: .scanning, .claude: .ready],
+            overallPhase: .ready,
+            blockingSources: [.codex],
+            hasDisplayedSessions: true
+        )
+
+        XCTAssertFalse(state.isAudienceReady)
+        let finished = LaunchState(
+            sourcePhases: [.codex: .ready, .claude: .ready],
+            overallPhase: .ready,
+            blockingSources: [],
+            hasDisplayedSessions: true
+        )
+        XCTAssertTrue(finished.isAudienceReady)
+    }
+
     /// THE §8.1 proof. Before Task 7 the `launchPhase` pyramid combined ten of the twelve
     /// providers — `kimi` and `grok` were never added to it — so a phase change from either
     /// one could not move `launchState`. The unified indexer is built here over twelve fake

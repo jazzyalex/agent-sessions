@@ -3,10 +3,11 @@ import AppKit
 
 /// Lightweight container mounted at the top of the session list. It hosts exactly
 /// one card — What's New, then Quota Meter, then star, then feedback, then the
-/// steward invitation, then the contribute-an-agent invitation (last two: they ask
-/// for the most work, targeted before generic) — and carries the sheets for the
-/// compact What's New panel, the Quota Meter explainer, and the standalone
-/// feedback prompt. Renders nothing when there is nothing to show.
+/// translation invitation, steward invitation, then the contribute-an-agent
+/// invitation (the last two ask for the most work, targeted before generic) —
+/// and carries the sheets for the compact What's New panel, the Quota Meter
+/// explainer, and the standalone feedback prompt. Renders nothing when there
+/// is nothing to show.
 ///
 /// Order is activation before extraction: the Quota Meter card asks the user to
 /// try something, the star and feedback cards ask them for something. Feedback
@@ -21,11 +22,14 @@ struct OnboardingListTopSlot: View {
     /// only what applies, and a single "has either" flag makes that impossible
     /// by the time it reaches the activator.
     let providers: QuotaMeterProviderAvailability
+    /// Session-derived targeting is not trustworthy until the initial index
+    /// snapshot has arrived. What's New may still be selected before this.
+    let audienceReady: Bool
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
-    /// Measured pane width, handed to the two cards whose text is allowed to
-    /// wrap so they can move their actions below it in a narrow window. Zero
+    /// Measured pane width, handed to every card so its actions can move below
+    /// the copy in a narrow window. Zero
     /// until the first layout pass; see `WrappingSlotCard.paneWidth`.
     ///
     /// Safe against a layout loop: it feeds a card's internal arrangement, which
@@ -35,6 +39,9 @@ struct OnboardingListTopSlot: View {
     /// Lets the ✕ on a forced card actually dismiss it, so the override can be
     /// clicked through like the real thing instead of being pinned on screen.
     @State private var debugCardDismissed = false
+    /// Frozen after the first eligible selection. Resolving or exhausting one
+    /// card therefore leaves the slot empty until the next app launch.
+    @State private var selectedCard: TopSlotCardSelection?
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
 
@@ -46,13 +53,6 @@ struct OnboardingListTopSlot: View {
         usageEnabled && coordinator.hasEverOpenedCockpit
     }
 
-    private var showsQuotaMeterCard: Bool {
-        coordinator.shouldShowQuotaMeterCard(
-            hasCodexOrClaudeSessions: providers.hasAny,
-            isQuotaMeterActive: isQuotaMeterActive
-        )
-    }
-
     var body: some View {
         Group {
             // Ahead of the whole chain on purpose: the point of the override is
@@ -61,74 +61,11 @@ struct OnboardingListTopSlot: View {
                 debugCard(override)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
-            } else if let version = coordinator.whatsNewMajorMinor {
-                WhatsNewCard(
-                    palette: palette,
-                    majorMinor: version,
-                    teaser: WhatsNewCatalog.teaser(for: version),
-                    onOpen: { coordinator.openWhatsNewFromCard(version: version) },
-                    onDismiss: { coordinator.dismissWhatsNewCard() }
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                // Being ignored is an answer. The coordinator counts one
-                // impression per launch however often this fires.
-                .onAppear { coordinator.noteWhatsNewCardShown() }
-            } else if showsQuotaMeterCard {
-                QuotaMeterCard(
-                    palette: palette,
-                    needsUsageEnabled: !usageEnabled,
-                    onOpen: { coordinator.isQuotaMeterPromoPresented = true },
-                    onDismiss: { coordinator.suppressQuotaMeterCardThisLaunch() }
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-            } else if coordinator.shouldShowStarCard() {
-                StarCard(
-                    palette: palette,
-                    onOpen: openRepository,
-                    onSnooze: { coordinator.snoozeStarAsk() },
-                    onDismiss: { coordinator.dismissStarAskForever() }
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                // Being ignored is an answer. The coordinator counts one
-                // impression per launch however often this fires.
-                .onAppear { coordinator.noteStarCardShown() }
-            } else if coordinator.shouldShowFeedbackCard() {
-                FeedbackCard(
-                    palette: palette,
-                    onOpen: { coordinator.isFeedbackPromptPresented = true },
-                    onDismiss: { coordinator.suppressFeedbackCardThisLaunch() }
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-            } else if let agent = coordinator.stewardAskTarget, coordinator.shouldShowStewardCard() {
-                StewardCard(
-                    palette: palette,
-                    agent: agent,
-                    onSignUp: { openStewardSignup(for: agent) },
-                    onLearnMore: openStewardGuide,
-                    onDismiss: { coordinator.dismissStewardAskForever() },
-                    paneWidth: paneWidth
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                // Being ignored is an answer, counted once per launch.
-                .onAppear { coordinator.noteStewardCardShown() }
-            } else if coordinator.shouldShowContributeCard() {
-                ContributeCard(
-                    palette: palette,
-                    onOpen: openContributeForm,
-                    onLearnMore: openContributeGuide,
-                    onSnooze: { coordinator.snoozeContributeAsk() },
-                    onDismiss: { coordinator.dismissContributeAskForever() },
-                    paneWidth: paneWidth
-                )
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                // Being ignored is an answer, counted once per launch.
-                .onAppear { coordinator.noteContributeCardShown() }
+            } else if !coordinator.didConsumeTopSlotAskThisLaunch, let selectedCard {
+                selectedCardView(selectedCard)
+                    .onAppear { coordinator.noteTopSlotCardShown(selectedCard) }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
             }
         }
         .background(
@@ -137,6 +74,96 @@ struct OnboardingListTopSlot: View {
             }
         )
         .onPreferenceChange(SlotWidthKey.self) { paneWidth = $0 }
+        .onAppear { chooseTopSlotCardIfNeeded() }
+        .onChange(of: audienceReady) { _, _ in chooseTopSlotCardIfNeeded() }
+    }
+
+    private func chooseTopSlotCardIfNeeded() {
+        guard selectedCard == nil, !coordinator.didConsumeTopSlotAskThisLaunch else { return }
+        guard TopSlotDebugOverride.current == nil else { return }
+        if coordinator.whatsNewMajorMinor != nil {
+            selectedCard = coordinator.selectWhatsNewTopSlotCard()
+            return
+        }
+        guard audienceReady else { return }
+        selectedCard = coordinator.selectTopSlotCard(
+            hasCodexOrClaudeSessions: providers.hasAny,
+            isQuotaMeterActive: isQuotaMeterActive
+        )
+    }
+
+    @ViewBuilder
+    private func selectedCardView(_ card: TopSlotCardSelection) -> some View {
+        switch card {
+        case let .whatsNew(version):
+            WhatsNewCard(
+                palette: palette,
+                majorMinor: version,
+                teaser: WhatsNewCatalog.teaser(for: version),
+                onOpen: { coordinator.openWhatsNewFromCard(version: version) },
+                onDismiss: { coordinator.dismissWhatsNewCard() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteWhatsNewCardShown() }
+        case .quotaMeter:
+            QuotaMeterCard(
+                palette: palette,
+                needsUsageEnabled: !usageEnabled,
+                onOpen: { coordinator.isQuotaMeterPromoPresented = true },
+                onSnooze: { coordinator.suppressQuotaMeterCardThisLaunch() },
+                onDismiss: { coordinator.dismissQuotaMeterAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteQuotaMeterCardShown() }
+        case .star:
+            StarCard(
+                palette: palette,
+                onOpen: openRepository,
+                onSnooze: { coordinator.snoozeStarAsk() },
+                onDismiss: { coordinator.dismissStarAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteStarCardShown() }
+        case .feedback:
+            FeedbackCard(
+                palette: palette,
+                onOpen: { coordinator.isFeedbackPromptPresented = true },
+                onSnooze: { coordinator.suppressFeedbackCardThisLaunch() },
+                onDismiss: { coordinator.dismissFeedbackAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteFeedbackCardShown() }
+        case .language:
+            LanguageContributeCard(
+                palette: palette,
+                onOpen: openLanguageContribution,
+                onLearnMore: openLocalizationGuide,
+                onSnooze: { coordinator.snoozeLanguageAsk() },
+                onDismiss: { coordinator.dismissLanguageAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteLanguageCardShown() }
+        case let .steward(agent):
+            StewardCard(
+                palette: palette,
+                agent: agent,
+                onSignUp: { openStewardSignup(for: agent) },
+                onLearnMore: openStewardGuide,
+                onDismiss: { coordinator.dismissStewardAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteStewardCardShown() }
+        case .contribute:
+            ContributeCard(
+                palette: palette,
+                onOpen: openContributeForm,
+                onLearnMore: openContributeGuide,
+                onSnooze: { coordinator.snoozeContributeAsk() },
+                onDismiss: { coordinator.dismissContributeAskForever() },
+                paneWidth: paneWidth
+            )
+            .onAppear { coordinator.noteContributeCardShown() }
+        }
     }
 
     /// The star card's one side effect. Kept here rather than in the coordinator
@@ -161,6 +188,18 @@ struct OnboardingListTopSlot: View {
     private func openContributeGuide() {
         guard NSWorkspace.shared.open(OnboardingCoordinator.contributeGuideURL) else { return }
         coordinator.recordContributeOpened()
+    }
+
+    /// Translation links carry no locale, session, or device data. As with the
+    /// other contribution card, only a successful browser open retires the ask.
+    private func openLanguageContribution() {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.languageContributionURL) else { return }
+        coordinator.recordLanguageContributionOpened()
+    }
+
+    private func openLocalizationGuide() {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.localizationGuideURL) else { return }
+        coordinator.recordLanguageContributionOpened()
     }
 
     /// Opens the signup form with the agent pre-filled. Same success guard as the
@@ -193,14 +232,33 @@ struct OnboardingListTopSlot: View {
                 // routes around `openWhatsNewFromCard` so viewing the card
                 // cannot retire the version for real.
                 onOpen: { coordinator.openWhatsNewPanel(version: version) },
-                onDismiss: { debugCardDismissed = true }
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
+            )
+        case .quotaMeter:
+            QuotaMeterCard(
+                palette: palette,
+                needsUsageEnabled: true,
+                onOpen: { debugCardDismissed = true },
+                onSnooze: { debugCardDismissed = true },
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
+            )
+        case .feedback:
+            FeedbackCard(
+                palette: palette,
+                onOpen: { debugCardDismissed = true },
+                onSnooze: { debugCardDismissed = true },
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
             )
         case .star:
             StarCard(
                 palette: palette,
                 onOpen: { _ = NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL) },
                 onSnooze: { debugCardDismissed = true },
-                onDismiss: { debugCardDismissed = true }
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
             )
         case let .steward(agent):
             StewardCard(
@@ -216,6 +274,15 @@ struct OnboardingListTopSlot: View {
                 palette: palette,
                 onOpen: { _ = NSWorkspace.shared.open(OnboardingCoordinator.contributeAgentSourceURL) },
                 onLearnMore: { _ = NSWorkspace.shared.open(OnboardingCoordinator.contributeGuideURL) },
+                onSnooze: { debugCardDismissed = true },
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
+            )
+        case .language:
+            LanguageContributeCard(
+                palette: palette,
+                onOpen: { _ = NSWorkspace.shared.open(OnboardingCoordinator.languageContributionURL) },
+                onLearnMore: { _ = NSWorkspace.shared.open(OnboardingCoordinator.localizationGuideURL) },
                 onSnooze: { debugCardDismissed = true },
                 onDismiss: { debugCardDismissed = true },
                 paneWidth: paneWidth
@@ -237,8 +304,9 @@ struct OnboardingListTopSlot: View {
 /// open <built>.app --args -AgentSessionsDebugTopSlotCard qwen
 /// ```
 ///
-/// Accepts `star`, `whatsnew` (optionally `whatsnew:5.1` to pick the version),
-/// `contribute`, or any `SessionSource` raw value listed in
+/// Accepts `quota`, `feedback`, `star`, `whatsnew` (optionally
+/// `whatsnew:5.1` to pick the version), `language`, `contribute`, or any
+/// `SessionSource` raw value listed in
 /// `StewardAskEligibility.stewardlessAgents` (`qwen`, `grok`, `cursor`, …).
 /// Debug builds only: `current` is a compile-time nil elsewhere, so no release
 /// build can be argued into showing a card it has not earned.
@@ -250,9 +318,12 @@ struct OnboardingListTopSlot: View {
 /// this.
 enum TopSlotDebugOverride {
     case whatsNew(String)
+    case quotaMeter
     case star
+    case feedback
     case steward(StewardAgent)
     case contribute
+    case language
 
     static let defaultsKey = "AgentSessionsDebugTopSlotCard"
 
@@ -281,6 +352,9 @@ enum TopSlotDebugOverride {
         // matching them here keeps the agent lookup from having to know about
         // the cards that are not agents.
         if raw == "contribute" { return .contribute }
+        if raw == "feedback" { return .feedback }
+        if raw == "language" { return .language }
+        if raw == "quota" { return .quotaMeter }
         if raw == "star" { return .star }
         if raw == "whatsnew" || raw.hasPrefix("whatsnew:") {
             let requested = String(raw.dropFirst("whatsnew".count).drop(while: { $0 == ":" }))
@@ -318,12 +392,8 @@ struct SlotCardAction: Identifiable {
 
 }
 
-/// Chrome shared by the two slot cards whose body text is allowed to wrap.
-///
-/// Every other card in this slot caps its body at `lineLimit(1)` and truncates
-/// cleanly however narrow the pane gets. These two must not: each ends on a
-/// sentence about what is never shared, and truncating is precisely what would
-/// delete it. So the layout adapts instead.
+/// Shared, adaptive chrome for every top-slot card. At narrow pane widths the
+/// actions move below the copy instead of squeezing or truncating it.
 ///
 /// In one row, the actions are laid beside the text and take a fixed width, so
 /// every pixel the pane loses comes out of the text column. Below
@@ -337,9 +407,10 @@ struct WrappingSlotCard: View {
     let iconName: String
     let iconTint: Color
     let title: LocalizedStringResource
-    let message: LocalizedStringResource
+    let message: LocalizedStringResource?
     let actions: [SlotCardAction]
     let dismissHelp: LocalizedStringResource
+    var usesTipStyle: Bool = false
     var onDismiss: () -> Void
     /// Width of the slot, measured by `OnboardingListTopSlot`. Zero before the
     /// first layout pass, which is read as wide: most windows are, and starting
@@ -351,9 +422,9 @@ struct WrappingSlotCard: View {
     /// Derived from the widest action row here — the contribute card's three
     /// links need roughly 320pt — plus the icon, the card's own padding, and
     /// about 200pt of text column, under which an 11pt sentence stops reading as
-    /// a sentence. Shared by both cards rather than computed per card: the
-    /// steward card could stay wide slightly longer, and gains nothing from
-    /// switching at a different width than its neighbour.
+    /// a sentence. Shared by every card rather than computed per card: some
+    /// could stay wide slightly longer, but gain nothing from switching at a
+    /// different width than their neighbours.
     static let minimumWideWidth: CGFloat = 560
 
     /// Indent that lines the wrapped action row up with the text column above it.
@@ -391,8 +462,8 @@ struct WrappingSlotCard: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 10).fill(usesTipStyle ? palette.tipFill : palette.rowFill))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(usesTipStyle ? palette.tipStroke : palette.rowStroke, lineWidth: 1))
     }
 
     private var icon: some View {
@@ -409,10 +480,12 @@ struct WrappingSlotCard: View {
                 // Titles here carry agent names and run longer than the
                 // single-line cards' do. Wrapping beats truncating to "Help ad…".
                 .fixedSize(horizontal: false, vertical: true)
-            Text(message)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let message {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -430,6 +503,9 @@ struct WrappingSlotCard: View {
         }
         .buttonStyle(.plain)
         .help(Text(dismissHelp))
+        .accessibilityLabel(Text(dismissHelp))
+        .frame(minWidth: 28, minHeight: 28)
+        .contentShape(Rectangle())
     }
 }
 
@@ -493,6 +569,43 @@ struct StewardCard: View {
     }
 }
 
+/// Dismissible invitation to translate Agent Sessions into another language.
+///
+/// This uses the wrapping card chrome because translated actions and body copy
+/// must remain readable at the session list's minimum width.
+struct LanguageContributeCard: View {
+    let palette: OnboardingPalette
+    var onOpen: () -> Void
+    var onLearnMore: () -> Void
+    var onSnooze: () -> Void
+    var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
+
+    static let titleText: LocalizedStringResource = "Speak another language?"
+    static let bodyText: LocalizedStringResource = """
+        Agent Sessions is now available in English and Simplified Chinese. Help bring it to your \
+        language—no Swift required.
+        """
+
+    var body: some View {
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "character.book.closed",
+            iconTint: palette.accentBlue,
+            title: Self.titleText,
+            message: Self.bodyText,
+            actions: [
+                SlotCardAction(id: "help-translate", title: "Help translate", isProminent: true, perform: onOpen),
+                SlotCardAction(id: "translation-guide", title: "Translation guide", isProminent: false, perform: onLearnMore),
+                SlotCardAction(id: "maybe-later", title: "Maybe later", isProminent: false, perform: onSnooze)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
+    }
+}
+
 /// Dismissible one-time invitation to add support for another coding agent.
 ///
 /// Four exits, because the ask has four honest answers: contribute, read what it
@@ -510,7 +623,7 @@ struct ContributeCard: View {
     /// sentence can be pinned by a test. Deliberately not a strings file — every
     /// other card in this slot keeps its copy inline too. No source count is
     /// stated here: that number changes every release.
-    static let titleText: LocalizedStringResource = "Help add your agent"
+    static let titleText: LocalizedStringResource = "Help add another agent"
     static let bodyText: LocalizedStringResource = """
         Agent Sessions adds new agents from user contributions — a pull request, your coding agent \
         working from our brief, or a sanitized sample. Never share real transcripts, keys, or \
@@ -541,42 +654,30 @@ struct QuotaMeterCard: View {
     let palette: OnboardingPalette
     let needsUsageEnabled: Bool
     var onOpen: () -> Void
+    var onSnooze: () -> Void
     var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "gauge.with.dots.needle.50percent")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.accentBlue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Know your quota before it runs out")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("A pinned window with Codex and Claude limits, and how fast each session burns them.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Button(needsUsageEnabled ? "Turn on" : "Show me", action: onOpen)
-                .buttonStyle(.link)
-                .font(.system(size: 12, weight: .semibold))
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Dismiss")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "gauge.with.dots.needle.50percent",
+            iconTint: palette.accentBlue,
+            title: "Know your quota before it runs out",
+            message: "A pinned window with Codex and Claude limits, and how fast each session burns them.",
+            actions: [
+                SlotCardAction(
+                    id: "quota-meter-setup",
+                    title: needsUsageEnabled ? "Set up" : "Preview",
+                    isProminent: true,
+                    perform: onOpen
+                ),
+                SlotCardAction(id: "not-now", title: "Not now", isProminent: false, perform: onSnooze)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
     }
 }
 
@@ -682,43 +783,23 @@ struct WhatsNewCard: View {
     let teaser: LocalizedStringResource?
     var onOpen: () -> Void
     var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.accentBlue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("What's New in \(majorMinor)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                if let teaser {
-                    Text(teaser)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            Button("See what's new", action: onOpen)
-                .buttonStyle(.link)
-                .font(.system(size: 12, weight: .semibold))
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Dismiss")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.tipFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tipStroke, lineWidth: 1))
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "sparkles",
+            iconTint: palette.accentBlue,
+            title: "What's New in \(majorMinor)",
+            message: teaser,
+            actions: [
+                SlotCardAction(id: "see-whats-new", title: "See what's new", isProminent: true, perform: onOpen)
+            ],
+            dismissHelp: "Dismiss this update",
+            usesTipStyle: true,
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
     }
 }
 
@@ -732,48 +813,23 @@ struct StarCard: View {
     var onOpen: () -> Void
     var onSnooze: () -> Void
     var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "star.circle")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.accentBlue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Leave a star if this helps")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("A star helps others find this project. One click, nothing sent.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Button("Star on GitHub", action: onOpen)
-                .buttonStyle(.link)
-                .font(.system(size: 12, weight: .semibold))
-
-            // Same link style as the primary action, one weight lighter — the
-            // accent colour is `.link`'s own, so tinting it here would not reach
-            // the layer that draws it.
-            Button("Maybe later", action: onSnooze)
-                .buttonStyle(.link)
-                .font(.system(size: 12))
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Don't ask again")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "star.circle",
+            iconTint: palette.accentBlue,
+            title: "Leave a star if this helps",
+            message: "A star helps others find this project. Opens GitHub; nothing is sent.",
+            actions: [
+                SlotCardAction(id: "open-github", title: "Open GitHub", isProminent: true, perform: onOpen),
+                SlotCardAction(id: "maybe-later", title: "Maybe later", isProminent: false, perform: onSnooze)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
     }
 }
 
@@ -782,50 +838,33 @@ struct StarCard: View {
 struct FeedbackCard: View {
     let palette: OnboardingPalette
     var onOpen: () -> Void
+    var onSnooze: () -> Void
     var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "text.bubble")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.accentBlue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Help make Agent Sessions better")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("What's the one thing you wish Agent Sessions did better?")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Button("Share feedback", action: onOpen)
-                .buttonStyle(.link)
-                .font(.system(size: 12, weight: .semibold))
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Dismiss for now")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "text.bubble",
+            iconTint: palette.accentBlue,
+            title: "Help make Agent Sessions better",
+            message: "What's the one thing you wish Agent Sessions did better?",
+            actions: [
+                SlotCardAction(id: "share-feedback", title: "Share feedback", isProminent: true, perform: onOpen),
+                SlotCardAction(id: "not-now", title: "Not now", isProminent: false, perform: onSnooze)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
     }
 }
 
 #if DEBUG
 /// The steward card at the pane widths that actually occur: the session list's
 /// 320pt minimum, a typical split, and a wide window. The contribute card sits
-/// underneath as the reference — this card is measured against it, since the two
-/// are neighbours in the slot and ask for comparable work.
+/// and translation cards sit underneath as references — all three use the same
+/// wrapping chrome and must behave at the same real pane widths.
 private struct StewardCardPreviewMatrix: View {
     let colorScheme: ColorScheme
 
@@ -851,6 +890,8 @@ private struct StewardCardPreviewMatrix: View {
                                         paneWidth: width)
                             ContributeCard(palette: palette, onOpen: {}, onLearnMore: {},
                                            onSnooze: {}, onDismiss: {}, paneWidth: width)
+                            LanguageContributeCard(palette: palette, onOpen: {}, onLearnMore: {},
+                                                   onSnooze: {}, onDismiss: {}, paneWidth: width)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)

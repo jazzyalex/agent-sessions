@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Where Codex CLI and Desktop Store History on macOS</title>
-  <meta name="description" content="Codex CLI, Desktop, and VS Code write rollout JSONL to ~/.codex/sessions. Where CODEX_HOME moves it, and how to search every session locally.">
+  <title>Find and Search Old Codex Sessions on macOS</title>
+  <meta name="description" content="Find old Codex CLI, Desktop, and VS Code sessions on your Mac. Learn where Codex stores rollout JSONL and how to search the transcripts locally.">
   <meta name="keywords" content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Codex rollout JSONL, ~/.codex/sessions, CODEX_HOME sessions, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html">
   <link rel="icon" href="../assets/app-icon-32.png">
@@ -24,9 +24,9 @@
       {
         "@type": "TechArticle",
         "@id": "https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html#article",
-        "headline": "Codex Local History",
-        "name": "Codex Local History",
-        "description": "Codex CLI, Desktop, and VS Code write rollout JSONL to ~/.codex/sessions. Where CODEX_HOME moves it, and how to search every session locally.",
+        "headline": "Find and Search Old Codex Sessions on macOS",
+        "name": "Find and Search Old Codex Sessions on macOS",
+        "description": "Find old Codex CLI, Desktop, and VS Code sessions on your Mac, including rollout JSONL under CODEX_HOME.",
         "url": "https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html",
         "mainEntityOfPage": {
           "@type": "WebPage",
@@ -99,7 +99,7 @@
 
   <main class="guide-shell">
     <p class="eyebrow">Local History Guide / Codex</p>
-    <h1>Codex Local History: Search Codex CLI, Desktop, and VS Code Sessions on macOS</h1>
+    <h1>Find and Search Old Codex Sessions on macOS</h1>
     <p class="lede">Codex sessions are often the record of how a task actually happened: the prompt, plan, tool call, patch output, command error, image input, or final reasoning boundary. Agent Sessions makes that local Codex history searchable across Codex CLI, Codex Desktop, and Codex VS Code surfaces.</p>
     <p class="note">Agent Sessions reads local Codex rollout files. It does not upload Codex transcripts or turn them into hosted project memory.</p>
     <div class="button-row">
@@ -115,6 +115,15 @@
       <div class="meta-card"><strong>Formats</strong>Date-sharded <code>rollout-*.jsonl</code> session logs.</div>
       <div class="meta-card"><strong>Surfaces</strong>Codex CLI, Codex Desktop, and Codex VS Code sessions in one Codex corpus.</div>
     </section>
+
+    <h2>How to Find an Old Codex Session</h2>
+    <ol>
+      <li>Open Agent Sessions and choose Codex in the source filter.</li>
+      <li>Search for a phrase from the prompt, command output, error, file path, or response you remember.</li>
+      <li>Open the matching transcript and use in-session Find to jump between occurrences.</li>
+      <li>For a resumable session, copy its resume command or open it in your preferred terminal.</li>
+    </ol>
+    <p>If the session is absent, check whether <code>CODEX_HOME</code> points somewhere other than the default location. Agent Sessions cannot recover a rollout file that Codex deleted or never wrote.</p>
 
     <h2>Where Codex Stores Local Data</h2>
     <p>Codex session logs use JSONL rollout files. The default root is:</p>

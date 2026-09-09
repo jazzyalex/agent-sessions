@@ -87,8 +87,8 @@ final class GrokSessionParserTests: XCTestCase {
         let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
 
         let calls = session.events.filter { $0.kind == .tool_call }
-        // Two assistant tool calls plus the server-side backend_tool_call.
-        XCTAssertEqual(calls.count, 3)
+        // Two assistant tool calls plus three server-side backend_tool_call records.
+        XCTAssertEqual(calls.count, 5)
         XCTAssertEqual(calls.first?.toolName, "read_file")
         // `arguments` arrives as a JSON string and is passed through verbatim.
         XCTAssertEqual(calls.first?.toolInput,
@@ -142,16 +142,16 @@ final class GrokSessionParserTests: XCTestCase {
 
     /// A preview that reached EOF counted the whole transcript, so it reports its
     /// own exact non-meta total rather than the sidecar's `num_chat_messages`.
-    /// The fixture's 11 records hold 9 non-meta events: the sidecar counts the
+    /// The fixture's 13 records hold 11 non-meta events: the sidecar counts the
     /// `system` record and both `reasoning` records, all three of which render
     /// as meta.
     func testLightweightParseCountsNonMetaEventsWhenNotTruncated() throws {
         let url = try stagedFixture()
         let session = try XCTUnwrap(GrokSessionParser.parseFile(at: url))
 
-        XCTAssertEqual(session.eventCount, 9)
+        XCTAssertEqual(session.eventCount, 11)
         XCTAssertTrue(session.events.isEmpty)
-        XCTAssertEqual(session.lightweightCommands, 3)
+        XCTAssertEqual(session.lightweightCommands, 5)
 
         // The list estimate must agree with what a full parse actually renders,
         // or `Session.messageCount`'s max() pins the larger number forever.
