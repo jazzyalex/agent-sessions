@@ -502,6 +502,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     let sessionIDLabel: String  // "Codex" or "Claude"
     let enableCaching: Bool  // Codex uses cache, Claude doesn't
 
+    @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
+    @State private var sessionTelemetry: SessionTelemetry?
+    @State private var telemetryOwner: String?
+    @State private var telemetryLoading = false
+    @State private var telemetryRefresh = 0
+
+    private var telemetrySelectionKey: String {
+        guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return "none" }
+        return "\(session.source.rawValue)|\(session.id)|\(session.filePath)"
+    }
+
+    private var selectedTelemetry: SessionTelemetry? {
+        telemetryOwner == telemetrySelectionKey ? sessionTelemetry : nil
+    }
+
     // Text transcript buffer
     @State private var transcript: String = ""
     @State private var rebuildTask: Task<Void, Never>?
@@ -789,6 +804,41 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                transcriptBody
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if showSessionInfo {
+                    Divider()
+                    TranscriptTelemetryView(
+                        telemetry: selectedTelemetry,
+                        loading: telemetryLoading,
+                        isSubagent: sessionID.flatMap { resolvedSessionForRender(id: $0) }?.isSubagent ?? false,
+                        refresh: { telemetryRefresh &+= 1 },
+                        close: { showSessionInfo = false })
+                        .frame(width: min(300, max(180, geometry.size.width * 0.36)))
+                }
+            }
+        }
+        // Selection and explicit refresh only: never re-read a growing log on a timer.
+        .task(id: "\(telemetrySelectionKey)|\(telemetryRefresh)") {
+            let owner = telemetrySelectionKey
+            sessionTelemetry = nil
+            telemetryOwner = owner
+            guard let id = sessionID, let session = resolvedSessionForRender(id: id) else {
+                telemetryLoading = false
+                return
+            }
+            telemetryLoading = true
+            let result = await SessionTelemetryEngine.shared.telemetry(for: session)
+            guard !Task.isCancelled, owner == telemetrySelectionKey else { return }
+            sessionTelemetry = result
+            telemetryLoading = false
+        }
+    }
+
+    @ViewBuilder
+    private var transcriptBody: some View {
         let displaySession = sessionID.flatMap { id in resolvedSessionForRender(id: id) }
 
         if sessionID != nil, let session = displaySession {
@@ -1282,6 +1332,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             derivedState: derivedState,
             session: session,
             fontSize: CGFloat(transcriptFontSize),
+            configurationChanges: selectedTelemetry?.configurationChanges ?? [],
             imagesByBlockIndex: richInlineImagesByBlockIndex,
             inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && richHasInlineImages,
             reviewCardsEnabled: transcriptReviewCardsEnabled,

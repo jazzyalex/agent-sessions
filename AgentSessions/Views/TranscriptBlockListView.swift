@@ -149,6 +149,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
     let derivedState: TranscriptDerivedState
     let session: Session
     let fontSize: CGFloat
+    var configurationChanges: [ConfigurationChange] = []
     /// Inline session images keyed by the target `.user` block's
     /// `globalBlockIndex` — which equals `BlockRowModel.id`, so the cell does a
     /// direct lookup with no translation. Computed off-main by the parent
@@ -303,6 +304,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
             fontSize: fontSize,
             source: session.source,
             sessionID: session.id,
+            configurationChanges: snapshot.key?.sessionID == session.id ? configurationChanges : [],
             imagesByBlockIndex: inlineImagesEnabled ? imagesByBlockIndex : [:],
             inlineImagesEnabled: inlineImagesEnabled,
             reviewCardsEnabled: reviewCardsEnabled,
@@ -942,8 +944,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         loadedBlockRange = newRange
 
         let windowed = Self.slice(allBlocksCache, to: newRange)
-        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
+        let newRows = rowsWithTelemetry(from: windowed)
         applyPrepend(newRows: newRows)
     }
 
@@ -1014,6 +1015,39 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         restoreScrollAnchor(anchor)
     }
 
+    private var telemetryMarkers: [Int: [String]] = [:]
+
+    private func rowsWithTelemetry(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
+        Self.rowsWithTelemetry(from: blocks, markers: telemetryMarkers,
+                               totalBlockCount: allBlocksCache.count, activeRoles: activeRoleFilters)
+    }
+
+    /// Display-only rows use negative IDs, leaving every transcript block ID and
+    /// source text untouched. Insert before tool grouping so changes split runs.
+    static func rowsWithTelemetry(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>,
+                                  markers: [Int: [String]], totalBlockCount: Int,
+                                  activeRoles: Set<TranscriptRoleFilter>) -> [BlockRowModel] {
+        var rows: [BlockRowModel] = []
+        func appendMarker(at index: Int) {
+            guard let lines = markers[index], !lines.isEmpty else { return }
+            let block = SessionTranscriptBuilder.LogicalBlock(
+                kind: .meta, text: lines.joined(separator: "\n"), timestamp: nil,
+                messageID: nil, toolName: nil, isDelta: false, toolInput: nil,
+                isErrorOutput: false, eventID: "telemetry-change-\(index)", rawJSON: "",
+                globalBlockIndex: -index - 1)
+            rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
+        }
+        for block in blocks {
+            appendMarker(at: block.globalBlockIndex)
+            let role = TranscriptRoleFilter.governing(block.kind)
+            if activeRoles.isEmpty || role == nil || activeRoles.contains(role!) {
+                rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
+            }
+        }
+        if blocks.last?.globalBlockIndex == totalBlockCount - 1 { appendMarker(at: totalBlockCount) }
+        return TranscriptToolSummary.mergeToolRuns(rows)
+    }
+
     // MARK: Apply
 
     /// Diff the incoming windowed stream against the current rows and update the
@@ -1023,6 +1057,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                fontSize: CGFloat,
                source: SessionSource,
                sessionID: String,
+               configurationChanges: [ConfigurationChange] = [],
                imagesByBlockIndex: [Int: [InlineSessionImage]] = [:],
                inlineImagesEnabled: Bool = false,
                reviewCardsEnabled: Bool = true,
@@ -1033,6 +1068,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                ideBinaryOverridePath: String = "",
                activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) {
         guard let table else { return }
+
+        let newMarkers = TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
+        let markersChanged = newMarkers != telemetryMarkers
+        telemetryMarkers = newMarkers
+        if markersChanged { heightCache.removeAll(keepingCapacity: true) }
 
         let fontChanged = fontSize != self.fontSize
         let sourceChanged = source != self.source
@@ -1178,8 +1218,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         self.totalBlockCount = totalBlockCount
 
         let windowed = Self.slice(allBlocks, to: loadedBlockRange)
-        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
+        let newRows = rowsWithTelemetry(from: windowed)
 
         // Font change forces a full re-measure + re-render of bodies. The
         // RenderKey embeds fontBucket so stale entries would already miss, but
@@ -1199,7 +1238,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let diff = Self.classifyChange(old: rows, new: newRows)
 
         switch diff {
-        case .identical where !fontChanged && !sourceChanged && !imagesChanged && !linkInputsChanged:
+        case .identical where !fontChanged && !sourceChanged && !imagesChanged && !linkInputsChanged && !markersChanged:
             return
         case .identical:
             // Same rows, but font/source/image-map/link-inputs changed →
@@ -1673,8 +1712,21 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return InlineImageThumbnailGridView.height(imageCount: count, width: width)
     }
 
+    static func telemetryMarkerHeight(text: String, width: CGFloat) -> CGFloat {
+        let rect = (text as NSString).boundingRect(
+            with: NSSize(width: max(1, width), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: 11)])
+        return ceil(rect.height) + 2 * LayoutTokens.sm
+    }
+
     private func measuredHeight(for row: BlockRowModel, width: CGFloat) -> CGFloat {
-        if row.isMeta { return CardMetrics.metaSeparatorHeight }
+        if row.isMeta {
+            if row.primaryBlock.eventID.hasPrefix("telemetry-change-") {
+                return Self.telemetryMarkerHeight(text: row.bodyText, width: width)
+            }
+            return CardMetrics.metaSeparatorHeight
+        }
 
         let toolState = toolRowHeightState(for: row)
         let imageCount = inlineImages(for: row).count
@@ -2145,8 +2197,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         loadedBlockRange = newRange
 
         let windowed = Self.slice(allBlocksCache, to: newRange)
-        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
+        let newRows = rowsWithTelemetry(from: windowed)
 
         // A widen re-slices the window and shifts ordinals — invalidate any live
         // cross-block selection before the rows swap.
@@ -3237,6 +3288,7 @@ final class BlockCardCellView: NSTableCellView {
     private var headerHost: NSHostingView<BlockCardHeader>?
     private var showAllHost: NSHostingView<ShowAllRow>?
     private let metaSeparator = DynamicFillView()
+    private let telemetryLabel = NSTextField(wrappingLabelWithString: "")
     /// Inline-image grid (Task C1), a sibling BELOW `showAllHost`. Native AppKit
     /// (no hosting view) so it recycles cleanly and cancels its own decodes.
     private let imageGrid = InlineImageThumbnailGridView()
@@ -3258,6 +3310,16 @@ final class BlockCardCellView: NSTableCellView {
 
     private func buildViewTree() {
         wantsLayer = true
+        telemetryLabel.translatesAutoresizingMaskIntoConstraints = false
+        telemetryLabel.font = .systemFont(ofSize: 11)
+        telemetryLabel.textColor = .secondaryLabelColor
+        telemetryLabel.isHidden = true
+        addSubview(telemetryLabel)
+        NSLayoutConstraint.activate([
+            telemetryLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CardMetrics.accentBarWidth + CardMetrics.contentLeadingInset),
+            telemetryLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CardMetrics.contentTrailingInset),
+            telemetryLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
 
         // DynamicFillView sets wantsLayer in its own init. cornerRadius/
         // masksToBounds are stored properties re-applied on every
@@ -3406,8 +3468,15 @@ final class BlockCardCellView: NSTableCellView {
         // cell that WAS an image row shows no stale image and leaks no decode
         // Task. Re-populated below only for a user message row with images.
         resetImageGrid()
+        telemetryLabel.isHidden = true
+        telemetryLabel.stringValue = ""
         if row.isMeta {
             configureMetaSeparator()
+            if row.primaryBlock.eventID.hasPrefix("telemetry-change-") {
+                metaSeparator.isHidden = true
+                telemetryLabel.stringValue = row.bodyText
+                telemetryLabel.isHidden = false
+            }
             return
         }
 

@@ -417,6 +417,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
+    @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     @AppStorage(PreferencesKey.Unified.collapsedHierarchyParents) private var collapsedHierarchyParentsRaw: String = ""
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
@@ -1980,6 +1981,16 @@ struct UnifiedSessionsView: View {
                 activeColor: .primary,
                 accessibilityLabel: "Transcript Window"
             )
+
+            ToolbarIconToggle(
+                isOn: $showSessionInfo,
+                onSymbol: "info.circle.fill",
+                offSymbol: "info.circle",
+                help: showSessionInfo ? "Hide Session info (⇧⌘I)" : "Show Session info (⇧⌘I)",
+                activeColor: .primary,
+                accessibilityLabel: "Session info"
+            )
+            .disabled(!showTranscriptWindow)
 
             LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
 

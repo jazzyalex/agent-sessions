@@ -212,6 +212,7 @@ struct AgentSessionsApp: App {
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
+    @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -419,6 +420,9 @@ struct AgentSessionsApp: App {
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
                 Toggle("Transcript Window", isOn: $showTranscriptWindow)
+                Toggle("Session info", isOn: $showSessionInfo)
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+                    .disabled(!showTranscriptWindow)
                 Divider()
                 Button("Collapse All") {
                     NotificationCenter.default.post(name: .collapseAllUnifiedSessionGroupsFromMenu, object: nil)
