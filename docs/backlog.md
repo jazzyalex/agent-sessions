@@ -1252,9 +1252,10 @@ this. The entry sat `verified —` and read as open work for two weeks.
   Hermes/Cursor nil it on placeholder paths, so shared-DB sources need a
   per-source store-size rule (report the shared db's size whole or apportioned)
   before the rollup can claim per-source coverage —
-  plus the S4 collapse-rule definitions in
-  [measure.py](../scripts/session_bench/measure.py) and the seeded numbers in
-  [measurements-2026-08-04.json](../scripts/session_bench/measurements-2026-08-04.json).
+  plus the canonical S4 collapse-rule definitions in
+  [Session-Bench measure.py](https://github.com/jazzyalex/session-bench/blob/main/scripts/measure.py)
+  and the seeded numbers in
+  [data/measurements.json](https://github.com/jazzyalex/session-bench/blob/main/data/measurements.json).
 - **Why deferred:** owner sequenced it after S4 landed in the bench so the
   product side reuses one definition instead of inventing a second
   ([discussion #54](https://github.com/jazzyalex/agent-sessions/discussions/54#discussioncomment-18121398)).

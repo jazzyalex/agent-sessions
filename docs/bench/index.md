@@ -147,7 +147,10 @@ Each area answers one question a developer actually has:
 ## The gate matrix
 
 ✓ pass · ✗ fail · — not run · ◦ unscored · · not applicable. Hover a cell for the evidence
-behind it.
+behind it. Underlined cells link to the checked source; their tooltip includes the
+source-check date. That date records a documentation check, not a new measurement
+or a score update. A source linked from a failing cell is the documentation
+checked, not proof that no other documentation exists.
 
 <div class="bench-matrix">
 <table>
@@ -168,17 +171,13 @@ behind it.
       {% for agent in site.data.session_bench.agents %}
       {% assign r = agent.results[gate.id] %}
       {% assign note = agent.notes[gate.id] %}
-      {% if r == "pass" %}
-      <td class="bench-pass" title="{{ note | default: gate.desc }}">✓</td>
-      {% elsif r == "fail" %}
-      <td class="bench-fail" title="{{ note | default: gate.desc }}">✗</td>
-      {% elsif r == "not_run" %}
-      <td class="bench-na" title="{{ note | default: gate.desc }}">—</td>
-      {% elsif r == "not_applicable" %}
-      <td class="bench-na" title="{{ note | default: gate.desc }}">·</td>
-      {% else %}
-      <td class="bench-na" title="{{ note | default: gate.desc }}">◦</td>
-      {% endif %}
+      {% assign citation = agent.sources[gate.id] %}
+      {% assign symbol = "◦" %}{% assign cell_class = "bench-na" %}
+      {% if r == "pass" %}{% assign symbol = "✓" %}{% assign cell_class = "bench-pass" %}
+      {% elsif r == "fail" %}{% assign symbol = "✗" %}{% assign cell_class = "bench-fail" %}
+      {% elsif r == "not_run" %}{% assign symbol = "—" %}
+      {% elsif r == "not_applicable" %}{% assign symbol = "·" %}{% endif %}
+      <td class="{{ cell_class }}" title="{{ note | default: gate.desc | escape }}{% if citation %} — Source checked {{ citation.observed_at | escape }}{% endif %}">{% if citation %}<a href="{{ citation.source_url | escape }}" aria-label="{{ agent.name | escape }} {{ gate.id }}: {{ r | escape }}; source checked {{ citation.observed_at | escape }}" style="color:inherit;text-decoration:underline;">{{ symbol }}</a>{% else %}{{ symbol }}{% endif %}</td>
       {% endfor %}
     </tr>
     {% endif %}
@@ -249,7 +248,7 @@ sidecar (gates O1, O2, P3).
   widened for most harnesses (e.g. Hermes best case 5 → 3). Absence of a
   qualifying rule is still not leanness; the ranges are enumeration
   arithmetic, not evidence. Raw commands and reported values:
-  [receipts-2026-08-22-s4.md](https://github.com/jazzyalex/agent-sessions/blob/main/scripts/session_bench/receipts-2026-08-22-s4.md).
+  [receipts-2026-08-22-s4.md](https://github.com/jazzyalex/session-bench/blob/main/evidence/receipts-2026-08-22-s4.md).
 
 - **2026-08-12 — O3 (documented schema) was originally scored fail for all
   ten harnesses. That was wrong.** An external re-check found real vendor
@@ -289,7 +288,7 @@ sidecar (gates O1, O2, P3).
   and their T3 becomes not-applicable. Claude and Codex 14→12/18,
   OpenCode 13→11/17, Copilot 12→10/18. The Codex C6/C7 evidence now cites
   a pinned artifact set with hashes
-  ([receipt](https://github.com/jazzyalex/agent-sessions/blob/main/scripts/session_bench/receipts-2026-08-12-codex-c6c7.md)).
+  ([receipt](https://github.com/jazzyalex/session-bench/blob/main/evidence/receipts-2026-08-12-codex-c6c7.md)).
 
 ## Method
 
@@ -306,11 +305,11 @@ raw artifacts to extraction — is the 1.0 milestone, and until it lands
 this page does not claim to be a push-button-reproducible benchmark. The benchmark's canonical home is
 [github.com/jazzyalex/session-bench]({{ site.data.session_bench.methodology_url }})
 — methodology, data, evaluator, tests, and the public corrections
-changelog; it syncs after each rubric change, so between a correction
-landing here and the mirror updating, the evaluator in this repository's
-`scripts/session_bench/` is the current-version reference. To dispute a
-score, open an issue there with the measurement or evidence you contest,
-and re-run the evaluator.
+changelog. Agent Sessions temporarily hosts this Jekyll view using a
+byte-identical, checked-in copy of Session-Bench's generated
+`data/leaderboard.yml`; it does not maintain a second evaluator or set of
+inputs. To dispute a score, open an issue in the Session-Bench repository
+with the measurement or evidence you contest, and re-run its evaluator.
 
 The probe is one identical prompt — "{{ site.data.session_bench.probe_prompt }}" —
 attempted through each harness's {{ site.data.session_bench.surface }};
@@ -334,6 +333,6 @@ re-scores when they do. v1.0 is reserved for end-to-end reproducibility:
 harness execution to archived artifacts to extraction, a tested crash
 gate, and per-event classifiers. Disputes
 and corrections are welcome as
-[issues](https://github.com/jazzyalex/agent-sessions/issues).
+[issues](https://github.com/jazzyalex/session-bench/issues).
 
 <p class="post-back"><a href="{{ '/blog/' | relative_url }}">&larr; The Rollout</a></p>

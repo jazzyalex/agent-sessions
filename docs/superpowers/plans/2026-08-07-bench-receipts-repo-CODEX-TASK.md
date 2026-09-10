@@ -1,5 +1,10 @@
 # Codex task: Session-Bench public receipts repo
 
+> Historical task packet, superseded by the completed standalone repository.
+> Since 2026-09-09, `jazzyalex/session-bench` owns the engine, inputs, tests,
+> evidence, generated leaderboard, and correction history. Agent Sessions only
+> hosts the current Jekyll view and an exact generated artifact.
+
 Owner: Alex (@jazzyalex). Prepared 2026-08-07 by Claude (main session).
 Model to copy: github.com/phuryn/experiments ("when a post claims a number,
 the receipt lives here") — see its root README, per-experiment folder
@@ -10,9 +15,8 @@ layout, and especially its Anonymization section (rules as code).
 A new public repo, **jazzyalex/session-bench**, holding the receipts behind
 Session-Bench (live at jazzyalex.github.io/agent-sessions/bench/): redacted
 probe artifacts, measurement outputs, per-gate evidence, and the graphics —
-so every cell on the leaderboard has an inspectable receipt. The scoring
-engine stays in agent-sessions (scripts/session_bench/); this repo holds
-data and links back.
+so every cell on the leaderboard has an inspectable receipt. The completed
+repository now also owns the scoring engine and versioned inputs.
 
 ## Hard privacy constraints (non-negotiable, read first)
 
@@ -65,8 +69,7 @@ session-bench/
     README.md                # question, method, probe prompt, the board,
                              # per-gate summary, caveats (not-run gates,
                              # content-key heuristic limits, CLI-only scope)
-    scoreboard.csv           # the 10×20 matrix + per-area + totals (from
-                             # docs/_data/session_bench.yml in agent-sessions)
+    scoreboard.csv           # the 10×20 matrix + per-area + totals
     probe-artifacts/         # REDACTED session files, one per harness
       codex-0.146.0.rollout.jsonl
       claude-2.1.220.session.jsonl
@@ -83,9 +86,10 @@ session-bench/
 
 ## Sources on this machine
 
-- Engine + inputs: `~/Repository/Codex-History/scripts/session_bench/`
-  (measurements JSON, checklist YAML, evaluate.py, measure.py, tests).
-- Generated board: `~/Repository/Codex-History/docs/_data/session_bench.yml`.
+- Engine + inputs: `~/Repository/session-bench/` (`data/`, `scripts/`, and
+  `tests/`).
+- Generated board: `~/Repository/session-bench/data/leaderboard.yml`; Agent
+  Sessions vendors it at `docs/_data/session_bench.yml` for GitHub Pages.
 - Probe artifacts (the 2026-08-04 run):
   - Claude: `~/.claude/projects/-Users-alexm-Repository-Codex-History/c1c69d06-53ab-4466-8c0f-2fb0e81f627c.jsonl`
   - Copilot: `~/.copilot/session-state/16a42cfb-dd6c-4687-87b7-cf80fade0f6e/events.jsonl`
