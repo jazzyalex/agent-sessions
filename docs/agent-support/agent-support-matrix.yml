@@ -1,8 +1,9 @@
-agent_sessions_version: "5.1.1"
-as_of_commit: "da13918e"
-as_of_date: 2026-09-08
+agent_sessions_version: "5.2"
+as_of_commit: "cb723ae"
+as_of_date: 2026-09-10
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-09-10 transcript telemetry follow-up: verified installed Codex 0.154.0 (scripts/probe_scan_output/agent_watch/20260910-202530-842309Z-p61010-prebump/report.json) and Claude 2.1.267 (scripts/probe_scan_output/agent_watch/20260910-202431-895555Z-p60050-prebump/report.json) from fresh prebump sessions. Their last current upstream checks named the same versions; the final weekly pass was conservatively installed-only because those latest-version reads came from cache. Claude assistant.perTurnEffort now drives the effective effort timeline when populated; six additive attachment records are internal metadata/noise. Codex's additive task_complete.error.codex_error_info.http_connection_failed flag is internal error metadata/noise. Normal fixture coverage for both agents was refreshed from all local sessions. Final weekly report: scripts/probe_scan_output/agent_watch/20260910-202619-049835Z-p61272/report.json."
   - "Snapshot taken at the 2026-08-21 format check. Qwen Code support (ef4e9253) shipped in v5.0 and is recorded in the 2026-08-17 ledger entry; the 2026-08-21 check is recorded under agent_sessions_version 5.0.1."
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
@@ -46,14 +47,14 @@ notes:
   - "2026-09-08 full format check: fresh native evidence verified Codex 0.153.4, Claude 2.1.263, Copilot 1.0.83, Kimi 0.41.0, Antigravity 1.1.27, OpenCode 1.18.29, Hermes 0.21.1, Cursor 2026.9.8, Pi 0.85.1, and Grok 1.0.24 after additive fixture refreshes. No parser behavior change was required. Claude remains installed-only because its updater advertised 2.1.266 but declined to replace 2.1.263; the separate usage capture was repaired and live-verified. Held: OpenClaw 2026.7.1 (vendor workspace migration blocks a fresh run), Qwen 0.14.3 (no modern native session), Devin 3000.6.7 (steward cadence), and fx 0.0.7 pending the requested steward check of 0.0.8. Final weekly report: scripts/probe_scan_output/agent_watch/20260908-235525-879296Z-p58511/report.json."
 agents:
   codex_cli:
-    max_verified_version: "0.153.4"
+    max_verified_version: "0.154.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.263"
+    max_verified_version: "2.1.267"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"

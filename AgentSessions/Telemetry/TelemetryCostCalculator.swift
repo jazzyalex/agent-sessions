@@ -44,7 +44,8 @@ enum TelemetryCostCalculator {
                 eventMissing.forEach { appendOnce($0, to: &missingComponents) }
             }
             pricedEvents.append(event.priced(usd: usd, revision: snapshot.revision,
-                                             updated: snapshot.updatedDate))
+                                             updated: snapshot.updatedDate,
+                                             manifestFingerprint: snapshot.manifestFingerprint))
         }
         let available = unpricedModels.isEmpty && missingComponents.isEmpty
         return Result(
@@ -53,7 +54,8 @@ enum TelemetryCostCalculator {
                 unpricedModels: unpricedModels,
                 missingPriceComponents: missingComponents,
                 priceTableUpdated: snapshot.updatedDate,
-                priceTableRevision: snapshot.revision),
+                priceTableRevision: snapshot.revision,
+                priceManifestFingerprint: snapshot.manifestFingerprint),
             events: pricedEvents)
     }
 
@@ -118,7 +120,8 @@ enum TelemetryCostCalculator {
             unpricedModels: unpricedModels,
             missingPriceComponents: missingComponents,
             priceTableUpdated: snapshot.updatedDate,
-            priceTableRevision: snapshot.revision
+            priceTableRevision: snapshot.revision,
+            priceManifestFingerprint: snapshot.manifestFingerprint
         )
     }
 

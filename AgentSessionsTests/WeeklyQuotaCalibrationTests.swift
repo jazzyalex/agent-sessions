@@ -415,7 +415,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let end = t0.addingTimeInterval(10 * 60)
         let payload = try XCTUnwrap(
             JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
-        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 6)
+        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 7)
         var restored = WeeklyQuotaCalibrationTracker()
         restored.restore(from: persisted.data, scope: scope(), now: end)
         XCTAssertEqual(try XCTUnwrap(restored.percentPointsPerDollar(now: end)),
@@ -437,6 +437,23 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
 
         var restored = WeeklyQuotaCalibrationTracker()
         restored.restore(from: legacy, scope: scope(), now: t0.addingTimeInterval(10 * 60))
+        XCTAssertNil(restored.percentPointsPerDollar(now: t0.addingTimeInterval(10 * 60)))
+    }
+
+    func testRevisionSixCodexCalibrationIsRejectedAfterAccountAndCacheWriteCorrection() throws {
+        let persisted = try persistedCalibration(
+            scope: scope(), hasExactPercent: false, model: "gpt-5.6")
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
+        payload["activityAccountingRevision"] = 6
+        let revisionSix = try JSONSerialization.data(withJSONObject: payload)
+
+        var restored = WeeklyQuotaCalibrationTracker()
+        restored.restore(
+            from: revisionSix,
+            scope: scope(),
+            now: t0.addingTimeInterval(10 * 60)
+        )
         XCTAssertNil(restored.percentPointsPerDollar(now: t0.addingTimeInterval(10 * 60)))
     }
 
@@ -551,6 +568,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scope(priceRevision: prices.revision).accountHash
         store.setBestBootstrapForTesting(provider: "codex", result: bootstrap)
 
         let currentScope = scope(priceRevision: prices.revision, source: "oauth", shape: "weekly")
@@ -716,6 +734,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         impossible.limitShape = scoped.limitShape
         impossible.sourceFamily = scoped.sourceFamily
         impossible.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        impossible.accountHash = scoped.accountHash
         store.setBootstrapForTesting(provider: "codex", result: impossible)
 
         XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: end),
@@ -878,11 +897,13 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let suite = try XCTUnwrap(UserDefaults(suiteName: "wkcal-test-\(UUID().uuidString)"))
         defer { suite.removePersistentDomain(forName: suite.description) }
         let resetsAt = t0.addingTimeInterval(604_800)
+        let accountHash = try XCTUnwrap(scope().accountHash)
         let stored = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0, resetsAt: resetsAt, scannedAt: t0,
-            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)
-        let key = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision,
+            accountHash: accountHash)
+        let key = "quotaMeter.weeklyBootstrap.codex.\(accountHash).\(Int(resetsAt.timeIntervalSince1970))"
         suite.set(try JSONEncoder().encode(stored), forKey: key)
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
@@ -894,6 +915,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                               resetsAt: resetsAt.addingTimeInterval(0.24),
                               windowMinutes: 10080,
                               usedPercentPoints: 20,
+                              accountHash: accountHash,
                               now: t0,
                               defaults: suite)
         // 20.5/100, not 20/100: the reported integer is a floor, so the served
@@ -1290,6 +1312,10 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     }
 
     private let t0 = Date(timeIntervalSince1970: 3_000_000)
+    private let codexAccountID = "account-a"
+    private var codexAccountHash: String {
+        WeeklyQuotaCalibrationScope.hashAccount(codexAccountID)!
+    }
     private var root: URL!
     private var suite: UserDefaults!
     private var suiteName: String!
@@ -1316,12 +1342,13 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     }
 
     private func result(used: Double, dollars: Double, resetsAt: Date,
-                        scannedAt: Date) -> WeeklyQuotaBootstrapResult {
+                        scannedAt: Date, accountHash: String? = nil) -> WeeklyQuotaBootstrapResult {
         WeeklyQuotaBootstrapResult(
             usedPercentPoints: used, dollars: dollars, unpricedVolumeShare: 0,
             windowStart: resetsAt.addingTimeInterval(-604_800), resetsAt: resetsAt,
             scannedAt: scannedAt,
-            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision)
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision,
+            accountHash: accountHash)
     }
 
     /// Writes a Codex transcript whose turns all carry `resetsAt` as their weekly
@@ -1329,6 +1356,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     private func writeTranscript(outputTokens: Int, resetsAt: Date, at: Date) throws {
         let iso = ISO8601DateFormatter().string(from: at)
         let lines = [
+            "{\"timestamp\":\"\(iso)\",\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(codexAccountID)\"}}",
             "{\"timestamp\":\"\(iso)\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6\"}}",
             "{\"timestamp\":\"\(iso)\",\"type\":\"token_count\",\"payload\":{\"info\":{\"total_token_usage\":"
             + "{\"input_tokens\":0,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,"
@@ -1492,7 +1520,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let completed = result(used: 6, dollars: 20, resetsAt: resetsAt, scannedAt: now)
         let store = WeeklyQuotaCalibrationStore.makeForTesting(
             launchedAt: t0,
-            scanRunner: { _, _, _, _, _, _, _ in
+            scanRunner: { _, _, _, _, _, _, _, _ in
                 entries.increment()
                 release.wait()
                 return completed
@@ -1522,7 +1550,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         let store = WeeklyQuotaCalibrationStore.makeForTesting(
             launchedAt: t0,
-            scanRunner: { _, _, _, _, _, _, _ in
+            scanRunner: { _, _, _, _, _, _, _, _ in
                 entries.increment()
                 release.wait()
                 return nil
@@ -1580,14 +1608,16 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     func testAnUnfreshenableCacheTriggersARescan() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
         try store(result(used: 4, dollars: 13.56, resetsAt: resetsAt,
-                         scannedAt: t0.addingTimeInterval(-3600)),
-                  at: key("codex", "unscoped", resetsAt))
+                         scannedAt: t0.addingTimeInterval(-3600),
+                         accountHash: codexAccountHash),
+                  at: key("codex", codexAccountHash, resetsAt))
         try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
                             at: t0.addingTimeInterval(3600))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 6,
+                              accountHash: codexAccountHash,
                               now: t0.addingTimeInterval(7200), defaults: suite)
         waitForScan(store, provider: "codex")
 
@@ -1670,6 +1700,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let resetsAt = t0.addingTimeInterval(604_800)
         let prices = RunwayPriceTable.makeForTesting()
         var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0)
+        cached.accountHash = "acct-a"
         cached.priceRevision = prices.revision
         cached.limitShape = "5h+weekly"
         try store(cached, at: key("codex", "acct-a", resetsAt))
@@ -1745,6 +1776,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 0,
+                              accountHash: codexAccountHash,
                               now: t0, defaults: suite)
         waitForScan(store, provider: "codex")
         XCTAssertFalse(store.scanSucceededForTesting(provider: "codex"),
@@ -1755,6 +1787,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                             at: t0.addingTimeInterval(3600))
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 1,
+                              accountHash: codexAccountHash,
                               now: t0.addingTimeInterval(7200), defaults: suite)
         waitForScan(store, provider: "codex")
         XCTAssertTrue(store.scanSucceededForTesting(provider: "codex"),
@@ -1765,8 +1798,9 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     func testAStaleScanIsReplacedByTheFreshMeasurement() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
         try store(result(used: 6, dollars: 10.0, resetsAt: resetsAt,
-                         scannedAt: t0.addingTimeInterval(-24 * 3600)),
-                  at: key("codex", "unscoped", resetsAt))
+                         scannedAt: t0.addingTimeInterval(-24 * 3600),
+                         accountHash: codexAccountHash),
+                  at: key("codex", codexAccountHash, resetsAt))
         // 1M output tokens of gpt-5.6 at $20/MTok, so a real scan prices this
         // window at $20 rather than the stored $10.
         try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
@@ -1775,6 +1809,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 6,
+                              accountHash: codexAccountHash,
                               now: t0.addingTimeInterval(7200), defaults: suite)
         waitForScan(store, provider: "codex")
 
@@ -1791,7 +1826,8 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     /// account's calibration under the new account's name.
     func testAnAccountSwitchDropsThePreviousAccountsCalibration() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
-        try store(result(used: 40, dollars: 100, resetsAt: resetsAt, scannedAt: t0),
+        try store(result(used: 40, dollars: 100, resetsAt: resetsAt, scannedAt: t0,
+                         accountHash: "acct-a"),
                   at: key("codex", "acct-a", resetsAt))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
@@ -1808,5 +1844,21 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                               now: t0, defaults: suite)
         XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
                      "account B must not inherit account A's conversion")
+    }
+}
+
+final class CodexCalibrationAccountScopeTests: XCTestCase {
+    func testAccountSwitchIsVisibleWithoutATTLWindow() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codex-account-scope-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let authURL = root.appendingPathComponent("auth.json")
+
+        try Data(#"{"account_id":"account-a"}"#.utf8).write(to: authURL)
+        XCTAssertEqual(CodexCalibrationAccountScope.accountId(authURL: authURL), "account-a")
+
+        try Data(#"{"tokens":{"account_id":"account-b"}}"#.utf8).write(to: authURL)
+        XCTAssertEqual(CodexCalibrationAccountScope.accountId(authURL: authURL), "account-b")
     }
 }

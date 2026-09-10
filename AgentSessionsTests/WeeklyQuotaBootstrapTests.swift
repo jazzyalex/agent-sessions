@@ -36,6 +36,10 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         """
     }
 
+    private func accountLine(_ rawAccountID: String) -> String {
+        "{\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(rawAccountID)\"}}"
+    }
+
     private func write(_ lines: [String], name: String) throws {
         try lines.joined(separator: "\n").write(
             to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
@@ -160,6 +164,47 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
                   name: "theirs.jsonl")
         XCTAssertEqual(scan()?.dollars ?? 0, 20.0, accuracy: 0.001,
                        "another account's activity must stay out of the denominator")
+    }
+
+    func testSameAnchorScanIncludesOnlyTheDurableAccount() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let mine = try XCTUnwrap(WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+        try write([accountLine("account-a"), modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "mine.jsonl")
+        try write([accountLine("account-b"), modelLine("gpt-5.6", at: at),
+                   turn(output: 9_000_000, resetsAt: anchor, at: at)], name: "theirs.jsonl")
+
+        let result = CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine)
+        XCTAssertEqual(result?.dollars ?? 0, 20, accuracy: 0.001)
+        XCTAssertEqual(result?.accountHash, mine)
+    }
+
+    func testAccountScopedScanRejectsRelevantTranscriptWithoutDurableIdentity() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let mine = try XCTUnwrap(WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+        try write([modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "unknown.jsonl")
+
+        XCTAssertNil(CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine))
+    }
+
+    func testAccountScopedScanRejectsConflictingDurableIdentity() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let mine = try XCTUnwrap(WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+        try write([accountLine("account-a"), accountLine("account-b"),
+                   modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "conflict.jsonl")
+
+        XCTAssertNil(CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine))
     }
 
     func testSameFileAnchorTransitionUsesFirstCurrentRecordAsBaseline() throws {

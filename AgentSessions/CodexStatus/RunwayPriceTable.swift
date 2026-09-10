@@ -18,16 +18,14 @@ enum RunwaySpeedTier: String, Equatable, Sendable {
     /// no rate set: callers must not turn an unknown tier into standard pricing.
     case unknown
 
-    /// The Claude runway source contract treats an absent speed as standard.
-    /// Explicit transcript telemetry bypasses this adapter and rejects unknown
-    /// raw strings before price lookup.
+    /// The Claude source contract treats an absent speed as standard. An explicit
+    /// value is evidence, so an unrecognized string or type must remain unknown
+    /// and make pricing fail closed.
     init(usageValue: Any?) {
-        switch usageValue as? String {
-        case "standard": self = .standard
-        case "standard-normalized": self = .standardNormalized
-        case "fast": self = .fast
-        default: self = .standard
-        }
+        guard let usageValue else { self = .standard; return }
+        guard let raw = usageValue as? String,
+              let tier = Self(rawValue: raw) else { self = .unknown; return }
+        self = tier
     }
 }
 
@@ -166,16 +164,22 @@ struct RunwayPriceSnapshot: Sendable {
             return Self.isClaudeDateSuffix(suffix)
         }
 
-        // Generic family aliases are intentionally bounded to known major
-        // generations. A future `claude-sonnet-6` must wait for an explicit table
-        // entry instead of inheriting Sonnet 4.x pricing.
-        let parts = suffix.dropFirst().split(separator: "-")
-        guard let major = parts.first, major.allSatisfy(\.isNumber),
-              let majorNumber = Int(major), (3...5).contains(majorNumber),
-              parts.dropFirst().allSatisfy({ part in
-                  part.allSatisfy(\.isNumber)
-              }) else { return false }
-        return true
+        // Generic family aliases are bounded to versions whose rates have been
+        // verified. Numeric-looking future minors must not silently inherit an
+        // older family's price (for example Fable 5.2 from Fable 5.0).
+        var parts = suffix.dropFirst().split(separator: "-").map(String.init)
+        if parts.last?.count == 8, parts.last?.allSatisfy(\.isNumber) == true {
+            parts.removeLast()
+        }
+        let version = parts.joined(separator: "-")
+        let knownVersions: [String: Set<String>] = [
+            "opus": ["3", "4", "4-1", "4-5", "4-6", "4-7", "4-8", "5"],
+            "sonnet": ["3", "3-5", "4", "4-5", "4-6", "5"],
+            "haiku": ["3", "3-5", "4", "4-5"],
+            "fable": ["5"],
+            "mythos": ["5"]
+        ]
+        return knownVersions[String(keyParts[1])]?.contains(version) == true
     }
 
     private static func isClaudeDateSuffix(_ suffix: String) -> Bool {
@@ -442,7 +446,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// Compiled-in default snapshot. Also published at `docs/prices.json` for the
     /// refresh — the two MUST stay identical, because whichever is newer wins outright
     /// and a rate that reaches only one of them is silently reverted by the other.
-    /// Verified 2026-09-03 against the official pricing pages
+    /// Verified 2026-09-09 against the official pricing pages
     /// (platform.claude.com/docs/en/about-claude/pricing and
     /// developers.openai.com/api/docs/pricing). Keyed by tier so longest-prefix
     /// resolves every generation (`claude-sonnet` → claude-sonnet-5, `gpt-5.6-sol`
@@ -450,8 +454,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     ///
     /// `cachedInputPerMTok` = cache-hit read (0.1× input). `cacheWritePerMTok` =
     /// 5-minute cache write (1.25× input); `cacheWrite1hPerMTok` = 1-hour cache write
-    /// (2× input). Both are omitted on the GPT keys, which have no TTL split — the
-    /// 1-hour column then falls back to the 5-minute one.
+    /// (2× input). GPT cache-write columns are populated only where the provider
+    /// publishes a write rate; a positive unpriced write otherwise fails closed.
     ///
     /// `fast` is Anthropic's fast mode, a research preview on Opus 5 and Opus 4.8
     /// only, published as $10/$50 per MTok. Its cache rates are derived off that
@@ -464,8 +468,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-09-07",
-      "_note": "USD per million tokens. Rates verified 2026-09-03 from platform.claude.com and developers.openai.com. Astra rates verified 2026-09-07 from developers.openai.com/api/docs/models/gpt-6-astra. Astra and Sol requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family prefixes remain supported. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object supplies model-specific fast-mode rates. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "updated": "2026-09-09",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-09-09 from platform.claude.com and developers.openai.com. Fable and Mythos 5.1 cache reads are $0.25/MTok. Astra, Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
         "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
@@ -475,7 +479,9 @@ final class RunwayPriceTable: @unchecked Sendable {
         "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,  "cacheWrite1hPerMTok": 4.0 },
         "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
         "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25, "cacheWrite1hPerMTok": 2.0 },
+        "claude-fable-5-1": { "inputPerMTok": 10.0, "cachedInputPerMTok": 0.25,  "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
         "claude-fable":    { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
+        "claude-mythos-5-1": { "inputPerMTok": 10.0, "cachedInputPerMTok": 0.25, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
         "claude-mythos":   { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
         "claude-opus-4-1":  { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
         "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
@@ -492,9 +498,11 @@ final class RunwayPriceTable: @unchecked Sendable {
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null },
+        "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.4-mini":    { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 4.5,  "cacheWritePerMTok": null },
-        "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null },
+        "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null,
+                             "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
         "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
                                "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } }

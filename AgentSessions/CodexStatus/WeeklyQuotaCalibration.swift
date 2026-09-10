@@ -573,10 +573,11 @@ struct WeeklyQuotaCalibrationTracker {
     /// version 3 preserved those records but could assign a later model switch to
     /// leading token records. Version 4 preserves record and model chronology.
     /// Version 5 adds weekly-anchor filtering, stable event identity and event-time
-    /// ledger semantics. No older denominator may survive these corrections.
+    /// ledger semantics. Version 7 adds durable account scoping and cache-write
+    /// propagation. No older denominator may survive these corrections.
     /// Claude already supplied incremental events and remains compatible with v1.
     private static let legacyActivityAccountingRevision = 1
-    private static let codexActivityAccountingRevision = 6
+    private static let codexActivityAccountingRevision = 7
 
     private static func activityAccountingRevision(for provider: String) -> Int {
         provider == "codex"
@@ -630,7 +631,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         _ windowMinutes: Int,
         _ usedPercentPoints: Double,
         _ priceTable: RunwayPriceTable,
-        _ now: Date
+        _ now: Date,
+        _ accountHash: String?
     ) -> WeeklyQuotaBootstrapResult?
 
     /// `launchedAt` is injectable because it is wall-clock state on a singleton,
@@ -690,7 +692,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// without this an in-process account switch keeps serving the previous
     /// account's calibration.
     private struct BootstrapScopeKey: Equatable {
-        let accountHash: String
+        let accountHash: String?
         let priceRevision: Int
         let limitShape: String?
         let sourceFamily: String?
@@ -746,7 +748,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         windowMinutes: Int,
         usedPercentPoints: Double,
         priceTable: RunwayPriceTable,
-        now: Date
+        now: Date,
+        accountHash: String?
     ) -> WeeklyQuotaBootstrapResult? {
         if provider == "claude" {
             return ClaudeWeeklyQuotaBootstrapScanner.scan(
@@ -758,6 +761,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 now: now,
                 fileManager: FileManager.default)
         }
+        guard let accountHash else { return nil }
         return CodexWeeklyQuotaBootstrapScanner.scan(
             root: root,
             resetsAt: resetsAt,
@@ -765,6 +769,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             usedPercentPoints: usedPercentPoints,
             priceTable: priceTable,
             now: now,
+            expectedAccountHash: accountHash,
             fileManager: FileManager.default)
     }
 
@@ -846,12 +851,13 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// interval after restore and before the next raw quota observation arrives.
     private func bootstrapCompatibility(for provider: String) -> (priceRevision: Int,
                                                                     limitShape: String?,
-                                                                    sourceFamily: String?)? {
+                                                                    sourceFamily: String?,
+                                                                    accountHash: String?)? {
         if let scope = trackers[provider]?.currentScope {
-            return (scope.priceRevision, scope.limitShape, scope.sourceFamily)
+            return (scope.priceRevision, scope.limitShape, scope.sourceFamily, scope.accountHash)
         }
         guard let key = activeScopeKeys[provider] else { return nil }
-        return (key.priceRevision, key.limitShape, key.sourceFamily)
+        return (key.priceRevision, key.limitShape, key.sourceFamily, key.accountHash)
     }
 
     private func compatibleBootstrap(_ bootstrap: WeeklyQuotaBootstrapResult,
@@ -861,7 +867,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                       limitShape: expected.limitShape,
                                       sourceFamily: expected.sourceFamily,
                                       activityAccountingRevision: provider == "codex"
-                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil)
+                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil,
+                                      accountHash: expected.accountHash)
     }
 
     /// Caller holds `lock`.
@@ -1261,7 +1268,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                       limitShape: limitShape,
                                       sourceFamily: sourceFamily,
                                       activityAccountingRevision: provider == "codex"
-                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) else { continue }
+                                        ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil,
+                                      accountHash: accountHash) else { continue }
             if cached.usedPercentPoints > (best?.usedPercentPoints ?? 0) { best = cached }
         }
         guard let best else { return }
@@ -1293,7 +1301,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let bestKey = Self.bestBootstrapKey(provider: provider, accountHash: accountHash)
         let priceRevision = priceRevisionProvider()
         let scopeKey = BootstrapScopeKey(
-            accountHash: accountHash ?? "unscoped",
+            accountHash: accountHash,
             priceRevision: priceRevision,
             limitShape: limitShape,
             sourceFamily: sourceFamily)
@@ -1342,7 +1350,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                limitShape: limitShape,
                                sourceFamily: sourceFamily,
                                activityAccountingRevision: provider == "codex"
-                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) {
+                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil,
+                               accountHash: accountHash) {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
@@ -1370,7 +1379,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                limitShape: limitShape,
                                sourceFamily: sourceFamily,
                                activityAccountingRevision: provider == "codex"
-                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil) {
+                                ? WeeklyQuotaBootstrapResult.codexActivityAccountingRevision : nil,
+                               accountHash: accountHash) {
             bootstraps[provider] = cached
         }
         // Promote on RESTORE too, not only after a scan. A launch that restores
@@ -1460,7 +1470,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             }
             guard let result = self.scanRunner(
                 provider, root, resetsAt, windowMinutes, usedPercentPoints,
-                RunwayPriceTable.shared, now
+                RunwayPriceTable.shared, now, accountHash
             ) else { backOff(); return }
             // A week can contain one slug the price table has never seen without
             // meaningfully moving the ratio; a large unknown share cannot.
@@ -1469,6 +1479,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             var stamped = result
             stamped.limitShape = limitShape
             stamped.sourceFamily = sourceFamily
+            stamped.accountHash = accountHash
             if provider == "codex" {
                 stamped.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
             }
@@ -1591,30 +1602,24 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     #endif
 }
 
-/// Synchronous, cached read of the Codex account id for calibration scoping.
+/// Synchronous read of the Codex account id for calibration scoping.
 ///
 /// `CodexOAuthCredentials` is an actor and the usage-poll callback that needs this
 /// is synchronous, so this reads the same file directly rather than forcing the
 /// whole status path async. Only the account id is read, and only its hash is ever
 /// stored — see `WeeklyQuotaCalibrationScope.hashAccount`.
 enum CodexCalibrationAccountScope {
-    private static let lock = NSLock()
-    private static var cached: String?
-    private static var readAt: Date = .distantPast
-    private static let ttl: TimeInterval = 10 * 60
+    static func accountId(now _: Date = Date()) -> String? {
+        accountId(authURL: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/auth.json"))
+    }
 
-    static func accountId(now: Date = Date()) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        if now.timeIntervalSince(readAt) < ttl { return cached }
-        readAt = now
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
-        guard let data = FileManager.default.contents(atPath: path),
+    static func accountId(authURL: URL) -> String? {
+        guard let data = FileManager.default.contents(atPath: authURL.path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            cached = nil
             return nil
         }
         let tokens = json["tokens"] as? [String: Any]
-        cached = (json["account_id"] as? String) ?? (tokens?["account_id"] as? String)
-        return cached
+        return (json["account_id"] as? String) ?? (tokens?["account_id"] as? String)
     }
 }

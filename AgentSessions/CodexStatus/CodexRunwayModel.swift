@@ -249,6 +249,7 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
     let totalTokens: Double
     var input: Double = 0
     var cachedInput: Double = 0
+    var cacheWrite: Double = 0
     var output: Double = 0
     var modelSlug: String? = nil
     /// Weekly quota anchor carried by the same token_count record. Calibration
@@ -262,6 +263,7 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
     /// remains unknown and tiered pricing fails closed.
     var requestInput: Double? = nil
     var requestCachedInput: Double? = nil
+    var requestCacheWrite: Double? = nil
     var requestOutput: Double? = nil
 }
 
@@ -2088,20 +2090,23 @@ private struct CodexRawTokenLine: Sendable {
     // subset. `modelSlug` is resolved cross-line (token_count lines don't carry it).
     let input: Double
     let cachedInput: Double
+    let cacheWrite: Double
     let output: Double
     let modelSlug: String?
     let weeklyResetAt: Date?
     let eventID: String
     let requestInput: Double?
     let requestCachedInput: Double?
+    let requestCacheWrite: Double?
     let requestOutput: Double?
 
     func withModelSlug(_ model: String?) -> CodexRawTokenLine {
         CodexRawTokenLine(logPath: logPath, createdAtReal: createdAtReal, totalTokens: totalTokens,
-                          input: input, cachedInput: cachedInput, output: output, modelSlug: model,
+                          input: input, cachedInput: cachedInput, cacheWrite: cacheWrite,
+                          output: output, modelSlug: model,
                           weeklyResetAt: weeklyResetAt, eventID: eventID,
                           requestInput: requestInput, requestCachedInput: requestCachedInput,
-                          requestOutput: requestOutput)
+                          requestCacheWrite: requestCacheWrite, requestOutput: requestOutput)
     }
 }
 
@@ -2956,12 +2961,14 @@ enum CodexRunwayTokenActivityParser {
             totalTokens: raw.totalTokens,
             input: raw.input,
             cachedInput: raw.cachedInput,
+            cacheWrite: raw.cacheWrite,
             output: raw.output,
             modelSlug: raw.modelSlug,
             weeklyResetAt: raw.weeklyResetAt,
             eventID: raw.eventID,
             requestInput: raw.requestInput,
             requestCachedInput: raw.requestCachedInput,
+            requestCacheWrite: raw.requestCacheWrite,
             requestOutput: raw.requestOutput
         )
     }
@@ -3041,16 +3048,21 @@ enum CodexRunwayTokenActivityParser {
         for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
             seen.insert(path)
             guard let latest = recentSamples(fromLogPath: path, now: now).last else { continue }
+            let normalized = normalizedInput(
+                total: latest.input,
+                cached: latest.cachedInput,
+                cacheWrite: latest.cacheWrite
+            )
             result.append(WeeklyQuotaTokenObservation(
                 logPath: path,
                 capturedAt: latest.capturedAt,
                 // Codex `input_tokens` INCLUDES cached reads, so fresh input is the
                 // difference — same normalization `activity(_:)` applies, so the
                 // ledger and `$` price identical token volumes.
-                input: max(0, latest.input - latest.cachedInput),
-                cachedInput: latest.cachedInput,
+                input: normalized.fresh,
+                cachedInput: normalized.cached,
                 output: latest.output,
-                cacheCreation: 0,
+                cacheCreation: normalized.cacheWrite,
                 modelSlug: latest.modelSlug
             ))
         }
@@ -3104,25 +3116,30 @@ enum CodexRunwayTokenActivityParser {
                 let countersReset = previous.map {
                     current.input < $0.input
                         || current.cachedInput < $0.cachedInput
+                        || current.cacheWrite < $0.cacheWrite
                         || current.output < $0.output
                 } ?? false
                 let baseline = countersReset ? nil : previous
                 let totalInput = max(0, current.input - (baseline?.input ?? 0))
                 let cached = max(0, current.cachedInput - (baseline?.cachedInput ?? 0))
-                let fresh = max(0, totalInput - cached)
+                let cacheWrite = max(0, current.cacheWrite - (baseline?.cacheWrite ?? 0))
+                let safeCached = min(totalInput, cached)
+                let safeCacheWrite = min(totalInput - safeCached, cacheWrite)
+                let fresh = totalInput - safeCached - safeCacheWrite
                 let output = max(0, current.output - (baseline?.output ?? 0))
-                guard fresh + cached + output > 0 else { continue }
+                guard fresh + safeCached + safeCacheWrite + output > 0 else { continue }
                 let requestBoundaryMatches = current.requestInput == totalInput
-                    && current.requestCachedInput == cached
+                    && current.requestCachedInput == safeCached
+                    && current.requestCacheWrite == safeCacheWrite
                     && current.requestOutput == output
                 result.append(WeeklyQuotaTokenEvent(
                     logPath: path,
                     eventID: current.eventID,
                     capturedAt: current.capturedAt,
                     input: fresh,
-                    cachedInput: cached,
+                    cachedInput: safeCached,
                     output: output,
-                    cacheCreation: 0,
+                    cacheCreation: safeCacheWrite,
                     modelSlug: current.modelSlug,
                     contextInputTokens: requestBoundaryMatches ? totalInput : nil
                 ))
@@ -3164,6 +3181,7 @@ enum CodexRunwayTokenActivityParser {
             guard elapsed >= minimumPairInterval, elapsed <= maximumPairInterval else { continue }
             let delta = current.totalTokens - previous.totalTokens
             guard delta > 0 else { continue }
+            let input = normalizedInputDelta(previous: previous, current: current)
             return RunwaySessionActivity(
                 identity: identity,
                 tokensPerSecond: delta / elapsed,
@@ -3171,11 +3189,11 @@ enum CodexRunwayTokenActivityParser {
                 sampleEnd: current.capturedAt,
                 // FRESH (non-cached) input, so both providers share one shape and
                 // dollarSnapshot prices per-type with no subtraction. Codex
-                // `input_tokens` includes cached, so subtract cached here.
-                inputPerSecond: max(0, (current.input - current.cachedInput) - (previous.input - previous.cachedInput)) / elapsed,
-                cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) / elapsed,
+                // `input_tokens` includes cache reads and writes, so subtract both.
+                inputPerSecond: input.fresh / elapsed,
+                cachedInputPerSecond: input.cached / elapsed,
                 outputPerSecond: max(0, current.output - previous.output) / elapsed,
-                cacheCreationPerSecond: 0,
+                cacheCreationPerSecond: input.cacheWrite / elapsed,
                 modelSlug: current.modelSlug,
                 contextInputTokens: max(0, current.input - previous.input)
             )
@@ -3210,14 +3228,14 @@ enum CodexRunwayTokenActivityParser {
             guard delta > 0 else { continue }
             let weight = max(0, 1 - now.timeIntervalSince(current.capturedAt) / weeklyWindow)
             guard weight > 0 else { continue }
+            let input = normalizedInputDelta(previous: previous, current: current)
             total += delta * weight
             components.append(RunwayModelComponent(
                 modelSlug: current.modelSlug,
-                inputPerSecond: max(0, (current.input - current.cachedInput)
-                    - (previous.input - previous.cachedInput)) * weight / normalization,
-                cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) * weight / normalization,
+                inputPerSecond: input.fresh * weight / normalization,
+                cachedInputPerSecond: input.cached * weight / normalization,
                 outputPerSecond: max(0, current.output - previous.output) * weight / normalization,
-                cacheCreationPerSecond: 0,
+                cacheCreationPerSecond: input.cacheWrite * weight / normalization,
                 contextInputTokens: max(0, current.input - previous.input)
             ))
         }
@@ -3228,6 +3246,26 @@ enum CodexRunwayTokenActivityParser {
             sampleStart: first.capturedAt,
             sampleEnd: last.capturedAt,
             components: components
+        )
+    }
+
+    private static func normalizedInput(total: Double,
+                                        cached: Double,
+                                        cacheWrite: Double)
+        -> (fresh: Double, cached: Double, cacheWrite: Double) {
+        let safeTotal = max(0, total)
+        let safeCached = min(safeTotal, max(0, cached))
+        let safeCacheWrite = min(safeTotal - safeCached, max(0, cacheWrite))
+        return (safeTotal - safeCached - safeCacheWrite, safeCached, safeCacheWrite)
+    }
+
+    private static func normalizedInputDelta(previous: CodexRunwayTokenActivitySample,
+                                             current: CodexRunwayTokenActivitySample)
+        -> (fresh: Double, cached: Double, cacheWrite: Double) {
+        normalizedInput(
+            total: current.input - previous.input,
+            cached: current.cachedInput - previous.cachedInput,
+            cacheWrite: current.cacheWrite - previous.cacheWrite
         )
     }
 
@@ -3244,6 +3282,7 @@ enum CodexRunwayTokenActivityParser {
         let request = lastUsageTokens(from: payload) ?? lastUsageTokens(from: obj)
         let input = perType?.input ?? 0
         let cached = perType?.cachedInput ?? 0
+        let cacheWrite = perType?.cacheWrite ?? 0
         let output = perType?.output ?? 0
         return CodexRawTokenLine(
             logPath: logPath,
@@ -3251,18 +3290,20 @@ enum CodexRunwayTokenActivityParser {
             totalTokens: totalTokens,
             input: input,
             cachedInput: cached,
+            cacheWrite: cacheWrite,
             output: output,
             modelSlug: model,
             weeklyResetAt: weeklyResetAt(from: payload) ?? weeklyResetAt(from: obj),
-            eventID: "\(createdAtReal?.timeIntervalSinceReferenceDate.description ?? "missing-time")|\(totalTokens)|\(input)|\(cached)|\(output)",
+            eventID: "\(createdAtReal?.timeIntervalSinceReferenceDate.description ?? "missing-time")|\(totalTokens)|\(input)|\(cached)|\(cacheWrite)|\(output)",
             requestInput: request?.input,
             requestCachedInput: request?.cachedInput,
+            requestCacheWrite: request?.cacheWrite,
             requestOutput: request?.output
         )
     }
 
     private static func lastUsageTokens(from dict: [String: Any])
-        -> (input: Double, cachedInput: Double, output: Double)? {
+        -> (input: Double, cachedInput: Double, cacheWrite: Double, output: Double)? {
         if let info = dict["info"] as? [String: Any],
            let found = lastUsageTokens(from: info) { return found }
         guard let last = dict["last_token_usage"] as? [String: Any] else { return nil }
@@ -3288,7 +3329,8 @@ enum CodexRunwayTokenActivityParser {
     /// Cumulative per-type counts (input incl. cached, cached subset, output),
     /// walking the same nesting as `totalTokens`. nil when the object has no
     /// per-type breakdown (e.g. `info: null`), so $ pricing degrades to token.
-    private static func perTypeTokens(from dict: [String: Any]) -> (input: Double, cachedInput: Double, output: Double)? {
+    private static func perTypeTokens(from dict: [String: Any])
+        -> (input: Double, cachedInput: Double, cacheWrite: Double, output: Double)? {
         if let t = perTypeDirect(from: dict) { return t }
         if let info = dict["info"] as? [String: Any], let t = perTypeTokens(from: info) { return t }
         if let total = dict["total_token_usage"] as? [String: Any], let t = perTypeDirect(from: total) { return t }
@@ -3296,11 +3338,13 @@ enum CodexRunwayTokenActivityParser {
         return nil
     }
 
-    private static func perTypeDirect(from dict: [String: Any]) -> (input: Double, cachedInput: Double, output: Double)? {
+    private static func perTypeDirect(from dict: [String: Any])
+        -> (input: Double, cachedInput: Double, cacheWrite: Double, output: Double)? {
         guard let input = CodexRunwayRateLimitParser.double(dict["input_tokens"]),
               let output = CodexRunwayRateLimitParser.double(dict["output_tokens"]) else { return nil }
         let cached = CodexRunwayRateLimitParser.double(dict["cached_input_tokens"]) ?? 0
-        return (input, cached, output)
+        let cacheWrite = CodexRunwayRateLimitParser.double(dict["cache_write_input_tokens"]) ?? 0
+        return (input, cached, cacheWrite, output)
     }
 
     private static func modelSlug(from dict: [String: Any]) -> String? {

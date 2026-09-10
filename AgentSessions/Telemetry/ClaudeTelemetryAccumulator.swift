@@ -42,7 +42,10 @@ struct ClaudeTelemetryAccumulator {
         // observation, not a change, not a token.
         guard rawModel != Self.syntheticModel else { return }
 
-        let effort = obj["effort"] as? String
+        // Claude 2.1.267 introduced `perTurnEffort`. Prefer that turn-specific
+        // observation when populated, while retaining the legacy top-level field
+        // for older records and current null-valued emissions.
+        let effort = (obj["perTurnEffort"] as? String) ?? (obj["effort"] as? String)
         // Nested subagents run on their own model. Their tokens are real spend, but
         // letting their model into the timeline rewrites the parent's configuration
         // history with a subagent's settings.
@@ -71,7 +74,14 @@ struct ClaudeTelemetryAccumulator {
         let cacheRead = Int(ClaudeRunwayLog.double(usage["cache_read_input_tokens"]) ?? 0)
         let output = Int(ClaudeRunwayLog.double(usage["output_tokens"]) ?? 0)
         let effectiveEffort = effort ?? timeline.effort
-        let speed = RunwaySpeedTier(usageValue: usage["speed"]).rawValue
+        let speed: String
+        if let explicit = usage["speed"] as? String {
+            speed = explicit
+        } else if usage["speed"] == nil {
+            speed = RunwaySpeedTier.standard.rawValue
+        } else {
+            speed = RunwaySpeedTier.unknown.rawValue
+        }
 
         slices.addComponents(fresh: fresh,
                          cacheRead: cacheRead,

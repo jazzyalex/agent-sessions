@@ -102,6 +102,7 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         XCTAssertEqual(result.priceTableUpdated, t.updatedDate)
         XCTAssertFalse(result.priceTableUpdated.isEmpty)
         XCTAssertEqual(result.priceTableRevision, t.revision)
+        XCTAssertEqual(result.priceManifestFingerprint, t.manifestFingerprint)
     }
 
     func testRequestLevelPricingAppliesLongContextPerRequest() throws {
@@ -116,6 +117,8 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         // $0.80 at the base $4/MTok + $2.40 at the long-context $8/MTok.
         XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 3.2, accuracy: 0.000001)
         XCTAssertEqual(result.events.map(\.priceTableRevision), [t.revision, t.revision])
+        XCTAssertEqual(result.events.map(\.priceManifestFingerprint),
+                       [t.manifestFingerprint, t.manifestFingerprint])
         XCTAssertEqual(result.events.compactMap(\.apiEquivalentUSD).reduce(0, +), 3.2, accuracy: 0.000001)
     }
 
@@ -192,15 +195,22 @@ final class TelemetryCostCalculatorTests: XCTestCase {
 
     func testPositiveCacheWriteWithNoWriteRateIsUnavailable() {
         // gpt-5.5 ships cacheWritePerMTok: null.
-        let result = TelemetryCostCalculator.estimate(
-            slices: [slice("gpt-5.5", write5m: oneMillion)], priceTable: table())
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-5.5", input: 0, context: 0, cacheWrite5m: oneMillion)],
+            fallbackSlices: [], priceTable: table()).estimate
         XCTAssertNil(result.apiEquivalentUSD)
         XCTAssertEqual(result.missingPriceComponents, ["gpt-5.5:cacheWrite5m"])
     }
 
     func testPositiveOneHourWriteWithNoOneHourRateIsUnavailable() {
-        let result = TelemetryCostCalculator.estimate(
-            slices: [slice("gpt-5.5", write1h: oneMillion)], priceTable: table())
+        let usage = TelemetryUsageEvent(
+            recordID: "write-1h", observedAt: Date(), anchorLine: 0,
+            usageFamily: "message.usage", ownership: .session,
+            model: "gpt-5.5", reasoningEffort: nil, speed: "standard",
+            freshInputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0,
+            cacheWrite1hTokens: oneMillion, outputTokens: 0, contextInputTokens: 0)
+        let result = TelemetryCostCalculator.price(
+            events: [usage], fallbackSlices: [], priceTable: table()).estimate
         XCTAssertNil(result.apiEquivalentUSD)
         XCTAssertEqual(result.missingPriceComponents, ["gpt-5.5:cacheWrite1h"])
     }

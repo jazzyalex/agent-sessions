@@ -144,6 +144,15 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "low")
     }
 
+    func testWrappedTurnContextReadsEffectiveModelAndEffort() {
+        let line = json(["timestamp": "2026-08-26T10:00:00.000Z", "type": "event_msg",
+                         "payload": ["type": "turn_context", "model": "gpt-5.6-sol",
+                                     "effort": "xhigh"]])
+        let t = CodexTelemetryAccumulator.accumulate(lines: [line])
+        XCTAssertEqual(t.initialConfiguration?.model, "gpt-5.6-sol")
+        XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "xhigh")
+    }
+
     // MARK: - Usage
 
     func testCumulativeDeltasAttributedPerModel() {
@@ -287,6 +296,17 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
                        "accounting still comes from the cumulative delta")
         XCTAssertNil(t.usageEvents[1].contextInputTokens,
                      "the cumulative total is not request-scoped context evidence")
+    }
+
+    func testRequestContextRequiresEveryComponentToMatch() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("gpt-5.6-sol", "xhigh"),
+            tokenCount(input: 300_001, output: 10,
+                       lastInput: 100_000, lastOutput: 200_011)
+        ])
+        XCTAssertEqual(t.usageEvents.first?.topLineTokens, 300_011)
+        XCTAssertNil(t.usageEvents.first?.contextInputTokens,
+                     "equal top-line totals do not establish one request boundary")
     }
 
     func testRequestContextIsUnavailableWithoutLastUsage() {

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Transcript telemetry now preserves exact price-manifest provenance, rejects mismatched Codex request components and ambiguous account evidence, carries cache-write tokens through live and weekly accounting, and fails closed on unknown Claude speed tiers and unverified model versions. Pricing now includes Fable/Mythos 5.1 cache reads and GPT-5.5/GPT-5.4 long-context rates.
 - Added the missing Simplified Chinese translation for the weekly burn estimate tooltip.
 - Format verification now honors the newest prebump outcome across clean and failed runs, directly tests Claude's bounded usage-page scrolling, and keeps redacted Kimi fixture timestamps from becoming 1970 session dates.
 - Corrected the Cursor support surface to Agents Window and CLI sessions; IDE sidepane chats without an Agent transcript remain outside the supported history boundary.

@@ -202,6 +202,8 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     public let apiEquivalentUSD: Double?
     public let priceTableRevision: Int?
     public let priceTableUpdated: String?
+    /// Exact canonical manifest identity, including metadata.
+    public let priceManifestFingerprint: String?
 
     public init(recordID: String?, observedAt: Date?, anchorLine: Int,
                 usageFamily: String, ownership: TelemetryUsageOwnership,
@@ -210,7 +212,8 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
                 cacheWrite5mTokens: Int, cacheWrite1hTokens: Int,
                 outputTokens: Int, reasoningOutputTokens: Int = 0,
                 contextInputTokens: Int?, apiEquivalentUSD: Double? = nil,
-                priceTableRevision: Int? = nil, priceTableUpdated: String? = nil) {
+                priceTableRevision: Int? = nil, priceTableUpdated: String? = nil,
+                priceManifestFingerprint: String? = nil) {
         self.recordID = recordID
         self.observedAt = observedAt
         self.anchorLine = anchorLine
@@ -229,13 +232,15 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
         self.apiEquivalentUSD = apiEquivalentUSD
         self.priceTableRevision = priceTableRevision
         self.priceTableUpdated = priceTableUpdated
+        self.priceManifestFingerprint = priceManifestFingerprint
     }
 
     public var topLineTokens: Int {
         freshInputTokens + cacheReadTokens + cacheWrite5mTokens + cacheWrite1hTokens + outputTokens
     }
 
-    func priced(usd: Double?, revision: Int, updated: String) -> TelemetryUsageEvent {
+    func priced(usd: Double?, revision: Int, updated: String,
+                manifestFingerprint: String) -> TelemetryUsageEvent {
         TelemetryUsageEvent(recordID: recordID, observedAt: observedAt, anchorLine: anchorLine,
                             usageFamily: usageFamily, ownership: ownership, model: model,
                             reasoningEffort: reasoningEffort, speed: speed,
@@ -243,7 +248,8 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
                             cacheWrite5mTokens: cacheWrite5mTokens, cacheWrite1hTokens: cacheWrite1hTokens,
                             outputTokens: outputTokens, reasoningOutputTokens: reasoningOutputTokens,
                             contextInputTokens: contextInputTokens, apiEquivalentUSD: usd,
-                            priceTableRevision: revision, priceTableUpdated: updated)
+                            priceTableRevision: revision, priceTableUpdated: updated,
+                            priceManifestFingerprint: manifestFingerprint)
     }
 }
 
@@ -298,22 +304,27 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
     /// Stable semantic hash of the model/rate content used for priced events.
     /// Pair with `priceTableUpdated` to identify metadata-only manifest changes.
     public let priceTableRevision: Int
+    /// Exact canonical manifest identity used for this estimate. This is separate
+    /// from the semantic revision so metadata-only corrections remain auditable.
+    public let priceManifestFingerprint: String?
 
     public init(apiEquivalentUSD: Double?,
                 unpricedModels: [String],
                 missingPriceComponents: [String],
                 priceTableUpdated: String,
-                priceTableRevision: Int = 0) {
+                priceTableRevision: Int = 0,
+                priceManifestFingerprint: String? = nil) {
         self.apiEquivalentUSD = apiEquivalentUSD
         self.unpricedModels = unpricedModels
         self.missingPriceComponents = missingPriceComponents
         self.priceTableUpdated = priceTableUpdated
         self.priceTableRevision = priceTableRevision
+        self.priceManifestFingerprint = priceManifestFingerprint
     }
 
     private enum CodingKeys: String, CodingKey {
         case apiEquivalentUSD, unpricedModels, missingPriceComponents
-        case priceTableUpdated, priceTableRevision
+        case priceTableUpdated, priceTableRevision, priceManifestFingerprint
     }
 
     public init(from decoder: Decoder) throws {
@@ -323,6 +334,7 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
         missingPriceComponents = try values.decode([String].self, forKey: .missingPriceComponents)
         priceTableUpdated = try values.decode(String.self, forKey: .priceTableUpdated)
         priceTableRevision = try values.decodeIfPresent(Int.self, forKey: .priceTableRevision) ?? 0
+        priceManifestFingerprint = try values.decodeIfPresent(String.self, forKey: .priceManifestFingerprint)
     }
 }
 
@@ -389,7 +401,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 3
+    public static let parserVersion = 4
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?

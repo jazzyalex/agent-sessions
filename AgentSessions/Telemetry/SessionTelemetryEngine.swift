@@ -5,7 +5,7 @@ import Foundation
 /// identify a historical transcript: an account switch leaves old files in
 /// place. Unknown, conflicting, or free-form message fields therefore produce
 /// no identity and make weekly attribution fail closed.
-private struct CodexTranscriptAccountIdentity {
+struct CodexTranscriptAccountIdentity {
     private static let metadataRecordTypes: Set<String> = [
         "session_meta",
         "session_started",
@@ -100,6 +100,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         let parserVersion: Int
         let priceTableRevision: Int
         let priceTableUpdated: String
+        let priceManifestFingerprint: String
         let telemetry: SessionTelemetry
         /// Hash of an account identity explicitly recorded by the transcript.
         /// The current signed-in account is deliberately not used as a proxy:
@@ -127,7 +128,8 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         guard let signature = RunwayFileSignature.read(path: path) else { return nil }
         if let cached = cachedTelemetry(path: path, signature: signature,
                                         priceTableRevision: priceTable.revision,
-                                        priceTableUpdated: priceTable.updatedDate) {
+                                        priceTableUpdated: priceTable.updatedDate,
+                                        priceManifestFingerprint: priceTable.manifestFingerprint) {
             return applyingWeeklyQuota(to: cached.telemetry,
                                        source: session.source,
                                        capabilities: capabilities,
@@ -337,13 +339,15 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private func cachedTelemetry(path: String,
                                  signature: RunwayFileSignature,
                                  priceTableRevision: Int,
-                                 priceTableUpdated: String) -> ComputedTelemetry? {
+                                 priceTableUpdated: String,
+                                 priceManifestFingerprint: String) -> ComputedTelemetry? {
         lock.lock(); defer { lock.unlock() }
         guard let entry = cache[path],
               entry.signature == signature,
               entry.parserVersion == SessionTelemetry.parserVersion,
               entry.priceTableRevision == priceTableRevision,
-              entry.priceTableUpdated == priceTableUpdated else { return nil }
+              entry.priceTableUpdated == priceTableUpdated,
+              entry.priceManifestFingerprint == priceManifestFingerprint else { return nil }
         touch(path)
         return ComputedTelemetry(telemetry: entry.telemetry,
                                  durableAccountHash: entry.durableAccountHash)
@@ -358,6 +362,8 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             parserVersion: SessionTelemetry.parserVersion,
             priceTableRevision: computed.telemetry.costEstimate?.priceTableRevision ?? priceTable.revision,
             priceTableUpdated: computed.telemetry.costEstimate?.priceTableUpdated ?? priceTable.updatedDate,
+            priceManifestFingerprint: computed.telemetry.costEstimate?.priceManifestFingerprint
+                ?? priceTable.manifestFingerprint,
             telemetry: computed.telemetry,
             durableAccountHash: computed.durableAccountHash)
         touch(path)

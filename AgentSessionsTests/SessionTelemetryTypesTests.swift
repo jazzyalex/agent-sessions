@@ -59,7 +59,8 @@ final class SessionTelemetryTypesTests: XCTestCase {
                                          unpricedModels: [],
                                          missingPriceComponents: [],
                                          priceTableUpdated: "2026-08-30",
-                                         priceTableRevision: 7)
+                                         priceTableRevision: 7,
+                                         priceManifestFingerprint: "manifest-abc")
         let event = TelemetryUsageEvent(
             recordID: "request-1", observedAt: cfg.observedAt, anchorLine: 4,
             usageFamily: "token_count", ownership: .session,
@@ -68,7 +69,8 @@ final class SessionTelemetryTypesTests: XCTestCase {
             cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
             outputTokens: 81, reasoningOutputTokens: 63,
             contextInputTokens: 16_341, apiEquivalentUSD: 1.25,
-            priceTableRevision: 7, priceTableUpdated: "2026-08-30")
+            priceTableRevision: 7, priceTableUpdated: "2026-08-30",
+            priceManifestFingerprint: "manifest-abc")
         let weekly = TelemetryWeeklyQuotaEstimate(
             status: .estimated, percentPoints: 0.5, unavailableReason: nil,
             percentPointsPerAPIDollar: 0.4, accountScoped: true,
@@ -109,6 +111,7 @@ final class SessionTelemetryTypesTests: XCTestCase {
         object.removeValue(forKey: "weeklyQuotaEstimate")
         var encodedCost = try XCTUnwrap(object["costEstimate"] as? [String: Any])
         encodedCost.removeValue(forKey: "priceTableRevision")
+        encodedCost.removeValue(forKey: "priceManifestFingerprint")
         object["costEstimate"] = encodedCost
 
         let decoded = try JSONDecoder().decode(
@@ -117,6 +120,7 @@ final class SessionTelemetryTypesTests: XCTestCase {
         XCTAssertEqual(decoded.usageEvents, [])
         XCTAssertNil(decoded.weeklyQuotaEstimate)
         XCTAssertEqual(decoded.costEstimate?.priceTableRevision, 0)
+        XCTAssertNil(decoded.costEstimate?.priceManifestFingerprint)
     }
 
     // An unavailable dollar result must carry a reason. nil USD with both arrays

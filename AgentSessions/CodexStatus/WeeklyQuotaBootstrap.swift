@@ -46,11 +46,15 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Optional for records written before source-family provenance existed; such
     /// records are not compatible when a caller supplies a current family.
     var sourceFamily: String?
-    /// Normalization contract used to create the denominator. Codex revision 6
-    /// unifies bootstrap/live cumulative accounting and event-time semantics.
+    /// Normalization contract used to create the denominator. Codex revision 7
+    /// adds durable account scoping and cache-write propagation to the shared
+    /// bootstrap/live cumulative accounting contract.
     var activityAccountingRevision: Int? = nil
+    /// Durable account identity proven by the transcripts included in a Codex
+    /// denominator. Nil is retained for legacy and Claude bootstrap records.
+    var accountHash: String? = nil
 
-    static let codexActivityAccountingRevision = 6
+    static let codexActivityAccountingRevision = 7
 
     /// Both providers report weekly consumption as whole percentage points, so a
     /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
@@ -63,7 +67,8 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     func isCompatible(priceRevision: Int,
                       limitShape: String?,
                       sourceFamily: String? = nil,
-                      activityAccountingRevision: Int? = nil) -> Bool {
+                      activityAccountingRevision: Int? = nil,
+                      accountHash: String? = nil) -> Bool {
         if let stamped = self.priceRevision, stamped != priceRevision { return false }
         if let required = activityAccountingRevision,
            self.activityAccountingRevision != required { return false }
@@ -73,6 +78,11 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
         } else if self.sourceFamily != nil {
             // A caller without a family scope cannot safely consume a stamped
             // record because it cannot prove that the evidence paths agree.
+            return false
+        }
+        if let accountHash {
+            guard self.accountHash == accountHash else { return false }
+        } else if self.accountHash != nil {
             return false
         }
         return true
@@ -149,6 +159,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
                      usedPercentPoints: Double,
                      priceTable: RunwayPriceTable,
                      now: Date,
+                     expectedAccountHash: String? = nil,
                      fileManager: FileManager = .default) -> WeeklyQuotaBootstrapResult? {
         debugLog("scan start used=\(usedPercentPoints)pp resetsAt=\(resetsAt.timeIntervalSince1970) win=\(windowMinutes) root=\(root.path)")
         guard usedPercentPoints >= minimumUsedPercentPoints else {
@@ -181,13 +192,30 @@ enum CodexWeeklyQuotaBootstrapScanner {
             // per line and ran O(line x needle), managing ~1 MB/s in a Debug build
             // and never finishing a 44 MB window. This form is memchr-backed.
             let text = String(decoding: data, as: UTF8.self)
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+            var identity = CodexTranscriptAccountIdentity()
+            if expectedAccountHash != nil {
+                for line in lines where line.contains("session_meta")
+                    || line.contains("session_started") || line.contains("session_start") {
+                    identity.consume(line: String(line))
+                }
+                if let actual = identity.durableAccountHash, actual != expectedAccountHash {
+                    continue
+                }
+            }
             // Model attribution is chronological. A later turn_context must not
             // price earlier token records in the same file.
             var currentModel: String?
             var currentAnchor: Date?
             var previousTokenAnchor: Date?
             var cumulative = CumulativeCounters()
-            for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            var fileDollars = 0.0
+            var filePricedVolume = 0.0
+            var fileUnpricedVolume = 0.0
+            var fileSeenAnchors: Set<Int> = []
+            var fileMatchedTurns = 0
+            var fileIncomplete = false
+            for line in lines {
                 let isTokenCount = line.contains("token_count")
                 let isTurnContext = line.contains("turn_context")
                 guard isTokenCount || isTurnContext else { continue }
@@ -203,13 +231,25 @@ enum CodexWeeklyQuotaBootstrapScanner {
                        observationCutoff: now,
                        priceSnapshot: priceSnapshot,
                        cumulative: &cumulative,
-                       dollars: &dollars,
-                       pricedVolume: &pricedVolume,
-                       unpricedVolume: &unpricedVolume,
-                       seenAnchors: &seenAnchors,
-                       matchedTurns: &matchedTurns)
-                hadIncompleteCandidate = hadIncompleteCandidate || !complete
+                       dollars: &fileDollars,
+                       pricedVolume: &filePricedVolume,
+                       unpricedVolume: &fileUnpricedVolume,
+                       seenAnchors: &fileSeenAnchors,
+                       matchedTurns: &fileMatchedTurns)
+                fileIncomplete = fileIncomplete || !complete
             }
+            if expectedAccountHash != nil,
+               identity.durableAccountHash == nil,
+               fileMatchedTurns > 0 {
+                hadIncompleteCandidate = true
+                continue
+            }
+            dollars += fileDollars
+            pricedVolume += filePricedVolume
+            unpricedVolume += fileUnpricedVolume
+            seenAnchors.formUnion(fileSeenAnchors)
+            matchedTurns += fileMatchedTurns
+            hadIncompleteCandidate = hadIncompleteCandidate || fileIncomplete
         }
 
         let totalVolume = pricedVolume + unpricedVolume
@@ -227,7 +267,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
             resetsAt: resetsAt,
             scannedAt: now,
             priceRevision: priceSnapshot.revision,
-            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+            activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision,
+            accountHash: expectedAccountHash
         )
     }
 

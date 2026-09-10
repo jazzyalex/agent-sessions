@@ -35,7 +35,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
     private func codexLines() -> [String] {
         [
             #"{"timestamp":"2026-08-26T10:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-codex","effort":"medium"}}"#,
-            #"{"timestamp":"2026-08-26T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}"#
+            #"{"timestamp":"2026-08-26T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}"#
         ]
     }
 
@@ -62,6 +62,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = WeeklyQuotaCalibrationScope.hashAccount(accountID)
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(
             provider: "codex",
@@ -158,6 +159,27 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(second.costEstimate?.priceTableUpdated, "2099-01-01")
         XCTAssertEqual(engine.parseCount, 2,
                        "cache must refresh the exact manifest provenance even when rates are unchanged")
+    }
+
+    func testSameDateManifestMetadataChangeInvalidatesExactProvenance() async throws {
+        let url = try write(codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let firstManifest = Data(#"{"version":1,"updated":"2099-01-01","_note":"first","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","_note":"second","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: firstManifest))
+        let engine = SessionTelemetryEngine(priceTable: prices)
+        let firstValue = await engine.telemetry(for: session(url, source: .codex))
+        let first = try XCTUnwrap(firstValue)
+        let firstFingerprint = try XCTUnwrap(first.costEstimate?.priceManifestFingerprint)
+
+        XCTAssertTrue(prices.loadForTesting(json: secondManifest))
+        let secondValue = await engine.telemetry(for: session(url, source: .codex))
+        let second = try XCTUnwrap(secondValue)
+        XCTAssertNotEqual(second.costEstimate?.priceManifestFingerprint, firstFingerprint)
+        XCTAssertEqual(second.costEstimate?.priceManifestFingerprint, prices.manifestFingerprint)
+        XCTAssertEqual(engine.parseCount, 2)
     }
 
     /// The exact staleness case a mtime-only key misses.
@@ -349,6 +371,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = WeeklyQuotaCalibrationScope.hashAccount("account-a")
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "codex",
                                                 accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),

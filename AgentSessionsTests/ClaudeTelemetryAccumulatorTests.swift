@@ -11,6 +11,7 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
 
     private func assistant(model: String?,
                            effort: String?,
+                           perTurnEffort: String? = nil,
                            id: String? = nil,
                            usage: [String: Any]? = nil,
                            isSidechain: Bool = false,
@@ -22,16 +23,17 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         var obj: [String: Any] = ["type": "assistant", "timestamp": ts,
                                   "isSidechain": isSidechain, "message": message]
         if let effort { obj["effort"] = effort }
+        if let perTurnEffort { obj["perTurnEffort"] = perTurnEffort }
         return json(obj)
     }
 
     private func usage(input: Int = 0, output: Int = 0, cacheRead: Int = 0,
                        flatWrite: Int = 0, write5m: Int? = nil, write1h: Int? = nil,
-                       speed: String = "standard") -> [String: Any] {
+                       speed: String? = "standard") -> [String: Any] {
         var u: [String: Any] = ["input_tokens": input, "output_tokens": output,
                                 "cache_read_input_tokens": cacheRead,
-                                "cache_creation_input_tokens": flatWrite,
-                                "speed": speed]
+                                "cache_creation_input_tokens": flatWrite]
+        if let speed { u["speed"] = speed }
         if write5m != nil || write1h != nil {
             u["cache_creation"] = ["ephemeral_5m_input_tokens": write5m ?? 0,
                                    "ephemeral_1h_input_tokens": write1h ?? 0]
@@ -135,6 +137,16 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.configurationChanges.first?.provenance, .assistantRecord)
     }
 
+    func testPerTurnEffortOverridesLegacyEffortWhenPopulated() {
+        let t = ClaudeTelemetryAccumulator.accumulate(lines: [
+            assistant(model: "claude-opus-5", effort: "medium", perTurnEffort: "high",
+                      id: "m1", usage: usage(input: 10, output: 5))
+        ])
+        XCTAssertEqual(t.initialConfiguration?.reasoningEffort, "high")
+        XCTAssertEqual(t.usageSlices.first?.reasoningEffort, "high")
+        XCTAssertEqual(t.usageEvents.first?.reasoningEffort, "high")
+    }
+
     func testModelChangeRecordedOnce() {
         let t = ClaudeTelemetryAccumulator.accumulate(lines: [
             assistant(model: "claude-opus-5", effort: "medium", id: "m1", usage: usage(input: 1, output: 1)),
@@ -219,6 +231,17 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageSlices.count, 2)
         XCTAssertEqual(slice(t, model: "claude-opus-5", speed: "fast")?.freshInputTokens, 20)
         XCTAssertEqual(slice(t, model: "claude-opus-5", speed: "standard")?.freshInputTokens, 10)
+    }
+
+    func testAbsentSpeedDefaultsToStandardButExplicitUnknownFailsClosed() {
+        let t = ClaudeTelemetryAccumulator.accumulate(lines: [
+            assistant(model: "claude-opus-5", effort: "medium", id: "missing",
+                      usage: usage(input: 10, speed: nil)),
+            assistant(model: "claude-opus-5", effort: "medium", id: "future",
+                      usage: usage(input: 20, speed: "turbo"))
+        ])
+        XCTAssertEqual(slice(t, model: "claude-opus-5", speed: "standard")?.freshInputTokens, 10)
+        XCTAssertEqual(slice(t, model: "claude-opus-5", speed: "turbo")?.freshInputTokens, 20)
     }
 
     /// Without carry-forward this splits into a junk "unknown effort" row for what

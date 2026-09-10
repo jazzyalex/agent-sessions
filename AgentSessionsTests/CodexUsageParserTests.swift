@@ -4629,6 +4629,10 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
+        XCTAssertEqual(t.price(forModel: "claude-fable-5-1")?.cachedInputPerMTok, 0.25)
+        XCTAssertEqual(t.price(forModel: "claude-mythos-5-1")?.cachedInputPerMTok, 0.25)
+        XCTAssertNil(t.price(forModel: "claude-fable-5-2"), "future Fable minors must fail closed")
+        XCTAssertNil(t.price(forModel: "claude-mythos-5-2"), "future Mythos minors must fail closed")
         XCTAssertNil(t.price(forModel: "claude-sonnet-6"), "future Claude generations must not inherit generic family rates")
         XCTAssertNil(t.price(forModel: "claude-sonnet-5-preview"), "unrecognized Claude suffixes must fail closed")
         XCTAssertNil(t.price(forModel: "claude-opus-50"), "a version-like suffix is not an approved alias")
@@ -4709,6 +4713,23 @@ final class CodexUsageParserTests: XCTestCase {
                 .rates(for: .standard, contextInputTokens: 272_001)?.inputPerMTok,
                            inputRate, model)
         }
+    }
+
+    func testGPT55AndGPT54UsePublishedLongContextPolicy() {
+        let table = RunwayPriceTable.makeForTesting()
+        let expected: [String: (input: Double, output: Double)] = [
+            "gpt-5.5": (10, 45),
+            "gpt-5.4": (5, 22.5)
+        ]
+        for (model, rates) in expected {
+            let price = table.price(forModel: model)?
+                .rates(for: .standard, contextInputTokens: 272_001)
+            XCTAssertEqual(price?.inputPerMTok, rates.input, model)
+            XCTAssertEqual(price?.outputPerMTok, rates.output, model)
+        }
+        XCTAssertEqual(table.price(forModel: "gpt-5.4-mini")?
+            .rates(for: .standard, contextInputTokens: 272_001)?.inputPerMTok, 0.75,
+                       "mini must not inherit the full GPT-5.4 long-context rule")
     }
 
     func testObservedSolBurstRemainsShortContextPriced() throws {
@@ -5350,6 +5371,50 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.count, 1,
                        "the first matching sample is a baseline across a window boundary")
         XCTAssertEqual(events.first?.output, 1_000_000)
+    }
+
+    func testCodexLedgerCarriesCacheWritesAndReconcilesRequestBoundary() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-ledger-cache-write-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(60)
+        func token(at: Date, input: Int, cached: Int, write: Int, output: Int,
+                   lastInput: Int, lastCached: Int, lastWrite: Int, lastOutput: Int) -> String {
+            "{\"timestamp\":\"\(iso(at))\",\"type\":\"event_msg\",\"payload\":{" +
+            "\"type\":\"token_count\",\"info\":{\"total_token_usage\":{" +
+            "\"input_tokens\":\(input),\"cached_input_tokens\":\(cached)," +
+            "\"cache_write_input_tokens\":\(write),\"output_tokens\":\(output)," +
+            "\"total_tokens\":\(input + output)},\"last_token_usage\":{" +
+            "\"input_tokens\":\(lastInput),\"cached_input_tokens\":\(lastCached)," +
+            "\"cache_write_input_tokens\":\(lastWrite),\"output_tokens\":\(lastOutput)," +
+            "\"total_tokens\":\(lastInput + lastOutput)}}}}"
+        }
+        let lines = [
+            "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}",
+            token(at: first, input: 1_000, cached: 200, write: 300, output: 100,
+                  lastInput: 1_000, lastCached: 200, lastWrite: 300, lastOutput: 100),
+            token(at: second, input: 2_000, cached: 400, write: 600, output: 200,
+                  lastInput: 1_000, lastCached: 200, lastWrite: 300, lastOutput: 100)
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(
+            to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let events = CodexRunwayTokenActivityParser.ledgerEvents(
+            identities: [identity], now: second.addingTimeInterval(1))
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.input }, 1_000)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.cachedInput }, 400)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.cacheCreation }, 600)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.output }, 200)
+        XCTAssertEqual(events.map(\.contextInputTokens), [1_000, 1_000])
     }
 
     /// Regression: image and tool-result records can be larger than the ordinary

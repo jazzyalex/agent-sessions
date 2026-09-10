@@ -50,15 +50,15 @@ struct CodexTelemetryAccumulator {
         let payload = (obj["payload"] as? [String: Any]) ?? obj
         let observedAt = ClaudeRunwayLog.date(obj["timestamp"]) ?? ClaudeRunwayLog.date(payload["timestamp"])
 
-        if (obj["type"] as? String) == "turn_context" {
+        let payloadType = (payload["type"] as? String)?.lowercased()
+
+        if (obj["type"] as? String) == "turn_context" || payloadType == "turn_context" {
             timeline.observe(model: payload["model"] as? String,
                              effort: payload["effort"] as? String,
                              observedAt: observedAt,
                              anchorLine: index)
             return
         }
-
-        let payloadType = (payload["type"] as? String)?.lowercased()
 
         if payloadType == "token_count" {
             sawCumulativeMarker = true
@@ -82,7 +82,11 @@ struct CodexTelemetryAccumulator {
                 // request-scoped record is used only when it exactly describes
                 // this cumulative increment; otherwise tier selection would apply
                 // one request's context size to an aggregate of several requests.
-                if request.hasComponents, requestDelta.topLine == delta.topLine {
+                if request.hasComponents,
+                   requestDelta.fresh == delta.fresh,
+                   requestDelta.cacheRead == delta.cacheRead,
+                   requestDelta.cacheWrite == delta.cacheWrite,
+                   requestDelta.output == delta.output {
                     delta = delta.withContextInput(request.input)
                 } else {
                     delta = delta.withContextInput(nil)

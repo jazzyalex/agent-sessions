@@ -9,6 +9,28 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.2"
+    as_of_date_utc: "2026-09-10"
+    as_of_commit: "cb723ae"
+    note: "Transcript telemetry accounting follow-up plus Codex 0.154.0 and Claude 2.1.267 format verification."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.154.0"
+          scope: "supports installed session format; latest source cached at the same version"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260910-202530-842309Z-p61010-prebump/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh codex_exec output matched baseline. The additive task-complete http_connection_failed detail is internal error metadata/noise and is fixture-covered."
+      claude:
+        sessions:
+          max_verified_version: "2.1.267"
+          scope: "supports installed session format; latest source cached at the same version"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260910-202431-895555Z-p60050-prebump/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl"]
+          notes: "assistant.perTurnEffort is handled by the configuration timeline and usage attribution. Additive renderedInHumanTurn, date, instruction, prompt-snapshot, and deferred-tool keys are internal metadata/noise and are fixture-covered."
+        usage_limits:
+          max_verified_version: "2.1.267"
+          scope: "live tmux capture; installed version"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260910-202619-049835Z-p61272/report.json", "AgentSessionsTests/ClaudeStatusServiceTests.swift"]
+          notes: "The weekly live capture returned both current-session and all-models weekly limits."
   - agent_sessions_version: "5.1.1"
     as_of_date_utc: "2026-09-08"
     as_of_commit: "da13918e"
