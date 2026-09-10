@@ -1259,6 +1259,8 @@ enum CodexRunwayCalculator {
             // AND a slice served at a billing tier the model has no rates for — a
             // fast-mode record priced at standard would understate it by half.
             guard let p = priceTable.price(forModel: component.modelSlug),
+                  (component.cacheCreationPerSecond == 0 || p.cacheWritePerMTok != nil),
+                  (component.cacheCreation1hPerSecond == 0 || p.cacheWrite1hPerMTok != nil),
                   let rates = p.rates(for: component.speed,
                                       contextInputTokens: component.contextInputTokens,
                                       inferenceGeo: component.inferenceGeo) else { return nil }

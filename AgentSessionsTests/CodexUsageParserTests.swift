@@ -4670,9 +4670,20 @@ final class CodexUsageParserTests: XCTestCase {
 
         let old = try XCTUnwrap(RunwayPriceTable.makeForTesting()
             .price(forModel: "claude-opus-4-5"))
-        XCTAssertEqual(old.rates(for: .standard, inferenceGeo: "us"),
-                       old.rates(for: .standard, inferenceGeo: "global"),
-                       "regional pricing starts at Claude 4.6")
+        XCTAssertNil(old.rates(for: .standard, inferenceGeo: "us"),
+                     "a pre-4.6 model cannot carry US inference evidence")
+
+        for slug in ["claude-fable-5", "claude-fable-5-1",
+                     "claude-mythos-5", "claude-mythos-5-1"] {
+            let model = try XCTUnwrap(RunwayPriceTable.makeForTesting().price(forModel: slug))
+            let base = try XCTUnwrap(model.rates(for: .standard, inferenceGeo: "global"))
+            let regional = try XCTUnwrap(model.rates(for: .standard, inferenceGeo: "us"))
+            XCTAssertEqual(regional.inputPerMTok, base.inputPerMTok * 1.1, accuracy: 0.000_001)
+            XCTAssertEqual(regional.cachedInputPerMTok, base.cachedInputPerMTok * 1.1, accuracy: 0.000_001)
+            XCTAssertEqual(regional.outputPerMTok, base.outputPerMTok * 1.1, accuracy: 0.000_001)
+            XCTAssertEqual(regional.cacheWritePerMTok, base.cacheWritePerMTok.map { $0 * 1.1 })
+            XCTAssertEqual(regional.cacheWrite1hPerMTok, base.cacheWrite1hPerMTok.map { $0 * 1.1 })
+        }
     }
 
     func testPriceTableRejectsMalformedAndUnrecognizedVersion() {
@@ -5072,6 +5083,22 @@ final class CodexUsageParserTests: XCTestCase {
         // A burning unknown slice → drop the session (never understate).
         XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(
             for: activity([known, busyUnknown]), priceTable: table))
+    }
+
+    func testLiveDollarsRejectUnpublishedCacheWriteRates() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let identity = RunwaySessionIdentity(id: "gpt-55", displayName: "GPT-5.5",
+                                             isGoal: false, logPaths: ["/gpt-55"])
+        let fiveMinute = RunwaySessionActivity(
+            identity: identity, tokensPerSecond: 1, sampleStart: now, sampleEnd: now,
+            cacheCreationPerSecond: 1, modelSlug: "gpt-5.5")
+        let oneHour = RunwaySessionActivity(
+            identity: identity, tokensPerSecond: 1, sampleStart: now, sampleEnd: now,
+            cacheCreationPerSecond: 0, cacheCreation1hPerSecond: 1, modelSlug: "gpt-5.5")
+        let table = RunwayPriceTable.makeForTesting()
+
+        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: fiveMinute, priceTable: table))
+        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: oneHour, priceTable: table))
     }
 
     /// A stale cached manifest must never shadow a corrected bundled table.
