@@ -36,6 +36,28 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
         XCTAssertFalse(CodexUsageModel.shouldSilentlyRecheckAuth(.ok(CodexUsageSnapshot())))
     }
 
+    func testOAuthWeeklyCalibrationRequiresFetchedAccountToMatchCurrentAccount() {
+        var snapshot = CodexUsageSnapshot()
+        snapshot.weekLimitsSource = .oauth
+        snapshot.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount("account-a")
+
+        XCTAssertEqual(
+            CodexUsageModel.weeklyCalibrationAccountHash(
+                snapshot: snapshot, currentAccountID: "account-a"),
+            snapshot.limitsAccountHash
+        )
+        XCTAssertNil(CodexUsageModel.weeklyCalibrationAccountHash(
+            snapshot: snapshot, currentAccountID: "account-b"))
+        XCTAssertNil(CodexUsageModel.weeklyCalibrationAccountHash(
+            snapshot: snapshot, currentAccountID: nil))
+
+        snapshot.limitsSource = .oauth
+        XCTAssertTrue(CodexUsageModel.oauthSnapshotMatchesCurrentAccount(
+            snapshot, currentAccountID: "account-a"))
+        XCTAssertFalse(CodexUsageModel.oauthSnapshotMatchesCurrentAccount(
+            snapshot, currentAccountID: "account-b"))
+    }
+
     func testApplyAuthStateSignedOutRaisesBanner() {
         let model = CodexUsageModel()
         model.applyAuthState(.signedOut)

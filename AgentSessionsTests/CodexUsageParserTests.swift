@@ -4627,7 +4627,14 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(t.price(forModel: "claude-sonnet-4-5-20250929")?.outputPerMTok, 15.0)
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 25.0)   // Opus dropped to $5/$25
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)
+        XCTAssertEqual(t.price(forModel: "claude-opus-4")?.outputPerMTok, 75.0)
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-20250514")?.inputPerMTok, 15.0)
+        XCTAssertNil(t.price(forModel: "claude-opus-4-preview"))
+        XCTAssertNil(t.price(forModel: "claude-opus-3"), "historical aliases with different rates must be exact")
         XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
+        XCTAssertNil(t.price(forModel: "claude-haiku-3"))
+        XCTAssertNil(t.price(forModel: "claude-haiku-3-5"))
+        XCTAssertNil(t.price(forModel: "claude-haiku-4"), "unpublished versions must fail closed")
         XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
         XCTAssertEqual(t.price(forModel: "claude-fable-5-1")?.cachedInputPerMTok, 0.25)
         XCTAssertEqual(t.price(forModel: "claude-mythos-5-1")?.cachedInputPerMTok, 0.25)
@@ -4647,6 +4654,25 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(t.price(forModel: "gpt-5.6-sol-pro"), "a suffix is not necessarily a dated snapshot")
         XCTAssertNil(t.price(forModel: "totally-unknown-model"))
         XCTAssertNil(t.price(forModel: nil))
+    }
+
+    func testClaudeUSInferenceGeoMultipliesEveryPublishedRate() throws {
+        let price = try XCTUnwrap(RunwayPriceTable.makeForTesting()
+            .price(forModel: "claude-opus-5"))
+        let global = try XCTUnwrap(price.rates(for: .fast, inferenceGeo: "global"))
+        let us = try XCTUnwrap(price.rates(for: .fast, inferenceGeo: "us"))
+        XCTAssertEqual(us.inputPerMTok, global.inputPerMTok * 1.1, accuracy: 0.000_001)
+        XCTAssertEqual(us.cachedInputPerMTok, global.cachedInputPerMTok * 1.1, accuracy: 0.000_001)
+        XCTAssertEqual(us.outputPerMTok, global.outputPerMTok * 1.1, accuracy: 0.000_001)
+        XCTAssertEqual(us.cacheWritePerMTok, global.cacheWritePerMTok.map { $0 * 1.1 })
+        XCTAssertEqual(us.cacheWrite1hPerMTok, global.cacheWrite1hPerMTok.map { $0 * 1.1 })
+        XCTAssertNil(price.rates(for: .standard, inferenceGeo: "unknown"))
+
+        let old = try XCTUnwrap(RunwayPriceTable.makeForTesting()
+            .price(forModel: "claude-opus-4-5"))
+        XCTAssertEqual(old.rates(for: .standard, inferenceGeo: "us"),
+                       old.rates(for: .standard, inferenceGeo: "global"),
+                       "regional pricing starts at Claude 4.6")
     }
 
     func testPriceTableRejectsMalformedAndUnrecognizedVersion() {
@@ -5415,6 +5441,41 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.reduce(0) { $0 + $1.cacheCreation }, 600)
         XCTAssertEqual(events.reduce(0) { $0 + $1.output }, 200)
         XCTAssertEqual(events.map(\.contextInputTokens), [1_000, 1_000])
+    }
+
+    func testCodexLiveLedgerScopesEventsToDurableAccount() throws {
+        CodexRunwayTokenActivityParser.resetSampleCacheForTesting()
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-ledger-account-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        func writeLog(_ name: String, account: String?) throws -> RunwaySessionIdentity {
+            var lines: [String] = []
+            if let account {
+                lines.append("{\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(account)\"}}")
+            }
+            lines.append("{\"timestamp\":\"\(iso(now))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}")
+            lines.append("{\"timestamp\":\"\(iso(now))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":0,\"cached_input_tokens\":0,\"output_tokens\":100,\"total_tokens\":100}}}}")
+            let url = dir.appendingPathComponent(name)
+            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            return .init(id: name, displayName: name, isGoal: false, logPaths: [url.path])
+        }
+        let mine = try writeLog("mine.jsonl", account: "account-a")
+        let foreign = try writeLog("foreign.jsonl", account: "account-b")
+        let unknown = try writeLog("unknown.jsonl", account: nil)
+        let hash = try XCTUnwrap(WeeklyQuotaCalibrationScope.hashAccount("account-a"))
+
+        let matched = CodexRunwayTokenActivityParser.ledgerEventScan(
+            identities: [mine, foreign], expectedAccountHash: hash, now: now)
+        XCTAssertEqual(matched.events.map(\.logPath), mine.logPaths)
+        XCTAssertTrue(matched.coverageComplete)
+
+        let ambiguous = CodexRunwayTokenActivityParser.ledgerEventScan(
+            identities: [unknown], expectedAccountHash: hash, now: now)
+        XCTAssertTrue(ambiguous.events.isEmpty)
+        XCTAssertFalse(ambiguous.coverageComplete)
     }
 
     /// Regression: image and tool-result records can be larger than the ordinary

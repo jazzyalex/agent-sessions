@@ -82,6 +82,7 @@ struct ClaudeTelemetryAccumulator {
         } else {
             speed = RunwaySpeedTier.unknown.rawValue
         }
+        let inferenceGeo = ClaudeRunwayLog.inferenceGeo(usage: usage)
 
         slices.addComponents(fresh: fresh,
                          cacheRead: cacheRead,
@@ -96,7 +97,8 @@ struct ClaudeTelemetryAccumulator {
                          // of its own is attributed the parent's. That is the best
                          // available answer, not a measured one.
                          effort: effectiveEffort,
-                         speed: speed)
+                         speed: speed,
+                         inferenceGeo: inferenceGeo)
 
         let write5m = Int(writes.fiveMinute)
         let write1h = Int(writes.oneHour)
@@ -110,6 +112,7 @@ struct ClaudeTelemetryAccumulator {
                 model: rawModel,
                 reasoningEffort: effectiveEffort,
                 speed: speed,
+                inferenceGeo: inferenceGeo,
                 freshInputTokens: fresh,
                 cacheReadTokens: cacheRead,
                 cacheWrite5mTokens: write5m,

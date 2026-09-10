@@ -84,9 +84,9 @@ enum TelemetryCostCalculator {
                 appendOnce("\(slug):contextInputTokens", to: &missingComponents)
                 continue
             }
-            guard let rates = price.rates(for: tier) else {
+            guard let rates = price.rates(for: tier, inferenceGeo: slice.inferenceGeo) else {
                 // Billing a fast record at standard would halve it. Refuse instead.
-                appendOnce("\(slug):\(tier.rawValue)", to: &missingComponents)
+                appendOnce("\(slug):\(slice.inferenceGeo.map { "inferenceGeo:\($0)" } ?? tier.rawValue)", to: &missingComponents)
                 continue
             }
 
@@ -144,8 +144,9 @@ enum TelemetryCostCalculator {
             return nil
         }
         guard let rates = price.rates(for: tier,
-                                      contextInputTokens: event.contextInputTokens.map(Double.init)) else {
-            appendOnce("\(slug):\(tier.rawValue)", to: &missingComponents)
+                                      contextInputTokens: event.contextInputTokens.map(Double.init),
+                                      inferenceGeo: event.inferenceGeo) else {
+            appendOnce("\(slug):\(event.inferenceGeo.map { "inferenceGeo:\($0)" } ?? tier.rawValue)", to: &missingComponents)
             return nil
         }
         if event.cacheWrite5mTokens > 0, rates.cacheWritePerMTok == nil {

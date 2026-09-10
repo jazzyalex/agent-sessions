@@ -88,15 +88,39 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
                        "the sub-object replaces the flat total rather than adding to it")
     }
 
+    func testClaudeScanAppliesUSInferenceGeoMultiplier() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
+                                   inferenceGeo: "us")], name: "c.jsonl")
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertEqual(result?.dollars ?? 0, 11.0, accuracy: 0.001)
+    }
+
+    func testClaudeScanRejectsExplicitUnknownInferenceGeo() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
+                                   inferenceGeo: "not_available")], name: "c.jsonl")
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertNil(result, "an all-unpriceable regional record cannot bootstrap calibration")
+    }
+
     private func claudeUsageLine(id: String,
                                  at: Date,
                                  oneHourCacheWrite: Int,
                                  flatCacheCreation: Int? = nil,
-                                 model: String = "claude-opus-5") -> String {
+                                 model: String = "claude-opus-5",
+                                 inferenceGeo: String? = nil) -> String {
         let flat = flatCacheCreation.map { "\"cache_creation_input_tokens\":\($0)," } ?? ""
+        let geo = inferenceGeo.map { "\"inference_geo\":\"\($0)\"," } ?? ""
         return "{\"timestamp\":\"\(ISO8601DateFormatter().string(from: at))\","
             + "\"message\":{\"id\":\"\(id)\",\"model\":\"\(model)\",\"usage\":{"
-            + "\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\(flat)"
+            + "\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\(geo)\(flat)"
             + "\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,"
             + "\"ephemeral_1h_input_tokens\":\(oneHourCacheWrite)}}}}"
     }

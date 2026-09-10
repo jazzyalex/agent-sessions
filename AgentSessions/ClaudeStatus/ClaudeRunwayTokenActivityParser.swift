@@ -35,6 +35,7 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
     var modelSlug: String? = nil
     /// Billing tier from `usage.speed`. Fast mode bills Opus 5 / 4.8 at double.
     var speed: RunwaySpeedTier = .standard
+    var inferenceGeo: String? = nil
     var eventID: String? = nil
 }
 
@@ -96,7 +97,8 @@ enum ClaudeRunwayTokenActivityParser {
                     cacheCreation: sample.cacheCreation5m,
                     cacheCreation1h: sample.cacheCreation1h,
                     modelSlug: sample.modelSlug,
-                    speed: sample.speed
+                    speed: sample.speed,
+                    inferenceGeo: sample.inferenceGeo
                 ))
             }
         }
@@ -342,6 +344,7 @@ enum ClaudeRunwayTokenActivityParser {
                              cacheCreationPerSecond: c.cacheCreationPerSecond * scale,
                              cacheCreation1hPerSecond: c.cacheCreation1hPerSecond * scale,
                              speed: c.speed,
+                             inferenceGeo: c.inferenceGeo,
                              contextInputTokens: c.contextInputTokens)
     }
 
@@ -361,6 +364,7 @@ enum ClaudeRunwayTokenActivityParser {
     private struct BurstKey: Hashable {
         let modelSlug: String?
         let speed: RunwaySpeedTier
+        let inferenceGeo: String?
     }
 
     private static func pathActivity(identity: RunwaySessionIdentity,
@@ -385,7 +389,8 @@ enum ClaudeRunwayTokenActivityParser {
             let gap = previous.capturedAt.timeIntervalSince(sample.capturedAt)
             if gap > maximumPairInterval { break }
             consumed += previous.tokens
-            let key = BurstKey(modelSlug: previous.modelSlug, speed: previous.speed)
+            let key = BurstKey(modelSlug: previous.modelSlug, speed: previous.speed,
+                               inferenceGeo: previous.inferenceGeo)
             var bucket = bySlice[key] ?? BurstTokens()
             bucket.add(previous)
             bySlice[key] = bucket
@@ -400,8 +405,8 @@ enum ClaudeRunwayTokenActivityParser {
             // model appears at both speeds.
             let components = bySlice
                 .sorted {
-                    ($0.key.modelSlug ?? "", $0.key.speed.rawValue)
-                        < ($1.key.modelSlug ?? "", $1.key.speed.rawValue)
+                    ($0.key.modelSlug ?? "", $0.key.speed.rawValue, $0.key.inferenceGeo ?? "")
+                        < ($1.key.modelSlug ?? "", $1.key.speed.rawValue, $1.key.inferenceGeo ?? "")
                 }
                 .map { key, t in
                     RunwayModelComponent(modelSlug: key.modelSlug,
@@ -410,7 +415,8 @@ enum ClaudeRunwayTokenActivityParser {
                                          outputPerSecond: t.output / span,
                                          cacheCreationPerSecond: t.cacheCreation5m / span,
                                          cacheCreation1hPerSecond: t.cacheCreation1h / span,
-                                         speed: key.speed)
+                                         speed: key.speed,
+                                         inferenceGeo: key.inferenceGeo)
                 }
             return (RunwaySessionActivity(
                 identity: identity,
@@ -442,7 +448,8 @@ enum ClaudeRunwayTokenActivityParser {
                     cacheCreationPerSecond: last.cacheCreation5m / turnDuration,
                     cacheCreation1hPerSecond: last.cacheCreation1h / turnDuration,
                     modelSlug: last.modelSlug,
-                    speed: last.speed
+                    speed: last.speed,
+                    inferenceGeo: last.inferenceGeo
                 ), true)
             }
         }
@@ -481,7 +488,8 @@ enum ClaudeRunwayTokenActivityParser {
                 outputPerSecond: item.sample.output * item.weight / normalization,
                 cacheCreationPerSecond: item.sample.cacheCreation5m * item.weight / normalization,
                 cacheCreation1hPerSecond: item.sample.cacheCreation1h * item.weight / normalization,
-                speed: item.sample.speed
+                speed: item.sample.speed,
+                inferenceGeo: item.sample.inferenceGeo
             )
         }
         let total = weighted.reduce(0) { $0 + $1.sample.tokens * $1.weight }
@@ -539,6 +547,7 @@ enum ClaudeRunwayTokenActivityParser {
             cacheRead: v("cache_read_input_tokens"),
             modelSlug: model,
             speed: RunwaySpeedTier(usageValue: usage["speed"]),
+            inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage),
             eventID: messageID
         ))
     }

@@ -298,6 +298,7 @@ struct RunwayModelComponent: Equatable, Sendable {
     let cacheCreation1hPerSecond: Double
     /// Billing tier this slice was served at, taken from the record's `usage.speed`.
     let speed: RunwaySpeedTier
+    let inferenceGeo: String?
     /// Total input tokens in this request. Some providers switch the entire
     /// request to a higher price tier above a context threshold.
     let contextInputTokens: Double?
@@ -309,6 +310,7 @@ struct RunwayModelComponent: Equatable, Sendable {
          cacheCreationPerSecond: Double,
          cacheCreation1hPerSecond: Double = 0,
          speed: RunwaySpeedTier = .standard,
+         inferenceGeo: String? = nil,
          contextInputTokens: Double? = nil) {
         self.modelSlug = modelSlug
         self.inputPerSecond = inputPerSecond
@@ -317,6 +319,7 @@ struct RunwayModelComponent: Equatable, Sendable {
         self.cacheCreationPerSecond = cacheCreationPerSecond
         self.cacheCreation1hPerSecond = cacheCreation1hPerSecond
         self.speed = speed
+        self.inferenceGeo = inferenceGeo
         self.contextInputTokens = contextInputTokens
     }
 
@@ -383,6 +386,7 @@ struct RunwaySessionActivity: Equatable, Sendable {
          cacheCreation1hPerSecond: Double = 0,
          modelSlug: String? = nil,
          speed: RunwaySpeedTier = .standard,
+         inferenceGeo: String? = nil,
          contextInputTokens: Double? = nil) {
         self.init(identity: identity,
                   tokensPerSecond: tokensPerSecond,
@@ -395,6 +399,7 @@ struct RunwaySessionActivity: Equatable, Sendable {
                                                     cacheCreationPerSecond: cacheCreationPerSecond,
                                                     cacheCreation1hPerSecond: cacheCreation1hPerSecond,
                                                     speed: speed,
+                                                    inferenceGeo: inferenceGeo,
                                                     contextInputTokens: contextInputTokens)])
     }
 }
@@ -444,6 +449,10 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     /// Current weekly reset anchor even when the visible presentation is 5h.
     /// Codex transcript activity is scoped against this before calibration.
     let weeklyResetAt: Date?
+    /// Durable account identity required for Codex ledger activity. nil means
+    /// the caller cannot establish ownership, so production calibration
+    /// must not consume those events.
+    let expectedAccountHash: String?
     /// Learned pp-per-API-dollar conversion for `Wk`. nil = not calibrated yet, so
     /// weekly rows wait on the clock rather than inventing a number.
     let weeklyPercentPointsPerDollar: Double?
@@ -460,6 +469,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
          maxRows: Int,
          recentSessionsRoot: URL? = nil,
          weeklyResetAt: Date? = nil,
+         expectedAccountHash: String? = nil,
          weeklyPercentPointsPerDollar: Double? = nil,
          weeklyWindowAvailable: Bool = true,
          weeklyCalibrationAbandoned: Bool = false) {
@@ -469,6 +479,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
         self.maxRows = maxRows
         self.recentSessionsRoot = recentSessionsRoot
         self.weeklyResetAt = weeklyResetAt
+        self.expectedAccountHash = expectedAccountHash
         self.weeklyPercentPointsPerDollar = weeklyPercentPointsPerDollar
         self.weeklyWindowAvailable = weeklyWindowAvailable
         self.weeklyCalibrationAbandoned = weeklyCalibrationAbandoned
@@ -490,6 +501,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
             "\(maxRows)",
             recentSessionsRoot?.path ?? "",
             weeklyResetAt?.timeIntervalSinceReferenceDate.description ?? "no-week-anchor",
+            expectedAccountHash ?? "no-account",
             "\(refreshBucket)",
             weeklyPercentPointsPerDollar.map { String(format: "%.6f", $0) } ?? "uncalibrated",
             weeklyWindowAvailable ? "wk" : "nowk",
@@ -591,10 +603,15 @@ enum CodexRunwaySnapshotLoader {
                 // timeline is also the poll-continuity record, so skipping cycles
                 // while the user is on 5h would make the next weekly interval look
                 // like a sleep gap and be rejected.
-                let ledgerScan = request.weeklyResetAt.map {
-                    CodexRunwayTokenActivityParser.ledgerEventScan(
+                let ledgerScan: (events: [WeeklyQuotaTokenEvent], coverageComplete: Bool) = request.weeklyResetAt.map {
+                    guard request.baseline.source != .codex
+                            || request.expectedAccountHash != nil else {
+                        return (events: [], coverageComplete: false)
+                    }
+                    return CodexRunwayTokenActivityParser.ledgerEventScan(
                             identities: identities,
                             expectedWeeklyResetAt: $0,
+                            expectedAccountHash: request.expectedAccountHash,
                             now: request.now
                         )
                     } ?? (events: [], coverageComplete: false)
@@ -1243,7 +1260,8 @@ enum CodexRunwayCalculator {
             // fast-mode record priced at standard would understate it by half.
             guard let p = priceTable.price(forModel: component.modelSlug),
                   let rates = p.rates(for: component.speed,
-                                      contextInputTokens: component.contextInputTokens) else { return nil }
+                                      contextInputTokens: component.contextInputTokens,
+                                      inferenceGeo: component.inferenceGeo) else { return nil }
             perSecond += rates.dollars(input: component.inputPerSecond,
                                        cachedInput: component.cachedInputPerSecond,
                                        output: component.outputPerSecond,
@@ -3074,16 +3092,19 @@ enum CodexRunwayTokenActivityParser {
     /// exceeds 272K, rather than treating a polling bucket as one request.
     static func ledgerEvents(identities: [RunwaySessionIdentity],
                              expectedWeeklyResetAt: Date? = nil,
+                             expectedAccountHash: String? = nil,
                              now: Date = Date()) -> [WeeklyQuotaTokenEvent] {
         ledgerEventScan(
             identities: identities,
             expectedWeeklyResetAt: expectedWeeklyResetAt,
+            expectedAccountHash: expectedAccountHash,
             now: now
         ).events
     }
 
     static func ledgerEventScan(identities: [RunwaySessionIdentity],
                                 expectedWeeklyResetAt: Date? = nil,
+                                expectedAccountHash: String? = nil,
                                 now: Date = Date())
         -> (events: [WeeklyQuotaTokenEvent], coverageComplete: Bool) {
         var seen: Set<String> = []
@@ -3091,9 +3112,15 @@ enum CodexRunwayTokenActivityParser {
         var coverageComplete = true
         for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
             seen.insert(path)
+            let actualAccountHash = transcriptAccountHash(fromLogPath: path)
+            if let expectedAccountHash, let actualAccountHash,
+               actualAccountHash != expectedAccountHash {
+                continue
+            }
             let scan = recentWeeklySampleScan(fromLogPath: path, now: now)
             let samples = scan.samples
             coverageComplete = coverageComplete && scan.coverageComplete
+            var pathEvents: [WeeklyQuotaTokenEvent] = []
             for (index, current) in samples.enumerated() {
                 func isExpectedAnchor(_ reset: Date?) -> Bool {
                     expectedWeeklyResetAt.map { expected in
@@ -3132,7 +3159,7 @@ enum CodexRunwayTokenActivityParser {
                     && current.requestCachedInput == safeCached
                     && current.requestCacheWrite == safeCacheWrite
                     && current.requestOutput == output
-                result.append(WeeklyQuotaTokenEvent(
+                pathEvents.append(WeeklyQuotaTokenEvent(
                     logPath: path,
                     eventID: current.eventID,
                     capturedAt: current.capturedAt,
@@ -3144,8 +3171,30 @@ enum CodexRunwayTokenActivityParser {
                     contextInputTokens: requestBoundaryMatches ? totalInput : nil
                 ))
             }
+            if expectedAccountHash != nil, actualAccountHash == nil, !pathEvents.isEmpty {
+                // Relevant activity with no durable transcript identity could
+                // belong to another account. Exclude it and poison coverage so
+                // the interval cannot produce a confident calibration.
+                coverageComplete = false
+                continue
+            }
+            result.append(contentsOf: pathEvents)
         }
         return (result, coverageComplete)
+    }
+
+    private static func transcriptAccountHash(fromLogPath path: String) -> String? {
+        // Durable session metadata is emitted at the start of a rollout. Keep the
+        // hot five-second ledger scan bounded even for 100+ MB transcripts.
+        guard let data = CodexRunwayRateLimitParser.headData(path: path, maxBytes: 256 * 1024) else { return nil }
+        var identity = CodexTranscriptAccountIdentity()
+        for line in String(decoding: data, as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: true) {
+            guard line.contains("session_meta") || line.contains("session_started")
+                    || line.contains("session_start") else { continue }
+            identity.consume(line: String(line))
+        }
+        return identity.durableAccountHash
     }
 
     static func burns(activities: [RunwaySessionActivity],

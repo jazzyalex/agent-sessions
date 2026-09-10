@@ -79,6 +79,7 @@ actor CodexOAuthUsageFetcher {
     private var lastFetchAt: Date? = nil
     private var lastFetchFailed: Bool = false
     private var rateLimitedUntil: Date? = nil
+    private var lastCredentialSet: CodexTokenSet?
 
     init(credentials: CodexOAuthCredentials) {
         self.credentials = credentials
@@ -96,6 +97,7 @@ actor CodexOAuthUsageFetcher {
         lastFetchAt = nil
         lastFetchFailed = false
         rateLimitedUntil = nil
+        lastCredentialSet = nil
         await credentials.invalidateCache()
     }
 
@@ -115,6 +117,7 @@ actor CodexOAuthUsageFetcher {
     func fetchUsage(cooldownSuccess: TimeInterval = 5 * 60,
                     cooldownFailure: TimeInterval = 30 * 60) async -> CodexUsageSnapshot? {
         let now = Date()
+        let tokenSet = await currentCredentialsResettingCooldownOnChange()
 
         // Rate limit gate
         if let until = rateLimitedUntil, until > now {
@@ -129,7 +132,7 @@ actor CodexOAuthUsageFetcher {
             if now.timeIntervalSince(last) < cd { return nil }
         }
 
-        guard let tokenSet = await credentials.resolve() else {
+        guard let tokenSet else {
             os_log("CodexOAuth: no credentials available", log: log, type: .info)
             return nil
         }
@@ -137,7 +140,8 @@ actor CodexOAuthUsageFetcher {
         lastFetchAt = now
         do {
             let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
-            let result = Self.normalizeResponse(raw)
+            var result = Self.normalizeResponse(raw)
+            result?.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount(tokenSet.accountId)
             lastFetchFailed = (result == nil)  // nil normalize = response shape changed
             return result
         } catch CodexOAuthUsageError.unauthorized {
@@ -166,6 +170,7 @@ actor CodexOAuthUsageFetcher {
     func fetchUsageResult(cooldownSuccess: TimeInterval = 5 * 60,
                            cooldownFailure: TimeInterval = 30 * 60) async -> CodexUsageFetchResult {
         let now = Date()
+        let tokenSet = await currentCredentialsResettingCooldownOnChange()
 
         // Rate limit gate
         if let until = rateLimitedUntil, until > now {
@@ -180,7 +185,7 @@ actor CodexOAuthUsageFetcher {
             if now.timeIntervalSince(last) < cd { return .skippedCooldown }
         }
 
-        guard let tokenSet = await credentials.resolve() else {
+        guard let tokenSet else {
             os_log("CodexOAuth: no credentials available", log: log, type: .info)
             // Record the attempt so the cooldown gate above applies to this path too.
             // Returning without stamping `lastFetchAt` meant a signed-out user never
@@ -195,10 +200,11 @@ actor CodexOAuthUsageFetcher {
         lastFetchAt = now
         do {
             let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
-            guard let result = Self.normalizeResponse(raw) else {
+            guard var result = Self.normalizeResponse(raw) else {
                 lastFetchFailed = true  // nil normalize = response shape changed
                 return .transient
             }
+            result.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount(tokenSet.accountId)
             lastFetchFailed = false
             return .ok(result)
         } catch CodexOAuthUsageError.unauthorized {
@@ -219,6 +225,17 @@ actor CodexOAuthUsageFetcher {
     }
 
     // MARK: - Private
+
+    private func currentCredentialsResettingCooldownOnChange() async -> CodexTokenSet? {
+        let current = await credentials.resolve()
+        if current != lastCredentialSet {
+            lastFetchAt = nil
+            lastFetchFailed = false
+            rateLimitedUntil = nil
+            lastCredentialSet = current
+        }
+        return current
+    }
 
     private func fetch(token: String, accountId: String?) async throws -> CodexOAuthRawUsageResponse {
         var request = URLRequest(url: Self.endpoint)

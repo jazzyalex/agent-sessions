@@ -4,6 +4,18 @@ import Foundation
 /// Claude runway parser and scanner. Kept in one place so the two readers can't
 /// drift apart.
 enum ClaudeRunwayLog {
+    /// nil means the field was absent (legacy/global-default pricing). Any explicit
+    /// value outside the supported contract is retained as unknown so callers fail
+    /// closed instead of silently applying global rates.
+    static func inferenceGeo(usage: [String: Any]) -> String? {
+        guard usage.keys.contains("inference_geo") else { return nil }
+        guard let raw = usage["inference_geo"] as? String else { return "unknown" }
+        switch raw {
+        case "us", "global": return raw
+        default: return "unknown"
+        }
+    }
+
     static func tailData(path: String, maxBytes: Int) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }

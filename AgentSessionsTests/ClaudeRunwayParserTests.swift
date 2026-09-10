@@ -1085,6 +1085,28 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertEqual(dollars ?? 0, 10_000 * 25.0 / 1_000_000 * 3600, accuracy: 1e-6)
     }
 
+    func testUSInferenceGeoAppliesToLiveRunwayPricing() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1, inferenceGeo: "us"),
+            usageLine(id: "burn", at: t1, output: 300_000, inferenceGeo: "us")
+        ], now: t1.addingTimeInterval(1))
+        XCTAssertEqual(dollars ?? 0, 10_000 * 25.0 * 1.1 / 1_000_000 * 3600,
+                       accuracy: 1e-6)
+    }
+
+    func testUnknownInferenceGeoMakesLiveRunwayUnpriceable() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "burn", at: t1, output: 300_000,
+                      inferenceGeo: "not_available")
+        ], now: t1.addingTimeInterval(1))
+        XCTAssertNil(dollars)
+    }
+
     /// A burst that straddles a speed switch must price each half at its own tier,
     /// exactly as it already does for a model switch.
     func testBurstStraddlingASpeedSwitchPricesEachHalf() throws {
@@ -1225,7 +1247,8 @@ final class ClaudeRunwayParserTests: XCTestCase {
                            flatCacheCreation: Int? = nil,
                            cacheCreation5m: Int? = nil,
                            cacheCreation1h: Int? = nil,
-                           speed: String? = nil) -> String {
+                           speed: String? = nil,
+                           inferenceGeo: String? = nil) -> String {
         var usage = "\"input_tokens\":\(input),\"output_tokens\":\(output),\"cache_read_input_tokens\":\(cacheRead)"
         if let flatCacheCreation { usage += ",\"cache_creation_input_tokens\":\(flatCacheCreation)" }
         if cacheCreation5m != nil || cacheCreation1h != nil {
@@ -1233,6 +1256,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
             usage += ",\"ephemeral_1h_input_tokens\":\(cacheCreation1h ?? 0)}"
         }
         if let speed { usage += ",\"speed\":\"\(speed)\"" }
+        if let inferenceGeo { usage += ",\"inference_geo\":\"\(inferenceGeo)\"" }
         return "{\"type\":\"assistant\",\"sessionId\":\"session\",\"timestamp\":\"\(iso(date))\","
             + "\"message\":{\"id\":\"\(id)\",\"role\":\"assistant\",\"model\":\"\(model)\",\"usage\":{\(usage)}}}"
     }

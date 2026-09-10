@@ -72,28 +72,38 @@ struct RunwayModelPrice: Equatable, Sendable {
     /// the calculator already prefers an honest drop to a confident wrong number.
     let fast: RunwayRateSet?
     let longContext: RunwayLongContextPrice?
+    /// Regional inference multiplier published for this exact model generation.
+    /// nil means the model is not subject to regional pricing.
+    let inferenceGeoUSMultiplier: Double?
 
     /// Rates for one observed tier, or nil when that tier has no rate set here.
     func rates(for speed: RunwaySpeedTier,
-               contextInputTokens: Double? = nil) -> RunwayRateSet? {
+               contextInputTokens: Double? = nil,
+               inferenceGeo: String? = nil) -> RunwayRateSet? {
         let base: RunwayRateSet?
         switch speed {
         case .standard, .standardNormalized: base = standard
         case .fast: base = fast
         case .unknown: base = nil
         }
-        guard let base else { return nil }
+        guard var resolved = base else { return nil }
         if let contextInputTokens, let longContext,
            contextInputTokens > longContext.thresholdInputTokens {
-            return RunwayRateSet(
-                inputPerMTok: base.inputPerMTok * longContext.inputMultiplier,
-                cachedInputPerMTok: base.cachedInputPerMTok * longContext.inputMultiplier,
-                outputPerMTok: base.outputPerMTok * longContext.outputMultiplier,
-                cacheWritePerMTok: base.cacheWritePerMTok.map { $0 * longContext.inputMultiplier },
-                cacheWrite1hPerMTok: base.cacheWrite1hPerMTok.map { $0 * longContext.inputMultiplier }
+            resolved = RunwayRateSet(
+                inputPerMTok: resolved.inputPerMTok * longContext.inputMultiplier,
+                cachedInputPerMTok: resolved.cachedInputPerMTok * longContext.inputMultiplier,
+                outputPerMTok: resolved.outputPerMTok * longContext.outputMultiplier,
+                cacheWritePerMTok: resolved.cacheWritePerMTok.map { $0 * longContext.inputMultiplier },
+                cacheWrite1hPerMTok: resolved.cacheWrite1hPerMTok.map { $0 * longContext.inputMultiplier }
             )
         }
-        return base
+        switch inferenceGeo {
+        case nil, "global": return resolved
+        case "us":
+            guard let multiplier = inferenceGeoUSMultiplier else { return resolved }
+            return resolved.scaled(by: multiplier)
+        default: return nil
+        }
     }
 
     /// Standard-rate accessors. Codex callers use these for an explicitly
@@ -110,6 +120,16 @@ struct RunwayLongContextPrice: Equatable, Sendable {
     let thresholdInputTokens: Double
     let inputMultiplier: Double
     let outputMultiplier: Double
+}
+
+private extension RunwayRateSet {
+    func scaled(by multiplier: Double) -> RunwayRateSet {
+        RunwayRateSet(inputPerMTok: inputPerMTok * multiplier,
+                      cachedInputPerMTok: cachedInputPerMTok * multiplier,
+                      outputPerMTok: outputPerMTok * multiplier,
+                      cacheWritePerMTok: cacheWritePerMTok.map { $0 * multiplier },
+                      cacheWrite1hPerMTok: cacheWrite1hPerMTok.map { $0 * multiplier })
+    }
 }
 
 /// Immutable view of one accepted price manifest. Session telemetry takes one
@@ -173,9 +193,9 @@ struct RunwayPriceSnapshot: Sendable {
         }
         let version = parts.joined(separator: "-")
         let knownVersions: [String: Set<String>] = [
-            "opus": ["3", "4", "4-1", "4-5", "4-6", "4-7", "4-8", "5"],
+            "opus": ["4-5", "4-6", "4-7", "4-8", "5"],
             "sonnet": ["3", "3-5", "4", "4-5", "4-6", "5"],
-            "haiku": ["3", "3-5", "4", "4-5"],
+            "haiku": ["4-5"],
             "fable": ["5"],
             "mythos": ["5"]
         ]
@@ -380,6 +400,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         let cacheWrite1hPerMTok: Double?
         let fast: RawRates?
         let longContext: RawLongContext?
+        let inferenceGeoUSMultiplier: Double?
 
         var standardRateSet: RunwayRateSet {
             RunwayRateSet(inputPerMTok: inputPerMTok,
@@ -403,7 +424,8 @@ final class RunwayPriceTable: @unchecked Sendable {
         let models = manifest.models.mapValues {
             RunwayModelPrice(standard: $0.standardRateSet,
                              fast: $0.fast?.rateSet,
-                             longContext: $0.longContext?.price)
+                             longContext: $0.longContext?.price,
+                             inferenceGeoUSMultiplier: $0.inferenceGeoUSMultiplier)
         }
         guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         guard let exactCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
@@ -468,15 +490,19 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-09-09",
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-09-09 from platform.claude.com and developers.openai.com. Fable and Mythos 5.1 cache reads are $0.25/MTok. Astra, Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "updated": "2026-09-10",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-09-10 from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Fable and Mythos 5.1 cache reads are $0.25/MTok. Astra, Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
-        "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
+        "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
-        "claude-opus-4-8": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
+        "claude-opus-4-8": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
+        "claude-opus-4":   { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,   "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
+        "claude-opus-4-7": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1 },
+        "claude-opus-4-6": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1 },
         "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0 },
-        "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,  "cacheWrite1hPerMTok": 4.0 },
+        "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,  "cacheWrite1hPerMTok": 4.0, "inferenceGeoUSMultiplier": 1.1 },
+        "claude-sonnet-4-6": { "inputPerMTok": 3.0, "cachedInputPerMTok": 0.3, "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0, "inferenceGeoUSMultiplier": 1.1 },
         "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
         "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25, "cacheWrite1hPerMTok": 2.0 },
         "claude-fable-5-1": { "inputPerMTok": 10.0, "cachedInputPerMTok": 0.25,  "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },

@@ -164,6 +164,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let modelSlug: String?
     /// Billing tier from `usage.speed`; fast mode doubles Opus rates.
     let speed: RunwaySpeedTier
+    let inferenceGeo: String?
     let contextInputTokens: Double?
 
     init(logPath: String,
@@ -176,6 +177,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
          cacheCreation1h: Double = 0,
          modelSlug: String?,
          speed: RunwaySpeedTier = .standard,
+         inferenceGeo: String? = nil,
          contextInputTokens: Double? = nil) {
         self.logPath = logPath
         self.eventID = eventID
@@ -187,6 +189,7 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
         self.cacheCreation1h = cacheCreation1h
         self.modelSlug = modelSlug
         self.speed = speed
+        self.inferenceGeo = inferenceGeo
         self.contextInputTokens = contextInputTokens
     }
 }
@@ -276,10 +279,17 @@ final class WeeklyQuotaActivityLedger {
                 hadUnpriced = true
                 continue
             }
+            guard dWrite == 0 || price.cacheWritePerMTok != nil else {
+                // A positive write count without a published write rate is not
+                // ordinary input. Poison the interval instead of inventing a
+                // fallback rate and making the learned quota conversion wrong.
+                hadUnpriced = true
+                continue
+            }
             dollars += dIn * price.inputPerMTok / 1_000_000
                 + dCached * price.cachedInputPerMTok / 1_000_000
                 + dOut * price.outputPerMTok / 1_000_000
-                + dWrite * (price.cacheWritePerMTok ?? price.inputPerMTok) / 1_000_000
+                + dWrite * (price.cacheWritePerMTok ?? 0) / 1_000_000
         }
 
         buckets.append(Bucket(at: now, dollars: dollars, hadUnpriced: hadUnpriced,
@@ -307,7 +317,8 @@ final class WeeklyQuotaActivityLedger {
                 event.capturedAt.timeIntervalSinceReferenceDate.description,
                 event.input.description, event.cachedInput.description,
                 event.output.description, event.cacheCreation.description,
-                event.cacheCreation1h.description, event.modelSlug ?? ""
+                event.cacheCreation1h.description, event.modelSlug ?? "",
+                event.inferenceGeo ?? ""
             ].joined(separator: "|")
             let key = "\(event.logPath)|\(event.eventID ?? fallbackID)"
             guard !seenEvents.contains(key) else { continue }
@@ -327,12 +338,16 @@ final class WeeklyQuotaActivityLedger {
             // Same poison flag as an unknown model when the record's billing tier has
             // no rates: the calibration must not be built on a knowingly halved cost.
             guard let price = snapshot.price(forModel: event.modelSlug),
+                  (event.cacheCreation + event.cacheCreation1h == 0
+                      || (price.cacheWritePerMTok != nil
+                          && (event.cacheCreation1h == 0 || price.cacheWrite1hPerMTok != nil))),
                   !(price.longContext.map {
                       event.contextInputTokens == nil
                           && contextInputVolume > $0.thresholdInputTokens
                   } ?? false),
                   let rates = price.rates(for: event.speed,
-                                          contextInputTokens: event.contextInputTokens) else {
+                                          contextInputTokens: event.contextInputTokens,
+                                          inferenceGeo: event.inferenceGeo) else {
                 buckets.append(Bucket(at: event.capturedAt, dollars: 0,
                                       hadUnpriced: true,
                                       hadIncompleteCoverage: discoveredLate,

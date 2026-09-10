@@ -3300,6 +3300,9 @@ enum HUDRunwayRequestBuilder {
             now: now,
             maxRows: maxRows,
             weeklyResetAt: weekResetAt,
+            expectedAccountHash: WeeklyQuotaCalibrationScope.hashAccount(
+                CodexCalibrationAccountScope.accountId(now: now)
+            ),
             weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
                 .percentPointsPerDollar(provider: "codex", now: now),
             weeklyWindowAvailable: weekResetAt != nil,

@@ -338,6 +338,7 @@ struct UsageSliceTable {
         let model: String?
         let effort: String?
         let speed: String
+        let inferenceGeo: String?
     }
 
     private var totals: [Key: TelemetryUsageSlice] = [:]
@@ -347,11 +348,12 @@ struct UsageSliceTable {
     private mutating func slice(for key: Key) -> TelemetryUsageSlice {
         if let existing = totals[key] { return existing }
         order.append(key)
-        return TelemetryUsageSlice(model: key.model, reasoningEffort: key.effort, speed: key.speed)
+        return TelemetryUsageSlice(model: key.model, reasoningEffort: key.effort,
+                                   speed: key.speed, inferenceGeo: key.inferenceGeo)
     }
 
     mutating func add(_ delta: UsageDelta, model: String?, effort: String?, speed: String) {
-        let key = Key(model: model, effort: effort, speed: speed)
+        let key = Key(model: model, effort: effort, speed: speed, inferenceGeo: nil)
         var slice = slice(for: key)
         slice.freshInputTokens += delta.fresh
         slice.cacheReadTokens += delta.cacheRead
@@ -364,8 +366,9 @@ struct UsageSliceTable {
     /// Adds a contribution whose components are already separated by the provider.
     /// Only Claude distinguishes cache-write TTLs; the others pass write1h: 0.
     mutating func addComponents(fresh: Int, cacheRead: Int, write5m: Int, write1h: Int, output: Int,
-                            model: String?, effort: String?, speed: String) {
-        let key = Key(model: model, effort: effort, speed: speed)
+                            model: String?, effort: String?, speed: String,
+                            inferenceGeo: String? = nil) {
+        let key = Key(model: model, effort: effort, speed: speed, inferenceGeo: inferenceGeo)
         var slice = slice(for: key)
         slice.freshInputTokens += fresh
         slice.cacheReadTokens += cacheRead

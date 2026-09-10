@@ -406,6 +406,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
         guard volume > 0 else { return true }
 
         guard let price = priceSnapshot.price(forModel: currentModel),
+              (cacheWrite == 0 || price.cacheWritePerMTok != nil),
               !(price.longContext.map {
                   delta.contextInput == nil && Double(delta.topLine - delta.output) > $0.thresholdInputTokens
               } ?? false),
@@ -540,7 +541,8 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                     // A tier with no rates counts as unpriced for the same reason an
                     // unknown model does — better an honest gap than a halved cost.
                     guard let price = priceTable.price(forModel: model),
-                          let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"])) else {
+                          let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
+                                                  inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {
                         localEntries.append((id, 0, volume, false))
                         continue
                     }

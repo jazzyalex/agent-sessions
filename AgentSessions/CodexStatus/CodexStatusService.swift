@@ -84,6 +84,9 @@ struct CodexUsageSnapshot: Equatable {
     var hasWeekRateLimit: Bool = false
     var weekLimitsSource: CodexLimitsSource? = nil
     var limitsSource: CodexLimitsSource? = nil
+    /// Durable account provenance for an OAuth response. This is the hash of
+    /// the account ID used on the request, not a later read of auth.json.
+    var limitsAccountHash: String? = nil
     /// True when the provider sent rate-limit data we could not confidently
     /// interpret (an unclassifiable window, an out-of-range percentage, or two
     /// windows of the same class). Drives the UI "can't verify" state so an empty
@@ -650,6 +653,11 @@ final class CodexUsageModel: ObservableObject {
         // learns a near-static pp-per-API-dollar conversion and therefore tolerates
         // a much longer interval (Codex weekly percent moves in whole points, so a
         // 30-minute cap would make it unacquirable on ordinary days).
+        let currentAccountID = CodexCalibrationAccountScope.accountId(now: now)
+        let weeklyAccountHash = Self.weeklyCalibrationAccountHash(
+            snapshot: s,
+            currentAccountID: currentAccountID
+        )
         if s.hasWeekRateLimit,
            weeklyFreshness.allowsProjectedDisplay,
            // Anchor, not display — same rule as the Claude path. Codex's OAuth text
@@ -659,7 +667,8 @@ final class CodexUsageModel: ObservableObject {
                                                             source: .codex,
                                                             raw: s.weekResetText,
                                                             now: observedAt),
-           weekResetAt > observedAt {
+           weekResetAt > observedAt,
+           let weeklyAccountHash {
             // Historical bootstrap: derive the conversion from the activity already
             // on disk for this weekly window, so `Wk` shows a number seconds after
             // launch instead of waiting hours for a 1pp tick. Once per anchor, off
@@ -671,8 +680,7 @@ final class CodexUsageModel: ObservableObject {
                 resetsAt: weekResetAt,
                 windowMinutes: 10080,
                 usedPercentPoints: Double(100 - s.weekRemainingPercent),
-                accountHash: WeeklyQuotaCalibrationScope.hashAccount(
-                    CodexCalibrationAccountScope.accountId(now: now)),
+                accountHash: weeklyAccountHash,
                 limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                 sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
                 now: now
@@ -687,7 +695,7 @@ final class CodexUsageModel: ObservableObject {
                 observedAt: observedAt,
                 scope: WeeklyQuotaCalibrationScope(
                     provider: "codex",
-                    accountHash: WeeklyQuotaCalibrationScope.hashAccount(CodexCalibrationAccountScope.accountId(now: now)),
+                    accountHash: weeklyAccountHash,
                     sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
                     limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                     priceRevision: RunwayPriceTable.shared.revision
@@ -717,6 +725,28 @@ final class CodexUsageModel: ObservableObject {
         // "usage updated" hook and runs on every poll. The fetcher's own long
         // cooldown gates the network, so calling it here is cheap.
         refreshResetCredits()
+    }
+
+    /// OAuth quota data may only condition the account that was used for the
+    /// request. This join also rejects an in-flight account switch: an A response
+    /// completing after auth.json changes to B cannot be stamped under B.
+    nonisolated static func weeklyCalibrationAccountHash(
+        snapshot: CodexUsageSnapshot,
+        currentAccountID: String?
+    ) -> String? {
+        let current = WeeklyQuotaCalibrationScope.hashAccount(currentAccountID)
+        guard snapshot.weekLimitsSource == .oauth else { return current }
+        guard let observed = snapshot.limitsAccountHash, observed == current else { return nil }
+        return observed
+    }
+
+    nonisolated static func oauthSnapshotMatchesCurrentAccount(
+        _ snapshot: CodexUsageSnapshot,
+        currentAccountID: String?
+    ) -> Bool {
+        guard snapshot.limitsSource == .oauth else { return true }
+        let current = WeeklyQuotaCalibrationScope.hashAccount(currentAccountID)
+        return snapshot.limitsAccountHash != nil && snapshot.limitsAccountHash == current
     }
 
     // MARK: - Auth health computation (Task 9b)
@@ -2280,6 +2310,10 @@ actor CodexStatusService {
 
         let result = await codexOAuthFetcher.fetchUsageResult()
         if case .ok(let preferredSnap) = result {
+            guard CodexUsageModel.oauthSnapshotMatchesCurrentAccount(
+                preferredSnap,
+                currentAccountID: CodexCalibrationAccountScope.accountId(now: Date())
+            ) else { return .transient }
             var merged = snapshot
             mergeRateLimitSnapshot(preferredSnap, into: &merged, replacesMissingWindows: true)
             return result
@@ -2661,6 +2695,12 @@ actor CodexStatusService {
         guard let preferredSnap = await fetchPreferredRateLimits(oauthSuccessCooldown: successCooldown) else {
             return nil
         }
+        if preferredSnap.limitsSource == .oauth {
+            guard CodexUsageModel.oauthSnapshotMatchesCurrentAccount(
+                preferredSnap,
+                currentAccountID: CodexCalibrationAccountScope.accountId(now: Date())
+            ) else { return nil }
+        }
         var merged = snapshot
         // OAuth/CLI-RPC return the provider's complete current windows, so a window
         // absent here means the provider dropped it — replace (clear), don't merge.
@@ -2706,6 +2746,9 @@ actor CodexStatusService {
         // so they must not clobber a real "can't verify" back to false.
         if replacesMissingWindows {
             dest.usageFormatSuspect = source.usageFormatSuspect
+            dest.limitsAccountHash = source.limitsSource == .oauth
+                ? source.limitsAccountHash
+                : nil
         }
         dest.limitsSource = aggregateLimitsSource(for: dest)
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker

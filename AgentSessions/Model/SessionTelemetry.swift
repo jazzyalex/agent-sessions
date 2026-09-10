@@ -124,6 +124,9 @@ public struct TelemetryUsageSlice: Equatable, Codable, Sendable {
     /// actual service tier is not observed; it must not be presented as evidence
     /// that the request ran on a provider-reported standard tier.
     public var speed: String
+    /// Provider-reported inference region. nil means the field was absent;
+    /// unsupported or malformed explicit values are preserved as `unknown`.
+    public var inferenceGeo: String?
 
     public var freshInputTokens: Int
     public var cacheReadTokens: Int
@@ -137,6 +140,7 @@ public struct TelemetryUsageSlice: Equatable, Codable, Sendable {
     public init(model: String?,
                 reasoningEffort: String?,
                 speed: String,
+                inferenceGeo: String? = nil,
                 freshInputTokens: Int = 0,
                 cacheReadTokens: Int = 0,
                 cacheWrite5mTokens: Int = 0,
@@ -146,6 +150,7 @@ public struct TelemetryUsageSlice: Equatable, Codable, Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.speed = speed
+        self.inferenceGeo = inferenceGeo
         self.freshInputTokens = freshInputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheWrite5mTokens = cacheWrite5mTokens
@@ -188,6 +193,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     public let model: String?
     public let reasoningEffort: String?
     public let speed: String
+    public let inferenceGeo: String?
     public let freshInputTokens: Int
     public let cacheReadTokens: Int
     public let cacheWrite5mTokens: Int
@@ -208,6 +214,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     public init(recordID: String?, observedAt: Date?, anchorLine: Int,
                 usageFamily: String, ownership: TelemetryUsageOwnership,
                 model: String?, reasoningEffort: String?, speed: String,
+                inferenceGeo: String? = nil,
                 freshInputTokens: Int, cacheReadTokens: Int,
                 cacheWrite5mTokens: Int, cacheWrite1hTokens: Int,
                 outputTokens: Int, reasoningOutputTokens: Int = 0,
@@ -222,6 +229,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.speed = speed
+        self.inferenceGeo = inferenceGeo
         self.freshInputTokens = freshInputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheWrite5mTokens = cacheWrite5mTokens
@@ -244,6 +252,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
         TelemetryUsageEvent(recordID: recordID, observedAt: observedAt, anchorLine: anchorLine,
                             usageFamily: usageFamily, ownership: ownership, model: model,
                             reasoningEffort: reasoningEffort, speed: speed,
+                            inferenceGeo: inferenceGeo,
                             freshInputTokens: freshInputTokens, cacheReadTokens: cacheReadTokens,
                             cacheWrite5mTokens: cacheWrite5mTokens, cacheWrite1hTokens: cacheWrite1hTokens,
                             outputTokens: outputTokens, reasoningOutputTokens: reasoningOutputTokens,
@@ -401,7 +410,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 4
+    public static let parserVersion = 5
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?

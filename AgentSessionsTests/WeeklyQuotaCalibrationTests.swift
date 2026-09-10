@@ -92,6 +92,37 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(activity?.dollars ?? -1, 0)
     }
 
+    func testLedgerRejectsCacheWritesWithoutPublishedRate() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        for (index, writes) in [0.0, 1_000_000.0].enumerated() {
+            let at = t0.addingTimeInterval(Double(index) * 60)
+            ledger.record(observations: [
+                WeeklyQuotaTokenObservation(
+                    logPath: "/write", capturedAt: at, input: 0, cachedInput: 0,
+                    output: 0, cacheCreation: writes, modelSlug: "gpt-5.5")
+            ], priceTable: prices, now: at)
+        }
+        let activity = ledger.activity(from: t0.addingTimeInterval(-1),
+                                       to: t0.addingTimeInterval(60))
+        XCTAssertTrue(activity?.hadUnpriced ?? false)
+        XCTAssertEqual(activity?.dollars ?? -1, 0)
+    }
+
+    func testIncrementalLedgerRejectsCacheWritesWithoutPublishedRate() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let event = WeeklyQuotaTokenEvent(
+            logPath: "/write", eventID: "unpriced-write",
+            capturedAt: t0, input: 0, cachedInput: 0, output: 0,
+            cacheCreation: 1_000_000, modelSlug: "gpt-5.5")
+        ledger.recordIncremental(events: [event],
+                                 priceTable: RunwayPriceTable.makeForTesting(),
+                                 now: t0)
+        let activity = ledger.activity(from: t0.addingTimeInterval(-1), to: t0)
+        XCTAssertTrue(activity?.hadUnpriced ?? false)
+        XCTAssertEqual(activity?.dollars ?? -1, 0)
+    }
+
     func testLedgerIncrementalPathDedupesRepeatedEvents() {
         let ledger = WeeklyQuotaActivityLedger()
         let prices = RunwayPriceTable.makeForTesting()
