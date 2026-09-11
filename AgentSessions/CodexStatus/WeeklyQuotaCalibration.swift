@@ -23,9 +23,9 @@ import CryptoKit
 // caps would make calibration unacquirable on Codex, whose weekly percent is
 // integer-quantized at 1pp (see `acceptance` below).
 
-/// What a calibration is valid for. Any change here invalidates the stored set:
-/// a different account, a different usage source, a re-priced table or a changed
-/// limit shape all break the pp-per-dollar relationship.
+/// What a calibration is valid for. A different account, evidence regime, price
+/// table or limit shape invalidates the stored set. OAuth and CLI RPC are two
+/// authoritative transports for the same Codex account windows, not two regimes.
 struct WeeklyQuotaCalibrationScope: Equatable, Codable, Sendable {
     let provider: String
     /// Locally hashed account identifier. `nil` means the provider exposes no
@@ -38,11 +38,36 @@ struct WeeklyQuotaCalibrationScope: Equatable, Codable, Sendable {
 
     var isPersistable: Bool { accountHash != nil }
 
+    /// OAuth and CLI RPC are two transports for the same authoritative Codex
+    /// account windows. A fallback between them must retain the learned quota
+    /// conversion while still recording which transport supplied each poll.
+    func isCalibrationCompatible(with other: WeeklyQuotaCalibrationScope) -> Bool {
+        provider == other.provider
+            && accountHash == other.accountHash
+            && limitShape == other.limitShape
+            && priceRevision == other.priceRevision
+            && WeeklyQuotaSourceFamily.areCompatible(
+                provider: provider,
+                sourceFamily,
+                other.sourceFamily
+            )
+    }
+
     /// Truncated SHA-256. The raw account id never reaches disk.
     static func hashAccount(_ raw: String?) -> String? {
         guard let raw, !raw.isEmpty else { return nil }
         let digest = SHA256.hash(data: Data(raw.utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(16).description
+    }
+}
+
+enum WeeklyQuotaSourceFamily {
+    private static let codexAuthoritative: Set<String> = ["oauth", "cli_rpc"]
+
+    static func areCompatible(provider: String, _ lhs: String?, _ rhs: String?) -> Bool {
+        guard lhs != rhs else { return true }
+        guard provider == "codex", let lhs, let rhs else { return false }
+        return codexAuthoritative.contains(lhs) && codexAuthoritative.contains(rhs)
     }
 }
 
@@ -497,14 +522,25 @@ struct WeeklyQuotaCalibrationTracker {
                          scope newScope: WeeklyQuotaCalibrationScope,
                          ledger: WeeklyQuotaActivityLedger,
                          now: Date) -> WeeklyQuotaCalibration? {
-        // Any scope change breaks the learned relationship outright.
-        if scope != newScope {
+        // Account, plan shape and price changes break the learned relationship.
+        // OAuth <-> CLI-RPC is only a Codex transport fallback, not a new quota
+        // regime, so preserve the measurement and update its current provenance.
+        if let currentScope = scope,
+           !currentScope.isCalibrationCompatible(with: newScope) {
             scope = newScope
             invalidate()
             firstObservedAt = observedAt
             anchor = Anchor(remainingPercent: remainingPercent, observedAt: observedAt, resetAt: resetAt)
             return nil
         }
+        if scope == nil {
+            scope = newScope
+            invalidate()
+            firstObservedAt = observedAt
+            anchor = Anchor(remainingPercent: remainingPercent, observedAt: observedAt, resetAt: resetAt)
+            return nil
+        }
+        scope = newScope
         if firstObservedAt == nil { firstObservedAt = observedAt }
 
         guard let previous = anchor else {
@@ -620,7 +656,7 @@ struct WeeklyQuotaCalibrationTracker {
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
               (payload.activityAccountingRevision ?? Self.legacyActivityAccountingRevision)
                 == Self.activityAccountingRevision(for: expected.provider),
-              payload.scope == expected else { return }
+              payload.scope.isCalibrationCompatible(with: expected) else { return }
         scope = expected
         firstObservedAt = nil
         accepted = payload.accepted
@@ -647,7 +683,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         _ usedPercentPoints: Double,
         _ priceTable: RunwayPriceTable,
         _ now: Date,
-        _ accountHash: String?
+        _ accountHash: String?,
+        _ shouldCancel: @Sendable () -> Bool
     ) -> WeeklyQuotaBootstrapResult?
 
     /// `launchedAt` is injectable because it is wall-clock state on a singleton,
@@ -660,7 +697,21 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
          scanRunner: BootstrapScanRunner? = nil,
          priceRevisionProvider: (@Sendable () -> Int)? = nil) {
         self.launchedAt = launchedAt
-        self.scanRunner = scanRunner ?? Self.runBootstrapScan
+        self.scanRunner = scanRunner ?? { provider, root, resetsAt, windowMinutes,
+                                         usedPercentPoints, priceTable, now,
+                                         accountHash, shouldCancel in
+            Self.runBootstrapScan(
+                provider: provider,
+                root: root,
+                resetsAt: resetsAt,
+                windowMinutes: windowMinutes,
+                usedPercentPoints: usedPercentPoints,
+                priceTable: priceTable,
+                now: now,
+                accountHash: accountHash,
+                shouldCancel: shouldCancel
+            )
+        }
         self.priceRevisionProvider = priceRevisionProvider ?? { RunwayPriceTable.shared.revision }
     }
 
@@ -711,6 +762,17 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let priceRevision: Int
         let limitShape: String?
         let sourceFamily: String?
+
+        func isCompatible(with other: BootstrapScopeKey, provider: String) -> Bool {
+            accountHash == other.accountHash
+                && priceRevision == other.priceRevision
+                && limitShape == other.limitShape
+                && WeeklyQuotaSourceFamily.areCompatible(
+                    provider: provider,
+                    sourceFamily,
+                    other.sourceFamily
+                )
+        }
     }
     private var activeScopeKeys: [String: BootstrapScopeKey] = [:]
     /// Providers whose older anchor-keyed caches have been folded into the
@@ -764,8 +826,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         usedPercentPoints: Double,
         priceTable: RunwayPriceTable,
         now: Date,
-        accountHash: String?
+        accountHash: String?,
+        shouldCancel: @Sendable () -> Bool
     ) -> WeeklyQuotaBootstrapResult? {
+        guard !shouldCancel() else { return nil }
         if provider == "claude" {
             return ClaudeWeeklyQuotaBootstrapScanner.scan(
                 root: root,
@@ -785,6 +849,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             priceTable: priceTable,
             now: now,
             expectedAccountHash: accountHash,
+            shouldCancel: shouldCancel,
             fileManager: FileManager.default)
     }
 
@@ -859,6 +924,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     private struct CalibrationSelection {
         let ratio: Double
         let provenance: WeeklyQuotaCalibrationProvenance
+        let accountAttributionSafe: Bool
     }
 
     /// The compatibility stamp used by an in-memory bootstrap. The tracker is
@@ -878,7 +944,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     private func compatibleBootstrap(_ bootstrap: WeeklyQuotaBootstrapResult,
                                      for provider: String) -> Bool {
         guard let expected = bootstrapCompatibility(for: provider) else { return true }
-        return bootstrap.isCompatible(priceRevision: expected.priceRevision,
+        return bootstrap.isCompatible(provider: provider,
+                                      priceRevision: expected.priceRevision,
                                       limitShape: expected.limitShape,
                                       sourceFamily: expected.sourceFamily,
                                       activityAccountingRevision: provider == "codex"
@@ -925,7 +992,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                         accountHash: liveScope.accountHash,
                         priceRevision: liveScope.priceRevision,
                         originResetAt: live.resetAt,
-                        originWindowStart: live.windowStart))
+                        originWindowStart: live.windowStart),
+                    accountAttributionSafe: true)
             }
             guard let ratio = freshenedBootstrapRatio(provider: provider,
                                                       bootstrap: bootstrap,
@@ -943,7 +1011,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                             accountHash: liveScope.accountHash,
                             priceRevision: liveScope.priceRevision,
                             originResetAt: calibration.resetAt,
-                            originWindowStart: calibration.windowStart))
+                            originWindowStart: calibration.windowStart),
+                        accountAttributionSafe: true)
                 }
             }
             // Prefer the scoped quota snapshot used by transcript attribution.
@@ -976,7 +1045,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                     accountHash: accountHash,
                     priceRevision: priceRevision,
                     originResetAt: bootstrap.resetsAt,
-                    originWindowStart: bootstrap.windowStart))
+                    originWindowStart: bootstrap.windowStart),
+                accountAttributionSafe: bootstrap.accountAttributionSafe == true)
         }
         guard let live, let liveScope = scope else { return nil }
         return CalibrationSelection(
@@ -989,7 +1059,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 accountHash: liveScope.accountHash,
                 priceRevision: liveScope.priceRevision,
                 originResetAt: live.resetAt,
-                originWindowStart: live.windowStart))
+                originWindowStart: live.windowStart),
+            accountAttributionSafe: true)
     }
 
     /// Caller holds `lock`.
@@ -1000,6 +1071,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     func attributionContext(provider: String, now: Date) -> WeeklyQuotaAttributionContext? {
         lock.lock(); defer { lock.unlock() }
         guard let selection = calibrationSelectionLocked(provider: provider, now: now),
+              provider != "codex" || selection.accountAttributionSafe,
               let scope = trackers[provider]?.currentScope else { return nil }
         let latest = snapshots[provider]?.last.flatMap { snapshot in
             snapshot.provider == scope.provider
@@ -1279,7 +1351,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                   // different plan shape, describes a different conversion. Without
                   // this an old plan could win forever purely by having reached a
                   // larger percentage.
-            cached.isCompatible(priceRevision: priceRevision,
+            cached.isCompatible(provider: provider,
+                                priceRevision: priceRevision,
                                       limitShape: limitShape,
                                       sourceFamily: sourceFamily,
                                       activityAccountingRevision: provider == "codex"
@@ -1325,7 +1398,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // The persisted keys are account-scoped but these maps are not, so a
         // same-process account switch would otherwise keep serving the previous
         // account's calibration under the new account's name.
-        if let previous = activeScopeKeys[provider], previous != scopeKey {
+        if let previous = activeScopeKeys[provider],
+           !previous.isCompatible(with: scopeKey, provider: provider) {
             bootstraps[provider] = nil
             bestBootstraps[provider] = nil
             trackers[provider] = nil
@@ -1361,7 +1435,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            let data = defaults.data(forKey: bestKey),
            let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
            cached.percentPointsPerDollar != nil,
-           cached.isCompatible(priceRevision: priceRevision,
+           cached.isCompatible(provider: provider,
+                               priceRevision: priceRevision,
                                limitShape: limitShape,
                                sourceFamily: sourceFamily,
                                activityAccountingRevision: provider == "codex"
@@ -1390,7 +1465,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            // so an exact Double compare never matches and every launch rescans.
            abs(cached.resetsAt.timeIntervalSince(resetsAt)) < CodexWeeklyQuotaBootstrapScanner.anchorTolerance,
            cached.percentPointsPerDollar != nil,
-           cached.isCompatible(priceRevision: priceRevision,
+           cached.isCompatible(provider: provider,
+                               priceRevision: priceRevision,
                                limitShape: limitShape,
                                sourceFamily: sourceFamily,
                                activityAccountingRevision: provider == "codex"
@@ -1485,7 +1561,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             }
             guard let result = self.scanRunner(
                 provider, root, resetsAt, windowMinutes, usedPercentPoints,
-                RunwayPriceTable.shared, now, accountHash
+                RunwayPriceTable.shared, now, accountHash, {
+                    self.lock.lock(); defer { self.lock.unlock() }
+                    return (self.scopeGenerations[provider] ?? 0) != generation
+                }
             ) else { backOff(); return }
             // A week can contain one slug the price table has never seen without
             // meaningfully moving the ratio; a large unknown share cannot.

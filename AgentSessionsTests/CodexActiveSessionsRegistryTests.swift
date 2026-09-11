@@ -2458,6 +2458,84 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(placeholder.rows.first?.confidence, .waiting)
     }
 
+    func testEmptyRefreshKeepsAnActiveRunwayVisibleInAutoMode() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false, logPaths: ["/tmp/session.jsonl"])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity], now: now, maxRows: 4,
+            weeklyResetAt: reset, weeklyWindowAvailable: true,
+            weeklyCalibrationAbandoned: false)
+
+        let replacement = try XCTUnwrap(RunwaySnapshotAssembly.replacementAfterRefresh(
+            current: nil, candidate: nil, request: request))
+
+        XCTAssertEqual(replacement.rows.first?.id, identity.id)
+        XCTAssertEqual(replacement.rows.first?.confidence, .waiting)
+        XCTAssertNotNil(quotaMeterVisibleRunwaySnapshot(from: replacement, visibility: .automatic))
+    }
+
+    func testAbandonedWeeklyRefreshPublishesUnavailableInsteadOfDisappearing() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false, logPaths: ["/tmp/session.jsonl"])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity], now: now, maxRows: 4,
+            weeklyResetAt: reset, weeklyWindowAvailable: true,
+            weeklyCalibrationAbandoned: true)
+        let current = CodexRunwaySnapshot(
+            baseline: baseline,
+            rows: [RunwayPauseImpactRow(
+                id: identity.id, displayName: identity.displayName, isGoal: false,
+                deadline: .runout(reset), gainedSeconds: 0, displayRate: 4,
+                confidence: .direct)],
+            burstSummary: nil)
+
+        let replacement = try XCTUnwrap(RunwaySnapshotAssembly.replacementAfterRefresh(
+            current: current, candidate: nil, request: request))
+
+        XCTAssertEqual(replacement.rows.first?.deadline, .unavailable)
+        XCTAssertEqual(replacement.rows.first?.confidence, .unsupported)
+        XCTAssertNotNil(quotaMeterVisibleRunwaySnapshot(from: replacement, visibility: .automatic))
+    }
+
+    func testUnavailableUsageRequestDoesNotClearAnActiveAutoRunway() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false, logPaths: ["/tmp/session.jsonl"])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let current = CodexRunwaySnapshot(
+            baseline: baseline,
+            rows: [RunwayPauseImpactRow(
+                id: identity.id, displayName: identity.displayName, isGoal: false,
+                deadline: .runout(reset), gainedSeconds: 0, displayRate: 4,
+                confidence: .direct)],
+            burstSummary: nil)
+
+        let replacement = try XCTUnwrap(RunwaySnapshotAssembly.replacementWhenRequestUnavailable(
+            current: current,
+            activeIdentities: [identity],
+            maxRows: 4
+        ))
+
+        XCTAssertEqual(replacement.rows.first?.deadline, .unavailable)
+        XCTAssertNotNil(quotaMeterVisibleRunwaySnapshot(from: replacement, visibility: .automatic))
+    }
+
     func testWeeklyPresentationBuildsWeeklyBaseline() {
         // Preferred .weekly with a recent same-reset quota tick → weekly baseline
         // (10080-min window, weeklyPercentPerHour), even while the 5h window is present.

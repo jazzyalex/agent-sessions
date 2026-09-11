@@ -19,6 +19,8 @@ struct CodexTranscriptAccountIdentity {
         isAmbiguous ? nil : hash
     }
 
+    var hasConflictingDurableAccounts: Bool { isAmbiguous }
+
     mutating func consume(line: String) {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

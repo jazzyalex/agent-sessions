@@ -395,6 +395,26 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                      "a re-priced table must invalidate the learned conversion")
     }
 
+    func testAuthoritativeCodexTransportFallbackPreservesCalibration() {
+        var tracker = WeeklyQuotaCalibrationTracker()
+        let ledger = WeeklyQuotaActivityLedger()
+        let reset = t0.addingTimeInterval(4 * 24 * 3600)
+        tracker.update(remainingPercent: 80, hasExactPercent: false, resetAt: reset,
+                       observedAt: t0, scope: scope(source: "oauth"), ledger: ledger, now: t0)
+        fillLedger(ledger, from: t0, minutes: 10, outputTokensPerMinute: 100_000)
+        let end = t0.addingTimeInterval(10 * 60)
+        tracker.update(remainingPercent: 79, hasExactPercent: false, resetAt: reset,
+                       observedAt: end, scope: scope(source: "oauth"), ledger: ledger, now: end)
+        let learned = tracker.percentPointsPerDollar(now: end)
+
+        tracker.update(remainingPercent: 79, hasExactPercent: false, resetAt: reset,
+                       observedAt: end.addingTimeInterval(60), scope: scope(source: "cli_rpc"),
+                       ledger: ledger, now: end.addingTimeInterval(60))
+
+        XCTAssertEqual(tracker.percentPointsPerDollar(now: end.addingTimeInterval(60)), learned)
+        XCTAssertEqual(tracker.currentScope?.sourceFamily, "cli_rpc")
+    }
+
     /// A weekly reset re-anchors the counter but must NOT erase a valid conversion.
     func testWeeklyResetKeepsLearnedConversion() {
         var tracker = WeeklyQuotaCalibrationTracker()
@@ -585,6 +605,31 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertNil(store.attributionContext(provider: "codex", now: t0))
     }
 
+    func testAccountlessRunwayBootstrapCannotAttributeHistoricalSession() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0.addingTimeInterval(-3600), resetsAt: reset, scannedAt: t0)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = "weekly"
+        bootstrap.sourceFamily = "oauth"
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scope(priceRevision: prices.revision).accountHash
+        bootstrap.accountAttributionSafe = false
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0,
+                           scope: scope(priceRevision: prices.revision, source: "oauth", shape: "weekly"),
+                           now: t0)
+
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0),
+                        "the live runway may use the current account quota with ordinary local activity")
+        XCTAssertNil(store.attributionContext(provider: "codex", now: t0),
+                     "account-less history cannot be attributed to the current account")
+    }
+
     func testCarriedBootstrapProvenanceIsSeparateFromLatestQuotaObservation() throws {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         let prices = RunwayPriceTable.makeForTesting()
@@ -600,6 +645,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         bootstrap.accountHash = scope(priceRevision: prices.revision).accountHash
+        bootstrap.accountAttributionSafe = true
         store.setBestBootstrapForTesting(provider: "codex", result: bootstrap)
 
         let currentScope = scope(priceRevision: prices.revision, source: "oauth", shape: "weekly")
@@ -1551,7 +1597,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let completed = result(used: 6, dollars: 20, resetsAt: resetsAt, scannedAt: now)
         let store = WeeklyQuotaCalibrationStore.makeForTesting(
             launchedAt: t0,
-            scanRunner: { _, _, _, _, _, _, _, _ in
+            scanRunner: { _, _, _, _, _, _, _, _, _ in
                 entries.increment()
                 release.wait()
                 return completed
@@ -1581,7 +1627,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         let store = WeeklyQuotaCalibrationStore.makeForTesting(
             launchedAt: t0,
-            scanRunner: { _, _, _, _, _, _, _, _ in
+            scanRunner: { _, _, _, _, _, _, _, _, _ in
                 entries.increment()
                 release.wait()
                 return nil
@@ -1606,6 +1652,37 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         XCTAssertTrue(waitForScanEntry(entries, count: 2))
         release.signal()
         waitForScanToFinish(store, provider: "codex")
+    }
+
+    func testAuthoritativeSourceFallbackDoesNotRestartAnInFlightBootstrap() {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let entries = ScanEntryCounter()
+        let release = DispatchSemaphore(value: 0)
+        let completed = result(used: 6, dollars: 20, resetsAt: resetsAt,
+                               scannedAt: t0, accountHash: codexAccountHash)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, _, _, _, _, _, _, _, _ in
+                entries.increment()
+                release.wait()
+                return completed
+            })
+
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 6,
+                              accountHash: codexAccountHash, limitShape: "weekly",
+                              sourceFamily: "oauth", now: t0, defaults: suite)
+        XCTAssertTrue(waitForScanEntry(entries))
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 6,
+                              accountHash: codexAccountHash, limitShape: "weekly",
+                              sourceFamily: "cli_rpc", now: t0.addingTimeInterval(5), defaults: suite)
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 1)
+
+        release.signal()
+        waitForScanToFinish(store, provider: "codex")
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0))
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 1)
     }
 
     // MARK: - Restart and regime changes

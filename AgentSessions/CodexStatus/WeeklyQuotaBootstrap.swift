@@ -41,8 +41,9 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Window layout the plan reported (`5h+weekly` vs `weekly`). A plan change
     /// alters what a percentage point means, so it invalidates the conversion.
     var limitShape: String?
-    /// Usage source that supplied the account-level observation. OAuth, CLI RPC,
-    /// JSONL fallback and a status probe are not interchangeable evidence paths.
+    /// Usage source that supplied the account-level observation. OAuth and CLI RPC
+    /// are compatible authoritative Codex transports; JSONL fallback and a status
+    /// probe remain separate evidence paths.
     /// Optional for records written before source-family provenance existed; such
     /// records are not compatible when a caller supplies a current family.
     var sourceFamily: String?
@@ -53,8 +54,13 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Durable account identity proven by the transcripts included in a Codex
     /// denominator. Nil is retained for legacy and Claude bootstrap records.
     var accountHash: String? = nil
+    /// True only when every included Codex transcript carried the durable account
+    /// identity matching `accountHash`. Account-less ordinary transcripts can
+    /// calibrate the live Quota Meter, but must never be used to attribute a
+    /// historical session to the currently signed-in account.
+    var accountAttributionSafe: Bool? = nil
 
-    static let codexActivityAccountingRevision = 7
+    static let codexActivityAccountingRevision = 8
 
     /// Both providers report weekly consumption as whole percentage points, so a
     /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
@@ -64,7 +70,8 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Whether this measurement may be served under the given conditions.
     /// Source-family provenance fails closed: a scoped caller cannot consume an
     /// unstamped legacy record because its evidence path cannot be established.
-    func isCompatible(priceRevision: Int,
+    func isCompatible(provider: String,
+                      priceRevision: Int,
                       limitShape: String?,
                       sourceFamily: String? = nil,
                       activityAccountingRevision: Int? = nil,
@@ -74,7 +81,11 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
            self.activityAccountingRevision != required { return false }
         if let stamped = self.limitShape, let current = limitShape, stamped != current { return false }
         if let current = sourceFamily {
-            guard self.sourceFamily == current else { return false }
+            guard WeeklyQuotaSourceFamily.areCompatible(
+                provider: provider,
+                self.sourceFamily,
+                current
+            ) else { return false }
         } else if self.sourceFamily != nil {
             // A caller without a family scope cannot safely consume a stamped
             // record because it cannot prove that the evidence paths agree.
@@ -160,6 +171,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
                      priceTable: RunwayPriceTable,
                      now: Date,
                      expectedAccountHash: String? = nil,
+                     shouldCancel: @Sendable () -> Bool = { false },
                      fileManager: FileManager = .default) -> WeeklyQuotaBootstrapResult? {
         debugLog("scan start used=\(usedPercentPoints)pp resetsAt=\(resetsAt.timeIntervalSince1970) win=\(windowMinutes) root=\(root.path)")
         guard usedPercentPoints >= minimumUsedPercentPoints else {
@@ -176,33 +188,45 @@ enum CodexWeeklyQuotaBootstrapScanner {
         var seenAnchors: Set<Int> = []
         var matchedTurns = 0
         var hadIncompleteCandidate = false
+        var usedAccountUnidentifiedActivity = false
         let priceSnapshot = priceTable.snapshot()
 
-        for url in candidateFiles(root: root, modifiedAfter: windowStart, fileManager: fileManager) {
+        let candidates = candidateFiles(
+            root: root,
+            modifiedAfter: windowStart,
+            shouldCancel: shouldCancel,
+            fileManager: fileManager
+        )
+        guard !shouldCancel() else {
+            debugLog("scan CANCELLED during candidate enumeration")
+            return nil
+        }
+        for url in candidates {
+            guard !shouldCancel() else {
+                debugLog("scan CANCELLED after files=\(seenFiles)")
+                return nil
+            }
             seenFiles += 1
+            guard !shouldCancel() else { return nil }
             guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
                 debugLog("open FAILED \(url.lastPathComponent)")
                 hadIncompleteCandidate = true
                 continue
             }
-
-            // Stdlib split + Substring.contains, matching how the existing parsers
-            // walk these transcripts (see `lastTurnContextModel`). A hand-rolled
-            // byte matcher was tried here and is NOT an optimisation: it allocated
-            // per line and ran O(line x needle), managing ~1 MB/s in a Debug build
-            // and never finishing a 44 MB window. This form is memchr-backed.
-            let text = String(decoding: data, as: UTF8.self)
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-            var identity = CodexTranscriptAccountIdentity()
-            if expectedAccountHash != nil {
-                for line in lines where line.contains("session_meta")
-                    || line.contains("session_started") || line.contains("session_start") {
-                    identity.consume(line: String(line))
-                }
-                if let actual = identity.durableAccountHash, actual != expectedAccountHash {
-                    continue
-                }
+            guard !shouldCancel() else {
+                debugLog("scan CANCELLED after reading \(url.lastPathComponent)")
+                return nil
             }
+
+            // Decode once, then enumerate lines without materializing a second
+            // full-file array. The per-line stop flag makes an obsolete scope
+            // cooperatively cancellable during the expensive transcript walk.
+            let text = String(decoding: data, as: UTF8.self)
+            guard !shouldCancel() else {
+                debugLog("scan CANCELLED after decoding \(url.lastPathComponent)")
+                return nil
+            }
+            var identity = CodexTranscriptAccountIdentity()
             // Model attribution is chronological. A later turn_context must not
             // price earlier token records in the same file.
             var currentModel: String?
@@ -215,34 +239,64 @@ enum CodexWeeklyQuotaBootstrapScanner {
             var fileSeenAnchors: Set<Int> = []
             var fileMatchedTurns = 0
             var fileIncomplete = false
-            for line in lines {
-                let isTokenCount = line.contains("token_count")
-                let isTurnContext = line.contains("turn_context")
-                guard isTokenCount || isTurnContext else { continue }
-                let complete = ingest(line: line,
-                       isTokenCount: isTokenCount,
-                       isTurnContext: isTurnContext,
-                       currentModel: &currentModel,
-                       currentAnchor: &currentAnchor,
-                       previousTokenAnchor: &previousTokenAnchor,
-                       resetsAt: resetsAt,
-                       windowMinutes: windowMinutes,
-                       windowStart: windowStart,
-                       observationCutoff: now,
-                       priceSnapshot: priceSnapshot,
-                       cumulative: &cumulative,
-                       dollars: &fileDollars,
-                       pricedVolume: &filePricedVolume,
-                       unpricedVolume: &fileUnpricedVolume,
-                       seenAnchors: &fileSeenAnchors,
-                       matchedTurns: &fileMatchedTurns)
-                fileIncomplete = fileIncomplete || !complete
+            var lineIndex = 0
+            var cancelled = false
+            withoutActuallyEscaping(shouldCancel) { cancellable in
+                text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .byLines) {
+                    substring, _, _, stop in
+                    guard let line = substring else { return }
+                    let lineSlice = line[...]
+                    if lineIndex.isMultiple(of: 1024), cancellable() {
+                        cancelled = true
+                        stop = true
+                        return
+                    }
+                    defer { lineIndex += 1 }
+                    if expectedAccountHash != nil,
+                       (line.contains("session_meta") || line.contains("session_started")
+                        || line.contains("session_start")) {
+                        identity.consume(line: String(line))
+                    }
+                    let isTokenCount = line.contains("token_count")
+                    let isTurnContext = line.contains("turn_context")
+                    guard isTokenCount || isTurnContext else { return }
+                    let complete = ingest(line: lineSlice,
+                           isTokenCount: isTokenCount,
+                           isTurnContext: isTurnContext,
+                           currentModel: &currentModel,
+                           currentAnchor: &currentAnchor,
+                           previousTokenAnchor: &previousTokenAnchor,
+                           resetsAt: resetsAt,
+                           windowMinutes: windowMinutes,
+                           windowStart: windowStart,
+                           observationCutoff: now,
+                           priceSnapshot: priceSnapshot,
+                           cumulative: &cumulative,
+                           dollars: &fileDollars,
+                           pricedVolume: &filePricedVolume,
+                           unpricedVolume: &fileUnpricedVolume,
+                           seenAnchors: &fileSeenAnchors,
+                           matchedTurns: &fileMatchedTurns)
+                    fileIncomplete = fileIncomplete || !complete
+                }
+            }
+            if cancelled {
+                debugLog("scan CANCELLED in \(url.lastPathComponent)")
+                return nil
+            }
+            if identity.hasConflictingDurableAccounts {
+                hadIncompleteCandidate = true
+                continue
+            }
+            if let expectedAccountHash,
+               let actual = identity.durableAccountHash,
+               actual != expectedAccountHash {
+                continue
             }
             if expectedAccountHash != nil,
                identity.durableAccountHash == nil,
                fileMatchedTurns > 0 {
-                hadIncompleteCandidate = true
-                continue
+                usedAccountUnidentifiedActivity = true
             }
             dollars += fileDollars
             pricedVolume += filePricedVolume
@@ -268,7 +322,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
             scannedAt: now,
             priceRevision: priceSnapshot.revision,
             activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision,
-            accountHash: expectedAccountHash
+            accountHash: expectedAccountHash,
+            accountAttributionSafe: !usedAccountUnidentifiedActivity
         )
     }
 
@@ -276,7 +331,9 @@ enum CodexWeeklyQuotaBootstrapScanner {
     /// created months ago and resumed this week is still this week's activity.
     static func candidateFiles(root: URL,
                                modifiedAfter: Date,
+                               shouldCancel: @Sendable () -> Bool = { false },
                                fileManager: FileManager = .default) -> [URL] {
+        guard !shouldCancel() else { return [] }
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -285,7 +342,12 @@ enum CodexWeeklyQuotaBootstrapScanner {
 
         var result: [URL] = []
         for case let url as URL in enumerator {
+            if shouldCancel() {
+                enumerator.skipDescendants()
+                return []
+            }
             guard url.pathExtension == "jsonl" else { continue }
+            guard !shouldCancel() else { return [] }
             guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   let modified = values.contentModificationDate,

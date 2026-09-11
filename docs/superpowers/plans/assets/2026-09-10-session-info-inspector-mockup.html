@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Info inspector — locked mockup</title>
+<style>
+:root{
+  --page:#EFF0F3; --panel:#FFFFFF; --panel-2:#F6F7F9;
+  --hair:#DCDEE4; --hair-soft:#E7E9EE;
+  --ink:#1A1C21; --ink-2:#4A4E57; --muted:#787D87;
+  --accent:#3A6DF0; --accent-soft:#E6ECFD;
+  --tok-cached:#9AA1B1; --tok-fresh:#3A6DF0; --tok-out:#D98A2B;
+  --shadow:0 1px 2px rgba(20,24,35,.08), 0 8px 24px rgba(20,24,35,.07);
+}
+.dark{
+  --page:#16171A; --panel:#1F2023; --panel-2:#26282C;
+  --hair:#33363C; --hair-soft:#2B2E33;
+  --ink:#E8E9ED; --ink-2:#B6BAC2; --muted:#8B909A;
+  --accent:#6E96FF; --accent-soft:#242B3D;
+  --tok-cached:#767D8C; --tok-fresh:#6E96FF; --tok-out:#D9A155;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{margin:0; background:#E9EAEE; color:#1A1C21;
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;}
+.sheet{padding:32px; background:var(--page); color:var(--ink)}
+.sheet.dark{background:#16171A; color:#E8E9ED}
+h1{margin:0 0 4px; font-size:20px; font-weight:600}
+.sub{margin:0 0 24px; font-size:13px; color:var(--muted); max-width:70ch; line-height:1.5}
+.states{display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start}
+.state{width:320px}
+.state h2{margin:0 0 8px; font-size:11px; font-weight:600; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--muted)}
+
+.panel{background:var(--panel); border:1px solid var(--hair); border-radius:9px;
+  box-shadow:var(--shadow); overflow:hidden; color:var(--ink)}
+.phead{display:flex; align-items:center; justify-content:space-between;
+  padding:9px 11px; border-bottom:1px solid var(--hair-soft); background:var(--panel-2)}
+.phead .t{font-size:13px; font-weight:600}
+.phead .acts{display:flex; gap:9px; color:var(--muted); font-size:12px}
+.pbody{padding:12px}
+.sec{padding:11px 0; border-top:1px solid var(--hair-soft)}
+.sec:first-child{border-top:0; padding-top:2px}
+.sechead{font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--muted); margin-bottom:8px}
+
+.kv{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; align-items:baseline; margin:0}
+.kv dt{font-size:11.5px; color:var(--muted)}
+.kv dd{margin:0; font-size:11.5px; text-align:right; font-variant-numeric:tabular-nums;
+  overflow-wrap:anywhere}
+.kv dd.na{color:var(--muted)}
+.kv dd.mono{font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px}
+
+.hero{display:flex; align-items:baseline; gap:8px}
+.hero .n{font-size:27px; font-weight:600; letter-spacing:-.022em;
+  font-variant-numeric:tabular-nums; line-height:1}
+.hero .u{font-size:11px; color:var(--muted)}
+.subhero{display:flex; align-items:baseline; justify-content:space-between; margin-top:9px}
+.subhero .n{font-size:14px; font-weight:600; font-variant-numeric:tabular-nums}
+.subhero .u{font-size:11px; color:var(--muted); font-weight:400}
+
+.bar{display:flex; height:6px; border-radius:3px; overflow:hidden; margin:7px 0 6px;
+  background:var(--hair-soft)}
+.bar i{display:block}
+.legend{display:flex; flex-wrap:wrap; gap:3px 12px; font-size:10.5px; color:var(--ink-2)}
+.legend span{display:inline-flex; align-items:center; gap:5px; font-variant-numeric:tabular-nums}
+.dot{width:7px; height:7px; border-radius:2px; display:inline-block}
+
+.tl{display:flex; flex-direction:column; margin:0 0 0 2px}
+.tl .row{display:grid; grid-template-columns:13px 1fr auto; gap:8px;
+  padding:4px 4px 9px 0; position:relative; border-radius:4px}
+.tl .row.hot{background:var(--accent-soft); padding-left:4px; margin-left:-4px}
+.tl .row:not(:last-child)::before{content:""; position:absolute; left:6px; top:13px; bottom:0;
+  width:1px; background:var(--hair)}
+.tl .pip{width:7px; height:7px; border-radius:50%; background:var(--accent);
+  margin:4px 0 0 3px; position:relative; z-index:1}
+.tl .pip.hollow{background:var(--panel); border:1.5px solid var(--muted)}
+.tl .txt{font-size:11.5px; line-height:1.4}
+.tl .txt b{font-weight:600}
+.tl .when{font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums}
+.tl .go{font-size:10.5px; color:var(--accent); align-self:center}
+
+.disc{display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-2)}
+.disc .caret{color:var(--muted); font-size:9px}
+.basis-body{margin-top:9px; display:flex; flex-direction:column; gap:9px}
+.basis-body p{margin:0; font-size:10.5px; line-height:1.5; color:var(--muted)}
+.empty{font-size:11.5px; color:var(--muted)}
+
+.foot{padding:9px 11px; border-top:1px solid var(--hair-soft); background:var(--panel-2);
+  font-size:10.5px; color:var(--muted); display:flex; justify-content:space-between;
+  align-items:center}
+.foot .link{color:var(--accent)}
+
+.legendtable{margin-top:30px; border-top:1px solid var(--hair); padding-top:18px}
+.legendtable h2{font-size:12px; margin:0 0 10px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--muted)}
+table{border-collapse:collapse; font-size:12px}
+th,td{text-align:left; padding:4px 18px 4px 0; vertical-align:top; color:var(--ink-2)}
+th{color:var(--ink); font-weight:600}
+code{font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px}
+</style>
+</head>
+<body>
+
+<section class="sheet">
+  <h1>Session info — locked design</h1>
+  <p class="sub">Chosen variant: one hero (cost), tokens as subhero with the share bar, history as an
+  always-visible section with per-row jump, and provenance collapsed under
+  “How this was estimated”. No tab bar. Panel width 320&nbsp;pt. Every string below is the exact
+  copy to ship.</p>
+
+  <div class="states">
+
+    <!-- STATE 1: full -->
+    <div class="state">
+      <h2>1 · Full evidence</h2>
+      <div class="panel">
+        <div class="phead"><span class="t">Session info</span><span class="acts">↻&nbsp;&nbsp;✕</span></div>
+        <div class="pbody">
+          <div class="sec">
+            <div class="hero"><span class="n">$12.37</span><span class="u">API-equivalent</span></div>
+            <div class="subhero">
+              <span class="n">18,969,245 <span class="u">tokens</span></span>
+              <span class="u">23 requests</span>
+            </div>
+            <div class="bar">
+              <i style="width:94.3%;background:var(--tok-cached)"></i>
+              <i style="width:5.4%;background:var(--tok-fresh)"></i>
+              <i style="width:0.3%;background:var(--tok-out)"></i>
+            </div>
+            <div class="legend">
+              <span><i class="dot" style="background:var(--tok-cached)"></i>Cached 17.9M</span>
+              <span><i class="dot" style="background:var(--tok-fresh)"></i>Fresh 1.0M</span>
+              <span><i class="dot" style="background:var(--tok-out)"></i>Output 56.3K</span>
+            </div>
+          </div>
+
+          <div class="sec">
+            <dl class="kv">
+              <dt>Model</dt><dd>gpt-5.6-sol · high</dd>
+              <dt>Weekly quota</dt><dd class="na">—</dd>
+              <dt>Delegated</dt><dd class="na">—</dd>
+            </dl>
+          </div>
+
+          <div class="sec">
+            <div class="sechead">History</div>
+            <div class="tl">
+              <div class="row">
+                <span class="pip hollow"></span>
+                <span class="txt">Started <b>gpt-5.6-sol · medium</b><br>
+                  <span class="when">3:12 PM · inferred</span></span>
+                <span class="go">↗</span>
+              </div>
+              <div class="row hot">
+                <span class="pip"></span>
+                <span class="txt">Thinking effort <b>medium → high</b><br>
+                  <span class="when">3:47 PM</span></span>
+                <span class="go">↗</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="disc"><span class="caret">▶</span> How this was estimated</div>
+          </div>
+        </div>
+        <div class="foot"><span>Estimates, not billing</span><span class="link">Refresh</span></div>
+      </div>
+    </div>
+
+    <!-- STATE 2: basis expanded -->
+    <div class="state">
+      <h2>2 · “How this was estimated”, expanded</h2>
+      <div class="panel">
+        <div class="phead"><span class="t">Session info</span><span class="acts">↻&nbsp;&nbsp;✕</span></div>
+        <div class="pbody">
+          <div class="sec">
+            <div class="sechead">How this was estimated</div>
+            <div class="basis-body">
+              <dl class="kv">
+                <dt>Priced as</dt><dd>gpt-5.6-sol · standard</dd>
+                <dt>Region</dt><dd class="na">not recorded</dd>
+                <dt>Context in</dt><dd>101K – 116K</dd>
+                <dt>Price table</dt><dd>2026-09-10</dd>
+                <dt>Revision</dt><dd class="mono">r…364686</dd>
+                <dt>Manifest</dt><dd class="mono">c0bcca4a…8a5d0</dd>
+              </dl>
+              <p>Cost is computed for each request from its model, speed, region and context size,
+              then summed at published API rates. “Standard” is a pricing assumption, not an
+              observed service tier.</p>
+              <p>Started configuration is inferred from the first record, not a session-start
+              setting.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="sub" style="margin-top:10px; font-size:11.5px">One row per distinct
+      <code>model · speed · region</code>. A second model adds one more “Priced as” row, never one
+      row per request.</p>
+    </div>
+
+    <!-- STATE 3: sparse -->
+    <div class="state">
+      <h2>3 · Nothing recorded</h2>
+      <div class="panel">
+        <div class="phead"><span class="t">Session info</span><span class="acts">↻&nbsp;&nbsp;✕</span></div>
+        <div class="pbody">
+          <div class="sec">
+            <div class="hero"><span class="n" style="color:var(--muted)">—</span><span class="u">API-equivalent</span></div>
+            <div class="subhero">
+              <span class="n" style="color:var(--muted)">— <span class="u">tokens</span></span>
+            </div>
+          </div>
+          <div class="sec">
+            <dl class="kv">
+              <dt>Model</dt><dd class="na">—</dd>
+              <dt>Weekly quota</dt><dd class="na">—</dd>
+              <dt>Delegated</dt><dd class="na">—</dd>
+            </dl>
+          </div>
+          <div class="sec">
+            <div class="sechead">History</div>
+            <div class="empty">No changes recorded</div>
+          </div>
+          <div class="sec">
+            <div class="disc"><span class="caret">▶</span> How this was estimated</div>
+          </div>
+        </div>
+        <div class="foot"><span>Estimates, not billing</span><span class="link">Refresh</span></div>
+      </div>
+      <p class="sub" style="margin-top:10px; font-size:11.5px">Every absent value is an em dash with
+      the reason in the tooltip. No “Unavailable (…)” sentences anywhere in the panel.</p>
+    </div>
+
+  </div>
+
+  <div class="legendtable">
+    <h2>Type and color contract</h2>
+    <table>
+      <tr><th>Role</th><th>SwiftUI</th><th>Color</th></tr>
+      <tr><td>Hero value</td><td><code>.system(size: 27, weight: .semibold)</code> + <code>.monospacedDigit()</code></td><td><code>.primary</code></td></tr>
+      <tr><td>Hero unit</td><td><code>.system(size: 11)</code></td><td><code>.secondary</code></td></tr>
+      <tr><td>Subhero value</td><td><code>.system(size: 14, weight: .semibold)</code> + <code>.monospacedDigit()</code></td><td><code>.primary</code></td></tr>
+      <tr><td>Section head</td><td><code>.system(size: 10.5, weight: .semibold)</code>, uppercase, tracking 0.6</td><td><code>.secondary</code></td></tr>
+      <tr><td>Row label</td><td><code>.system(size: 11.5)</code></td><td><code>.secondary</code></td></tr>
+      <tr><td>Row value</td><td><code>.system(size: 11.5)</code> + <code>.monospacedDigit()</code>, trailing</td><td><code>.primary</code>, <code>.secondary</code> when em dash</td></tr>
+      <tr><td>Provenance prose</td><td><code>.system(size: 10.5)</code></td><td><code>.secondary</code></td></tr>
+      <tr><td>Cached share</td><td>bar segment</td><td><code>Color.secondary.opacity(0.55)</code></td></tr>
+      <tr><td>Fresh share</td><td>bar segment</td><td><code>Color.accentColor</code></td></tr>
+      <tr><td>Output share</td><td>bar segment</td><td><code>Color.orange</code></td></tr>
+      <tr><td>History pip · change</td><td>7 pt circle</td><td><code>Color.accentColor</code></td></tr>
+      <tr><td>History pip · started</td><td>7 pt ring</td><td><code>Color.secondary</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="sheet dark">
+  <h1>Dark</h1>
+  <p class="sub">Same panel, system dark. The bar keeps its three-way separation without the accent
+  fighting the ground.</p>
+  <div class="states">
+    <div class="state">
+      <h2>1 · Full evidence</h2>
+      <div class="panel">
+        <div class="phead"><span class="t">Session info</span><span class="acts">↻&nbsp;&nbsp;✕</span></div>
+        <div class="pbody">
+          <div class="sec">
+            <div class="hero"><span class="n">$12.37</span><span class="u">API-equivalent</span></div>
+            <div class="subhero">
+              <span class="n">18,969,245 <span class="u">tokens</span></span>
+              <span class="u">23 requests</span>
+            </div>
+            <div class="bar">
+              <i style="width:94.3%;background:var(--tok-cached)"></i>
+              <i style="width:5.4%;background:var(--tok-fresh)"></i>
+              <i style="width:0.3%;background:var(--tok-out)"></i>
+            </div>
+            <div class="legend">
+              <span><i class="dot" style="background:var(--tok-cached)"></i>Cached 17.9M</span>
+              <span><i class="dot" style="background:var(--tok-fresh)"></i>Fresh 1.0M</span>
+              <span><i class="dot" style="background:var(--tok-out)"></i>Output 56.3K</span>
+            </div>
+          </div>
+          <div class="sec">
+            <dl class="kv">
+              <dt>Model</dt><dd>gpt-5.6-sol · high</dd>
+              <dt>Weekly quota</dt><dd class="na">—</dd>
+              <dt>Delegated</dt><dd class="na">—</dd>
+            </dl>
+          </div>
+          <div class="sec">
+            <div class="sechead">History</div>
+            <div class="tl">
+              <div class="row">
+                <span class="pip hollow"></span>
+                <span class="txt">Started <b>gpt-5.6-sol · medium</b><br>
+                  <span class="when">3:12 PM · inferred</span></span>
+                <span class="go">↗</span>
+              </div>
+              <div class="row hot">
+                <span class="pip"></span>
+                <span class="txt">Thinking effort <b>medium → high</b><br>
+                  <span class="when">3:47 PM</span></span>
+                <span class="go">↗</span>
+              </div>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="disc"><span class="caret">▶</span> How this was estimated</div>
+          </div>
+        </div>
+        <div class="foot"><span>Estimates, not billing</span><span class="link">Refresh</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

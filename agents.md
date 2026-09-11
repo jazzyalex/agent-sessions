@@ -14,6 +14,22 @@ the owner explicitly authorizes that exact external action and its targets in th
 request. Do not infer permission for additional posts, recipients, follow-ups, or account
 actions. `Marketing/` is gitignored and local to this machine.
 
+## Signed-in browser tasks
+- Any task that needs the owner's existing signed-in web session must use the bundled
+  Chrome extension bridge and the owner's normal Chrome profile. This includes Reddit,
+  GitHub, X, Discord, Threads, email, analytics, submissions, and other account-backed
+  sites.
+- Do not use the Codex in-app browser for a task that depends on saved login state. Do
+  not select a generic browser merely because it can open the same URL.
+- Bootstrap the Chrome bridge with the bundled `scripts/browser-client.mjs`, call
+  `setupBrowserRuntime({ globals: globalThis })`, select
+  `agent.browsers.get("extension")`, and verify the profile and open tabs before acting.
+- If the saved bridge is stale, follow the Chrome troubleshooting sequence and reconnect
+  to the extension. Do not fall back to the in-app browser. Use the in-app browser only
+  when the owner explicitly requests it or when the task does not need saved login state.
+- External submission still follows the authorization rule above. Filling or staging a
+  draft does not authorize clicking the final Post, Send, Submit, or Publish control.
+
 ## Build & review discipline
 - Don't ask the user to "confirm if it looks good" until the code builds with zero errors.
 - After changing Swift sources or Xcode project files, build the active scheme.

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed an intermittent Codex Session Runway refresh loop that alternated between weekly estimates, clocks, `n/a`, and disappearance. OAuth and CLI-RPC now share one authoritative calibration regime, slow scans stop after real scope cancellation, ordinary account-less Codex transcripts can calibrate the live runway without becoming historical account-attribution evidence, and Auto keeps active pending/unavailable rows visible during refresh.
+
 - Added a Session info inspector beside the transcript in both split layouts, with a main-toolbar toggle and Shift-Command-I shortcut. Codex and Claude transcripts show configuration changes inline and expose usage, API-equivalent cost, quota estimates, and unavailable-state reasons for each session independently.
 
 - Transcript telemetry now preserves exact price-manifest provenance, rejects mismatched Codex request components and ambiguous or switched-account evidence, carries cache-write tokens and Claude inference geography through live and weekly accounting, and fails closed on unknown Claude speed/region tiers, unverified model versions, and cache writes without a published rate. Pricing now includes the Claude 4.6+ US inference multiplier, distinct historical Opus 4 rate, Fable/Mythos 5.1 cache reads, and GPT-5.5/GPT-5.4 long-context rates.

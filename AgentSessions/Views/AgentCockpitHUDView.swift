@@ -2842,8 +2842,8 @@ private extension CodexRunwaySnapshot {
     }
 }
 
-private func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?,
-                                             visibility: QuotaMeterRunwayVisibility) -> CodexRunwaySnapshot? {
+func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?,
+                                     visibility: QuotaMeterRunwayVisibility) -> CodexRunwaySnapshot? {
     guard let snapshot else { return nil }
     switch visibility {
     case .automatic:
@@ -3752,8 +3752,8 @@ private struct HUDLimitsRowsPanel: View {
             }
         )
         .onReceive(Self.clockTimer) { clockNow = $0 }
-        .task(id: runwayRequestID) {
-            await refreshRunwaySnapshot()
+        .task(id: runwayRefreshConfigurationID) {
+            await runRunwayRefreshLoop()
         }
     }
 
@@ -3842,8 +3842,19 @@ private struct HUDLimitsRowsPanel: View {
         .frame(height: 30)
     }
 
-    private var runwayRequestID: String {
-        "\(codexRunwayRequest?.id ?? "codex-off")||\(claudeRunwayRequest?.id ?? "claude-off")"
+    /// Refresh configuration only. Time-varying request fields are deliberately
+    /// excluded: using the five-second request bucket as the task identity cancels
+    /// every async scan before a slow one can publish.
+    private var runwayRefreshConfigurationID: String {
+        [
+            runwayPresentationRaw,
+            runwayVisibilityRaw,
+            projectedRunoutEnabled.description,
+            codexAgentEnabled.description,
+            codexUsageEnabled.description,
+            claudeAgentEnabled.description,
+            claudeUsageEnabled.description
+        ].joined(separator: "|")
     }
 
     private var codexRunwayRequest: CodexRunwaySnapshotRequest? {
@@ -3902,6 +3913,12 @@ private struct HUDLimitsRowsPanel: View {
                 current: codexRunwaySnapshot,
                 request: request
             )
+        } else if codexAgentEnabled, codexUsageEnabled, providerShown(.codex) {
+            codexRunwaySnapshot = RunwaySnapshotAssembly.replacementWhenRequestUnavailable(
+                current: codexRunwaySnapshot,
+                activeIdentities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .codex),
+                maxRows: 4
+            )
         } else {
             codexRunwaySnapshot = nil
         }
@@ -3910,6 +3927,12 @@ private struct HUDLimitsRowsPanel: View {
                 current: claudeRunwaySnapshot,
                 request: request
             )
+        } else if claudeAgentEnabled, claudeUsageEnabled, providerShown(.claude) {
+            claudeRunwaySnapshot = RunwaySnapshotAssembly.replacementWhenRequestUnavailable(
+                current: claudeRunwaySnapshot,
+                activeIdentities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .claude),
+                maxRows: 4
+            )
         } else {
             claudeRunwaySnapshot = nil
         }
@@ -3917,11 +3940,32 @@ private struct HUDLimitsRowsPanel: View {
         if let request = nextCodexRequest {
             let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
             guard !Task.isCancelled else { return }
-            codexRunwaySnapshot = snapshot
+            codexRunwaySnapshot = RunwaySnapshotAssembly.replacementAfterRefresh(
+                current: codexRunwaySnapshot,
+                candidate: snapshot,
+                request: request
+            )
         }
         if let request = nextClaudeRequest {
             let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
-            if !Task.isCancelled { claudeRunwaySnapshot = snapshot }
+            if !Task.isCancelled {
+                claudeRunwaySnapshot = RunwaySnapshotAssembly.replacementAfterRefresh(
+                    current: claudeRunwaySnapshot,
+                    candidate: snapshot,
+                    request: request
+                )
+            }
+        }
+    }
+
+    private func runRunwayRefreshLoop() async {
+        while !Task.isCancelled {
+            await refreshRunwaySnapshot()
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
         }
     }
 }

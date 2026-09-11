@@ -6,6 +6,27 @@ import XCTest
 /// practice: the anchor/account filter, both window slots, and completing at all.
 final class WeeklyQuotaBootstrapTests: XCTestCase {
 
+    private final class CancellationGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var checks = 0
+        private let cancelAfter: Int
+
+        init(cancelAfter: Int) {
+            self.cancelAfter = cancelAfter
+        }
+
+        func shouldCancel() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            checks += 1
+            return checks > cancelAfter
+        }
+
+        var checkCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return checks
+        }
+    }
+
     private var root: URL!
 
     override func setUpWithError() throws {
@@ -204,18 +225,64 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine)
         XCTAssertEqual(result?.dollars ?? 0, 20, accuracy: 0.001)
         XCTAssertEqual(result?.accountHash, mine)
+        XCTAssertEqual(result?.accountAttributionSafe, true)
     }
 
-    func testAccountScopedScanRejectsRelevantTranscriptWithoutDurableIdentity() throws {
+    func testAccountScopedScanUsesOrdinaryAccountlessTranscriptForRunwayOnly() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         let mine = try XCTUnwrap(WeeklyQuotaCalibrationScope.hashAccount("account-a"))
         try write([modelLine("gpt-5.6", at: at),
                    turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "unknown.jsonl")
 
+        let result = CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine)
+        XCTAssertEqual(result?.dollars ?? 0, 20, accuracy: 0.001)
+        XCTAssertEqual(result?.accountHash, mine)
+        XCTAssertEqual(result?.accountAttributionSafe, false)
+    }
+
+    func testCancelledScanStopsBeforeReadingCandidates() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "cancelled.jsonl")
+
         XCTAssertNil(CodexWeeklyQuotaBootstrapScanner.scan(
             root: root, resetsAt: anchor, windowMinutes: 10080,
             usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
-            now: anchor.addingTimeInterval(-3600), expectedAccountHash: mine))
+            now: anchor.addingTimeInterval(-3600), shouldCancel: { true }))
+    }
+
+    func testCancellationStopsCandidateEnumeration() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([modelLine("gpt-5.6", at: at),
+                   turn(output: 1_000_000, resetsAt: anchor, at: at)], name: "cancelled.jsonl")
+        let gate = CancellationGate(cancelAfter: 1)
+
+        let candidates = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
+            root: root,
+            modifiedAfter: anchor.addingTimeInterval(-7 * 24 * 60 * 60),
+            shouldCancel: gate.shouldCancel
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertGreaterThanOrEqual(gate.checkCount, 2)
+    }
+
+    func testCancellationStopsDecodedLineWalk() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write(Array(repeating: "{}", count: 1_100) + [
+            modelLine("gpt-5.6", at: at),
+            turn(output: 1_000_000, resetsAt: anchor, at: at)
+        ], name: "cancelled.jsonl")
+        let gate = CancellationGate(cancelAfter: 8)
+
+        XCTAssertNil(CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), shouldCancel: gate.shouldCancel))
+        XCTAssertGreaterThanOrEqual(gate.checkCount, 9)
     }
 
     func testAccountScopedScanRejectsConflictingDurableIdentity() throws {

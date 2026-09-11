@@ -63,6 +63,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         bootstrap.accountHash = WeeklyQuotaCalibrationScope.hashAccount(accountID)
+        bootstrap.accountAttributionSafe = true
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(
             provider: "codex",
@@ -372,6 +373,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         bootstrap.accountHash = WeeklyQuotaCalibrationScope.hashAccount("account-a")
+        bootstrap.accountAttributionSafe = true
         quota.setBootstrapForTesting(provider: "codex", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "codex",
                                                 accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),

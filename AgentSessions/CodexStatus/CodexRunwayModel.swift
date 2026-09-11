@@ -449,9 +449,9 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     /// Current weekly reset anchor even when the visible presentation is 5h.
     /// Codex transcript activity is scoped against this before calibration.
     let weeklyResetAt: Date?
-    /// Durable account identity required for Codex ledger activity. nil means
-    /// the caller cannot establish ownership, so production calibration
-    /// must not consume those events.
+    /// Durable current account identity. Explicitly mismatched transcript activity
+    /// is excluded. Ordinary account-less history may calibrate the live runway,
+    /// but is tagged so historical session attribution still fails closed.
     let expectedAccountHash: String?
     /// Learned pp-per-API-dollar conversion for `Wk`. nil = not calibrated yet, so
     /// weekly rows wait on the clock rather than inventing a number.
@@ -801,6 +801,63 @@ enum RunwaySnapshotAssembly {
             snapshot: nil,
             activeIdentities: request.identities,
             maxRows: request.maxRows
+        )
+    }
+
+    /// A transient empty scan must not erase active rows in Auto mode. Prefer a
+    /// real candidate; otherwise keep matching current rows or publish an honest
+    /// pending/unavailable placeholder for identities the HUD still says are live.
+    static func replacementAfterRefresh(
+        current: CodexRunwaySnapshot?,
+        candidate: CodexRunwaySnapshot?,
+        request: CodexRunwaySnapshotRequest
+    ) -> CodexRunwaySnapshot? {
+        if let candidate,
+           !candidate.rows.isEmpty || candidate.burstSummary != nil {
+            return candidate
+        }
+        guard !request.identities.isEmpty else { return candidate }
+
+        let activeIDs = Set(request.identities.map(\.id))
+        if request.baseline.rateUnit == .weeklyPercentPerHour,
+           (!request.weeklyWindowAvailable || request.weeklyCalibrationAbandoned) {
+            return withUnavailableRows(
+                baseline: request.baseline,
+                snapshot: nil,
+                identities: request.identities,
+                unavailableIDs: activeIDs,
+                maxRows: request.maxRows
+            )
+        }
+        if let current,
+           current.baseline.rateUnit == request.baseline.rateUnit,
+           current.rows.contains(where: { activeIDs.contains($0.id) }) {
+            return current
+        }
+        return withPendingRows(
+            baseline: request.baseline,
+            snapshot: nil,
+            activeIdentities: request.identities,
+            maxRows: request.maxRows
+        )
+    }
+
+    /// Usage polling can briefly lose the percent/reset fields needed to build a
+    /// fresh request. If active sessions still exist, replace the last numeric row
+    /// with an explicit pending/unavailable row instead of clearing the snapshot
+    /// and making Auto hide the runway entirely.
+    static func replacementWhenRequestUnavailable(
+        current: CodexRunwaySnapshot?,
+        activeIdentities: [RunwaySessionIdentity],
+        maxRows: Int
+    ) -> CodexRunwaySnapshot? {
+        guard let current, !activeIdentities.isEmpty else { return nil }
+        return withUnavailableRows(
+            baseline: current.baseline,
+            snapshot: nil,
+            identities: activeIdentities,
+            unavailableIDs: Set(activeIdentities.map(\.id)),
+            maxRows: maxRows
         )
     }
 

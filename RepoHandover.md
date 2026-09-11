@@ -1,3 +1,74 @@
+## 2026-09-10 21:06 · quota-runway-refresh-regression · Intermittent Codex runway refresh fixed
+status: done
+
+**State:** The `n/a` → spinner/clock → disappearance sequence is fixed locally, independently reviewed, fully tested, and running from a fresh Debug build; no commit, push, or release was performed.
+
+**Verified:**
+- Branch `main`, HEAD `d75d7138a89103ce7a209a59bf37455dc4391d32`; final XCResult `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.09.10_17-14-15--0700.xcresult` reports 2,720 total / 2,717 passed / 3 skipped / 0 failed.
+- Manual Debug build succeeded and was relaunched as PID `14918`; the user confirmed the display looked fine.
+- Final live capture performed one 17-second Codex bootstrap across 12 files / 638 matched turns. OAuth → CLI-RPC fallback did not start a duplicate, and the later minute refresh reused the stored result.
+- Independent review found transient request clearing and incomplete scan cancellation; both were fixed, and re-review returned no actionable findings.
+
+**Decided / don't redo:**
+- OAuth and CLI-RPC are compatible authoritative Codex calibration transports, but account-less transcript evidence remains barred from historical account attribution even when it powers the live runway.
+- Refresh is one stable serial five-second loop. Transient empty or unavailable requests preserve active Auto rows as pending/unavailable instead of replacing the snapshot with `nil`.
+- Post-bootstrap profiling still sees brief CPU bursts in the separate live-session tail scanner; it does not restart quota bootstrap and was not widened into a second optimization task.
+
+**Uncommitted / ownership:**
+- `AgentSessions/CodexStatus/{CodexRunwayModel,WeeklyQuotaBootstrap,WeeklyQuotaCalibration}.swift`, `AgentSessions/Telemetry/SessionTelemetryEngine.swift`, `AgentSessions/Views/AgentCockpitHUDView.swift`, the four matching test files, `docs/CHANGELOG.md`, and `docs/summaries/2026-09.md` — this completed Quota Meter task; preserve together.
+- `RepoHandover.md` — shared existing handovers plus this checkpoint. `agents.md` and `docs/superpowers/plans/2026-09-10-session-info-inspector-*` / `assets/` belong to the concurrent Session Info work and were preserved.
+
+**Key files:**
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift` and `WeeklyQuotaBootstrap.swift` — transport-compatible scope, attribution boundary, bootstrap cancellation.
+- `AgentSessions/CodexStatus/CodexRunwayModel.swift` and `AgentSessions/Views/AgentCockpitHUDView.swift` — snapshot replacement and stable refresh loop.
+
+## 2026-09-09 16:27 · public-docs-refresh · README and GitHub Pages aligned and live
+status: done
+
+**State:** The approved README, GitHub Pages, Quota Meter screenshots, trust copy, and Cursor support wording are committed, pushed, deployed, and verified live.
+
+**Verified:**
+- `main` and `origin/main` are `33ebf94301735ab57df5d4e3051b5145dcbe2f48` (`docs: refresh public product proof`); the push also included parent `d45e3698` (`fix: close agent format verification gaps`).
+- GitHub Pages run `34416637971` succeeded. CI run `34416639174` succeeded: build, tests, test count, docs guard, localization validation, and extraction-drift checks all passed.
+- Live homepage and README reference `sessions-main-window-with-current-quota.png`; downloaded hero and Quota Meter asset SHA-256 values matched the committed files exactly.
+
+**Decided / don't redo:**
+- README and Pages share one main hero composed from the sessions window plus the user-approved current Quota Meter screenshot; the standalone Quota Meter image includes Codex and Claude sessions.
+- Trust line is `Open source. Your session history stays on your Mac. No telemetry.`
+- Cursor support is `Agents Window · CLI`. IDE sidepane chats without Agent transcript JSONL are outside the supported boundary.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — existing handover edits plus this checkpoint; intentionally uncommitted.
+- `docs/CHANGELOG.md`, `docs/summaries/2026-09.md`, `docs/_data/session_bench.yml`, `docs/bench/index.md`, and `scripts/session_bench/*` — unrelated Session Bench task; preserved without staging or cleanup.
+
+**Key files:**
+- `README.md` and `docs/index.html` — aligned public entry points and shared imagery.
+- `docs/guides/cursor-agent-local-history.html` — exact Cursor support boundary.
+- `scripts/check_docs_publish.py` — guards the shared assets and Cursor wording.
+
+## 2026-09-09 15:36 · top-slot-card-lifecycle · Localized contributor cards hardened and shipped
+status: done
+
+**State:** The localization contributor card and full seven-card lifecycle/design audit are committed and pushed; no release was performed.
+
+**Verified:**
+- Current `main` is `d801b4974d85584c203437d7a8c2c03b2180a0b0` (`docs: share one hero composition`), aligned with `origin/main` except for this handover edit; it contains this session's pushed `5026fa4b` commit.
+- Final XCResult for the committed snapshot: 2,677 total / 2,674 passed / 3 skipped / 0 failed. Python validation: 290 passed plus 5 subtests. The docs publication guard passed.
+- `5026fa4b` committed all 45 pending cross-session files (2,228 insertions / 755 deletions) and was pushed with the previously local `38633bbb`; a later session advanced `main` to the current HEAD.
+
+**Decided / don't redo:**
+- Top-slot selection waits for every active source to finish or error, freezes one card per launch, and leaves five quiet days before switching card types; a card's own bounded round may continue on consecutive launches.
+- Star, translation, and add-agent session gates are 25 / 40 / 60 distinct locally hashed session IDs. All seven cards have terminal exits and bounded silence; every round transition is idempotent within a launch.
+- Impressions count on render because the slot is pinned above the scrolling table. All production and forced-debug cards share the measured adaptive-width layout.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — this checkpoint only; intentionally uncommitted by the handover skill.
+
+**Key files:**
+- `AgentSessions/Onboarding/Models/OnboardingCoordinator.swift` — targeting, five-day pacing, priorities, and lifecycle state machines.
+- `AgentSessions/Onboarding/Views/OnboardingListTopSlot.swift` — launch-frozen selection and shared adaptive card presentation.
+- `AgentSessionsTests/Onboarding*Tests.swift` — audience, frequency, cooldown, exit, locale, layout, and idempotency coverage.
+
 ## 2026-09-08 15:35 · qm-weekly-calibration-integrity · Weekly runway calibration corrected
 status: done
 
