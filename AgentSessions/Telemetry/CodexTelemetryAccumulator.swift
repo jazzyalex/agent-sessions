@@ -44,6 +44,14 @@ struct CodexTelemetryAccumulator {
     private var turnHasComponents = false
 
     mutating func consume(line: String, index: Int) {
+        // Rollouts contain many message/tool records that can never affect this
+        // accumulator. Reject them before JSON deserialization: large transcripts
+        // otherwise pay to decode every record again when Session info first opens.
+        guard line.contains("turn_context")
+                || line.contains("token_count")
+                || line.contains("turn.completed")
+                || line.contains("turn_completed")
+                || line.contains("turn-completed") else { return }
         guard let obj = ClaudeRunwayLog.jsonObject(line) else { return }
         // Old rollouts omit the `payload` wrapper and write fields at the top level;
         // newer ones nest under `event_msg`/`payload`.

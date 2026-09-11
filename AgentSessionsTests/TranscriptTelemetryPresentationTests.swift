@@ -2,6 +2,23 @@ import XCTest
 @testable import AgentSessions
 
 final class TranscriptTelemetryPresentationTests: XCTestCase {
+    func testTelemetryLoadRequestDoesNotTrackSelectionWhileInspectorIsHidden() {
+        XCTAssertNil(TranscriptTelemetryLoadRequest.key(
+            isVisible: false, selectionKey: "codex|session-a|/tmp/a.jsonl", refresh: 0))
+        XCTAssertNil(TranscriptTelemetryLoadRequest.key(
+            isVisible: false, selectionKey: "codex|session-b|/tmp/b.jsonl", refresh: 0))
+    }
+
+    func testTelemetryLoadRequestTracksVisibleSelectionAndRefresh() {
+        XCTAssertEqual(
+            TranscriptTelemetryLoadRequest.key(
+                isVisible: true, selectionKey: "codex|session-a|/tmp/a.jsonl", refresh: 2),
+            "codex|session-a|/tmp/a.jsonl|2"
+        )
+        XCTAssertNil(TranscriptTelemetryLoadRequest.key(
+            isVisible: true, selectionKey: "none", refresh: 2))
+    }
+
     private func block(_ index: Int, record: Int, kind: SessionTranscriptBuilder.LogicalBlock.Kind = .assistant) -> SessionTranscriptBuilder.LogicalBlock {
         .init(kind: kind, text: "Original message \(index)", timestamp: nil, messageID: nil,
               toolName: nil, isDelta: false, toolInput: nil, isErrorOutput: false,

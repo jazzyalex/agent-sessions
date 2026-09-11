@@ -47,6 +47,16 @@ public struct SessionInfoHistoryRow: Equatable, Identifiable {
     public let blockIndex: Int?
 }
 
+/// Keeps the expensive full-file telemetry read tied to the inspector's actual
+/// visibility. Returning nil while hidden also keeps session-selection churn from
+/// restarting the SwiftUI task merely because its underlying session key changed.
+enum TranscriptTelemetryLoadRequest {
+    static func key(isVisible: Bool, selectionKey: String, refresh: Int) -> String? {
+        guard isVisible, selectionKey != "none" else { return nil }
+        return "\(selectionKey)|\(refresh)"
+    }
+}
+
 /// Presentation only: never fills missing evidence from Session.model or a parent.
 enum TranscriptTelemetryPresentation {
     static let visibilityKey = "ShowSessionInfo"

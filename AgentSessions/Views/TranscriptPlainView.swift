@@ -842,8 +842,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
         }
-        // Selection and explicit refresh only: never re-read a growing log on a timer.
-        .task(id: "\(telemetrySelectionKey)|\(telemetryRefresh)") {
+        // Selection and explicit refresh only, and only while Session info is
+        // visible. A hidden inspector must not re-read every selected transcript.
+        .task(id: TranscriptTelemetryLoadRequest.key(
+            isVisible: showSessionInfo,
+            selectionKey: telemetrySelectionKey,
+            refresh: telemetryRefresh
+        )) {
+            guard showSessionInfo else {
+                sessionTelemetry = nil
+                telemetryOwner = nil
+                telemetryLoading = false
+                return
+            }
             let owner = telemetrySelectionKey
             sessionTelemetry = nil
             telemetryOwner = owner

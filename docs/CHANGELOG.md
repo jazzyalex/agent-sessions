@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the main window doing a full Session info telemetry scan for every opened session even when the inspector was hidden. Hidden inspectors now schedule no telemetry work, obsolete scans stop when selection changes, and Codex and Claude telemetry skip JSON decoding for record types that cannot contain usage or configuration data.
+
 - Fixed Codex hierarchy rows breaking apart when a session was opened. Tail-first and full transcript hydration now retain the parent's runtime identity and other stable list metadata, so subagent counts, row order, selection, and scroll position stay intact.
 
 - Fixed an intermittent Codex Session Runway refresh loop that alternated between weekly estimates, clocks, `n/a`, and disappearance. OAuth and CLI-RPC now share one authoritative calibration regime, slow scans stop after real scope cancellation, ordinary account-less Codex transcripts can calibrate the live runway without becoming historical account-attribution evidence, and Auto keeps active pending/unavailable rows visible during refresh.

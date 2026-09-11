@@ -32,6 +32,11 @@ struct ClaudeTelemetryAccumulator {
     private var sawUsageRecord = false
 
     mutating func consume(line: String, index: Int) {
+        // Only assistant records can carry Claude configuration or usage. Keep
+        // user/tool/progress records out of JSONSerialization on the full-file
+        // Session info pass; the broader check remains correctness-neutral
+        // because the decoded type guard below is still authoritative.
+        guard line.contains("assistant") else { return }
         guard let obj = ClaudeRunwayLog.jsonObject(line),
               (obj["type"] as? String) == "assistant",
               let message = obj["message"] as? [String: Any] else { return }

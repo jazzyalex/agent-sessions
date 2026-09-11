@@ -22,6 +22,13 @@ struct CodexTranscriptAccountIdentity {
     var hasConflictingDurableAccounts: Bool { isAmbiguous }
 
     mutating func consume(line: String) {
+        // The accumulator below already decodes every record. Avoid doing a
+        // second JSON decode for ordinary messages and token events; durable
+        // account identity can only occur in one of these metadata records.
+        guard line.contains("session_meta")
+                || line.contains("session_started")
+                || line.contains("session_start") else { return }
+        guard line.contains("account_id") || line.contains("accountId") else { return }
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String,
@@ -141,12 +148,16 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
         let source = session.source
         let priceTable = self.priceTable
-        let computed = await Task.detached(priority: .utility) { [weak self] in
+        let worker = Task.detached(priority: .utility) { [weak self] in
             self?.compute(path: path, source: source, capabilities: capabilities,
                           priceTable: priceTable)
-        }.value
+        }
+        let computed = await withTaskCancellationHandler(
+            operation: { await worker.value },
+            onCancel: { worker.cancel() }
+        )
 
-        guard let computed else { return nil }
+        guard !Task.isCancelled, let computed else { return nil }
         store(computed, path: path, signature: signature)
         return applyingWeeklyQuota(to: computed.telemetry,
                                    source: source,
@@ -161,6 +172,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                          source: SessionSource,
                          capabilities: TelemetryCapabilities,
                          priceTable: RunwayPriceTable) -> ComputedTelemetry? {
+        guard !Task.isCancelled else { return nil }
         let url = URL(fileURLWithPath: path)
         var telemetry: SessionTelemetry?
         var durableAccountHash: String?
@@ -326,11 +338,13 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private func streamLines(at url: URL, into consume: (String, Int) -> Void) -> Bool {
         var index = 0
         do {
-            try JSONLReader(url: url).forEachLine { line in
+            let completed = try JSONLReader(url: url).forEachLineWhile { line in
+                guard !Task.isCancelled else { return false }
                 consume(line, index)
                 index += 1
+                return true
             }
-            return true
+            return completed && !Task.isCancelled
         } catch {
             return false
         }
