@@ -52,12 +52,18 @@ enum ClaudeDesktopSessionTitles {
         var modifiedAt: Date
     }
 
+    private struct MergedSnapshot {
+        var records: [String: ClaudeDesktopSidecarRecord]
+        var refreshedAt: Date
+    }
+
     /// Guards `cacheByRoot` below. `records(root:fileManager:)` is called from
     /// main-actor call sites (transcript archive strip, HUD-adjacent archive
     /// overlay) and is also safe to call off-main (`ClaudeRunwaySnapshotLoader`
     /// already does, on a utility queue) — the lock makes the cache safe under both.
     private static let cacheLock = NSLock()
     private static var cacheByRoot: [URL: [String: CacheEntry]] = [:]
+    private static var mergedSnapshotByRootsKey: [String: MergedSnapshot] = [:]
     #if DEBUG
     private static var debugParseCount = 0
     private static var debugCacheHitCount = 0
@@ -65,7 +71,8 @@ enum ClaudeDesktopSessionTitles {
 
     /// Map of CLI transcript session id -> full sidecar record. Last-writer-wins by mtime.
     ///
-    /// Still walks the directory tree every call (`fileManager.enumerator` — a
+    /// A direct single-root read walks the directory tree every call
+    /// (`fileManager.enumerator` — a
     /// tree of unknown, possibly multi-level depth per the `**/local_*.json`
     /// layout, so there is no cheaper reliable "has anything changed" probe
     /// than visiting every entry's mtime). What's cached is the expensive part:
@@ -73,7 +80,9 @@ enum ClaudeDesktopSessionTitles {
     /// for any file whose mtime matches what was parsed last time. On an
     /// unchanged tree this turns N JSON parses into N cheap mtime comparisons —
     /// this was measured running on the MAIN thread, once per HUD/
-    /// transcript-archive-strip rebuild (W7 Task 2b).
+    /// transcript-archive-strip rebuild (W7 Task 2b). Multi-root callers may
+    /// explicitly request a short minimum rescan interval when bounded title
+    /// freshness is acceptable.
     static func records(root: URL? = nil, fileManager: FileManager = .default) -> [String: ClaudeDesktopSidecarRecord] {
         let rootURL = root ?? defaultRoot()
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -84,6 +93,7 @@ enum ClaudeDesktopSessionTitles {
               ) else {
             cacheLock.lock()
             cacheByRoot[rootURL] = nil
+            mergedSnapshotByRootsKey = [:]
             cacheLock.unlock()
             return [:]
         }
@@ -128,6 +138,9 @@ enum ClaudeDesktopSessionTitles {
 
         cacheLock.lock()
         cacheByRoot[rootURL] = nextCache
+        // A caller explicitly walking one root is a freshness request. Any
+        // short-lived merged snapshot containing it must be rebuilt next time.
+        mergedSnapshotByRootsKey = [:]
         cacheLock.unlock()
 
         return out
@@ -136,13 +149,36 @@ enum ClaudeDesktopSessionTitles {
     /// Merge of `records(root:)` across several roots. Duplicate `cliSessionId`s
     /// resolve last-writer-wins by sidecar mtime, matching the single-root rule.
     /// Each root keeps its own mtime cache entry (cache is keyed by root).
-    static func records(roots: [URL], fileManager: FileManager = .default) -> [String: ClaudeDesktopSidecarRecord] {
+    /// `minimumRescanInterval` defaults to zero so ordinary UI reads preserve
+    /// immediate rename/archive visibility; presence polling opts into a
+    /// bounded aggregate snapshot to avoid a full tree walk every two seconds.
+    static func records(roots: [URL],
+                        fileManager: FileManager = .default,
+                        minimumRescanInterval: TimeInterval = 0,
+                        now: Date = Date()) -> [String: ClaudeDesktopSidecarRecord] {
+        let rootsKey = roots.map { $0.standardizedFileURL.path }.joined(separator: "\u{0}")
+        if minimumRescanInterval > 0 {
+            cacheLock.lock()
+            let cached = mergedSnapshotByRootsKey[rootsKey]
+            cacheLock.unlock()
+            if let cached,
+               now.timeIntervalSince(cached.refreshedAt) >= 0,
+               now.timeIntervalSince(cached.refreshedAt) < minimumRescanInterval {
+                return cached.records
+            }
+        }
+
         var merged: [String: ClaudeDesktopSidecarRecord] = [:]
         for rootURL in roots {
             for (cli, record) in records(root: rootURL, fileManager: fileManager) {
                 if let existing = merged[cli], existing.modifiedAt >= record.modifiedAt { continue }
                 merged[cli] = record
             }
+        }
+        if minimumRescanInterval > 0 {
+            cacheLock.lock()
+            mergedSnapshotByRootsKey[rootsKey] = MergedSnapshot(records: merged, refreshedAt: now)
+            cacheLock.unlock()
         }
         return merged
     }
@@ -181,6 +217,7 @@ enum ClaudeDesktopSessionTitles {
     static func debugResetCache() {
         cacheLock.lock()
         cacheByRoot = [:]
+        mergedSnapshotByRootsKey = [:]
         debugParseCount = 0
         debugCacheHitCount = 0
         cacheLock.unlock()

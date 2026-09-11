@@ -1066,7 +1066,11 @@ actor PresenceEngine {
                 root: root,
                 now: now,
                 claimedLogPaths: claimedClaudeLogPaths,
-                desktopTitlesRoots: desktopTitlesRoots
+                desktopTitlesRoots: desktopTitlesRoots,
+                // Active-window presence polls run every two seconds. A title
+                // or archive edit can tolerate this bounded delay; repeatedly
+                // walking thousands of sidecars cannot.
+                desktopTitlesMinimumRescanInterval: Self.claudeDesktopTitlesPresenceRescanInterval
             )
             out.append(contentsOf: synthesized)
             claimedClaudeLogPaths.formUnion(Self.claimedLogPaths(in: synthesized, source: .claude))
@@ -1084,6 +1088,7 @@ actor PresenceEngine {
     }
 
     private static let processProbeTimeout: TimeInterval = 0.75
+    private static let claudeDesktopTitlesPresenceRescanInterval: TimeInterval = 10
 
     private static func claimedLogPaths(in presences: [CodexActivePresence],
                                         source: SessionSource) -> Set<String> {

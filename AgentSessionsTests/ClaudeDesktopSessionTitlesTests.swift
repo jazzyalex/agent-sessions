@@ -1,12 +1,11 @@
 import XCTest
 @testable import AgentSessions
 
-/// W7 Task 2b: `ClaudeDesktopSessionTitles.records(root:)` enumerates the whole
-/// tree every call (there's no cheaper reliable "did anything change" probe for
-/// an arbitrarily-nested directory), but caches the parsed record per file path
-/// keyed by mtime — an unchanged file is served from cache instead of
-/// re-reading + re-parsing its JSON. This was measured running on the main
-/// thread once per HUD / transcript-archive-strip rebuild.
+/// W7 Task 2b: a direct `ClaudeDesktopSessionTitles.records(root:)` read
+/// enumerates the whole tree (there's no cheaper reliable "did anything
+/// change" probe for an arbitrarily-nested directory), but caches the parsed
+/// record per file path keyed by mtime. Presence polling additionally opts into
+/// a bounded merged snapshot; direct UI reads retain immediate freshness.
 final class ClaudeDesktopSessionTitlesTests: XCTestCase {
 
     private var root: URL!
@@ -62,6 +61,40 @@ final class ClaudeDesktopSessionTitlesTests: XCTestCase {
         XCTAssertEqual(third["f1d39390-aaaa"]?.title, "Renamed title")
         let afterThird = ClaudeDesktopSessionTitles.debugParseAndHitCounts()
         XCTAssertEqual(afterThird.parsed, 2, "a touched file must be re-parsed")
+    }
+
+    func testPresenceSnapshotReusesMergedTreeOnlyWithinRequestedInterval() throws {
+        let convoDir = try makeSessionDir()
+        let file = convoDir.appendingPathComponent("local_presence.json")
+        try """
+        {"cliSessionId":"presence-1111","title":"First title"}
+        """.write(to: file, atomically: true, encoding: .utf8)
+        let firstReadAt = Date(timeIntervalSince1970: 1_000)
+
+        let first = ClaudeDesktopSessionTitles.records(
+            roots: [root], minimumRescanInterval: 10, now: firstReadAt
+        )
+        XCTAssertEqual(first["presence-1111"]?.title, "First title")
+
+        try """
+        {"cliSessionId":"presence-1111","title":"Renamed title"}
+        """.write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2_000)],
+            ofItemAtPath: file.path
+        )
+
+        let withinWindow = ClaudeDesktopSessionTitles.records(
+            roots: [root], minimumRescanInterval: 10,
+            now: firstReadAt.addingTimeInterval(9)
+        )
+        XCTAssertEqual(withinWindow["presence-1111"]?.title, "First title")
+
+        let afterWindow = ClaudeDesktopSessionTitles.records(
+            roots: [root], minimumRescanInterval: 10,
+            now: firstReadAt.addingTimeInterval(10)
+        )
+        XCTAssertEqual(afterWindow["presence-1111"]?.title, "Renamed title")
     }
 
     // Deletion parity: the cache is rebuilt from what the enumerator actually

@@ -103,6 +103,14 @@ enum SearchTextMatcher {
 
     static func hasMatch(in text: String, query: String, cacheKey: TokenCacheKey? = nil) -> Bool {
         guard let pattern = buildPattern(from: query) else { return false }
+        if case .phrase(let phrase) = pattern,
+           phrase.count == 1,
+           phrase[0].isPrefix,
+           isSimpleASCII(phrase[0].text) {
+            return !simplePrefixMatchRanges(in: text,
+                                            prefix: phrase[0].text,
+                                            stopAfterFirst: true).isEmpty
+        }
         let tokens = tokenize(text, cacheKey: cacheKey)
         switch pattern {
         case .phrase(let phrase):
@@ -114,6 +122,14 @@ enum SearchTextMatcher {
 
     static func matchRanges(in text: String, query: String) -> [NSRange] {
         guard let pattern = buildPattern(from: query) else { return [] }
+        if case .phrase(let phrase) = pattern,
+           phrase.count == 1,
+           phrase[0].isPrefix,
+           isSimpleASCII(phrase[0].text) {
+            return simplePrefixMatchRanges(in: text,
+                                           prefix: phrase[0].text,
+                                           stopAfterFirst: false)
+        }
         let tokens = tokenizeText(text)
         switch pattern {
         case .phrase(let phrase):
@@ -437,8 +453,97 @@ enum SearchTextMatcher {
         return token.valueLower == query.text
     }
 
+    /// The common Instant-search shape is one simple ASCII term, which the
+    /// query parser treats as a token prefix. Tokenizing a multi-megabyte
+    /// transcript for that case allocates every unrelated token just to locate
+    /// a handful of matches. Scan token boundaries without materializing token
+    /// strings, then return the same whole-token highlight.
+    private static func simplePrefixMatchRanges(in text: String,
+                                                prefix: String,
+                                                stopAfterFirst: Bool) -> [NSRange] {
+        guard !text.isEmpty, !prefix.isEmpty else { return [] }
+
+        var ranges: [NSRange] = []
+        let normalizedPrefix = prefix.lowercased()
+        let prefixBytes = Array(normalizedPrefix.utf8)
+        let bytes = text.utf8
+        var cursor = bytes.startIndex
+        while cursor < bytes.endIndex {
+            let leadingByte = bytes[cursor]
+            let startsToken: Bool
+            if leadingByte < 128 {
+                startsToken = isASCIITokenByte(leadingByte)
+                if !startsToken { cursor = bytes.index(after: cursor) }
+            } else {
+                startsToken = isTokenChar(text.unicodeScalars[cursor])
+                if !startsToken { cursor = text.unicodeScalars.index(after: cursor) }
+            }
+            guard startsToken else { continue }
+
+            let tokenStart = cursor
+            var tokenEnd = cursor
+            var asciiPrefixIndex = 0
+            var asciiMismatch = false
+            var needsUnicodeFallback = false
+            while tokenEnd < bytes.endIndex {
+                let byte = bytes[tokenEnd]
+                if byte < 128 {
+                    guard isASCIITokenByte(byte) else { break }
+                    if asciiPrefixIndex < prefixBytes.count,
+                       !asciiMismatch,
+                       !needsUnicodeFallback {
+                        asciiMismatch = lowercaseASCII(byte) != prefixBytes[asciiPrefixIndex]
+                    }
+                    asciiPrefixIndex += 1
+                    tokenEnd = bytes.index(after: tokenEnd)
+                } else {
+                    let scalar = text.unicodeScalars[tokenEnd]
+                    guard isTokenChar(scalar) else { break }
+                    if asciiPrefixIndex < prefixBytes.count, !asciiMismatch {
+                        needsUnicodeFallback = true
+                    }
+                    tokenEnd = text.unicodeScalars.index(after: tokenEnd)
+                }
+            }
+
+            let matches: Bool
+            if needsUnicodeFallback {
+                // Preserve the original Unicode lowercase semantics, including
+                // characters such as Kelvin sign, while allocating only for the
+                // rare token whose candidate prefix actually contains Unicode.
+                matches = text[tokenStart..<tokenEnd].lowercased().hasPrefix(normalizedPrefix)
+            } else {
+                matches = asciiPrefixIndex >= prefixBytes.count && !asciiMismatch
+            }
+            if matches {
+                ranges.append(NSRange(tokenStart..<tokenEnd, in: text))
+                if stopAfterFirst { return ranges }
+            }
+            cursor = tokenEnd
+        }
+        return ranges
+    }
+
+    private static func isASCIITokenByte(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte)
+            || (65...90).contains(byte)
+            || (97...122).contains(byte)
+            || byte == 95
+    }
+
+    private static func lowercaseASCII(_ byte: UInt8) -> UInt8 {
+        (65...90).contains(byte) ? byte + 32 : byte
+    }
+
     private static func isTokenChar(_ scalar: UnicodeScalar) -> Bool {
-        if scalar == "_" { return true }
+        let value = scalar.value
+        if (48...57).contains(value)
+            || (65...90).contains(value)
+            || (97...122).contains(value)
+            || value == 95 {
+            return true
+        }
+        if value < 128 { return false }
         return CharacterSet.alphanumerics.contains(scalar)
     }
 

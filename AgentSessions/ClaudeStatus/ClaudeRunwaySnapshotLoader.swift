@@ -10,6 +10,7 @@ enum ClaudeRunwaySnapshotLoader {
                                     now: Date,
                                     desktopTitlesRoot: URL? = nil,
                                     desktopTitlesRoots: [URL]? = nil,
+                                    desktopTitlesMinimumRescanInterval: TimeInterval = 0,
                                     scannerOptions: ClaudeRunwayRecentSessionScanner.ScanOptions = .runway) -> [RunwaySessionIdentity] {
         let scannerIdentities = ClaudeRunwayRecentSessionScanner.identities(
             root: recentSessionsRoot,
@@ -23,7 +24,11 @@ enum ClaudeRunwaySnapshotLoader {
         // Desktop.
         let desktopRecords: [String: ClaudeDesktopSidecarRecord]
         if let desktopTitlesRoots {
-            desktopRecords = ClaudeDesktopSessionTitles.records(roots: desktopTitlesRoots)
+            desktopRecords = ClaudeDesktopSessionTitles.records(
+                roots: desktopTitlesRoots,
+                minimumRescanInterval: desktopTitlesMinimumRescanInterval,
+                now: now
+            )
         } else if let desktopTitlesRoot {
             desktopRecords = ClaudeDesktopSessionTitles.records(root: desktopTitlesRoot)
         } else {
@@ -183,7 +188,8 @@ enum ClaudeRunwayPresenceSynthesizer {
     static func presences(root: URL?,
                           now: Date,
                           claimedLogPaths: Set<String>,
-                          desktopTitlesRoots: [URL]? = nil) -> [CodexActivePresence] {
+                          desktopTitlesRoots: [URL]? = nil,
+                          desktopTitlesMinimumRescanInterval: TimeInterval = 0) -> [CodexActivePresence] {
         let normalizedClaimed = Set(
             claimedLogPaths
                 .map(CodexActiveSessionsModel.normalizePath)
@@ -194,6 +200,7 @@ enum ClaudeRunwayPresenceSynthesizer {
             recentSessionsRoot: root,
             now: now,
             desktopTitlesRoots: desktopTitlesRoots,
+            desktopTitlesMinimumRescanInterval: desktopTitlesMinimumRescanInterval,
             scannerOptions: .presence
         )
 
