@@ -1939,6 +1939,92 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(result.rowMeta["guardian-child"]?.depth, 1)
     }
 
+    func testReloadHydrationPreservesExplicitCodexHierarchyAndRowOrder() {
+        // Real indexed shape: the row ID is a path hash, while children point to
+        // the parent's raw Codex runtime UUID. Both reload publishes must retain
+        // that UUID or the children become roots and the table performs a large reorder.
+        let parentRuntimeID = "01a04b59-5078-7fe0-a8f0-31d3d8c02e41"
+        var parent = makeCodexHierarchySession(
+            id: "105db93de0440f3dcb5e7777f8c16bcc1dd1cb6c97b40b97a7cb81fadc4eb188",
+            runtimeID: parentRuntimeID,
+            timestamp: "2026-08-28T19-28-59",
+            cwd: "/Users/test/Repository/Codex-History"
+        )
+        parent.isFavorite = true
+        let child = makeCodexHierarchySession(
+            id: "03be9c9a27a099bd09c8d6f08f925abf45aaf85f41808bd491bf3448835413ca",
+            runtimeID: "01a04b66-0000-7000-8000-000000000001",
+            timestamp: "2026-08-28T19-40-00",
+            cwd: "/Users/test/Repository/Codex-History",
+            parentSessionID: parentRuntimeID,
+            subagentType: "review"
+        )
+        let initial = SubagentHierarchyBuilder.build(
+            sessions: [parent, child],
+            hierarchyEnabled: true
+        )
+
+        let parsedEvent = SessionEvent(
+            id: "parsed-event",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            kind: .assistant,
+            role: "assistant",
+            text: "Hydrated",
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: "{}"
+        )
+        let tailParse = Session(
+            id: parent.id,
+            source: .codex,
+            startTime: parent.startTime,
+            endTime: parent.endTime,
+            model: nil,
+            filePath: parent.filePath,
+            eventCount: 1,
+            events: [parsedEvent]
+        )
+        let fullParse = Session(
+            id: parent.id,
+            source: .codex,
+            startTime: parent.startTime,
+            endTime: parent.endTime,
+            model: "gpt-5",
+            filePath: parent.filePath,
+            eventCount: 1,
+            events: [parsedEvent],
+            codexInternalSessionIDHint: parentRuntimeID
+        )
+
+        let stages: [(SessionIndexer.ReloadHydrationStage, Session, Bool)] = [
+            (.tail, tailParse, true),
+            (.full, fullParse, false)
+        ]
+        for (stage, parsed, expectedPartial) in stages {
+            let hydrated = SessionIndexer.mergeReloadedSession(
+                current: parent,
+                parsed: parsed,
+                stage: stage
+            )
+            let result = SubagentHierarchyBuilder.build(
+                sessions: [hydrated, child],
+                hierarchyEnabled: true
+            )
+
+            XCTAssertEqual(hydrated.codexInternalSessionIDHint, parentRuntimeID)
+            XCTAssertEqual(hydrated.isPartiallyHydrated, expectedPartial)
+            XCTAssertTrue(hydrated.isFavorite)
+            XCTAssertEqual(result.sessions.map(\.id), initial.sessions.map(\.id))
+            XCTAssertEqual(result.rowMeta[parent.id]?.childCount, 1)
+            XCTAssertEqual(result.rowMeta[child.id]?.depth, 1)
+            XCTAssertFalse(UnifiedTableIdentityPolicy.isLargeReorder(old: initial.sessions, new: result.sessions))
+        }
+    }
+
     func testCodexSubagentParsesReasoningEffortFromTurnContext() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagentEffort-\(UUID().uuidString)", isDirectory: true)

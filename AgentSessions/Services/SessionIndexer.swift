@@ -351,6 +351,53 @@ final class SessionIndexer: ObservableObject {
         case manualRefresh
     }
 
+    enum ReloadHydrationStage {
+        case tail
+        case full
+    }
+
+    /// Replaces transcript data after a reload without discarding the stable metadata
+    /// that keeps the list row identified and grouped. In particular, Codex child rows
+    /// refer to a parent's raw runtime UUID while the parent row itself uses a path-hash
+    /// ID, so dropping `codexInternalSessionIDHint` temporarily dissolves the hierarchy.
+    static func mergeReloadedSession(current: Session,
+                                     parsed: Session,
+                                     stage: ReloadHydrationStage) -> Session {
+        let isTail = stage == .tail
+        var merged = Session(
+            id: current.id,
+            source: current.source,
+            startTime: parsed.startTime ?? current.startTime,
+            endTime: parsed.endTime ?? current.endTime,
+            model: isTail ? current.model : (parsed.model ?? current.model),
+            filePath: current.filePath,
+            fileSizeBytes: isTail ? current.fileSizeBytes : (parsed.fileSizeBytes ?? current.fileSizeBytes),
+            eventCount: isTail ? current.eventCount : max(current.eventCount, parsed.nonMetaCount),
+            events: parsed.events,
+            cwd: isTail ? current.lightweightCwd : (current.lightweightCwd ?? parsed.cwd),
+            repoName: current.lightweightRepoName,
+            lightweightTitle: current.lightweightTitle,
+            lightweightCommands: current.lightweightCommands,
+            isHousekeeping: current.isHousekeeping,
+            codexInternalSessionIDHint: parsed.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
+            parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
+            subagentType: parsed.subagentType ?? current.subagentType,
+            relationshipKind: parsed.relationshipKind ?? current.relationshipKind,
+            customTitle: parsed.customTitle ?? current.customTitle,
+            codexOriginator: parsed.codexOriginator ?? current.codexOriginator,
+            codexSource: parsed.codexSource ?? current.codexSource,
+            codexSurface: parsed.codexSurface ?? current.codexSurface,
+            originator: parsed.originator ?? current.originator,
+            originSource: parsed.originSource ?? current.originSource,
+            surface: parsed.surface ?? current.surface,
+            reasoningEffort: parsed.reasoningEffort ?? current.reasoningEffort,
+            deletedAt: parsed.deletedAt ?? current.deletedAt
+        )
+        merged.isFavorite = current.isFavorite
+        merged.isPartiallyHydrated = isTail
+        return merged
+    }
+
     // Reload a session with full parse.
     // - Parameters:
     //   - id: Session identifier
@@ -466,33 +513,11 @@ final class SessionIndexer: ObservableObject {
                     // no events (avoid clobbering a full parse that raced ahead,
                     // e.g. via a concurrent manual refresh).
                     guard current.events.isEmpty else { return }
-                    var provisional = current
-                    provisional.isPartiallyHydrated = true
-                    let tailMerged = Session(
-                        id: current.id,
-                        source: current.source,
-                        startTime: tailSession.startTime ?? current.startTime,
-                        endTime: tailSession.endTime ?? current.endTime,
-                        model: current.model,
-                        filePath: current.filePath,
-                        fileSizeBytes: current.fileSizeBytes,
-                        eventCount: current.eventCount,
-                        events: tailSession.events,
-                        cwd: current.lightweightCwd,
-                        repoName: current.lightweightRepoName,
-                        lightweightTitle: current.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands,
-                        parentSessionID: current.parentSessionID,
-                        subagentType: current.subagentType,
-                        relationshipKind: current.relationshipKind,
-                        customTitle: current.customTitle,
-                        codexOriginator: current.codexOriginator,
-                        codexSource: current.codexSource,
-                        codexSurface: current.codexSurface,
-                        reasoningEffort: current.reasoningEffort
+                    let published = Self.mergeReloadedSession(
+                        current: current,
+                        parsed: tailSession,
+                        stage: .tail
                     )
-                    var published = tailMerged
-                    published.isPartiallyHydrated = true
                     var updated = self.allSessions
                     updated[idx] = published
                     self.allSessions = updated
@@ -525,28 +550,10 @@ final class SessionIndexer: ObservableObject {
                     // Replace in allSessions
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         let current = self.allSessions[idx]
-                        let merged = Session(
-                            id: fullSession.id,
-                            source: fullSession.source,
-                            startTime: fullSession.startTime ?? current.startTime,
-                            endTime: fullSession.endTime ?? current.endTime,
-                            model: fullSession.model ?? current.model,
-                            filePath: fullSession.filePath,
-                            fileSizeBytes: fullSession.fileSizeBytes ?? current.fileSizeBytes,
-                            eventCount: max(current.eventCount, fullSession.nonMetaCount),
-                            events: fullSession.events,
-                            cwd: current.lightweightCwd ?? fullSession.cwd,
-                            repoName: current.lightweightRepoName,
-                            lightweightTitle: current.lightweightTitle,
-                            lightweightCommands: current.lightweightCommands,
-                            parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
-                            subagentType: fullSession.subagentType ?? current.subagentType,
-                            relationshipKind: fullSession.relationshipKind ?? current.relationshipKind,
-                            customTitle: fullSession.customTitle ?? current.customTitle,
-                            codexOriginator: fullSession.codexOriginator ?? current.codexOriginator,
-                            codexSource: fullSession.codexSource ?? current.codexSource,
-                            codexSurface: fullSession.codexSurface ?? current.codexSurface,
-                            reasoningEffort: fullSession.reasoningEffort ?? current.reasoningEffort
+                        let merged = Self.mergeReloadedSession(
+                            current: current,
+                            parsed: fullSession,
+                            stage: .full
                         )
                         var updated = self.allSessions
                         updated[idx] = merged
