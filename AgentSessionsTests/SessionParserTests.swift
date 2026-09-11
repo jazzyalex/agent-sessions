@@ -1951,6 +1951,7 @@ final class SessionParserTests: XCTestCase {
             cwd: "/Users/test/Repository/Codex-History"
         )
         parent.isFavorite = true
+        parent.isHousekeeping = true
         let child = makeCodexHierarchySession(
             id: "03be9c9a27a099bd09c8d6f08f925abf45aaf85f41808bd491bf3448835413ca",
             runtimeID: "01a04b66-0000-7000-8000-000000000001",
@@ -1959,10 +1960,33 @@ final class SessionParserTests: XCTestCase {
             parentSessionID: parentRuntimeID,
             subagentType: "review"
         )
+        let interveningRoots = (0..<200).map { index in
+            makeCodexHierarchySession(
+                id: "unrelated-root-\(index)",
+                runtimeID: "unrelated-runtime-\(index)",
+                timestamp: "2026-08-28T19-35-00",
+                cwd: "/Users/test/Repository/Other"
+            )
+        }
+        let sourceOrder = [parent] + interveningRoots + [child]
         let initial = SubagentHierarchyBuilder.build(
-            sessions: [parent, child],
+            sessions: sourceOrder,
             hierarchyEnabled: true
         )
+
+        // Sensitivity check: reproduce the pre-fix metadata loss. The child falls
+        // back to its distant source position and crosses the table rebuild threshold.
+        let parentWithoutRuntimeID = makeCodexHierarchySession(
+            id: parent.id,
+            runtimeID: "",
+            timestamp: "2026-08-28T19-28-59",
+            cwd: "/Users/test/Repository/Codex-History"
+        )
+        let broken = SubagentHierarchyBuilder.build(
+            sessions: [parentWithoutRuntimeID] + interveningRoots + [child],
+            hierarchyEnabled: true
+        )
+        XCTAssertTrue(UnifiedTableIdentityPolicy.isLargeReorder(old: initial.sessions, new: broken.sessions))
 
         let parsedEvent = SessionEvent(
             id: "parsed-event",
@@ -2000,23 +2024,24 @@ final class SessionParserTests: XCTestCase {
             codexInternalSessionIDHint: parentRuntimeID
         )
 
-        let stages: [(SessionIndexer.ReloadHydrationStage, Session, Bool)] = [
-            (.tail, tailParse, true),
-            (.full, fullParse, false)
+        let stages: [(SessionIndexer.ReloadHydrationStage, Session, Bool, Bool)] = [
+            (.tail, tailParse, true, true),
+            (.full, fullParse, false, false)
         ]
-        for (stage, parsed, expectedPartial) in stages {
+        for (stage, parsed, expectedPartial, expectedHousekeeping) in stages {
             let hydrated = SessionIndexer.mergeReloadedSession(
                 current: parent,
                 parsed: parsed,
                 stage: stage
             )
             let result = SubagentHierarchyBuilder.build(
-                sessions: [hydrated, child],
+                sessions: [hydrated] + interveningRoots + [child],
                 hierarchyEnabled: true
             )
 
             XCTAssertEqual(hydrated.codexInternalSessionIDHint, parentRuntimeID)
             XCTAssertEqual(hydrated.isPartiallyHydrated, expectedPartial)
+            XCTAssertEqual(hydrated.isHousekeeping, expectedHousekeeping)
             XCTAssertTrue(hydrated.isFavorite)
             XCTAssertEqual(result.sessions.map(\.id), initial.sessions.map(\.id))
             XCTAssertEqual(result.rowMeta[parent.id]?.childCount, 1)

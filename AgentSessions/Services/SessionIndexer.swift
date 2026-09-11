@@ -378,7 +378,7 @@ final class SessionIndexer: ObservableObject {
             repoName: current.lightweightRepoName,
             lightweightTitle: current.lightweightTitle,
             lightweightCommands: current.lightweightCommands,
-            isHousekeeping: current.isHousekeeping,
+            isHousekeeping: isTail ? current.isHousekeeping : parsed.isHousekeeping,
             codexInternalSessionIDHint: parsed.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
             parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
             subagentType: parsed.subagentType ?? current.subagentType,
