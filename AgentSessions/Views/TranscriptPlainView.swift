@@ -738,6 +738,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var richEventJumpID: String? = nil
     @State private var richUserPromptIndexJumpToken: Int = 0
     @State private var richUserPromptIndexJump: Int? = nil
+    // Session info history-row jump. Rich mode only: Terminal and JSON have no
+    // block table, so the panel is handed a nil closure there and renders the
+    // history rows as static text instead of buttons.
+    @State private var richConfigJumpToken: Int = 0
+    @State private var richConfigJumpBlockIndex: Int? = nil
 
     // Text view navigation cursors (used for keyboard jumps)
     @State private var lastUserJumpLocation: Int? = nil
@@ -810,13 +815,30 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if showSessionInfo {
                     Divider()
+                    // `selectedTelemetry` re-scopes to the newly selected session
+                    // immediately, but `derivedState.snapshot` keeps the PREVIOUS
+                    // session's blocks until its detached rebuild lands. Anchoring
+                    // history rows against those would resolve a jump into an
+                    // unrelated transcript, so the panel gets no blocks and no jump
+                    // closure until the snapshot belongs to this session — the same
+                    // readiness gate `isTranscriptReady(for:)` applies elsewhere.
+                    let telemetrySession = sessionID.flatMap { resolvedSessionForRender(id: $0) }
+                    let blocksReady = telemetrySession.map { isTranscriptReady(for: $0) } ?? false
                     TranscriptTelemetryView(
                         telemetry: selectedTelemetry,
+                        blocks: blocksReady ? derivedState.snapshot.blocks : [],
                         loading: telemetryLoading,
-                        isSubagent: sessionID.flatMap { resolvedSessionForRender(id: $0) }?.isSubagent ?? false,
+                        isSubagent: telemetrySession?.isSubagent ?? false,
+                        delegatedRequestCount: selectedTelemetry.map { telemetry in
+                            telemetry.usageEvents.filter { $0.ownership == .descendant }.count
+                        } ?? 0,
+                        jumpToBlock: (blocksReady && viewMode == .blocks) ? { index in
+                            richConfigJumpBlockIndex = index
+                            richConfigJumpToken &+= 1
+                        } : nil,
                         refresh: { telemetryRefresh &+= 1 },
                         close: { showSessionInfo = false })
-                        .frame(width: min(300, max(180, geometry.size.width * 0.36)))
+                        .frame(width: min(320, max(200, geometry.size.width * 0.36)))
                 }
             }
         }
@@ -1346,6 +1368,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             eventJumpID: richEventJumpID,
             userPromptIndexJumpToken: richUserPromptIndexJumpToken,
             userPromptIndexJump: richUserPromptIndexJump,
+            configJumpToken: richConfigJumpToken,
+            configJumpBlockIndex: richConfigJumpBlockIndex,
             findQuery: findQuery,
             findToken: richFindToken,
             findDirection: richFindDirection,

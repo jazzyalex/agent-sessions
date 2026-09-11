@@ -195,6 +195,12 @@ struct TranscriptBlockListView: NSViewRepresentable {
     /// landed yet when the notification arrives.
     var userPromptIndexJumpToken: Int = 0
     var userPromptIndexJump: Int? = nil
+    /// Bumped alongside `configJumpBlockIndex` when a Session info history row is
+    /// clicked. The target block is resolved at the SwiftUI layer by
+    /// `TranscriptTelemetryPresentation.historyRows`, which shares its anchoring
+    /// with the inline markers — so this lands on the marked block, not near it.
+    var configJumpToken: Int = 0
+    var configJumpBlockIndex: Int? = nil
 
     // MARK: Find (Task 10)
     /// Local ⌘F query (trimmed at the SwiftUI layer). Whole-session matches are
@@ -285,7 +291,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             firstPromptJumpToken: firstPromptJumpToken,
             eventJumpToken: eventJumpToken,
             userPromptIndexJumpToken: userPromptIndexJumpToken,
-            roleJumpToken: roleJumpToken)
+            roleJumpToken: roleJumpToken,
+            configJumpToken: configJumpToken)
         context.coordinator.seedConsumedFindTokens(
             findToken: findToken,
             unifiedFindToken: unifiedFindToken)
@@ -333,6 +340,10 @@ struct TranscriptBlockListView: NSViewRepresentable {
             eventID: eventJumpID,
             eventIDToAnchorBlockIndex: snapshot.eventIDToAnchorBlockIndex,
             isSnapshotComputing: derivedState.isComputing)
+
+        context.coordinator.handleConfigJumpIntent(
+            token: configJumpToken,
+            blockIndex: configJumpBlockIndex)
 
         context.coordinator.handleUserPromptIndexJumpIntent(
             token: userPromptIndexJumpToken,
@@ -699,6 +710,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Last `roleJumpToken` this controller has acted on (role ▲▼ jump-nav).
     private var lastConsumedRoleJumpToken: Int = 0
+    /// Last `configJumpToken` acted on (Session info history row click).
+    private var lastConsumedConfigJumpToken: Int = 0
 
     // MARK: Find state (Task 10)
 
@@ -2224,7 +2237,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         if rowIndex(forBlock: globalBlockIndex) == nil {
             widen(toIncludeBlock: globalBlockIndex)
         }
-        guard let table, let rowIndex = rowIndex(forBlock: globalBlockIndex) else { return }
+        guard let rowIndex = rowIndex(forBlock: globalBlockIndex) else { return }
+        scrollToRowIndex(rowIndex)
+    }
+
+    /// Shared tail of every scroll-to-target: top-ish alignment plus a flash.
+    private func scrollToRowIndex(_ rowIndex: Int) {
+        guard let table, rows.indices.contains(rowIndex) else { return }
         table.layoutSubtreeIfNeeded()
         // Top-ish alignment: scroll the row to visible, then nudge it near the
         // top of the viewport so a jumped-to card isn't stuck at the very bottom.
@@ -2253,11 +2272,45 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     func seedConsumedJumpTokens(firstPromptJumpToken: Int,
                                 eventJumpToken: Int,
                                 userPromptIndexJumpToken: Int,
-                                roleJumpToken: Int = 0) {
+                                roleJumpToken: Int = 0,
+                                configJumpToken: Int = 0) {
         lastConsumedFirstPromptJumpToken = firstPromptJumpToken
         lastConsumedEventJumpToken = eventJumpToken
         lastConsumedUserPromptIndexJumpToken = userPromptIndexJumpToken
         lastConsumedRoleJumpToken = roleJumpToken
+        lastConsumedConfigJumpToken = configJumpToken
+    }
+
+    /// Route a Session info history-row click into Rich mode. The block index was
+    /// already resolved by `TranscriptTelemetryPresentation.historyRows`, using the
+    /// same anchoring the inline markers use — so this lands on the marked block,
+    /// not near it. `scrollToBlock` widens when the target sits outside the loaded
+    /// window and no-ops when it cannot be materialised.
+    func handleConfigJumpIntent(token: Int, blockIndex: Int?) {
+        guard token != lastConsumedConfigJumpToken else { return }
+        lastConsumedConfigJumpToken = token
+        guard let blockIndex else { return }
+        if rowIndex(forBlock: blockIndex) == nil {
+            widen(toIncludeBlock: blockIndex)
+        }
+        // The change marker is its OWN synthetic row, inserted directly above the
+        // block it anchors to (id == -blockIndex - 1, see `rowsWithTelemetry`).
+        // Scrolling to the anchored block leaves that marker one row above the
+        // viewport — i.e. the very thing the click asked to see is off-screen.
+        // Target the marker row when it exists; fall back to the block otherwise
+        // (role filters can hide a marker, and a trailing anchor has none).
+        let markerRowID = Self.telemetryMarkerRowID(forBlock: blockIndex)
+        if let markerRow = rows.firstIndex(where: { $0.id == markerRowID }) {
+            scrollToRowIndex(markerRow)
+        } else {
+            scrollToBlock(blockIndex)
+        }
+    }
+
+    /// Row id of the marker that precedes `globalBlockIndex`. Mirrors the
+    /// negative-id scheme `rowsWithTelemetry` assigns to display-only rows.
+    static func telemetryMarkerRowID(forBlock globalBlockIndex: Int) -> Int {
+        -globalBlockIndex - 1
     }
 
     /// Route the toolbar "jump to first user prompt" intent into Rich mode.
