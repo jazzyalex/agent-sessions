@@ -496,8 +496,8 @@ struct TranscriptTelemetryView: View {
                     SessionInfoRow(label: "Region",
                                    value: row.inferenceGeo.map {
                                        TranscriptTelemetryPresentation.Value(
-                                           text: $0, help: "Provider-reported inference region.")
-                                   } ?? .absent("The provider did not record an inference region."))
+                                           text: $0, help: copy("Provider-reported inference region."))
+                                   } ?? .absent(copy("The provider did not record an inference region.")))
                     SessionInfoRow(label: "Context in", value: contextValue(row))
                 }
                 if let cost = telemetry.costEstimate {

@@ -630,6 +630,23 @@
           }
         }
       },
+      "Provider-reported inference region.": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Provider-reported inference region."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "提供商报告的推理区域。"
+            }
+          }
+        }
+      },
       "Quota observed": {
         "comment": "User-visible Session info copy.",
         "localizations": {
@@ -762,6 +779,23 @@
             "stringUnit": {
               "state": "translated",
               "value": "子代理模型"
+            }
+          }
+        }
+      },
+      "The provider did not record an inference region.": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "The provider did not record an inference region."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "提供商未记录推理区域。"
             }
           }
         }
