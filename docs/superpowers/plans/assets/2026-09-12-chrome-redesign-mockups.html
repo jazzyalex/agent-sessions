@@ -1,0 +1,614 @@
+<title>Agent Sessions Redesign Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --page:#ECEEF1; --card:#FFFFFF; --sunk:#E3E6EA;
+  --hair:#D5D9DF; --hair-soft:#E4E7EC;
+  --ink:#171A1F; --ink-2:#464C56; --muted:#767D89;
+  --accent:#3D4FC4; --accent-soft:#E4E7FA;
+  --good:#2F6B57; --good-soft:#E2F0EA;
+  --shadow:0 1px 2px rgba(15,20,30,.07), 0 14px 38px rgba(15,20,30,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#15171B; --card:#1D2025; --sunk:#22262C;
+    --hair:#31363E; --hair-soft:#282D34;
+    --ink:#E9EBEF; --ink-2:#B4BAC4; --muted:#848C99;
+    --accent:#8494FF; --accent-soft:#242A47;
+    --good:#6FBFA0; --good-soft:#172B25;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.45);
+  }
+}
+:root[data-theme="dark"]{
+  --page:#15171B; --card:#1D2025; --sunk:#22262C;
+  --hair:#31363E; --hair-soft:#282D34;
+  --ink:#E9EBEF; --ink-2:#B4BAC4; --muted:#848C99;
+  --accent:#8494FF; --accent-soft:#242A47;
+  --good:#6FBFA0; --good-soft:#172B25;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+body{background:var(--page); color:var(--ink);
+  font-family:"Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px; margin:0 auto; padding:44px 24px 90px; display:flex; flex-direction:column; gap:16px}
+.eyebrow{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+h1{margin:6px 0 0; font-size:31px; font-weight:600; letter-spacing:-.018em; text-wrap:balance}
+.lede{margin:10px 0 0; font-size:15px; line-height:1.62; color:var(--ink-2); max-width:66ch}
+.lede b{color:var(--ink); font-weight:600}
+section{margin-top:40px}
+.shead{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.num{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12px; color:var(--accent)}
+h2{margin:0; font-size:20px; font-weight:600; letter-spacing:-.012em}
+.cap{margin:9px 0 16px; font-size:14px; line-height:1.6; color:var(--ink-2); max-width:72ch}
+.cap b{color:var(--ink); font-weight:600}
+.cap code, .note code{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12.5px;
+  background:var(--sunk); border-radius:3px; padding:1px 5px}
+.note{margin-top:14px; font-size:13px; line-height:1.6; color:var(--muted); max-width:72ch}
+.stage{background:var(--sunk); border:1px solid var(--hair); border-radius:12px; padding:22px; overflow-x:auto}
+
+/* ══ macOS window ══ */
+.win{
+  --w-chrome:#F2F1EF; --w-paper:#FBF8F3; --w-card:#FFFFFF; --w-list:#F6F5F3;
+  --w-hair:#DEDCD8; --w-hair2:#E9E7E3;
+  --w-ink:#1D1D1F; --w-ink2:#48474B; --w-mut:#8A8A8F;
+  --w-pill:#E5E3DF; --w-sel:#D9DFF0; --w-selink:#1D2B57;
+  --w-acc:#3F63C8; --w-warn:#B4552E; --w-cache:#9A9A9F; --w-out:#C98A2E;
+  background:var(--w-chrome); color:var(--w-ink);
+  border:1px solid var(--w-hair); border-radius:11px; overflow:hidden;
+  min-width:1000px; box-shadow:var(--shadow);
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size:12px;
+}
+.win.dark{
+  --w-chrome:#232326; --w-paper:#1B1B1D; --w-card:#252528; --w-list:#202022;
+  --w-hair:#3A3A3D; --w-hair2:#313134;
+  --w-ink:#F2F2F4; --w-ink2:#C6C6CB; --w-mut:#8E8E93;
+  --w-pill:#3A3A3D; --w-sel:#39406A; --w-selink:#DCE2FF;
+  --w-acc:#7E96FF; --w-warn:#E0906B; --w-cache:#6E6E75; --w-out:#D9A155;
+}
+
+/* toolbar */
+.tbar{display:flex; align-items:center; gap:8px; padding:9px 12px;
+  background:var(--w-chrome); border-bottom:1px solid var(--w-hair)}
+.lights{display:flex; gap:6px; margin-right:5px}
+.lights i{width:11px; height:11px; border-radius:50%; display:block}
+.app{font-size:13px; font-weight:600; margin-right:6px; white-space:nowrap}
+.ico{width:16px; height:16px; color:var(--w-mut); flex:none}
+.ico.on{color:var(--w-ink)}
+.ico.acc{color:var(--w-acc)}
+.pill{display:inline-flex; align-items:center; padding:3px 11px; border-radius:13px;
+  border:1px solid var(--w-hair); font-size:12px; white-space:nowrap; color:var(--w-ink2)}
+.pill.sel{background:var(--w-sel); border-color:transparent; color:var(--w-selink); font-weight:500}
+.pill.dim{color:var(--w-mut)}
+.pill.warn{color:var(--w-warn); border-color:var(--w-warn)}
+.pill.btn{cursor:default}
+.field{flex:1; min-width:150px; display:flex; align-items:center; gap:7px; padding:4px 9px;
+  border-radius:7px; background:var(--w-card); border:1px solid var(--w-hair); color:var(--w-mut)}
+.win.dark .field{background:#1B1B1D}
+.field .chipset{display:flex; gap:5px; align-items:center}
+.field .fchip{display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:10px;
+  background:var(--w-pill); color:var(--w-ink2); font-size:11px}
+.field .fchip.on{background:var(--w-sel); color:var(--w-selink)}
+.field .fchip svg{width:11px; height:11px}
+.spacer{flex:1}
+.sep{width:1px; height:17px; background:var(--w-hair); flex:none; margin:0 2px}
+.kbd{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:10.5px; color:var(--w-mut);
+  border:1px solid var(--w-hair); border-radius:4px; padding:0 4px; white-space:nowrap}
+.tb{display:inline-flex; align-items:center; gap:5px; padding:3px 6px; border-radius:6px;
+  color:var(--w-mut); font-size:12px; white-space:nowrap}
+.tb.on{background:var(--w-pill); color:var(--w-ink)}
+
+/* body */
+.body{display:flex; align-items:stretch; min-height:430px}
+.list{width:288px; background:var(--w-list); border-right:1px solid var(--w-hair); flex:none;
+  display:flex; flex-direction:column}
+.lhead{display:flex; gap:0; padding:6px 10px; border-bottom:1px solid var(--w-hair);
+  font-size:10.5px; color:var(--w-mut); font-weight:600; letter-spacing:.03em}
+.lhead span:nth-child(1){width:56px}
+.lhead span:nth-child(2){flex:1}
+.lhead span:nth-child(3){width:52px; text-align:right}
+.lrow{display:flex; align-items:center; gap:0; padding:5px 10px; border-bottom:1px solid var(--w-hair2);
+  font-size:11.5px; color:var(--w-ink2)}
+.lrow.sel{background:var(--w-sel); color:var(--w-selink)}
+.lrow .ag{width:56px; font-size:10.5px; color:var(--w-mut); display:flex; align-items:center; gap:4px}
+.lrow.sel .ag{color:var(--w-selink)}
+.lrow .ti{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.lrow .mg{width:52px; text-align:right; font-family:"IBM Plex Mono", ui-monospace, monospace;
+  font-size:10.5px; color:var(--w-mut)}
+.lrow.sel .mg{color:var(--w-selink)}
+.dot{width:6px; height:6px; border-radius:50%; flex:none}
+
+/* transcript */
+.tr{flex:1; display:flex; flex-direction:column; min-width:0}
+.trbar{display:flex; align-items:center; gap:7px; padding:7px 11px;
+  background:var(--w-chrome); border-bottom:1px solid var(--w-hair)}
+.paper{flex:1; background:var(--w-paper); padding:13px 14px; display:flex; flex-direction:column; gap:9px;
+  overflow:hidden}
+.msg{border-left:2px solid transparent; padding:7px 10px; border-radius:5px; background:var(--w-card)}
+.win.dark .msg{background:var(--w-card)}
+.msg.agent{border-left-color:#C9A227}
+.msg.you{border-left-color:#3F63C8}
+.msg .who{font-size:10.5px; font-weight:600; color:var(--w-mut); margin-bottom:3px}
+.msg.agent .who{color:#9C7D14}
+.msg.you .who{color:var(--w-acc)}
+.msg p{margin:0; font-size:12px; line-height:1.5; color:var(--w-ink)}
+.tool{padding:5px 10px; border-radius:5px; background:transparent; border-left:2px solid #8C6FC4;
+  font-size:11px; color:var(--w-mut); display:flex; gap:8px; align-items:center}
+.marker{display:flex; align-items:center; gap:8px; padding:3px 10px; font-size:10.5px;
+  color:var(--w-mut); font-style:italic}
+.marker::before, .marker::after{content:""; height:1px; background:var(--w-hair); flex:1}
+.marker.hot{color:var(--w-acc); font-style:normal; font-weight:500}
+.marker.hot::before, .marker.hot::after{background:var(--w-acc); opacity:.4}
+
+/* inspector */
+.insp{width:238px; flex:none; border-left:1px solid var(--w-hair); background:var(--w-chrome);
+  display:flex; flex-direction:column}
+.ihead{display:flex; align-items:center; justify-content:space-between; padding:8px 11px;
+  border-bottom:1px solid var(--w-hair2)}
+.ihead b{font-size:12.5px}
+.ibody{padding:11px; display:flex; flex-direction:column; gap:0; flex:1}
+.isec{padding:10px 0; border-top:1px solid var(--w-hair2)}
+.isec:first-child{border-top:0; padding-top:1px}
+.ihero{display:flex; align-items:baseline; gap:7px}
+.ihero .n{font-size:25px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1}
+.ihero .u{font-size:10.5px; color:var(--w-mut)}
+.isub{display:flex; align-items:baseline; justify-content:space-between; margin-top:8px}
+.isub .n{font-size:13px; font-weight:600; font-variant-numeric:tabular-nums}
+.isub .u{font-size:10.5px; color:var(--w-mut); font-weight:400}
+.bar3{display:flex; height:6px; border-radius:3px; overflow:hidden; margin:7px 0 6px; background:var(--w-hair2)}
+.bar3 i{display:block}
+.leg{display:flex; flex-wrap:wrap; gap:2px 10px; font-size:10px; color:var(--w-ink2)}
+.leg span{display:inline-flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums}
+.sq{width:6px; height:6px; border-radius:2px; display:inline-block}
+.kv{display:flex; justify-content:space-between; gap:10px; font-size:11px; padding:2px 0}
+.kv dt{color:var(--w-mut)}
+.kv dd{margin:0; font-variant-numeric:tabular-nums; text-align:right}
+.kv dd.na{color:var(--w-mut)}
+.ish{font-size:10px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--w-mut); margin-bottom:7px}
+.tl{display:flex; flex-direction:column}
+.tlr{display:grid; grid-template-columns:12px 1fr auto; gap:7px; padding:0 0 8px}
+.tlr .pip{width:7px; height:7px; border-radius:50%; background:var(--w-acc); margin:4px 0 0 2px}
+.tlr .pip.ring{background:transparent; border:1.5px solid var(--w-mut)}
+.tlr .t{font-size:11px; line-height:1.35}
+.tlr .w{font-size:10px; color:var(--w-mut); font-variant-numeric:tabular-nums}
+.tlr .go{font-size:10px; color:var(--w-acc); align-self:center}
+.disc{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--w-ink2)}
+.ifoot{padding:8px 11px; border-top:1px solid var(--w-hair2); display:flex;
+  justify-content:space-between; align-items:center; font-size:10px; color:var(--w-mut)}
+.ifoot .lk{color:var(--w-acc)}
+
+/* status bar */
+.status{display:flex; justify-content:flex-end; gap:14px; padding:5px 12px;
+  border-top:1px solid var(--w-hair); font-size:10.5px; color:var(--w-mut);
+  font-variant-numeric:tabular-nums; background:var(--w-chrome)}
+
+/* menus */
+.menus{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; margin-top:4px}
+.menu{background:var(--card); border:1px solid var(--hair); border-radius:9px; overflow:hidden;
+  box-shadow:var(--shadow); font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-size:12.5px; align-self:start}
+.menu .mh{padding:7px 12px; font-size:10.5px; font-weight:600; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--hair-soft)}
+.mi{display:flex; align-items:center; gap:9px; padding:6px 12px; color:var(--ink)}
+.mi .ico{color:var(--ink-2)}
+.mi .r{margin-left:auto; font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:10.5px;
+  color:var(--muted)}
+.mi.sub::after{content:"›"; margin-left:auto; color:var(--muted)}
+.mdiv{height:1px; background:var(--hair-soft); margin:4px 0}
+
+.states{display:flex; flex-direction:column; gap:14px; margin-top:4px}
+.stlabel{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11px; color:var(--muted);
+  margin-bottom:7px}
+.strip{border:1px solid var(--hair); border-radius:9px; overflow:hidden}
+.close{margin-top:46px; border-top:1px solid var(--hair); padding-top:24px}
+ol{margin:0; padding-left:20px}
+ol li{font-size:14px; line-height:1.65; color:var(--ink-2); margin-bottom:9px}
+ol li b{color:var(--ink); font-weight:600}
+::selection{background:var(--accent-soft)}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <g id="i-search"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></g>
+  <g id="i-star"><path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.5 4.3 13.5l.8-4.2L2 6.4l4.2-.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+  <g id="i-archive"><rect x="1.8" y="2.6" width="12.4" height="3.2" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.1 5.8v6a1.5 1.5 0 001.5 1.5h6.8a1.5 1.5 0 001.5-1.5v-6M6.4 8.8h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+  <g id="i-split"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2.6v10.8" stroke="currentColor" stroke-width="1.4"/></g>
+  <g id="i-sidebar"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 2.6v10.8" stroke="currentColor" stroke-width="1.4"/></g>
+  <g id="i-gauge"><path d="M2.4 12a6.4 6.4 0 1111.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 11.4L11.1 6.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.9" r="1.15" fill="currentColor"/></g>
+  <g id="i-dots"><circle cx="3.2" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.8" cy="8" r="1.3" fill="currentColor"/></g>
+  <g id="i-copy"><rect x="5.4" y="1.9" width="8.7" height="8.7" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.6 13.1a1.8 1.8 0 01-1.8 1.8H3.7a1.8 1.8 0 01-1.8-1.8V7.2a1.8 1.8 0 011.8-1.8" fill="none" stroke="currentColor" stroke-width="1.4"/></g>
+  <g id="i-term"><rect x="1.8" y="3" width="12.4" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 6.5L6.8 8l-2.3 1.5M8.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <g id="i-folder"><path d="M1.8 4.5A1.5 1.5 0 013.3 3h2.9l1.3 1.6h4.9a1.5 1.5 0 011.5 1.5v5.4a1.5 1.5 0 01-1.5 1.5H3.3a1.5 1.5 0 01-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+  <g id="i-photo"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.6" cy="6.6" r="1.1" fill="currentColor"/><path d="M2.6 11.4l3.3-3 2.4 2.1 2-1.8 3 2.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></g>
+  <g id="i-grid"><rect x="1.8" y="1.8" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="1.8" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="1.8" y="9" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/></g>
+  <g id="i-chart"><path d="M2 13V8M6 13V4M10 13V9M14 13V6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g>
+  <g id="i-refresh"><path d="M13.2 8a5.2 5.2 0 11-1.6-3.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.4 2.6v2.9h-2.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <g id="i-doc"><path d="M3.6 2.4h5.2l3.6 3.5v7.7H3.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.6 2.4v3.6h3.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+  <g id="i-export"><path d="M8 10.6V2.4M5.2 5.1L8 2.3l2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.6 9.6v2.6a1.4 1.4 0 001.4 1.4h8a1.4 1.4 0 001.4-1.4V9.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+  <g id="i-text"><path d="M2.6 4V2.6h10.8V4M8 2.8v10.4M5.9 13.2h4.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+  <g id="i-check"><path d="M3 8.4l3.2 3.2L13 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <g id="i-x"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></g>
+</defs></svg>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Agent Sessions · redesign mockups · 2026-09-11</div>
+    <h1>What the window looks like after</h1>
+    <p class="lede">Every recommendation from the chrome audit, applied at once, in real proportions with real numbers from the session you screenshotted. <b>One toolbar row at the top, one in the transcript, one warm neutral across all chrome, no dead rows in the inspector.</b> Revised after review: the first pass cut too hard, so <b>Quota Meter and Terminal are back in the main toolbar, Copy and Export are back in the transcript</b>. Eight controls still live in the two menus below — nothing was removed from the app.</p>
+  </header>
+
+  <div class="persona-note" style="margin-top:26px; border:1px solid var(--hair); border-radius:10px;
+       background:var(--card); padding:18px 20px">
+    <div style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);
+         font-weight:600; margin-bottom:9px">What earned a slot back</div>
+    <table style="margin-top:0">
+      <tr><th style="width:24%">Restored</th><th style="width:20%">Over</th><th>Why this one</th></tr>
+      <tr><td><b>Quota Meter</b></td><td>Statistics</td><td>Checked several times a day when you are burning through a weekly window; Statistics is a monthly look-back. It is also the app's signature window — burying it undersells the product.</td></tr>
+      <tr><td><b>Open in Terminal</b></td><td>Reveal in Finder</td><td>The vibe-coder move after reading a session is <code>cd</code> into that repo and keep going. Finder is the same intent for someone who works in files rather than a shell, and stays one row down in the menu.</td></tr>
+      <tr><td><b>Copy</b></td><td>Text size</td><td>Pasting a transcript into an issue, a PR, or another agent is a daily action. Text size is set once and already has ⌘+ / ⌘−.</td></tr>
+      <tr><td><b>Export</b></td><td>View as</td><td>Rarer than Copy but the same intent — get this out of the app — so the pair reads as one group. View mode stays demoted: that was the actual complaint.</td></tr>
+    </table>
+    <p class="note" style="margin-top:12px">Main toolbar: 18 controls to 6 plus a menu. Transcript: two rows and 9 controls to one row and 6. The rule that held: <b>a glyph earns permanent space by being reached for without thinking.</b> Anything you have to look for is better as a named menu row.</p>
+  </div>
+
+  <!-- ══════════ LIGHT ══════════ -->
+  <section>
+    <div class="shead"><span class="num">01</span><h2>Light</h2></div>
+    <p class="cap">The case that looked unintegrated. The inspector now sits on the same warm chrome as the toolbars and the session list; the transcript paper is the only lifted surface. <b>Delegated is gone</b> — this is a Codex session, so it can never have a value.</p>
+    <div class="stage">
+      <div class="win">
+        <div class="tbar">
+          <span class="lights"><i style="background:#F0605A"></i><i style="background:#F5BC4F"></i><i style="background:#61C555"></i></span>
+          <span class="app">Agent Sessions</span>
+          <span class="pill sel">Codex</span>
+          <span class="pill">Claude</span>
+          <span class="pill dim">OpenCode</span>
+          <span class="pill dim">Hermes</span>
+          <span class="sep"></span>
+          <span class="field">
+            <svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>
+            <span style="flex:1">Search sessions</span>
+            <span class="chipset">
+              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-star"/></svg>Starred</span>
+              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived</span>
+            </span>
+            <span class="kbd">⌥⌘F</span>
+          </span>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-grid"/></svg>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-term"/></svg>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-split"/></svg>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-sidebar"/></svg>
+          <svg class="ico on" viewBox="0 0 16 16"><use href="#i-gauge"/></svg>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg>
+        </div>
+
+        <div class="body">
+          <div class="list">
+            <div class="lhead"><span>Agent</span><span>Session</span><span>Msgs</span></div>
+            <div class="lrow sel"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Profile session sidebar CPU</span><span class="mg">6935</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Analyze how vibe coders read</span><span class="mg">1431</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Session info sidebar UI/UX</span><span class="mg">317</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Summarize ThinkFISH thread</span><span class="mg">39</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">V1 proposal scope and cuts</span><span class="mg">83</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Sweep benchmark rows</span><span class="mg">2111</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Tennis Tracker fresh build</span><span class="mg">50</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Research Claude cloud API</span><span class="mg">367</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Investigate tree search</span><span class="mg">280</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Session-Bench synthesis</span><span class="mg">16</span></div>
+          </div>
+
+          <div class="tr">
+            <div class="trbar">
+              <span class="pill sel">You</span>
+              <span class="pill">Agent</span>
+              <span class="pill">Tools</span>
+              <span class="pill dim">Errors</span>
+              <span class="spacer"></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+              <span class="sep"></span>
+              <span class="tb">Copy</span>
+              <span class="tb">Export</span>
+              <span class="sep"></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+            </div>
+            <div class="paper">
+              <div class="msg agent"><div class="who">Agent · 7:11:13 PM</div><p>The full suite is clean: 2,761 total, 2,758 passed, 3 skipped, 0 failed — exactly five new tests over the prior baseline.</p></div>
+              <div class="tool">14 tool calls · 7:11:17 PM</div>
+              <div class="marker hot">12:29:57 PM · Thinking effort changed: medium → high</div>
+              <div class="msg agent"><div class="who">Agent · 7:12:50 PM</div><p>All Session info extraction keys are now covered. The repair adds nine extracted UI keys plus the plural request resource, for 1,313 catalog entries.</p></div>
+              <div class="tool">12 tool calls · 7:12:51 PM</div>
+              <div class="msg you"><div class="who">You · 7:15:14 PM</div><p>meanwhile run oracle xhigh with connected gh — after commit and push</p></div>
+            </div>
+          </div>
+
+          <div class="insp">
+            <div class="ihead"><b>Session info</b><svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg></div>
+            <div class="ibody">
+              <div class="isec">
+                <div class="ihero"><span class="n">$51.22</span><span class="u">API-equivalent</span></div>
+                <div class="isub"><span class="n">99,733,375 <span class="u">tokens</span></span><span class="u">721 requests</span></div>
+                <div class="bar3">
+                  <i style="width:97.5%; background:var(--w-cache)"></i>
+                  <i style="width:2.3%; background:var(--w-acc)"></i>
+                  <i style="width:0.2%; background:var(--w-out)"></i>
+                </div>
+                <div class="leg">
+                  <span><i class="sq" style="background:var(--w-cache)"></i>Cached 97.3M</span>
+                  <span><i class="sq" style="background:var(--w-acc)"></i>Fresh 2.3M</span>
+                  <span><i class="sq" style="background:var(--w-out)"></i>Output 162K</span>
+                </div>
+              </div>
+              <div class="isec">
+                <dl class="kv" style="margin:0"><dt>Model</dt><dd>gpt-5.6-sol · medium</dd></dl>
+                <dl class="kv" style="margin:0"><dt>Weekly quota</dt><dd class="na">Calibrate ↗</dd></dl>
+              </div>
+              <div class="isec">
+                <div class="ish">History</div>
+                <div class="tl">
+                  <div class="tlr"><span class="pip ring"></span><span class="t">Started gpt-5.6-sol · medium<br><span class="w">9:41:06 AM · inferred</span></span><span class="go">↗</span></div>
+                  <div class="tlr"><span class="pip"></span><span class="t">Thinking effort medium → high<br><span class="w">12:29:57 PM</span></span><span class="go">↗</span></div>
+                  <div class="tlr"><span class="pip"></span><span class="t">Thinking effort high → medium<br><span class="w">4:29:50 PM</span></span><span class="go">↗</span></div>
+                </div>
+              </div>
+              <div class="isec"><div class="disc">› How this was estimated</div></div>
+            </div>
+            <div class="ifoot"><span>Estimates, not billing</span><span class="lk">Refresh</span></div>
+          </div>
+        </div>
+        <div class="status"><span>3,603 / 3,753 sessions</span><span>Last: &lt;1m ago</span></div>
+      </div>
+    </div>
+    <p class="note">Weekly quota keeps its row but the em dash becomes <code>Calibrate ↗</code> — an absence you can act on is worth a line, an absence you can't isn't.</p>
+  </section>
+
+  <!-- ══════════ DARK ══════════ -->
+  <section>
+    <div class="shead"><span class="num">02</span><h2>Dark</h2></div>
+    <p class="cap">Same window, same rule applied rather than inverted: the transcript paper is <b>darker</b> than the chrome around it, not lighter. A raised light surface in a dark UI reads as a modal. This session has subagents, so <b>Delegated to subagents</b> appears — and there is an error in the transcript, so the Errors chip carries a count.</p>
+    <div class="stage">
+      <div class="win dark">
+        <div class="tbar">
+          <span class="lights"><i style="background:#F0605A"></i><i style="background:#F5BC4F"></i><i style="background:#61C555"></i></span>
+          <span class="app">Agent Sessions</span>
+          <span class="pill">Codex</span>
+          <span class="pill sel">Claude</span>
+          <span class="pill dim">OpenCode</span>
+          <span class="pill dim">Hermes</span>
+          <span class="sep"></span>
+          <span class="field">
+            <svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>
+            <span style="flex:1; color:var(--w-ink)">telemetry pricing</span>
+            <span class="chipset">
+              <span class="fchip on"><svg viewBox="0 0 16 16"><use href="#i-star"/></svg>Starred</span>
+              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived</span>
+            </span>
+            <span class="kbd">⌥⌘F</span>
+          </span>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-grid"/></svg>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-term"/></svg>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-split"/></svg>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-sidebar"/></svg>
+          <svg class="ico on" viewBox="0 0 16 16"><use href="#i-gauge"/></svg>
+          <span class="sep"></span>
+          <svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg>
+        </div>
+
+        <div class="body">
+          <div class="list">
+            <div class="lhead"><span>Agent</span><span>Session</span><span>Msgs</span></div>
+            <div class="lrow sel"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Session info sidebar UI/UX</span><span class="mg">317</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Close telemetry pricing gaps</span><span class="mg">204</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Bind pricing to provenance</span><span class="mg">158</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Weekly quota calibration</span><span class="mg">96</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Price manifest fingerprints</span><span class="mg">77</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Cache-write rate handling</span><span class="mg">61</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Long-context multiplier audit</span><span class="mg">44</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Inference geo fail-closed</span><span class="mg">31</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Opus 4 historical rates</span><span class="mg">28</span></div>
+            <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Fable 5.1 cache reads</span><span class="mg">19</span></div>
+          </div>
+
+          <div class="tr">
+            <div class="trbar">
+              <span class="pill">You</span>
+              <span class="pill sel">Agent</span>
+              <span class="pill">Tools</span>
+              <span class="pill warn">Errors 2</span>
+              <span class="spacer"></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>4ff8</span>
+              <span class="sep"></span>
+              <span class="tb">Copy</span>
+              <span class="tb">Export</span>
+              <span class="sep"></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+              <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+            </div>
+            <div class="paper">
+              <div class="msg agent"><div class="who">Agent · 9:15:28 PM</div><p>Tree is clean, the plan docs are in an ignored path. Starting implementation.</p></div>
+              <div class="tool">4 tool calls · 9:15:28 PM</div>
+              <div class="marker">4:01:00 PM · Started claude-opus-5 · medium</div>
+              <div class="msg agent"><div class="who">Agent · 9:16:14 PM</div><p>Now Task 3 — the shared anchoring refactor, so the timeline row and the inline marker can never resolve to different blocks.</p></div>
+              <div class="tool">2 tool calls · 0.8s · 9:16:28 PM</div>
+              <div class="msg agent"><div class="who">Agent · 9:17:48 PM</div><p>Exactly 4 lines, as expected. Task 6 — the panel rewrite:</p></div>
+            </div>
+          </div>
+
+          <div class="insp">
+            <div class="ihead"><b>Session info</b><svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg></div>
+            <div class="ibody">
+              <div class="isec">
+                <div class="ihero"><span class="n">$12.37</span><span class="u">API-equivalent</span></div>
+                <div class="isub"><span class="n">18,969,245 <span class="u">tokens</span></span><span class="u">86 requests</span></div>
+                <div class="bar3">
+                  <i style="width:94.3%; background:var(--w-cache)"></i>
+                  <i style="width:5.4%; background:var(--w-acc)"></i>
+                  <i style="width:0.3%; background:var(--w-out)"></i>
+                </div>
+                <div class="leg">
+                  <span><i class="sq" style="background:var(--w-cache)"></i>Cached 17.9M</span>
+                  <span><i class="sq" style="background:var(--w-acc)"></i>Fresh 1.0M</span>
+                  <span><i class="sq" style="background:var(--w-out)"></i>Output 56K</span>
+                </div>
+              </div>
+              <div class="isec">
+                <dl class="kv" style="margin:0"><dt>Model</dt><dd>claude-opus-5 · high</dd></dl>
+                <dl class="kv" style="margin:0"><dt>Weekly quota</dt><dd>≈3.40%</dd></dl>
+                <dl class="kv" style="margin:0"><dt>Delegated</dt><dd>3.2M · 47 req</dd></dl>
+              </div>
+              <div class="isec">
+                <div class="ish">History</div>
+                <div class="tl">
+                  <div class="tlr"><span class="pip ring"></span><span class="t">Started claude-opus-5 · medium<br><span class="w">4:01:00 PM · inferred</span></span><span class="go">↗</span></div>
+                  <div class="tlr"><span class="pip"></span><span class="t">Thinking effort medium → high<br><span class="w">9:15:08 PM</span></span><span class="go">↗</span></div>
+                </div>
+              </div>
+              <div class="isec"><div class="disc">› How this was estimated</div></div>
+            </div>
+            <div class="ifoot"><span>Estimates, not billing</span><span class="lk">Refresh</span></div>
+          </div>
+        </div>
+        <div class="status"><span>3,603 / 3,753 sessions</span><span>Last: &lt;1m ago</span></div>
+      </div>
+    </div>
+    <p class="note">Row label is <b>Delegated to subagents</b> in full; the mockup shows it truncated the way a 238&nbsp;pt panel actually would. Value is <code>3.2M · 47 req</code> — requests, not an agent count, because the transcript does not identify which subagent each record belongs to.</p>
+  </section>
+
+  <!-- ══════════ MENUS ══════════ -->
+  <section>
+    <div class="shead"><span class="num">03</span><h2>Where the remaining eight went</h2></div>
+    <p class="cap">Nothing was deleted. What is left in the menus is genuinely occasional — a name in a menu is more discoverable than an unlabelled glyph, and these are the ones you reach for by thinking rather than by muscle memory.</p>
+    <div class="menus">
+      <div class="menu">
+        <div class="mh">Main toolbar · ⋯ <span style="text-transform:none;letter-spacing:0;font-weight:400">(7 items)</span></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-chart"/></svg>Statistics</div>
+        <div class="mdiv"></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-folder"/></svg>Reveal in Finder<span class="r">⌃⌘R</span></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-photo"/></svg>Image Browser</div>
+        <div class="mdiv"></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-refresh"/></svg>Reindex now</div>
+        <div class="mdiv"></div>
+        <div class="mi sub">Appearance</div>
+        <div class="mi">Settings…<span class="r">⌘,</span></div>
+      </div>
+
+      <div class="menu">
+        <div class="mh">Transcript · ⋯ <span style="text-transform:none;letter-spacing:0;font-weight:400">(4 items)</span></div>
+        <div class="mi sub"><svg class="ico" viewBox="0 0 16 16"><use href="#i-doc"/></svg>View as</div>
+        <div class="mdiv"></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-text"/></svg>Text size<span class="r">⌘+ ⌘−</span></div>
+        <div class="mdiv"></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-gauge"/></svg>Session info<span class="r">⇧⌘I</span></div>
+      </div>
+
+      <div class="menu">
+        <div class="mh">Transcript · ⋯ ▸ View as</div>
+        <div class="mi"><svg class="ico acc" viewBox="0 0 16 16"><use href="#i-check"/></svg>Session<span class="r">⌘1</span></div>
+        <div class="mi"><span style="width:16px"></span>Text<span class="r">⌘2</span></div>
+        <div class="mi"><span style="width:16px"></span>JSON<span class="r">⌘3</span></div>
+        <div class="mh" style="border-top:1px solid var(--hair-soft); border-bottom:0; text-transform:none; letter-spacing:0; font-weight:400; font-size:11.5px; color:var(--muted); line-height:1.5">
+          The dropdown that used to occupy the primary slot in the transcript toolbar, now three menu rows and three shortcuts.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ STATES ══════════ -->
+  <section>
+    <div class="shead"><span class="num">04</span><h2>Transcript toolbar, four states</h2></div>
+    <p class="cap">One row has to carry everything the two rows did. These are the states it must hold without wrapping or growing.</p>
+    <div class="states">
+      <div>
+        <div class="stlabel">default · no filter selected means all roles</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="pill">You</span><span class="pill">Agent</span><span class="pill">Tools</span><span class="pill dim">Errors</span>
+            <span class="spacer"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+            <span class="sep"></span>
+            <span class="tb">Copy</span>
+            <span class="tb">Export</span>
+            <span class="sep"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+
+      <div>
+        <div class="stlabel">filtered · active chip reveals ▲▼ jump, matching ⌘G / ⇧⌘G</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="pill sel">You <span style="margin-left:5px; opacity:.65">⌃ ⌄</span></span>
+            <span class="pill">Agent</span><span class="pill">Tools</span><span class="pill dim">Errors</span>
+            <span class="spacer"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+            <span class="sep"></span>
+            <span class="tb">Copy</span>
+            <span class="tb">Export</span>
+            <span class="sep"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+
+      <div>
+        <div class="stlabel">errors present · the one chip that earns a count</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="pill">You</span><span class="pill">Agent</span><span class="pill">Tools</span>
+            <span class="pill warn">Errors 2</span>
+            <span class="spacer"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+            <span class="sep"></span>
+            <span class="tb">Copy</span>
+            <span class="tb">Export</span>
+            <span class="sep"></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+
+      <div>
+        <div class="stlabel">find open · the field takes the row, filters collapse to a count</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="pill dim">3 filters</span>
+            <span class="field" style="max-width:none">
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>
+              <span style="flex:1; color:var(--w-ink)">anchorBlockIndex</span>
+              <span class="kbd">4 of 17</span>
+              <span class="tb">⌃</span><span class="tb">⌄</span>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg>
+            </span>
+            <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="close">
+    <h2>Build order</h2>
+    <ol>
+      <li><b>Transcript toolbar to one row.</b> Self-contained, biggest visible weight drop, touches no data and no other view.</li>
+      <li><b>Main toolbar to five groups</b> — pills, search, actions, view, menu. Moving a control into a menu is a relocation, not a rewrite.</li>
+      <li><b>One warm neutral for all chrome</b> plus the inspector surface. Needs a token pass, so it wants its own commit.</li>
+      <li><b>Inspector row policy</b> — hide Delegated when the provider cannot produce it, make Weekly quota's absence actionable. This one changes what is claimed about data, so it deserves the most review.</li>
+    </ol>
+    <p class="note" style="margin-top:18px">All four are presentation-only. If any of these get built, they belong in a separate worktree — another session is on the telemetry code right now.</p>
+  </div>
+
+</div>

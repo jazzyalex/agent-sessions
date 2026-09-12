@@ -1,0 +1,437 @@
+<title>Agent Sessions Chrome Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --page:#ECEEF1; --card:#FFFFFF; --sunk:#E3E6EA;
+  --hair:#D5D9DF; --hair-soft:#E4E7EC;
+  --ink:#171A1F; --ink-2:#464C56; --muted:#767D89;
+  --accent:#3D4FC4; --accent-soft:#E4E7FA;
+  --bad:#A2503A; --bad-soft:#F6E7E2;
+  --good:#2F6B57; --good-soft:#E2F0EA;
+  --shadow:0 1px 2px rgba(15,20,30,.07), 0 10px 30px rgba(15,20,30,.07);
+  /* mac chrome tokens, light */
+  --mac-window:#F7F7F8; --mac-chrome:#F0EFEE; --mac-paper:#FBF8F3;
+  --mac-hair:#DDDCDA; --mac-ink:#1D1D1F; --mac-muted:#77767B;
+  --mac-pill:#E7E6E5; --mac-sel:#D6DCEC;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#15171B; --card:#1D2025; --sunk:#22262C;
+    --hair:#31363E; --hair-soft:#282D34;
+    --ink:#E9EBEF; --ink-2:#B4BAC4; --muted:#848C99;
+    --accent:#8494FF; --accent-soft:#242A47;
+    --bad:#D98F76; --bad-soft:#33231E;
+    --good:#6FBFA0; --good-soft:#172B25;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.4);
+    --mac-window:#232326; --mac-chrome:#2A2A2D; --mac-paper:#1C1C1E;
+    --mac-hair:#3A3A3D; --mac-ink:#F2F2F4; --mac-muted:#8E8E93;
+    --mac-pill:#3A3A3D; --mac-sel:#38406B;
+  }
+}
+:root[data-theme="dark"]{
+  --page:#15171B; --card:#1D2025; --sunk:#22262C;
+  --hair:#31363E; --hair-soft:#282D34;
+  --ink:#E9EBEF; --ink-2:#B4BAC4; --muted:#848C99;
+  --accent:#8494FF; --accent-soft:#242A47;
+  --bad:#D98F76; --bad-soft:#33231E;
+  --good:#6FBFA0; --good-soft:#172B25;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.4);
+  --mac-window:#232326; --mac-chrome:#2A2A2D; --mac-paper:#1C1C1E;
+  --mac-hair:#3A3A3D; --mac-ink:#F2F2F4; --mac-muted:#8E8E93;
+  --mac-pill:#3A3A3D; --mac-sel:#38406B;
+}
+*{box-sizing:border-box}
+body{background:var(--page); color:var(--ink);
+  font-family:"Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing:antialiased;}
+.wrap{max-width:1080px; margin:0 auto; padding:44px 28px 90px;
+  display:flex; flex-direction:column; gap:14px}
+
+.eyebrow{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+h1{margin:6px 0 0; font-size:32px; font-weight:600; letter-spacing:-.018em; text-wrap:balance}
+.lede{margin:10px 0 0; font-size:15px; line-height:1.62; color:var(--ink-2); max-width:66ch}
+.lede b{color:var(--ink); font-weight:600}
+
+/* who it's for */
+.persona{margin-top:26px; border:1px solid var(--hair); border-radius:10px;
+  background:var(--card); padding:20px 22px; display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:20px}
+.persona h3{margin:0 0 6px; font-size:12px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--muted); font-weight:600}
+.persona p{margin:0; font-size:13.5px; line-height:1.55; color:var(--ink-2)}
+.persona p b{color:var(--ink); font-weight:600}
+
+section{margin-top:40px; scroll-margin-top:20px}
+.shead{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.num{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12px; color:var(--accent)}
+h2{margin:0; font-size:21px; font-weight:600; letter-spacing:-.012em}
+.verdict{margin:10px 0 0; font-size:14.5px; line-height:1.6; color:var(--ink-2); max-width:70ch}
+.verdict b{color:var(--ink); font-weight:600}
+.verdict code, .note code{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12.5px;
+  background:var(--sunk); border-radius:3px; padding:1px 5px}
+
+.evidence{margin-top:14px; border-left:2px solid var(--bad); background:var(--bad-soft);
+  padding:11px 14px; border-radius:0 6px 6px 0}
+.evidence p{margin:0; font-size:13px; line-height:1.55; color:var(--ink-2)}
+.evidence p + p{margin-top:6px}
+.evidence b{color:var(--ink)}
+.evidence code{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12px}
+
+.pair{margin-top:18px; display:flex; flex-direction:column; gap:14px}
+.slab{border:1px solid var(--hair); border-radius:10px; overflow:hidden; background:var(--card)}
+.slab > .tag{display:flex; align-items:center; gap:8px; padding:8px 13px;
+  font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  border-bottom:1px solid var(--hair-soft)}
+.tag.now{color:var(--bad); background:var(--bad-soft)}
+.tag.next{color:var(--good); background:var(--good-soft)}
+.slab .stage{padding:18px; background:var(--sunk); overflow-x:auto}
+
+/* ── mac window chrome mock ── */
+.mac{background:var(--mac-window); border:1px solid var(--mac-hair); border-radius:9px;
+  overflow:hidden; min-width:820px;
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color:var(--mac-ink); box-shadow:var(--shadow)}
+.bar{display:flex; align-items:center; gap:9px; padding:9px 12px; background:var(--mac-chrome);
+  border-bottom:1px solid var(--mac-hair)}
+.bar.sub{background:var(--mac-window)}
+.lights{display:flex; gap:6px; margin-right:6px}
+.lights i{width:11px; height:11px; border-radius:50%; display:block}
+.appname{font-size:13px; font-weight:600; margin-right:8px; white-space:nowrap}
+.ico{width:16px; height:16px; color:var(--mac-muted); flex:none}
+.ico.on{color:var(--mac-ink)}
+.btn{display:inline-flex; align-items:center; gap:5px; padding:3px 6px; border-radius:5px;
+  color:var(--mac-muted); font-size:12px; white-space:nowrap}
+.btn.on{background:var(--mac-pill); color:var(--mac-ink)}
+.pill{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:13px;
+  border:1px solid var(--mac-hair); font-size:12px; white-space:nowrap; color:var(--mac-ink)}
+.pill.sel{background:var(--mac-sel); border-color:transparent}
+.pill.dim{color:var(--mac-muted)}
+.search{flex:1; min-width:120px; display:flex; align-items:center; gap:6px; padding:3px 9px;
+  border-radius:6px; background:var(--mac-window); border:1px solid var(--mac-hair);
+  color:var(--mac-muted); font-size:12px}
+.search.wide{max-width:none}
+.spacer{flex:1}
+.sep{width:1px; height:16px; background:var(--mac-hair); flex:none; margin:0 3px}
+.kbd{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:10.5px;
+  color:var(--mac-muted); border:1px solid var(--mac-hair); border-radius:4px; padding:0 4px}
+.dropdown{display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:6px;
+  background:var(--mac-pill); font-size:12.5px; font-weight:500}
+.body{display:flex; min-height:104px}
+.paper{flex:1; background:var(--mac-paper); padding:14px 16px}
+.linefake{height:5px; border-radius:3px; background:var(--mac-hair); opacity:.55; margin-bottom:8px}
+.list{width:190px; background:var(--mac-window); border-right:1px solid var(--mac-hair); padding:12px}
+.insp{width:180px; border-left:1px solid var(--mac-hair); padding:12px}
+.count{font-size:11px; color:var(--mac-muted); font-family:"IBM Plex Mono", ui-monospace, monospace}
+
+/* icon candidate tiles */
+.icons{margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(184px,1fr)); gap:12px}
+.icard{border:1px solid var(--hair); border-radius:9px; background:var(--card); padding:14px}
+.icard.pick{border-color:var(--good); box-shadow:inset 0 0 0 1px var(--good)}
+.icard .glyphrow{display:flex; align-items:center; gap:11px; margin-bottom:9px}
+.icard svg{width:19px; height:19px; color:var(--ink)}
+.icard .nm{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11px; color:var(--ink-2);
+  overflow-wrap:anywhere}
+.icard p{margin:0; font-size:12.5px; line-height:1.5; color:var(--ink-2)}
+.icard .badge{font-size:10px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--good)}
+
+/* surface ramp swatches */
+.ramp{margin-top:16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px}
+.sw{border:1px solid var(--hair); border-radius:9px; overflow:hidden; background:var(--card)}
+.sw .chip{height:54px}
+.sw .meta{padding:10px 12px}
+.sw .meta b{display:block; font-size:12.5px; margin-bottom:3px}
+.sw .meta span{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:10.5px; color:var(--muted)}
+
+table{border-collapse:collapse; width:100%; margin-top:16px; font-size:13px}
+th,td{text-align:left; padding:8px 14px 8px 0; vertical-align:top; border-bottom:1px solid var(--hair-soft);
+  color:var(--ink-2); line-height:1.5}
+th{color:var(--ink); font-weight:600; font-size:11.5px; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--muted)}
+td b{color:var(--ink); font-weight:600}
+td code{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12px}
+.keep{color:var(--good); font-weight:600}
+.move{color:var(--bad); font-weight:600}
+
+.note{margin-top:14px; font-size:13px; line-height:1.6; color:var(--muted); max-width:70ch}
+.close{margin-top:46px; border-top:1px solid var(--hair); padding-top:24px}
+.close h2{margin-bottom:12px}
+ol{margin:0; padding-left:20px}
+ol li{font-size:14px; line-height:1.65; color:var(--ink-2); margin-bottom:9px}
+ol li b{color:var(--ink); font-weight:600}
+::selection{background:var(--accent-soft)}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-search"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></g>
+    <g id="i-star"><path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.5 4.3 13.5l.8-4.2L2 6.4l4.2-.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+    <g id="i-chart"><path d="M2 13V8M6 13V4M10 13V9M14 13V6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g>
+    <g id="i-term"><rect x="1.8" y="3" width="12.4" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 6.5L6.8 8l-2.3 1.5M8.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="i-folder"><path d="M1.8 4.5A1.5 1.5 0 013.3 3h2.9l1.3 1.6h4.9a1.5 1.5 0 011.5 1.5v5.4a1.5 1.5 0 01-1.5 1.5H3.3a1.5 1.5 0 01-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+    <g id="i-refresh"><path d="M13.2 8a5.2 5.2 0 11-1.6-3.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.4 2.6v2.9h-2.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="i-photo"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.6" cy="6.6" r="1.1" fill="currentColor"/><path d="M2.6 11.4l3.3-3 2.4 2.1 2-1.8 3 2.7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></g>
+    <g id="i-grid"><rect x="1.8" y="1.8" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="1.8" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="1.8" y="9" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="5.2" height="5.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/></g>
+    <g id="i-sidebar"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 2.6v10.8" stroke="currentColor" stroke-width="1.4"/></g>
+    <g id="i-split"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2.6v10.8" stroke="currentColor" stroke-width="1.4"/></g>
+    <g id="i-info"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".85" fill="currentColor"/></g>
+    <g id="i-moon"><path d="M13 9.6A5.6 5.6 0 016.4 3a5.6 5.6 0 106.6 6.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></g>
+    <g id="i-gear"><circle cx="8" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8L3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+    <g id="i-dots"><circle cx="3.2" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.8" cy="8" r="1.3" fill="currentColor"/></g>
+    <g id="i-copy"><rect x="5.4" y="1.9" width="8.7" height="8.7" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.6 13.1a1.8 1.8 0 01-1.8 1.8H3.7a1.8 1.8 0 01-1.8-1.8V7.2a1.8 1.8 0 011.8-1.8" fill="none" stroke="currentColor" stroke-width="1.4"/></g>
+    <g id="i-gauge"><path d="M2.4 12a6.4 6.4 0 1111.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 11.4L11.1 6.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.9" r="1.15" fill="currentColor"/></g>
+    <g id="i-receipt"><path d="M3.4 1.9h9.2v12.2l-1.85-1.2-1.84 1.2-1.85-1.2-1.84 1.2-1.82-1.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.9 5.4h4.2M5.9 8.2h4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></g>
+    <g id="i-tag"><path d="M8.1 1.9H14v5.9l-6.2 6.2a1.5 1.5 0 01-2.1 0L1.9 10.2a1.5 1.5 0 010-2.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="11.1" cy="4.9" r="1.15" fill="currentColor"/></g>
+    <g id="i-archive"><rect x="1.8" y="2.6" width="12.4" height="3.2" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.1 5.8v6a1.5 1.5 0 001.5 1.5h6.8a1.5 1.5 0 001.5-1.5v-6M6.4 8.8h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Agent Sessions · chrome audit · 2026-09-11</div>
+    <h1>The chrome is louder than the content</h1>
+    <p class="lede">Five issues, one cause: <b>every control that has ever been useful is on screen at all times</b>, at equal weight. Eighteen icons in the main toolbar, a two-row transcript toolbar, and a view-mode dropdown sized like a primary action for a feature nobody opens twice. This audit ranks controls by how often a person running a dozen agent sessions a day actually touches them, then puts everything below "weekly" behind a menu.</p>
+  </header>
+
+  <div class="persona">
+    <div>
+      <h3>Who this is for</h3>
+      <p>Someone running <b>10–50 agent sessions a day</b> across Codex and Claude. Not a first-time Mac user, not a casual reader.</p>
+    </div>
+    <div>
+      <h3>What they come here to do</h3>
+      <p><b>Find</b> the session where something happened. <b>Read</b> what the agent did. <b>Check</b> what it cost and which model ran.</p>
+    </div>
+    <div>
+      <h3>What they never do</h3>
+      <p>Read raw <b>JSON</b>. Switch to <b>Text</b> view. Change the <b>font size</b> more than once, ever. Press <b>Refresh</b> — they expect it to be current.</p>
+    </div>
+  </div>
+
+  <!-- ══════════ 1 ══════════ -->
+  <section>
+    <div class="shead"><span class="num">01</span><h2>Weekly quota and Delegated are dead rows</h2></div>
+    <p class="verdict"><b>Delegated can never have a value in a Codex session — remove it there, don't leave an em dash.</b> It is not a bug and not missing data: the Codex accumulator hard-codes every usage record as self-owned, so there is nothing to delegate. Only Claude marks records as delegated, and only when the session used subagents.</p>
+
+    <div class="evidence">
+      <p><b>Codex:</b> <code>CodexTelemetryAccumulator.swift:159</code> writes <code>ownership: .session</code> as a literal. No other value is reachable.</p>
+      <p><b>Claude:</b> <code>ClaudeTelemetryAccumulator.swift:116</code> writes <code>ownership: isSidechain ? .descendant : .session</code>. A Claude session with no Task-tool subagents is also legitimately empty.</p>
+      <p><b>Weekly quota</b> is different — it is real but conditional. It needs an account-window calibration; without one there is no honest number to show.</p>
+    </div>
+
+    <p class="verdict" style="margin-top:16px">Two different absences deserve two different treatments, and the current panel gives them the same em dash:</p>
+
+    <table>
+      <tr><th style="width:30%">Case</th><th>Treatment</th></tr>
+      <tr><td><b>Structurally impossible</b><br>Delegated, in any Codex session</td><td class="keep">Don't render the row. A permanent em dash teaches the reader to ignore the column.</td></tr>
+      <tr><td><b>Possible, absent here</b><br>Delegated in a Claude session with no subagents</td><td>Don't render it either. "This session delegated nothing" is the default; only the exception is worth a row.</td></tr>
+      <tr><td><b>Possible, blocked</b><br>Weekly quota with no calibration</td><td class="move">Keep the row, keep the em dash — but make the tooltip a fix, not an explanation: <i>"Open Quota Meter to calibrate."</i> An absence the reader can act on is worth its line.</td></tr>
+    </table>
+
+    <p class="note">Net effect on the screenshot: the Codex session loses the Delegated row entirely and keeps Weekly quota with an actionable tooltip. Two dead lines become one live one. Rename it <b>Delegated to subagents</b> when it does appear — "Delegated" alone doesn't say to whom, which is exactly the confusion here.</p>
+  </section>
+
+  <!-- ══════════ 2 ══════════ -->
+  <section>
+    <div class="shead"><span class="num">02</span><h2>Light mode: the inspector is the only white thing on screen</h2></div>
+    <p class="verdict"><b>The panel paints <code>controlBackgroundColor</code> — pure white — while the transcript beside it is a warm paper tone.</b> Dark mode looks integrated because every dark surface collapses toward the same near-black; light mode exposes that the app never picked one neutral. The fix is a three-step ramp with a consistent warm bias, not a new color for the inspector.</p>
+
+    <div class="ramp">
+      <div class="sw"><div class="chip" style="background:#F2F1EF"></div><div class="meta"><b>Level 0 · Chrome</b><span>toolbars, session list, inspector</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FBF8F3"></div><div class="meta"><b>Level 1 · Paper</b><span>transcript body — the only lifted surface</span></div></div>
+      <div class="sw"><div class="chip" style="background:#FFFFFF; box-shadow:inset 0 0 0 1px #DDDCDA"></div><div class="meta"><b>Level 2 · Card</b><span>message cards on paper</span></div></div>
+    </div>
+
+    <p class="verdict" style="margin-top:16px">The rule that makes this hold: <b>the transcript is the only thing that gets a lifted surface.</b> Everything that frames it — session list, both toolbars, the inspector — sits on Level 0 and shares one warm neutral. The inspector is chrome, so it belongs at Level 0, not above the paper it annotates.</p>
+    <p class="note">Both themes need the same treatment applied, not inverted: in dark mode Level 1 is slightly <i>darker</i> than the chrome, not lighter, because a raised light surface in a dark UI reads as a modal.</p>
+  </section>
+
+  <!-- ══════════ 3 ══════════ -->
+  <section>
+    <div class="shead"><span class="num">03</span><h2>The Session info icon</h2></div>
+    <p class="verdict"><b><code>info.circle</code> is the weakest choice available</b> — it means "about this app" everywhere else in macOS, and it sits one slot away from an identically-weighted sidebar toggle. The panel is not general information; it is <i>what this session cost and what model ran</i>. The icon should say meter, not help.</p>
+
+    <div class="icons">
+      <div class="icard">
+        <div class="glyphrow"><svg viewBox="0 0 16 16"><use href="#i-info"/></svg><span class="nm">info.circle</span></div>
+        <p>Today. Reads as "about", collides with the standard Help affordance, and carries no hint of cost or usage.</p>
+      </div>
+      <div class="icard pick">
+        <div class="glyphrow"><svg viewBox="0 0 16 16"><use href="#i-gauge"/></svg><span class="nm">gauge.with.needle</span><span class="badge">Pick</span></div>
+        <p>Reads instantly as consumption. Pairs conceptually with the Quota Meter without duplicating its grid icon, and nothing else in the toolbar is round-with-a-needle.</p>
+      </div>
+      <div class="icard">
+        <div class="glyphrow"><svg viewBox="0 0 16 16"><use href="#i-receipt"/></svg><span class="nm">receipt</span></div>
+        <p>Most literal for "what this run cost". Risks implying a real invoice, which the panel explicitly is not — it is an API-equivalent estimate.</p>
+      </div>
+      <div class="icard">
+        <div class="glyphrow"><svg viewBox="0 0 16 16"><use href="#i-sidebar"/></svg><span class="nm">sidebar.trailing</span></div>
+        <p>The strict macOS idiom for an inspector — Xcode uses exactly this. Correct, but unusable here while a near-identical <code>sidebar.right</code> sits beside it.</p>
+      </div>
+    </div>
+    <p class="note">Whichever wins, it must be the <i>only</i> right-side panel toggle at full weight. Two adjacent controls that both mean "show a panel on the right" is the actual complaint behind "need a nice one".</p>
+  </section>
+
+  <!-- ══════════ 4 ══════════ -->
+  <section>
+    <div class="shead"><span class="num">04</span><h2>Main toolbar: eighteen controls, four of them daily</h2></div>
+    <p class="verdict">Everything is a 16pt monochrome glyph at identical weight, so scanning costs the same whether you want <b>Search</b> or <b>Refresh</b>. Rank by frequency and the answer is obvious — one primary group, one view group, one menu.</p>
+
+    <table>
+      <tr><th style="width:26%">Control</th><th style="width:16%">Real frequency</th><th>Where it goes</th></tr>
+      <tr><td><b>Source pills</b> Codex / Claude / OpenCode / Hermes</td><td>Constant</td><td class="keep">Stay, leading. This is the primary axis of the whole app.</td></tr>
+      <tr><td><b>Search</b></td><td>Constant</td><td class="keep">Stay, and take the space the removed icons free. It is the main verb.</td></tr>
+      <tr><td><b>Layout</b> / <b>Transcript pane</b> / <b>Session info</b></td><td>Daily</td><td class="keep">Stay, trailing, as one view group of three.</td></tr>
+      <tr><td><b>Starred</b></td><td>Daily-ish</td><td class="move">Becomes a filter chip beside Search, where the other filters already live.</td></tr>
+      <tr><td><b>Quota Meter</b>, <b>Stats</b></td><td>Weekly</td><td class="move">Into the overflow menu, by name. Both open windows; neither needs a permanent glyph.</td></tr>
+      <tr><td><b>Terminal</b>, <b>Finder</b>, <b>Images</b></td><td>Weekly</td><td class="move">Overflow menu. These act on the <i>selected session</i> — they also belong in its context menu, which is where a power user will actually reach for them.</td></tr>
+      <tr><td><b>Refresh</b></td><td>Rarely, and it shouldn't exist</td><td class="move">Overflow menu. The index is live; a visible Refresh button advertises that you don't trust it.</td></tr>
+      <tr><td><b>Dark / Light</b>, <b>Settings</b></td><td>Rarely</td><td class="move">Settings window and the app menu. Appearance is a preference, not a toolbar verb.</td></tr>
+      <tr><td><b>Collapse / Expand all</b></td><td>Occasional</td><td class="move">Into the session list's own header, next to the rows they affect.</td></tr>
+    </table>
+
+    <div class="pair">
+      <div class="slab">
+        <div class="tag now">Now — 18 controls, all equal weight</div>
+        <div class="stage">
+          <div class="mac">
+            <div class="bar">
+              <span class="lights"><i style="background:#F0605A"></i><i style="background:#F5BC4F"></i><i style="background:#61C555"></i></span>
+              <span class="appname">Agent Sessions</span>
+              <svg class="ico" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><path d="M6 10l-4 4M10 6l4-4M6 10h-3M6 10v3M10 6h3M10 6V3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><path d="M2 14l4-4M14 2l-4 4M6 10h3M6 10v-3M10 6h-3M10 6v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <span class="pill sel">Codex</span><svg class="ico" viewBox="0 0 16 16"><use href="#i-archive"/></svg>
+              <span class="pill">Claude</span><svg class="ico" viewBox="0 0 16 16"><use href="#i-archive"/></svg>
+              <span class="pill dim">OpenCode</span>
+              <span class="pill dim">Hermes</span>
+              <span class="search"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>Search<span class="spacer"></span><span class="kbd">⌥⌘F</span></span>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-star"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-chart"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-term"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-folder"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-refresh"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-photo"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-grid"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-sidebar"/></svg>
+              <svg class="ico on" viewBox="0 0 16 16"><use href="#i-info"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-split"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-moon"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-gear"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg>
+            </div>
+            <div class="body"><div class="list"></div><div class="paper"><div class="linefake" style="width:88%"></div><div class="linefake" style="width:64%"></div><div class="linefake" style="width:79%"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slab">
+        <div class="tag next">Proposed — 3 groups, search takes the reclaimed space</div>
+        <div class="stage">
+          <div class="mac">
+            <div class="bar">
+              <span class="lights"><i style="background:#F0605A"></i><i style="background:#F5BC4F"></i><i style="background:#61C555"></i></span>
+              <span class="appname">Agent Sessions</span>
+              <span class="pill sel">Codex</span>
+              <span class="pill">Claude</span>
+              <span class="pill dim">OpenCode</span>
+              <span class="pill dim">Hermes</span>
+              <span class="sep"></span>
+              <span class="search wide"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>Search sessions<span class="spacer"></span>
+                <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-star"/></svg></span>
+                <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-archive"/></svg></span>
+                <span class="kbd">⌥⌘F</span></span>
+              <span class="sep"></span>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-split"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-sidebar"/></svg>
+              <svg class="ico on" viewBox="0 0 16 16"><use href="#i-gauge"/></svg>
+              <span class="sep"></span>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg>
+            </div>
+            <div class="body"><div class="list"></div><div class="paper"><div class="linefake" style="width:88%"></div><div class="linefake" style="width:64%"></div><div class="linefake" style="width:79%"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">Archive moves inside the search field as a scope chip, which also fixes a smaller oddity: today each source pill carries its own archive icon, so the same concept is drawn four times.</p>
+  </section>
+
+  <!-- ══════════ 5 ══════════ -->
+  <section>
+    <div class="shead"><span class="num">05</span><h2>Transcript toolbar: two rows for one row of work</h2></div>
+    <p class="verdict"><b>The <code>Session ⌄</code> dropdown is the loudest control in the transcript and switches between Session, Text and JSON — a choice made once, by a debugging author, and never again.</b> It is a filled, labelled menu button sitting where the primary action goes. Meanwhile the role filters, which are used constantly, are exiled to a second row with four sets of ▲▼ arrows attached.</p>
+
+    <div class="pair">
+      <div class="slab">
+        <div class="tag now">Now — two rows, view mode leading</div>
+        <div class="stage">
+          <div class="mac" style="min-width:700px">
+            <div class="bar sub">
+              <span class="dropdown">Session <svg class="ico" viewBox="0 0 16 16" style="width:11px;height:11px"><path d="M4 6.5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>ID a277</span>
+              <span class="spacer"></span>
+              <span class="btn">A−</span><span class="btn">A+</span>
+              <span class="btn">Copy</span>
+              <span class="btn">Export</span>
+              <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg>Find <span class="kbd">⌘F</span></span>
+            </div>
+            <div class="bar sub" style="border-bottom:1px solid var(--mac-hair)">
+              <span class="pill sel">All</span>
+              <span class="pill">● You</span><span class="btn">⌃⌄</span>
+              <span class="pill">● Agent</span><span class="btn">⌃⌄</span>
+              <span class="pill">● Tools</span><span class="btn">⌃⌄</span>
+              <span class="pill">● Errors</span><span class="btn">⌃⌄</span>
+            </div>
+            <div class="body"><div class="paper"><div class="linefake" style="width:88%"></div><div class="linefake" style="width:64%"></div><div class="linefake" style="width:79%"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slab">
+        <div class="tag next">Proposed — one row, filters leading, view mode demoted to the menu</div>
+        <div class="stage">
+          <div class="mac" style="min-width:700px">
+            <div class="bar sub" style="border-bottom:1px solid var(--mac-hair)">
+              <span class="pill sel">You</span>
+              <span class="pill">Agent</span>
+              <span class="pill">Tools</span>
+              <span class="pill" style="color:#C0553F; border-color:#C0553F">Errors 2</span>
+              <span class="spacer"></span>
+              <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+              <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
+              <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+            </div>
+            <div class="body"><div class="paper"><div class="linefake" style="width:88%"></div><div class="linefake" style="width:64%"></div><div class="linefake" style="width:79%"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th style="width:30%">Change</th><th>Why</th></tr>
+      <tr><td><b>View mode leaves the toolbar</b></td><td>Into the <code>⋯</code> menu as "View as ▸ Session / Text / JSON", plus ⌘1 / ⌘2 / ⌘3. A choice made once a year does not deserve permanent primary placement.</td></tr>
+      <tr><td><b>"All" chip disappears</b></td><td>No filter selected already means all. The chip only existed to undo the other four.</td></tr>
+      <tr><td><b>▲▼ arrows disappear</b></td><td>Jump-to-next-occurrence stays on ⌘G / ⇧⌘G and appears on the active chip on hover. Four permanent arrow pairs for one navigation action is eight controls doing one job.</td></tr>
+      <tr><td><b>Errors chip carries a count</b></td><td>The one filter with real signal. <code>Errors 2</code> tells you whether to press it; a bare dot doesn't. Zero errors, no count, dimmed chip.</td></tr>
+      <tr><td><b>A− / A+, Copy, Export</b></td><td>Into the <code>⋯</code> menu. Font size is set once; ⌘+ / ⌘− already work. Copy and Export are both "get this out of the app" and read better as one menu section than two buttons.</td></tr>
+      <tr><td><b>ID keeps its place</b></td><td>The one piece of identity a vibe coder genuinely copies. Losing the "ID" prefix saves width — <code>⧉ a277</code> is unambiguous next to a copy glyph.</td></tr>
+    </table>
+  </section>
+
+  <div class="close">
+    <h2>If you only ship three things</h2>
+    <ol>
+      <li><b>Collapse the transcript toolbar to one row</b> and move view mode into the overflow menu. This is the single largest weight reduction on screen and touches no data.</li>
+      <li><b>Empty the main toolbar down to source pills, search, three view toggles, and a menu.</b> Nothing is removed from the app — it moves to where its frequency says it belongs.</li>
+      <li><b>Pick one warm neutral for all chrome</b> so light mode stops looking like two apps stitched together, and drop rows that can never have data.</li>
+    </ol>
+    <p class="note" style="margin-top:18px">Everything here is presentation. The one item that needs a decision beyond taste is the Delegated row, because hiding it is a claim about the data: it is correct for Codex today because the accumulator cannot produce delegated records, and that would have to be revisited if Codex ever reports subagent usage.</p>
+  </div>
+
+</div>
