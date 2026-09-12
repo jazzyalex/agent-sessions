@@ -160,7 +160,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             validator.INFO_PLIST,
             skip_xcstringstool=False,
         )
-        self.assertEqual(counts, (1299, 6, {"zh-Hans"}))
+        self.assertEqual(counts, (1313, 6, {"zh-Hans"}))
 
     def test_current_catalog_uses_current_product_terms(self) -> None:
         strings = validator.load_catalog(validator.LOCALIZABLE)["strings"]

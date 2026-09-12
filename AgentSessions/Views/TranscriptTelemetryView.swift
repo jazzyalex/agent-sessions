@@ -250,6 +250,11 @@ enum TranscriptTelemetryPresentation {
     }
 }
 
+private func localizedRequestCount(_ count: Int) -> String {
+    String(localized: "\(count) request",
+           comment: "Count of requests represented by a Session info summary or pricing row.")
+}
+
 struct TranscriptTelemetryView: View {
     let telemetry: SessionTelemetry?
     let blocks: [SessionTranscriptBuilder.LogicalBlock]
@@ -358,7 +363,7 @@ struct TranscriptTelemetryView: View {
                 }
                 Spacer()
                 if requests > 0 {
-                    Text("\(requests) request\(requests == 1 ? "" : "s")")
+                    Text(localizedRequestCount(requests))
                         .font(SessionInfoType.caption)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -387,7 +392,7 @@ struct TranscriptTelemetryView: View {
             return .absent("This session recorded no delegated work.")
         }
         let compact = descendants.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
-        let requests = "\(delegatedRequestCount) request\(delegatedRequestCount == 1 ? "" : "s")"
+        let requests = localizedRequestCount(delegatedRequestCount)
         return .init(text: "\(compact) · \(requests)",
                      help: "\(descendants.formatted()) tokens across \(requests), recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.")
     }
@@ -472,7 +477,7 @@ struct TranscriptTelemetryView: View {
 
     private func pricedAsValue(_ row: TelemetryPricingBasis) -> TranscriptTelemetryPresentation.Value {
         .init(text: "\(row.model ?? "—") · \(row.speed)",
-              help: "\(row.requestCount) request\(row.requestCount == 1 ? "" : "s") priced on this basis.")
+              help: "\(localizedRequestCount(row.requestCount)) priced on this basis.")
     }
 
     private func contextValue(_ row: TelemetryPricingBasis) -> TranscriptTelemetryPresentation.Value {

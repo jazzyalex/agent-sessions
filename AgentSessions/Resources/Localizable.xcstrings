@@ -1,6 +1,268 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Hide Session info (⇧⌘I)": {
+      "comment": "Tooltip for the button that closes the Session info inspector. Preserve the keyboard shortcut symbols.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Session info (⇧⌘I)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏会话信息（⇧⌘I）"
+          }
+        }
+      }
+    },
+    "How this was estimated": {
+      "comment": "Title of the expandable Session info section that explains estimate inputs and provenance.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How this was estimated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "估算方式"
+          }
+        }
+      }
+    },
+    "Loading session information…": {
+      "comment": "Status shown while the Session info inspector loads telemetry from the selected transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading session information…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入会话信息…"
+          }
+        }
+      }
+    },
+    "No changes recorded": {
+      "comment": "Empty state for a Session info configuration-history timeline.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No changes recorded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录任何更改"
+          }
+        }
+      }
+    },
+    "No supported telemetry, or the transcript could not be read.": {
+      "comment": "Session info empty state when the selected source has no supported telemetry or its transcript is unreadable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported telemetry, or the transcript could not be read."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有受支持的遥测数据，或无法读取会话记录。"
+          }
+        }
+      }
+    },
+    "Session info": {
+      "comment": "Title of the inspector that summarizes the selected session's configuration, usage, and estimated cost.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话信息"
+          }
+        }
+      }
+    },
+    "Show this change in the transcript": {
+      "comment": "Tooltip for a Session info history row that scrolls to the corresponding transcript marker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show this change in the transcript"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话记录中显示此更改"
+          }
+        }
+      }
+    },
+    "Started configuration is inferred from the first record, not a session-start setting.": {
+      "comment": "Session info note explaining that the initial configuration is inferred rather than explicitly recorded at session start.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started configuration is inferred from the first record, not a session-start setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动配置根据第一条记录推断，并非会话启动时的设置。"
+          }
+        }
+      }
+    },
+    "tokens": {
+      "comment": "Unit label beside a session's total token count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "令牌"
+          }
+        }
+      }
+    },
+    "%@: %@": {
+      "comment": "Label and value in a Session info detail row. Preserve both placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：%2$@"
+          }
+        }
+      }
+    },
+    "%lld request": {
+      "comment": "Count of requests represented by a Session info summary or pricing row.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld request"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld requests"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "API-equivalent": {
+      "comment": "Caption for an estimated cost calculated at published API prices rather than a subscription bill.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 等值费用"
+          }
+        }
+      }
+    },
+    "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier.": {
+      "comment": "Explanation of how Session info estimates API-equivalent cost. Standard names the assumed pricing tier.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "费用按每个请求的模型、速度、区域和上下文大小计算，然后按公布的 API 费率汇总。“标准”是一种定价假设，并非实际观测到的服务层级。"
+          }
+        }
+      }
+    },
+    "Estimates, not billing": {
+      "comment": "Session info footer clarifying that displayed costs are estimates rather than charges.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimates, not billing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅为估算，并非账单"
+          }
+        }
+      }
+    },
     "%@ %@ session": {
       "localizations": {
         "en": {
