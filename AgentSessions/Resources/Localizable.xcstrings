@@ -545,40 +545,6 @@
           }
         }
       },
-      "Not available": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Not available"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "不可用"
-            }
-          }
-        }
-      },
-      "Not provided": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Not provided"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未提供"
-            }
-          }
-        }
-      },
       "Output": {
         "comment": "User-visible Session info copy.",
         "localizations": {
@@ -660,23 +626,6 @@
             "stringUnit": {
               "state": "translated",
               "value": "计价依据"
-            }
-          }
-        }
-      },
-      "Provider-reported inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Provider-reported inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商报告的推理区域。"
             }
           }
         }
@@ -813,57 +762,6 @@
             "stringUnit": {
               "state": "translated",
               "value": "子代理模型"
-            }
-          }
-        }
-      },
-      "The provider did not record an inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider did not record an inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商未记录推理区域。"
-            }
-          }
-        }
-      },
-      "The provider recorded an empty inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider recorded an empty inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商记录的推理区域为空。"
-            }
-          }
-        }
-      },
-      "The provider reported that inference geography was unavailable.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider reported that inference geography was unavailable."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商报告推理地理位置不可用。"
             }
           }
         }
