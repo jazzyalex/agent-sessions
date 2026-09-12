@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1378
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1388
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "217181469c1ace5b554757d9196fbf66783a3b9831c4eafbd82821685cc2c385"
+    "c6be705bddda1fae546bd3368a55ff9511a1cdd030b621eb706372fd01f52bfd"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -118,7 +118,6 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "%lld%%",
     "(%lld%%)",
     "(%lld)",
-    "+",
     "/path/to/agent",
     "/path/to/agy",
     "/path/to/claude",
@@ -136,7 +135,6 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "/path/to/qwen",
     ">",
     "@jazzyalex",
-    "A",
     "AS",
     "F",
     "M",
@@ -163,7 +161,6 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "· %@",
     "—",
     "↻",
-    "−",
     "★",
 }
 FORMAT_TOKEN = re.compile(

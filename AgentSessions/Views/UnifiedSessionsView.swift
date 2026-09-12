@@ -981,7 +981,7 @@ struct UnifiedSessionsView: View {
 	    /// Flat "sidebar" tone for the Session-list pane — the standard window/chrome
 	    /// gray, one value step off the transcript's brighter text background, so the
 	    /// panes read as distinct without depending on column widths.
-	    private static let listPaneBackground = Color(nsColor: .windowBackgroundColor)
+	    private static let listPaneBackground = Surface.chrome
 
 	    /// A single 1px hairline at the list/transcript boundary, in the system
 	    /// `separatorColor` so it matches every other divider in the window and
@@ -1897,68 +1897,11 @@ struct UnifiedSessionsView: View {
                 UnifiedProjectFilterBadgeView(unified: unified)
             }
         }
+        // Ranked by how often a control is reached for without thinking. Two
+        // action glyphs, three view toggles, and one menu for everything that is
+        // looked for rather than reflexed at — a named menu row is more
+        // discoverable than an unlabelled glyph, not less.
         ToolbarItemGroup(placement: .automatic) {
-            ToolbarIconToggle(
-                isOn: $unified.showFavoritesOnly,
-                onSymbol: "star.fill",
-                offSymbol: "star",
-                help: "Show only saved sessions",
-                activeColor: .primary,
-                accessibilityLabel: "Saved"
-            )
-
-            AnalyticsButtonView(
-                isReady: analyticsReady,
-                phase: analyticsPhase,
-                isStale: analyticsIsStale
-            )
-
-            ToolbarGroupDivider()
-
-            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
-                ToolbarIcon(systemName: "terminal")
-            } action: {
-                if let s = selectedSession { resume(s) }
-            }
-            .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(!canResumeSelectedSession)
-            .accessibilityLabel(Text("Resume"))
-
-            ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
-                ToolbarIcon(systemName: "folder")
-            } action: {
-                if let s = selectedSession { openDir(s) }
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
-            .disabled(selectedSession == nil)
-            .accessibilityLabel(Text("Open Working Directory"))
-
-            ToolbarIconButton(help: "Refresh sessions list/index (core indexing, not Analytics) (⌘R)") { _ in
-                ZStack {
-                    ToolbarIcon(systemName: "arrow.clockwise")
-                        .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
-                    if unified.isIndexing || unified.isProcessingTranscripts {
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 7, height: 7)
-                            .offset(x: 8, y: -8)
-                    }
-                }
-            } action: {
-                activeCodexSessions.refreshNow()
-                unified.refresh()
-            }
-            .keyboardShortcut("r", modifiers: .command)
-            .accessibilityLabel(Text("Refresh"))
-
-            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
-                ToolbarIcon(systemName: "photo.on.rectangle")
-            } action: {
-                showImagesForSelectedSession(showNoSelectionAlert: true)
-            }
-            .disabled(selectedSession == nil)
-            .accessibilityLabel(Text("Image Browser"))
-
             ToolbarIconButton(
                 help: liveSessionsFeatureEnabled
                     ? "Open the Quota Meter."
@@ -1971,7 +1914,18 @@ struct UnifiedSessionsView: View {
             .disabled(!liveSessionsFeatureEnabled)
             .accessibilityLabel(Text("Quota Meter"))
 
+            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
+                ToolbarIcon(systemName: "terminal")
+            } action: {
+                if let s = selectedSession { resume(s) }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .control])
+            .disabled(!canResumeSelectedSession)
+            .accessibilityLabel(Text("Resume"))
+
             ToolbarGroupDivider()
+
+            LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
 
             ToolbarIconToggle(
                 isOn: $showTranscriptWindow,
@@ -1982,33 +1936,91 @@ struct UnifiedSessionsView: View {
                 accessibilityLabel: "Transcript Window"
             )
 
+            // A meter, not an "about" glyph: the panel reports what the session
+            // consumed. `info.circle` reads as Help everywhere else in macOS and
+            // sat one slot from the sidebar toggle at identical weight.
             ToolbarIconToggle(
                 isOn: $showSessionInfo,
-                onSymbol: "info.circle.fill",
-                offSymbol: "info.circle",
+                onSymbol: "gauge.with.needle.fill",
+                offSymbol: "gauge.with.needle",
                 help: showSessionInfo ? "Hide Session info (⇧⌘I)" : "Show Session info (⇧⌘I)",
                 activeColor: .primary,
                 accessibilityLabel: "Session info"
             )
             .disabled(!showTranscriptWindow)
 
-            LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+            ToolbarGroupDivider()
 
-            ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
-                ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
-            } action: {
+            mainOverflowMenu
+        }
+    }
+
+    /// The analytics build state used to be a badge on a glyph. As a menu row it
+    /// says the state in words instead, which is the whole reason the item moved.
+    private var analyticsMenuTitle: String {
+        switch analyticsPhase {
+        case .queued, .building: return String(localized: "Statistics (building…)")
+        case .failed: return String(localized: "Statistics (last build failed)")
+        case .canceled: return String(localized: "Statistics (build canceled)")
+        case .ready, .idle:
+            if analyticsIsStale { return String(localized: "Statistics (update available)") }
+            return analyticsReady
+                ? String(localized: "Statistics")
+                : String(localized: "Statistics (build required)")
+        }
+    }
+
+    /// Everything below daily use. Each item keeps its shortcut and gains a name.
+    @ViewBuilder
+    private var mainOverflowMenu: some View {
+        Menu {
+            Button(analyticsMenuTitle) {
+                NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
+            }
+            .keyboardShortcut("k", modifiers: .command)
+
+            Divider()
+
+            Button("Reveal Working Directory in Finder") {
+                if let s = selectedSession { openDir(s) }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(selectedSession == nil)
+
+            Button("Image Browser") {
+                showImagesForSelectedSession(showNoSelectionAlert: true)
+            }
+            .disabled(selectedSession == nil)
+
+            Divider()
+
+            Button(unified.isIndexing || unified.isProcessingTranscripts
+                   ? "Reindexing…" : "Reindex Now") {
+                activeCodexSessions.refreshNow()
+                unified.refresh()
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(unified.isIndexing || unified.isProcessingTranscripts)
+
+            Divider()
+
+            Button(effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") {
                 codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
             }
-            .accessibilityLabel(Text("Toggle Dark/Light"))
 
-            ToolbarIconButton(help: "Open settings for appearance, indexing, and agents (⌘,)") { isHovering in
-                ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
-            } action: {
-                PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
+            Button("Settings…") {
+                PreferencesWindowController.shared.show(indexer: codexIndexer,
+                                                        updaterController: updaterController)
             }
             .keyboardShortcut(",", modifiers: .command)
-            .accessibilityLabel(Text("Settings"))
+        } label: {
+            ToolbarIcon(systemName: "ellipsis")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("More options")
+        .accessibilityLabel(Text("More options"))
     }
 
     /// Enabled agents other than Codex/Claude (which always render as segmented pills),
@@ -4413,6 +4425,37 @@ private struct ProjectCellView: View {
     }
 }
 
+/// A scope toggle living inside the search field. Reads as part of the query,
+/// which is what it is, instead of as another toolbar action.
+private struct SearchScopeChip: View {
+    @Binding var isOn: Bool
+    let symbol: String
+    let title: LocalizedStringResource
+    let help: LocalizedStringResource
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? "\(symbol).fill" : symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(isOn ? Color.accentColor.opacity(0.14) : Color.clear)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(Text(help))
+        .accessibilityLabel(Text(title))
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
@@ -4466,6 +4509,15 @@ private struct UnifiedSearchFiltersView: View {
                     .buttonStyle(.plain)
                     .help("Clear search (⎋)")
                 }
+
+                // Saved is a scope on the result set, so it belongs inside the
+                // field with the other scoping, not as a separate toolbar glyph.
+                Divider().frame(height: 14)
+
+                SearchScopeChip(isOn: $unified.showFavoritesOnly,
+                                symbol: "star",
+                                title: "Saved",
+                                help: "Show only saved sessions")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)

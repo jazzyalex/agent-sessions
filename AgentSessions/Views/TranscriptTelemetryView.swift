@@ -134,8 +134,12 @@ enum TranscriptTelemetryPresentation {
             return Value(text: "≈\(points.formatted(.number.precision(.fractionLength(2)).locale(locale)))%",
                          help: localized("Account-calibrated estimate of this session's share of the weekly allowance.", locale: locale))
         }
-        return .absent(telemetry.weeklyQuotaEstimate?.unavailableReason
-                       ?? localized("No compatible weekly calibration for this account.", locale: locale))
+        // This row survives its own absence because the reader can act on it:
+        // the estimate needs an account-window calibration, and the Quota Meter
+        // is where one comes from. Naming the fix is what earns the line.
+        let reason = telemetry.weeklyQuotaEstimate?.unavailableReason
+            ?? localized("No compatible weekly calibration for this account.", locale: locale)
+        return .absent(reason + " " + localized("Open the Quota Meter to calibrate.", locale: locale))
     }
 
     static func tokensValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
@@ -396,7 +400,7 @@ struct TranscriptTelemetryView: View {
             Divider()
             footer
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Surface.chrome)
     }
 
     private var header: some View {
@@ -475,17 +479,25 @@ struct TranscriptTelemetryView: View {
             SessionInfoRow(label: isSubagent ? "Subagent model" : "Model",
                            value: TranscriptTelemetryPresentation.configurationValue(
                             telemetry.currentConfiguration, locale: locale))
+            // Weekly quota keeps its row even when absent: the reader can act on
+            // it. Calibration is what is missing, and the tooltip names the fix.
             SessionInfoRow(label: "Weekly quota",
                            value: TranscriptTelemetryPresentation.weeklyValue(telemetry, locale: locale))
-            SessionInfoRow(label: "Delegated", value: delegatedValue(telemetry))
+            // Delegated does NOT keep its row. A permanent em dash teaches the
+            // reader to ignore the line, and for a provider that cannot record
+            // delegated work the dash is permanent by construction.
+            if let delegated = delegatedValue(telemetry) {
+                SessionInfoRow(label: "Delegated to subagents", value: delegated)
+            }
         }
     }
 
-    private func delegatedValue(_ telemetry: SessionTelemetry) -> TranscriptTelemetryPresentation.Value {
-        guard let descendants = telemetry.descendantTopLineTokens else {
-            return .absent(TranscriptTelemetryPresentation.localized(
-                "This session recorded no delegated work.", locale: locale))
-        }
+    /// nil when the row must not be drawn at all — this transcript records no
+    /// delegated work, either because the session delegated none or because the
+    /// provider cannot express it. Both are the unremarkable default; only the
+    /// exception is worth a line.
+    private func delegatedValue(_ telemetry: SessionTelemetry) -> TranscriptTelemetryPresentation.Value? {
+        guard let descendants = telemetry.descendantTopLineTokens else { return nil }
         let compact = descendants.formatted(
             .number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
         return .init(

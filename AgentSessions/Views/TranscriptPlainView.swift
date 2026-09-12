@@ -613,6 +613,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // tell the block controller which occurrence to scroll to).
     @State private var roleJumpToken: Int = 0
     @State private var roleJumpRole: TranscriptRoleFilter? = nil
+    /// Chip under the pointer, so jump chevrons appear only where they apply.
+    @State private var hoveredRoleFilter: TranscriptRoleFilter? = nil
     @State private var roleJumpDirection: Int = 1
 
     // Inline session images for Rich (.blocks) mode — mirrors SessionTerminalView's
@@ -878,12 +880,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             VStack(spacing: 0) {
                 toolbar(session: session)
                     .frame(maxWidth: .infinity)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(Surface.chrome)
                 Divider()
-                if viewMode == .blocks {
-                    sessionRoleFilterBar(session: session)
-                    Divider()
-                }
                 ZStack {
                     if viewMode == .blocks {
                         blocksTranscriptView(session: session)
@@ -896,11 +894,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The one lifted surface in the window. Stated rather than
+                // inherited: the block table draws no background of its own, so
+                // without this the transcript silently took the window's chrome.
+                .background(Surface.paper)
                 Divider()
                 transcriptSessionIdentityStrip(session: session)
                     .frame(height: 24)
                     .frame(maxWidth: .infinity)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(Surface.chrome)
             }
             .onAppear {
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -1232,10 +1234,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         persistRoleFilters()
     }
 
-    private var allRoleFiltersActive: Bool {
-        activeRoleFilters.count == TranscriptRoleFilter.allCases.count
-    }
-
     private func roleFilterLabel(_ role: TranscriptRoleFilter) -> String {
         switch role {
         case .user: return "You"
@@ -1295,9 +1293,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // A role's occurrences are reachable when it's shown (explicitly on, or
         // the "no filter" empty-set state) and it actually has ≥1 block.
         let shown = activeRoleFilters.isEmpty || isOn
-        let navEnabled = shown && roleOccurrenceCount(role) > 0
+        let count = roleOccurrenceCount(role)
+        let navEnabled = shown && count > 0
         let label = roleFilterLabel(role)
-        return HStack(spacing: 4) {
+        // Errors is the only role whose count changes the decision to press it,
+        // so it is the only one that carries a number. A session with no errors
+        // shows a dimmed chip and no count rather than a reassuring zero.
+        let showsCount = role == .errors && count > 0
+        // The jump chevrons appear on the chip being navigated, not on all four
+        // at once: eight permanent controls for one action was most of the old
+        // second row's weight. ⌘G / ⇧⌘G stay available regardless.
+        let showsNav = navEnabled && (isOn || hoveredRoleFilter == role)
+        return HStack(spacing: 3) {
             Button(action: { toggleRoleFilter(role) }) {
                 HStack(spacing: 6) {
                     Circle()
@@ -1307,6 +1314,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(isOn ? Color.primary : Color.secondary)
                         .lineLimit(1)
+                    if showsCount {
+                        Text("\(count)")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(roleFilterAccent(role, source: source))
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -1319,45 +1332,22 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .buttonStyle(.plain)
             .help(isOn ? "Hide \(label) blocks" : "Show \(label) blocks")
 
-            HStack(spacing: 1) {
-                roleJumpChevron("chevron.up", role: role, direction: -1,
-                                enabled: navEnabled, help: "Previous \(label)")
-                roleJumpChevron("chevron.down", role: role, direction: 1,
-                                enabled: navEnabled, help: "Next \(label)")
+            if showsNav {
+                HStack(spacing: 1) {
+                    roleJumpChevron("chevron.up", role: role, direction: -1,
+                                    enabled: navEnabled, help: "Previous \(label)")
+                    roleJumpChevron("chevron.down", role: role, direction: 1,
+                                    enabled: navEnabled, help: "Next \(label)")
+                }
             }
         }
-    }
-
-    private func sessionRoleFilterBar(session: Session) -> some View {
-        HStack(spacing: 10) {
-            Button(action: {
-                activeRoleFilters = Set(TranscriptRoleFilter.allCases)
-                persistRoleFilters()
-            }) {
-                Text("All")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(allRoleFiltersActive ? Color.accentColor : Color.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(allRoleFiltersActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3), lineWidth: 1)
-                    )
-                    .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                hoveredRoleFilter = role
+            } else if hoveredRoleFilter == role {
+                hoveredRoleFilter = nil
             }
-            .buttonStyle(.plain)
-            .help("Show all block types")
-
-            ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
-                sessionRoleFilterChip(role, source: session.source)
-            }
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor))
     }
 
     private func blocksTranscriptView(session: Session) -> some View {
@@ -1443,41 +1433,59 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         VStack(spacing: 0) {
             toolbarTopRow(session: session, placeUnifiedPillInline: placeUnifiedPillInline)
                 .frame(height: 44)
-                .background(Color(NSColor.controlBackgroundColor))
+                .background(Surface.chrome)
 
             if isFindBarVisible {
                 findBar
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(Surface.chrome)
             }
 
             if isUnifiedNavigationVisible && !placeUnifiedPillInline {
                 unifiedNavigationPill
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(Surface.chrome)
             }
         }
     }
 
     private func toolbarTopRow(session: Session, placeUnifiedPillInline: Bool) -> some View {
         HStack(spacing: 0) {
-            // === LEADING GROUP: View mode + JSON status + ID ===
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    viewModeMenu
-
-                    if isJSONMode && isBuildingJSON {
-                        HStack(spacing: 6) {
-                            Image(systemName: "hourglass")
-                            Text("Building JSON view…")
-                        }
-                        .font(TranscriptToolbarStyle.compactFont)
-                        .foregroundStyle(.secondary)
+            // === LEADING GROUP: role filters ===
+            // Filters lead because they are used constantly. View mode moved into
+            // the overflow menu — a once-a-year choice was holding the primary slot.
+            HStack(alignment: .center, spacing: 10) {
+                if viewMode == .blocks {
+                    ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
+                        sessionRoleFilterChip(role, source: session.source)
                     }
                 }
 
+                if isJSONMode && isBuildingJSON {
+                    HStack(spacing: 6) {
+                        Image(systemName: "hourglass")
+                        Text("Building JSON view…")
+                    }
+                    .font(TranscriptToolbarStyle.compactFont)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, TranscriptToolbarStyle.leadingPadding)
+
+            Spacer(minLength: 12)
+
+            if placeUnifiedPillInline && isUnifiedNavigationVisible {
+                unifiedNavigationPillBody
+                    .frame(minWidth: 240, maxWidth: 520)
+                    .layoutPriority(2)
+            }
+
+            Spacer(minLength: 12)
+
+            // === TRAILING GROUP: identity, export, find, overflow ===
+            HStack(spacing: 12) {
                 HStack(spacing: 10) {
                     if let fullID = sessionIDExtractor(session) {
                         let displayLast4 = String(fullID.suffix(4))
@@ -1504,45 +1512,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     if StarredSessionsStore().contains(id: session.id, source: session.source) {
                         pinnedBadge(session: session)
                     }
-                }
-                .padding(.leading, 12)
-            }
-            .padding(.leading, TranscriptToolbarStyle.leadingPadding)
-
-            Spacer(minLength: 12)
-
-            if placeUnifiedPillInline && isUnifiedNavigationVisible {
-                unifiedNavigationPillBody
-                    .frame(minWidth: 240, maxWidth: 520)
-                    .layoutPriority(2)
-            }
-
-            Spacer(minLength: 12)
-
-            // === TRAILING GROUP: Copy + Find ===
-            HStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Button(action: { adjustFont(-1) }) {
-                        HStack(spacing: 2) {
-                            Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut("-", modifiers: .command)
-                    .help("Decrease text size (⌘−)")
-                    .accessibilityLabel("Decrease Text Size")
-
-                    Button(action: { adjustFont(1) }) {
-                        HStack(spacing: 2) {
-                            Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut("+", modifiers: .command)
-                    .help("Increase text size (⌘+)")
-                    .accessibilityLabel("Increase Text Size")
                 }
 
                 Divider().frame(height: 20)
@@ -1588,6 +1557,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .buttonStyle(.borderless)
                 .help("Find in session (⌘F)")
                 .accessibilityLabel("Find in session")
+
+                Divider().frame(height: 20)
+
+                transcriptOverflowMenu
             }
             .padding(.trailing, 12)
         }
@@ -1630,31 +1603,48 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         .help(transcriptSessionIdentityHelp(for: session))
     }
 
-    private var viewModeMenu: some View {
+    /// Everything the transcript toolbar used to show at full weight but that is
+    /// reached for by thinking rather than by muscle memory: view mode and text
+    /// size. A named menu row is more discoverable than an unlabelled glyph.
+    private var transcriptOverflowMenu: some View {
         Menu {
-            viewModeMenuButton(.blocks,
-                               title: "Session",
-                               help: "Structured cards with collapsible tool calls.")
-            viewModeMenuButton(.transcript,
-                               title: "Text",
-                               help: "Merged chat and tools.")
-            viewModeMenuButton(.json,
-                               title: "JSON",
-                               help: "Formatted session JSON for readability.")
+            Menu {
+                viewModeMenuButton(.blocks,
+                                   title: "Session",
+                                   help: "Structured cards with collapsible tool calls.",
+                                   shortcut: "1")
+                viewModeMenuButton(.transcript,
+                                   title: "Text",
+                                   help: "Merged chat and tools.",
+                                   shortcut: "2")
+                viewModeMenuButton(.json,
+                                   title: "JSON",
+                                   help: "Formatted session JSON for readability.",
+                                   shortcut: "3")
+            } label: {
+                Text("View as")
+            }
+
+            Divider()
+
+            Button("Increase Text Size") { adjustFont(1) }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("Decrease Text Size") { adjustFont(-1) }
+                .keyboardShortcut("-", modifiers: .command)
         } label: {
-            Text(viewModeMenuTitle)
-                .font(TranscriptToolbarStyle.baseFont)
+            Image(systemName: "ellipsis")
         }
-        .menuStyle(.button)
-        .controlSize(.regular)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize(horizontal: true, vertical: false)
-        .help("Choose transcript view")
-        .accessibilityLabel("View Style")
+        .help("More transcript options")
+        .accessibilityLabel("More transcript options")
     }
 
     private func viewModeMenuButton(_ mode: SessionViewMode,
                                     title: LocalizedStringResource,
-                                    help: LocalizedStringResource) -> some View {
+                                    help: LocalizedStringResource,
+                                    shortcut: KeyEquivalent) -> some View {
         Button {
             setViewMode(mode)
         } label: {
@@ -1668,16 +1658,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Text(title)
             }
         }
+        .keyboardShortcut(shortcut, modifiers: .command)
         .help(Text(help))
-    }
-
-    private var viewModeMenuTitle: LocalizedStringResource {
-        switch viewMode {
-        case .blocks: return "Session"
-        case .terminal: return "Session" // unreachable post-migration; resolves to .blocks
-        case .transcript: return "Text"
-        case .json: return "JSON"
-        }
     }
 
     private func setViewMode(_ mode: SessionViewMode) {
