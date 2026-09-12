@@ -19,14 +19,15 @@ enum SessionInfoPalette {
 }
 
 struct SessionInfoSection<Content: View>: View {
-    let title: String?
+    let title: LocalizedStringResource?
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutTokens.sm) {
             if let title {
-                Text(title.uppercased())
+                Text(title)
                     .font(SessionInfoType.sectionHead)
+                    .textCase(.uppercase)
                     .tracking(0.6)
                     .foregroundStyle(.secondary)
             }
@@ -39,24 +40,27 @@ struct SessionInfoSection<Content: View>: View {
 /// A label/value line: secondary label left, tabular value right. The value is
 /// dimmed when it is the em dash, so an absent field reads as absent at a glance.
 struct SessionInfoRow: View {
-    let label: String
+    let label: String.LocalizationValue
     let value: TranscriptTelemetryPresentation.Value
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: LayoutTokens.md) {
-            Text(label)
+            Text(LocalizedStringResource(label))
                 .font(SessionInfoType.row)
                 .foregroundStyle(.secondary)
             Spacer(minLength: LayoutTokens.sm)
-            Text(value.text)
+            Text(verbatim: value.text)
                 .font(SessionInfoType.row)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
                 .foregroundStyle(value.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         }
-        .help(value.help)
+        .help(Text(verbatim: value.help))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label): \(value.text == "—" ? "unavailable" : value.text)")
+        .accessibilityLabel(Text(verbatim: TranscriptTelemetryPresentation.rowAccessibilityLabel(
+            label: label,
+            value: value.text
+        )))
     }
 }
 
@@ -64,6 +68,7 @@ struct SessionInfoRow: View {
 /// a real-but-tiny share (output is routinely 0.3%) does not vanish.
 struct TokenShareBar: View {
     let share: TelemetryTokenShare
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutTokens.xs) {
@@ -83,20 +88,13 @@ struct TokenShareBar: View {
                 legend("Output", share.output, SessionInfoPalette.output)
             }
         }
-        .help(helpText)
+        .help(Text(verbatim: helpText))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(helpText)
+        .accessibilityLabel(Text(verbatim: helpText))
     }
 
     private var helpText: String {
-        var lines = ["Cached input \(share.cached.formatted()), fresh input \(share.fresh.formatted()), output \(share.output.formatted())."]
-        if share.cacheWriteTokens > 0 {
-            lines.append("Fresh includes \(share.cacheWriteTokens.formatted()) cache-write tokens.")
-        }
-        if share.reasoningTokens > 0 {
-            lines.append("Output includes \(share.reasoningTokens.formatted()) reasoning tokens.")
-        }
-        return lines.joined(separator: " ")
+        TranscriptTelemetryPresentation.tokenShareHelp(share, locale: locale)
     }
 
     private func segment(_ fraction: Double, width: CGFloat, color: AnyShapeStyle) -> some View {
@@ -105,14 +103,16 @@ struct TokenShareBar: View {
             .frame(width: fraction > 0 ? max(1, width * fraction) : 0)
     }
 
-    private func legend(_ name: String, _ tokens: Int, _ color: AnyShapeStyle) -> some View {
+    private func legend(_ name: LocalizedStringResource, _ tokens: Int, _ color: AnyShapeStyle) -> some View {
         HStack(spacing: LayoutTokens.xs) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(color)
                 .frame(width: 7, height: 7)
             // One fraction digit: plain compactName rounds 17,892,480 to "18M",
             // which reads as a suspiciously round number for a measured total.
-            Text("\(name) \(tokens.formatted(.number.notation(.compactName).precision(.fractionLength(0...1))))")
+            (Text(name) + Text(verbatim: " " + tokens.formatted(
+                .number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale)
+            )))
                 .font(SessionInfoType.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -126,6 +126,7 @@ struct TokenShareBar: View {
 struct SessionInfoHistoryList: View {
     let rows: [SessionInfoHistoryRow]
     let jump: ((Int) -> Void)?
+    @Environment(\.locale) private var locale
 
     /// Above this many rows the list scrolls in place instead of growing. Real
     /// sessions carry 0-3 changes, so the common case never nests a scroll view.
@@ -163,11 +164,11 @@ struct SessionInfoHistoryList: View {
             pip(row)
                 .padding(.top, 4)
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.title)
+                Text(verbatim: row.title)
                     .font(SessionInfoType.row)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
-                Text(subtitle(row))
+                Text(verbatim: subtitle(row))
                     .font(SessionInfoType.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -203,7 +204,6 @@ struct SessionInfoHistoryList: View {
     }
 
     private func subtitle(_ row: SessionInfoHistoryRow) -> String {
-        let time = row.observedAt.map { AppDateFormatting.transcriptTimestamp($0) } ?? "Time not recorded"
-        return row.isInferred ? time + " · inferred" : time
+        TranscriptTelemetryPresentation.historySubtitle(row, locale: locale)
     }
 }

@@ -178,12 +178,20 @@ final class SessionIndexer: ObservableObject {
 
     // Track sessions currently being reloaded to prevent duplicate loads
     private var reloadingSessionIDs: Set<String> = []
-    private let reloadLock = NSLock()
+    private let reloadLock = NSCondition()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var appendCursorsBySessionID: [String: CodexAppendCursor] = [:]
+    private struct TranscriptCacheBuildRequest {
+        let session: Session
+        let sourceStat: SessionFileStat?
+        let delayForSelection: Bool
+    }
+    private var pendingTranscriptCacheBuildsBySessionID: [String: TranscriptCacheBuildRequest] = [:]
+    private var activeTranscriptCacheBuilderSessionIDs: Set<String> = []
 #if DEBUG
     private var fullParseInvocationCountForTesting = 0
     private var appendParseInvocationCountForTesting = 0
+    private var transcriptCacheBuildHookForTesting: ((Session) -> Void)?
 #endif
     private var lastPrewarmSignatureByID: [String: Int] = [:]
     private var transcriptPrewarmTask: Task<Void, Never>? = nil
@@ -360,6 +368,32 @@ final class SessionIndexer: ObservableObject {
         defer { reloadLock.unlock() }
         return (fullParseInvocationCountForTesting, appendParseInvocationCountForTesting)
     }
+
+    func waitForReloadToFinishForTesting(id: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        reloadLock.lock()
+        defer { reloadLock.unlock() }
+        while reloadingSessionIDs.contains(id) {
+            guard reloadLock.wait(until: deadline) else { return false }
+        }
+        return true
+    }
+
+    func setTranscriptCacheBuildHookForTesting(_ hook: ((Session) -> Void)?) {
+        reloadLock.lock()
+        transcriptCacheBuildHookForTesting = hook
+        reloadLock.unlock()
+    }
+
+    func waitForTranscriptCacheBuildsToFinishForTesting(id: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        reloadLock.lock()
+        defer { reloadLock.unlock() }
+        while activeTranscriptCacheBuilderSessionIDs.contains(id) {
+            guard reloadLock.wait(until: deadline) else { return false }
+        }
+        return true
+    }
 #endif
 
     enum ReloadReason: String {
@@ -466,6 +500,7 @@ final class SessionIndexer: ObservableObject {
                 loadingTimer?.cancel()
                 self.reloadLock.lock()
                 self.reloadingSessionIDs.remove(id)
+                self.reloadLock.broadcast()
                 self.reloadLock.unlock()
             }
 
@@ -504,6 +539,7 @@ final class SessionIndexer: ObservableObject {
 
             if force,
                reason != .manualRefresh,
+               reason != .focusedSessionMonitor,
                hasLoadedEvents,
                let preParseStat,
                let lastReloadStat,
@@ -664,30 +700,12 @@ final class SessionIndexer: ObservableObject {
 
                         // Keep first-paint responsive; selection loads should not compete
                         // with the terminal renderer for the same transcript text.
-                        let cache = self.transcriptCache
-                        cache.remove(merged.id)
                         let cacheSourceStat = postParseStat ?? preParseStat
-                        Task.detached(priority: .utility) {
-                            if reason == .selection {
-                                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                                if let cacheSourceStat,
-                                   Self.fileStat(for: URL(fileURLWithPath: merged.filePath)) != cacheSourceStat {
-                                    return
-                                }
-                            }
-                            guard !Task.isCancelled else { return }
-                            let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-                            let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
-                                session: merged,
-                                filters: filters,
-                                mode: .normal
-                            )
-                            if let cacheSourceStat,
-                               Self.fileStat(for: URL(fileURLWithPath: merged.filePath)) != cacheSourceStat {
-                                return
-                            }
-                            cache.set(merged.id, transcript: transcript)
-                        }
+                        self.enqueueTranscriptCacheBuild(
+                            session: merged,
+                            sourceStat: cacheSourceStat,
+                            delayForSelection: reason == .selection
+                        )
 
                         if shouldSurfaceLoadingState {
                             // Clear loading state AFTER updating allSessions, with small delay for UI to render.
@@ -724,6 +742,101 @@ final class SessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    private func enqueueTranscriptCacheBuild(session: Session,
+                                             sourceStat: SessionFileStat?,
+                                             delayForSelection: Bool) {
+        let request = TranscriptCacheBuildRequest(session: session,
+                                                  sourceStat: sourceStat,
+                                                  delayForSelection: delayForSelection)
+        reloadLock.lock()
+        // Serialize invalidation with publication below. Otherwise an older builder
+        // could set stale text after a newer enqueue had already removed the cache.
+        transcriptCache.remove(session.id)
+        pendingTranscriptCacheBuildsBySessionID[session.id] = request
+        let shouldStart = activeTranscriptCacheBuilderSessionIDs.insert(session.id).inserted
+        reloadLock.unlock()
+        guard shouldStart else { return }
+        launchTranscriptCacheBuilder(for: session.id)
+    }
+
+    private func launchTranscriptCacheBuilder(for sessionID: String) {
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.runTranscriptCacheBuilds(for: sessionID)
+        }
+    }
+
+    private func takePendingTranscriptCacheBuild(for sessionID: String) -> TranscriptCacheBuildRequest? {
+        reloadLock.lock()
+        defer { reloadLock.unlock() }
+        guard let request = pendingTranscriptCacheBuildsBySessionID.removeValue(forKey: sessionID) else {
+            activeTranscriptCacheBuilderSessionIDs.remove(sessionID)
+            reloadLock.broadcast()
+            return nil
+        }
+        return request
+    }
+
+#if DEBUG
+    private func invokeTranscriptCacheBuildHookForTesting(with session: Session) {
+        reloadLock.lock()
+        let hook = transcriptCacheBuildHookForTesting
+        reloadLock.unlock()
+        hook?(session)
+    }
+#endif
+
+    private func publishTranscriptCacheBuild(_ transcript: String, sessionID: String) {
+        reloadLock.lock()
+        // Do not publish an older snapshot when another reload arrived while it
+        // was building. The same worker will consume the latest pending request.
+        if pendingTranscriptCacheBuildsBySessionID[sessionID] == nil {
+            transcriptCache.set(sessionID, transcript: transcript)
+        }
+        reloadLock.unlock()
+    }
+
+    private func finishCancelledTranscriptCacheBuilder(for sessionID: String) -> Bool {
+        reloadLock.lock()
+        activeTranscriptCacheBuilderSessionIDs.remove(sessionID)
+        // Reserve a successor before unlocking so a request that arrived as this
+        // task observed cancellation cannot be stranded behind a stale marker.
+        let shouldRestart = pendingTranscriptCacheBuildsBySessionID[sessionID] != nil
+            && activeTranscriptCacheBuilderSessionIDs.insert(sessionID).inserted
+        reloadLock.broadcast()
+        reloadLock.unlock()
+        return shouldRestart
+    }
+
+    private func runTranscriptCacheBuilds(for sessionID: String) async {
+        while !Task.isCancelled {
+            guard let request = takePendingTranscriptCacheBuild(for: sessionID) else { return }
+
+            if request.delayForSelection {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard !Task.isCancelled else { break }
+            }
+#if DEBUG
+            invokeTranscriptCacheBuildHookForTesting(with: request.session)
+#endif
+            guard !Task.isCancelled else { break }
+            let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+            let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                session: request.session,
+                filters: filters,
+                mode: .normal
+            )
+            guard !Task.isCancelled else { break }
+            if let sourceStat = request.sourceStat,
+               Self.fileStat(for: URL(fileURLWithPath: request.session.filePath)) != sourceStat {
+                continue
+            }
+            publishTranscriptCacheBuild(transcript, sessionID: sessionID)
+        }
+
+        let shouldRestart = finishCancelledTranscriptCacheBuilder(for: sessionID)
+        if shouldRestart { launchTranscriptCacheBuilder(for: sessionID) }
     }
 
     // Parse all lightweight sessions (for Analytics or full-index use cases)

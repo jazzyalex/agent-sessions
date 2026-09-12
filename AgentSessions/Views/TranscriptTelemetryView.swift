@@ -61,6 +61,11 @@ enum TranscriptTelemetryLoadRequest {
 enum TranscriptTelemetryPresentation {
     static let visibilityKey = "ShowSessionInfo"
 
+    static func localized(_ resource: String.LocalizationValue,
+                          locale: Locale = .current) -> String {
+        String(localized: resource, locale: locale)
+    }
+
     /// A displayable value plus the explanation that belongs in its tooltip.
     /// An absent value is always the em dash — the reason never occupies layout.
     struct Value: Equatable {
@@ -74,9 +79,12 @@ enum TranscriptTelemetryPresentation {
         "\(value?.model ?? "—") · \(value?.reasoningEffort ?? "—")"
     }
 
-    static func change(_ value: ConfigurationChange) -> String {
-        let field = value.field == .model ? "Model changed" : "Thinking effort changed"
-        return "\(field): \(value.oldValue ?? "Unavailable") → \(value.newValue ?? "Unavailable")"
+    static func change(_ value: ConfigurationChange, locale: Locale = .current) -> String {
+        let old = value.oldValue ?? localized("Unavailable", locale: locale)
+        let new = value.newValue ?? localized("Unavailable", locale: locale)
+        return value.field == .model
+            ? localized("Model changed: \(old) → \(new)", locale: locale)
+            : localized("Thinking effort changed: \(old) → \(new)", locale: locale)
     }
 
     static func tokens(_ telemetry: SessionTelemetry) -> Int? {
@@ -88,47 +96,76 @@ enum TranscriptTelemetryPresentation {
 
     // MARK: - Displayable values
 
-    static func costValue(_ telemetry: SessionTelemetry) -> Value {
+    static func costValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         if let dollars = telemetry.costEstimate?.apiEquivalentUSD {
             return Value(
                 text: dollars.formatted(.currency(code: "USD").precision(.fractionLength(2))),
-                help: "API-equivalent estimate at published rates: "
-                    + dollars.formatted(.number.precision(.fractionLength(4)))
-                    + " USD. Not a subscription charge.")
+                help: localized(
+                    "API-equivalent estimate at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Not a subscription charge.",
+                    locale: locale))
         }
         let reasons = (telemetry.costEstimate?.unpricedModels ?? [])
             + (telemetry.costEstimate?.missingPriceComponents ?? [])
         return .absent(reasons.isEmpty
-                       ? "No priceable usage was recorded in this transcript."
-                       : "No price entry for: " + reasons.joined(separator: ", "))
+                       ? localized("No priceable usage was recorded in this transcript.", locale: locale)
+                       : localized("No price entry for: \(reasons.joined(separator: ", "))", locale: locale))
     }
 
-    static func weeklyValue(_ telemetry: SessionTelemetry) -> Value {
+    static func weeklyValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         if let estimate = telemetry.weeklyQuotaEstimate,
            estimate.status == .estimated, let points = estimate.percentPoints {
-            return Value(text: "≈\(points.formatted(.number.precision(.fractionLength(2))))%",
-                         help: "Account-calibrated estimate of this session's share of the weekly allowance.")
+            return Value(text: "≈\(points.formatted(.number.precision(.fractionLength(2)).locale(locale)))%",
+                         help: localized("Account-calibrated estimate of this session's share of the weekly allowance.", locale: locale))
         }
         return .absent(telemetry.weeklyQuotaEstimate?.unavailableReason
-                       ?? "No compatible weekly calibration for this account.")
+                       ?? localized("No compatible weekly calibration for this account.", locale: locale))
     }
 
-    static func tokensValue(_ telemetry: SessionTelemetry) -> Value {
+    static func tokensValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         guard let total = tokens(telemetry) else {
-            return .absent("This transcript records no usage.")
+            return .absent(localized("This transcript records no usage.", locale: locale))
         }
-        return Value(text: total.formatted(),
-                     help: "Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.")
+        return Value(text: total.formatted(.number.locale(locale)),
+                     help: localized("Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.", locale: locale))
     }
 
-    static func configurationValue(_ value: SessionConfiguration?) -> Value {
+    static func configurationValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value {
         guard let value, value.model != nil || value.reasoningEffort != nil else {
-            return .absent("This transcript records no model or effort setting.")
+            return .absent(localized("This transcript records no model or effort setting.", locale: locale))
         }
         return Value(text: configuration(value),
                      help: value.provenance == .inferredFirstObservation
-                         ? "Inferred from the first record, not a session-start setting."
-                         : "Recorded by the provider.")
+                         ? localized("Inferred from the first record, not a session-start setting.", locale: locale)
+                         : localized("Recorded by the provider.", locale: locale))
+    }
+
+    static func rowAccessibilityLabel(label: String.LocalizationValue,
+                                      value: String,
+                                      locale: Locale = .current) -> String {
+        let localizedLabel = localized(label, locale: locale)
+        if value == "—" {
+            return localized("\(localizedLabel): unavailable", locale: locale)
+        }
+        return localized("\(localizedLabel): \(value)", locale: locale)
+    }
+
+    static func tokenShareHelp(_ share: TelemetryTokenShare,
+                               locale: Locale = .current) -> String {
+        let cached = share.cached.formatted(.number.locale(locale))
+        let fresh = share.fresh.formatted(.number.locale(locale))
+        let output = share.output.formatted(.number.locale(locale))
+        var lines = [localized(
+            "Cached input \(cached), fresh input \(fresh), output \(output).",
+            locale: locale)]
+        if share.cacheWriteTokens > 0 {
+            let writes = share.cacheWriteTokens.formatted(.number.locale(locale))
+            lines.append(localized("Fresh includes \(writes) cache-write tokens.", locale: locale))
+        }
+        if share.reasoningTokens > 0 {
+            let reasoning = share.reasoningTokens.formatted(.number.locale(locale))
+            lines.append(localized("Output includes \(reasoning) reasoning tokens.", locale: locale))
+        }
+        return lines.joined(separator: " ")
     }
 
     // MARK: - Grouped evidence
@@ -207,14 +244,15 @@ enum TranscriptTelemetryPresentation {
     }
 
     static func markers(changes: [ConfigurationChange],
-                        blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [Int: [String]] {
+                        blocks: [SessionTranscriptBuilder.LogicalBlock],
+                        locale: Locale = .current) -> [Int: [String]] {
         var result: [Int: [String]] = [:]
         let anchors = Self.anchors(blocks)
         for change in changes {
             guard let target = anchorBlockIndex(change: change, anchors: anchors,
                                                 blockCount: blocks.count) else { continue }
             let timestamp = change.observedAt.map { AppDateFormatting.transcriptTimestamp($0) + " · " } ?? ""
-            result[target, default: []].append(timestamp + Self.change(change))
+            result[target, default: []].append(timestamp + Self.change(change, locale: locale))
         }
         return result
     }
@@ -222,7 +260,8 @@ enum TranscriptTelemetryPresentation {
     /// The started baseline (when one is known) followed by every recorded change,
     /// in transcript order.
     static func historyRows(telemetry: SessionTelemetry,
-                            blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [SessionInfoHistoryRow] {
+                            blocks: [SessionTranscriptBuilder.LogicalBlock],
+                            locale: Locale = .current) -> [SessionInfoHistoryRow] {
         var rows: [SessionInfoHistoryRow] = []
         let anchors = Self.anchors(blocks)
         if let initial = telemetry.initialConfiguration,
@@ -230,17 +269,21 @@ enum TranscriptTelemetryPresentation {
             rows.append(SessionInfoHistoryRow(
                 id: 0,
                 kind: .started,
-                title: "Started " + configuration(initial),
+                title: localized("Started \(configuration(initial))", locale: locale),
                 observedAt: initial.observedAt,
                 isInferred: initial.provenance == .inferredFirstObservation,
                 blockIndex: anchors.first?.block))
         }
         for (offset, change) in telemetry.configurationChanges.enumerated() {
-            let field = change.field == .model ? "Model" : "Thinking effort"
+            let old = change.oldValue ?? "—"
+            let new = change.newValue ?? "—"
+            let title = change.field == .model
+                ? localized("Model \(old) → \(new)", locale: locale)
+                : localized("Thinking effort \(old) → \(new)", locale: locale)
             rows.append(SessionInfoHistoryRow(
                 id: offset + 1,
                 kind: .change,
-                title: "\(field) \(change.oldValue ?? "—") → \(change.newValue ?? "—")",
+                title: title,
                 observedAt: change.observedAt,
                 isInferred: false,
                 blockIndex: anchorBlockIndex(change: change, anchors: anchors,
@@ -248,10 +291,40 @@ enum TranscriptTelemetryPresentation {
         }
         return rows
     }
+
+    static func historySubtitle(_ row: SessionInfoHistoryRow,
+                                locale: Locale = .current) -> String {
+        let time = row.observedAt.map { AppDateFormatting.transcriptTimestamp($0) }
+            ?? localized("Time not recorded", locale: locale)
+        return row.isInferred
+            ? localized("\(time) · inferred", locale: locale)
+            : time
+    }
+
+    static func pricedOnBasisHelp(_ requestCount: Int,
+                                  locale: Locale = .current) -> String {
+        localized("\(requestCount) request priced on this basis.", locale: locale)
+    }
+
+    static func delegatedSummary(compactTokens: String,
+                                 requestCount: Int,
+                                 locale: Locale = .current) -> String {
+        localized("\(compactTokens) · \(requestCount) requests", locale: locale)
+    }
+
+    static func delegatedHelp(tokens: Int,
+                              requestCount: Int,
+                              locale: Locale = .current) -> String {
+        let formattedTokens = tokens.formatted(.number.locale(locale))
+        return localized(
+            "\(formattedTokens) tokens across \(requestCount) requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.",
+            locale: locale)
+    }
 }
 
-private func localizedRequestCount(_ count: Int) -> String {
+private func localizedRequestCount(_ count: Int, locale: Locale = .current) -> String {
     String(localized: "\(count) request",
+           locale: locale,
            comment: "Count of requests represented by a Session info summary or pricing row.")
 }
 
@@ -273,6 +346,7 @@ struct TranscriptTelemetryView: View {
     let close: () -> Void
 
     @AppStorage("SessionInfoBasisExpanded") private var basisExpanded = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -288,10 +362,12 @@ struct TranscriptTelemetryView: View {
                         history(telemetry)
                         Divider()
                         basis(telemetry)
+                    } else if loading {
+                        Text("Loading session information…")
+                            .font(SessionInfoType.row)
+                            .foregroundStyle(.secondary)
                     } else {
-                        Text(loading
-                             ? "Loading session information…"
-                             : "No supported telemetry, or the transcript could not be read.")
+                        Text("No supported telemetry, or the transcript could not be read.")
                             .font(SessionInfoType.row)
                             .foregroundStyle(.secondary)
                     }
@@ -335,13 +411,13 @@ struct TranscriptTelemetryView: View {
     /// One hero (cost) and one subhero (tokens). Two large numbers read as two
     /// competing answers; the token count explains the cost, so it sits under it.
     private func summary(_ telemetry: SessionTelemetry) -> some View {
-        let cost = TranscriptTelemetryPresentation.costValue(telemetry)
-        let tokens = TranscriptTelemetryPresentation.tokensValue(telemetry)
+        let cost = TranscriptTelemetryPresentation.costValue(telemetry, locale: locale)
+        let tokens = TranscriptTelemetryPresentation.tokensValue(telemetry, locale: locale)
         let share = TranscriptTelemetryPresentation.tokenShare(telemetry)
         let requests = telemetry.usageEvents.filter { $0.ownership == .session }.count
         return VStack(alignment: .leading, spacing: LayoutTokens.sm) {
             HStack(alignment: .firstTextBaseline, spacing: LayoutTokens.sm) {
-                Text(cost.text)
+                Text(verbatim: cost.text)
                     .font(SessionInfoType.hero)
                     .monospacedDigit()
                     .foregroundStyle(cost.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
@@ -353,7 +429,7 @@ struct TranscriptTelemetryView: View {
 
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: LayoutTokens.xs) {
-                    Text(tokens.text)
+                    Text(verbatim: tokens.text)
                         .font(SessionInfoType.subhero)
                         .monospacedDigit()
                         .foregroundStyle(tokens.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
@@ -363,7 +439,7 @@ struct TranscriptTelemetryView: View {
                 }
                 Spacer()
                 if requests > 0 {
-                    Text(localizedRequestCount(requests))
+                    Text(verbatim: localizedRequestCount(requests, locale: locale))
                         .font(SessionInfoType.caption)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -380,27 +456,33 @@ struct TranscriptTelemetryView: View {
     private func facts(_ telemetry: SessionTelemetry) -> some View {
         VStack(alignment: .leading, spacing: LayoutTokens.xs) {
             SessionInfoRow(label: isSubagent ? "Subagent model" : "Model",
-                           value: TranscriptTelemetryPresentation.configurationValue(telemetry.currentConfiguration))
+                           value: TranscriptTelemetryPresentation.configurationValue(
+                            telemetry.currentConfiguration, locale: locale))
             SessionInfoRow(label: "Weekly quota",
-                           value: TranscriptTelemetryPresentation.weeklyValue(telemetry))
+                           value: TranscriptTelemetryPresentation.weeklyValue(telemetry, locale: locale))
             SessionInfoRow(label: "Delegated", value: delegatedValue(telemetry))
         }
     }
 
     private func delegatedValue(_ telemetry: SessionTelemetry) -> TranscriptTelemetryPresentation.Value {
         guard let descendants = telemetry.descendantTopLineTokens else {
-            return .absent("This session recorded no delegated work.")
+            return .absent(TranscriptTelemetryPresentation.localized(
+                "This session recorded no delegated work.", locale: locale))
         }
-        let compact = descendants.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
-        let requests = localizedRequestCount(delegatedRequestCount)
-        return .init(text: "\(compact) · \(requests)",
-                     help: "\(descendants.formatted()) tokens across \(requests), recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.")
+        let compact = descendants.formatted(
+            .number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
+        return .init(
+            text: TranscriptTelemetryPresentation.delegatedSummary(
+                compactTokens: compact, requestCount: delegatedRequestCount, locale: locale),
+            help: TranscriptTelemetryPresentation.delegatedHelp(
+                tokens: descendants, requestCount: delegatedRequestCount, locale: locale))
     }
 
     private func history(_ telemetry: SessionTelemetry) -> some View {
         SessionInfoSection(title: "History") {
             SessionInfoHistoryList(
-                rows: TranscriptTelemetryPresentation.historyRows(telemetry: telemetry, blocks: blocks),
+                rows: TranscriptTelemetryPresentation.historyRows(
+                    telemetry: telemetry, blocks: blocks, locale: locale),
                 jump: jumpToBlock)
         }
     }
@@ -421,10 +503,10 @@ struct TranscriptTelemetryView: View {
                 if let cost = telemetry.costEstimate {
                     SessionInfoRow(label: "Price table",
                                    value: .init(text: cost.priceTableUpdated,
-                                                help: "Date of the price manifest used."))
+                                                help: copy("Date of the price manifest used.")))
                     SessionInfoRow(label: "Revision",
                                    value: .init(text: "r…\(String(String(cost.priceTableRevision).suffix(6)))",
-                                                help: "Full revision: \(cost.priceTableRevision)"))
+                                                help: copy("Full revision: \(cost.priceTableRevision)")))
                     SessionInfoRow(label: "Manifest", value: manifestValue(cost))
                 }
                 if let weekly = telemetry.weeklyQuotaEstimate {
@@ -435,28 +517,28 @@ struct TranscriptTelemetryView: View {
                     SessionInfoRow(label: "Quota source",
                                    value: weekly.sourceFamily.map {
                                        TranscriptTelemetryPresentation.Value(
-                                           text: $0, help: "Which account window the calibration came from.")
-                                   } ?? .absent("No quota source recorded."))
+                                           text: $0, help: copy("Which account window the calibration came from."))
+                                   } ?? .absent(copy("No quota source recorded.")))
                     SessionInfoRow(label: "Precision",
                                    value: weekly.quotaPrecision.map {
                                        TranscriptTelemetryPresentation.Value(
-                                           text: $0, help: "Granularity of the account quota reading behind this estimate.")
-                                   } ?? .absent("No quota precision recorded."))
+                                           text: $0, help: copy("Granularity of the account quota reading behind this estimate."))
+                                   } ?? .absent(copy("No quota precision recorded.")))
                     SessionInfoRow(label: "Calculated",
                                    value: .init(text: weekly.calculatedAt.formatted(date: .abbreviated, time: .shortened),
-                                                help: "When this estimate was computed."))
+                                                help: copy("When this estimate was computed.")))
                     SessionInfoRow(label: "Quota observed",
                                    value: weekly.quotaObservedAt.map {
                                        TranscriptTelemetryPresentation.Value(
                                            text: $0.formatted(date: .abbreviated, time: .shortened),
-                                           help: "When the account quota reading was taken. A carried calibration can be far older than this.")
-                                   } ?? .absent("No quota observation recorded."))
+                                           help: copy("When the account quota reading was taken. A carried calibration can be far older than this."))
+                                   } ?? .absent(copy("No quota observation recorded.")))
                     SessionInfoRow(label: "Quota resets",
                                    value: weekly.quotaResetAt.map {
                                        TranscriptTelemetryPresentation.Value(
                                            text: $0.formatted(date: .abbreviated, time: .shortened),
-                                           help: "End of the weekly window this estimate is a share of.")
-                                   } ?? .absent("No reset time recorded."))
+                                           help: copy("End of the weekly window this estimate is a share of."))
+                                   } ?? .absent(copy("No reset time recorded.")))
                 }
                 Text("Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier.")
                     .font(SessionInfoType.caption)
@@ -477,27 +559,32 @@ struct TranscriptTelemetryView: View {
 
     private func pricedAsValue(_ row: TelemetryPricingBasis) -> TranscriptTelemetryPresentation.Value {
         .init(text: "\(row.model ?? "—") · \(row.speed)",
-              help: "\(localizedRequestCount(row.requestCount)) priced on this basis.")
+              help: TranscriptTelemetryPresentation.pricedOnBasisHelp(
+                row.requestCount, locale: locale))
     }
 
     private func contextValue(_ row: TelemetryPricingBasis) -> TranscriptTelemetryPresentation.Value {
         guard let low = row.minContextInputTokens, let high = row.maxContextInputTokens else {
-            return .absent("No request recorded its context size.")
+            return .absent(copy("No request recorded its context size."))
         }
         let text = low == high
             ? low.formatted(.number.notation(.compactName))
             : "\(low.formatted(.number.notation(.compactName))) – \(high.formatted(.number.notation(.compactName)))"
         return .init(text: text,
-                     help: "Context presented to each request: \(low.formatted()) to \(high.formatted()) tokens.")
+                     help: copy("Context presented to each request: \(low.formatted(.number.locale(locale))) to \(high.formatted(.number.locale(locale))) tokens."))
     }
 
     private func manifestValue(_ cost: TelemetryCostEstimate) -> TranscriptTelemetryPresentation.Value {
         guard let fingerprint = cost.priceManifestFingerprint else {
-            return .absent("No manifest fingerprint recorded.")
+            return .absent(copy("No manifest fingerprint recorded."))
         }
         let short = fingerprint.count > 16
             ? "\(fingerprint.prefix(8))…\(fingerprint.suffix(5))"
             : fingerprint
         return .init(text: String(short), help: fingerprint)
+    }
+
+    private func copy(_ resource: String.LocalizationValue) -> String {
+        TranscriptTelemetryPresentation.localized(resource, locale: locale)
     }
 }

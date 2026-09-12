@@ -5545,6 +5545,8 @@ final class SessionParserTests: XCTestCase {
         indexer.reloadSession(id: sessionID, reason: .selection)
         wait(for: [hydrated], timeout: 3)
         hydrationCancellable?.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1),
+                      "Initial publish must finish reload bookkeeping before the monitor tick")
         let afterHydration = indexer.reloadParseInvocationCountsForTesting()
 
         let appendedLine = #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"delta"}]}}"#
@@ -5568,5 +5570,158 @@ final class SessionParserTests: XCTestCase {
                        "Focused growth must not invoke parseFileFull again")
         XCTAssertEqual(afterAppend.append, afterHydration.append + 1)
         XCTAssertEqual(indexer.allSessions.first?.events.last?.text, "delta")
+    }
+
+    func testFocusedCodexReloadDetectsSameSizeSameMtimeAtomicReplacement() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexReloadReplacement-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fixedMtime = Date(timeIntervalSince1970: 1_799_999_900)
+        let baselineLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        let replacementLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"replaced"}]}}"#
+        XCTAssertEqual(baselineLine.utf8.count, replacementLine.utf8.count)
+        try writeText(baselineLine + "\n", to: url)
+        try FileManager.default.setAttributes([.modificationDate: fixedMtime], ofItemAtPath: url.path)
+        let originalInode = try XCTUnwrap(
+            (FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber)?.uint64Value
+        )
+
+        let size = try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let sessionID = "reload-replacement-id"
+        let lightweight = Session(id: sessionID,
+                                  source: .codex,
+                                  startTime: nil,
+                                  endTime: nil,
+                                  model: nil,
+                                  filePath: url.path,
+                                  fileSizeBytes: size,
+                                  eventCount: 1,
+                                  events: [])
+        let indexer = SessionIndexer()
+        indexer.installSessionsForReloadTesting([lightweight])
+
+        let hydrated = expectation(description: "initial replacement-test hydration")
+        var cancellable = indexer.$allSessions
+            .filter { $0.first?.events.first?.text == "baseline" }
+            .prefix(1)
+            .sink { _ in hydrated.fulfill() }
+        indexer.reloadSession(id: sessionID, reason: .selection)
+        wait(for: [hydrated], timeout: 3)
+        cancellable.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+        let beforeReplacement = indexer.reloadParseInvocationCountsForTesting()
+
+        try Data((replacementLine + "\n").utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.modificationDate: fixedMtime], ofItemAtPath: url.path)
+        let replacementInode = try XCTUnwrap(
+            (FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber)?.uint64Value
+        )
+        XCTAssertNotEqual(replacementInode, originalInode, "Fixture must replace the file identity")
+
+        let replaced = expectation(description: "replacement content published")
+        cancellable = indexer.$allSessions
+            .filter { $0.first?.events.first?.text == "replaced" }
+            .prefix(1)
+            .sink { _ in replaced.fulfill() }
+        indexer.reloadSession(id: sessionID, force: true, reason: .focusedSessionMonitor)
+        wait(for: [replaced], timeout: 3)
+        cancellable.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+
+        let afterReplacement = indexer.reloadParseInvocationCountsForTesting()
+        XCTAssertEqual(afterReplacement.append, beforeReplacement.append + 1)
+        XCTAssertEqual(afterReplacement.full, beforeReplacement.full + 1,
+                       "An identity mismatch must fall back to a full parse even when coarse stats match")
+    }
+
+    func testFocusedCodexReloadCoalescesTranscriptCacheBuildsAndPublishesNewestSnapshot() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexCacheCoalesce-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let baselineLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        try writeText(baselineLine + "\n", to: url)
+        let size = try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let sessionID = "reload-cache-coalesce-id"
+        let lightweight = Session(id: sessionID,
+                                  source: .codex,
+                                  startTime: nil,
+                                  endTime: nil,
+                                  model: nil,
+                                  filePath: url.path,
+                                  fileSizeBytes: size,
+                                  eventCount: 1,
+                                  events: [])
+        let indexer = SessionIndexer()
+        indexer.installSessionsForReloadTesting([lightweight])
+
+        let hydrated = expectation(description: "initial cache-test hydration")
+        var cancellable = indexer.$allSessions
+            .filter { $0.first?.events.count == 1 }
+            .prefix(1)
+            .sink { _ in hydrated.fulfill() }
+        indexer.reloadSession(id: sessionID, reason: .selection)
+        wait(for: [hydrated], timeout: 3)
+        cancellable.cancel()
+        XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+        XCTAssertTrue(indexer.waitForTranscriptCacheBuildsToFinishForTesting(id: sessionID, timeout: 3))
+
+        let firstBuildStarted = expectation(description: "first append cache build started")
+        let secondBuildStarted = expectation(description: "newest pending cache build started")
+        let firstBuildGate = DispatchSemaphore(value: 0)
+        let hookLock = NSLock()
+        var buildCount = 0
+        indexer.setTranscriptCacheBuildHookForTesting { _ in
+            hookLock.lock()
+            buildCount += 1
+            let ordinal = buildCount
+            hookLock.unlock()
+            if ordinal == 1 {
+                firstBuildStarted.fulfill()
+                _ = firstBuildGate.wait(timeout: .now() + 5)
+            } else if ordinal == 2 {
+                secondBuildStarted.fulfill()
+            }
+        }
+        defer {
+            firstBuildGate.signal()
+            indexer.setTranscriptCacheBuildHookForTesting(nil)
+        }
+
+        func appendAndReload(_ text: String, expectedCount: Int) throws {
+            let line = #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"\#(text)"}]}}"#
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+            try handle.close()
+            let published = expectation(description: "published \(text)")
+            let token = indexer.$allSessions
+                .filter { $0.first?.events.count == expectedCount }
+                .prefix(1)
+                .sink { _ in published.fulfill() }
+            indexer.reloadSession(id: sessionID, force: true, reason: .focusedSessionMonitor)
+            wait(for: [published], timeout: 3)
+            token.cancel()
+            XCTAssertTrue(indexer.waitForReloadToFinishForTesting(id: sessionID, timeout: 1))
+        }
+
+        try appendAndReload("delta-one", expectedCount: 2)
+        wait(for: [firstBuildStarted], timeout: 2)
+        try appendAndReload("delta-two", expectedCount: 3)
+        hookLock.lock()
+        let buildsBeforeRelease = buildCount
+        hookLock.unlock()
+        XCTAssertEqual(buildsBeforeRelease, 1,
+                       "A second builder must not overlap the blocked in-flight build")
+        firstBuildGate.signal()
+        wait(for: [secondBuildStarted], timeout: 3)
+        XCTAssertTrue(indexer.waitForTranscriptCacheBuildsToFinishForTesting(id: sessionID, timeout: 3))
+
+        hookLock.lock()
+        let finalBuildCount = buildCount
+        hookLock.unlock()
+        XCTAssertEqual(finalBuildCount, 2,
+                       "The in-flight builder plus one latest pending snapshot should be the only builds")
+        let cached = try XCTUnwrap(indexer.searchTranscriptCache.getCached(sessionID))
+        XCTAssertTrue(cached.contains("delta-two"), "The newest pending snapshot must win publication")
     }
 }

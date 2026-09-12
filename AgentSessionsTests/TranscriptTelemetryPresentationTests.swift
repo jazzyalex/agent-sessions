@@ -278,6 +278,42 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
             telemetry: telemetry(events: []), blocks: []).isEmpty)
     }
 
+    func testSessionInfoPresentationResolvesCompleteLocalizedCopy() {
+        let locale = Locale(identifier: "en")
+        XCTAssertEqual(
+            TranscriptTelemetryPresentation.pricedOnBasisHelp(2, locale: locale),
+            "2 requests priced on this basis."
+        )
+        XCTAssertEqual(
+            TranscriptTelemetryPresentation.rowAccessibilityLabel(
+                label: "Model", value: "—", locale: locale),
+            "Model: unavailable"
+        )
+    }
+
+    func testSessionInfoCompleteSentencesPluralizeWithoutNounPhraseInsertion() {
+        let locale = Locale(identifier: "en")
+        XCTAssertEqual(
+            TranscriptTelemetryPresentation.delegatedSummary(
+                compactTokens: "12K", requestCount: 2, locale: locale),
+            "12K · 2 requests"
+        )
+        let help = TranscriptTelemetryPresentation.delegatedHelp(
+            tokens: 12_000, requestCount: 2, locale: locale)
+        XCTAssertTrue(help.hasPrefix("12,000 tokens across 2 requests,"))
+    }
+
+    func testTokenShareHelpResolvesCompleteLocalizedSentences() {
+        let locale = Locale(identifier: "en")
+        let share = TelemetryTokenShare(
+            cached: 900, fresh: 100, output: 10,
+            cacheWriteTokens: 20, reasoningTokens: 4)
+        XCTAssertEqual(
+            TranscriptTelemetryPresentation.tokenShareHelp(share, locale: locale),
+            "Cached input 900, fresh input 100, output 10. Fresh includes 20 cache-write tokens. Output includes 4 reasoning tokens."
+        )
+    }
+
     // MARK: - Task 4: value formatting
 
     func testAbsentValuesRenderAsAnEmDashWithTheReasonInHelp() {
