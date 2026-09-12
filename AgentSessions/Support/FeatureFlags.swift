@@ -56,12 +56,6 @@ enum FeatureFlags {
     // their NULL cwd forever and stay invisible to the path filter. The bump is
     // what forces them to be re-ingested.
     static let sessionSearchFormatVersion: Int = 5
-    // Format 5 only added cwd text for sources whose lightweight sessions learned
-    // to resolve it. Version 4's transcript/title/repo/model text is otherwise
-    // compatible, so Instant search can keep using byte-current v4 rows while the
-    // coordinator supplements cwd matches from in-memory metadata. Do not add a
-    // future version here unless its text-shape delta is similarly accounted for.
-    static let sessionSearchCompatiblePreviousFormatVersions: Set<Int> = [4]
     static let sessionToolIOFormatVersion: Int = 1
     static let transcriptPrewarmMaxSessionsPerRefresh: Int = 96
     static let transcriptPrewarmMaxSessionBytes: Int = 50 * 1024 * 1024

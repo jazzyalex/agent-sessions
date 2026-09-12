@@ -300,20 +300,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     // SearchIngestService) drops out of this set, so shouldIncludeUnindexedCandidate lets
                     // the legacy full-scan pick it up and return FRESH text instead of stale FTS rows.
                     var indexedIDs = Set((try? await db.indexedSessionIDsCurrent(sources: allowedRaw)) ?? [])
-                    // Format 5 only added cwd to the FTS document. Treat byte-current v4
-                    // rows as text-compatible instead of reparsing every old transcript
-                    // on every keystroke; cwd-only hits are merged from the lightweight
-                    // Session metadata below. A future incompatible format remains stale
-                    // and therefore stays on the correctness-preserving full-scan path.
-                    var compatiblePreviousFormatIDs = Set<String>()
-                    for formatVersion in FeatureFlags.sessionSearchCompatiblePreviousFormatVersions {
-                        let ids = Set((try? await db.indexedSessionIDsCurrent(
-                            sources: allowedRaw,
-                            formatVersion: formatVersion
-                        )) ?? [])
-                        compatiblePreviousFormatIDs.formUnion(ids)
-                        indexedIDs.formUnion(ids)
-                    }
                     // Shared-database sessions use their lightweight per-session update
                     // revision instead of the database file's global stat. Overlay those
                     // identities onto the path-current set so a WAL-only update becomes
@@ -376,22 +362,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     let deepEnabled = enableDeepScan && self.deepToolOutputsEnabled()
                     var mergedIDs = ids
                     var mergedSet = Set(ids)
-
-                    // Version 4 did not index cwd. Preserve version-5 search semantics
-                    // without touching disk by adding cwd-only matches from the already
-                    // loaded lightweight rows, after the FTS-ranked hits.
-                    if !compatiblePreviousFormatIDs.isEmpty,
-                       mergedIDs.count < dbResultLimit {
-                        for session in searchableCandidates
-                        where compatiblePreviousFormatIDs.contains(session.id)
-                            && Self.compatiblePreviousFormatMetadataMatches(session,
-                                                                            freeText: freeText) {
-                            guard mergedIDs.count < dbResultLimit else { break }
-                            if mergedSet.insert(session.id).inserted {
-                                mergedIDs.append(session.id)
-                            }
-                        }
-                    }
                     var out = mergedIDs.compactMap { byID[$0] }
                     var seen = Set(out.map(\.id))
                     let initialOut = out
@@ -828,15 +798,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             return max(FeatureFlags.ftsSearchLimit, totalSessionCount)
         }
         return FeatureFlags.ftsSearchLimit
-    }
-
-    /// Format 5's only text-shape addition over format 4 was `Session.cwd`.
-    /// Search every other field through the existing v4 FTS row, and close that
-    /// one compatibility gap from the lightweight model without parsing the file.
-    static func compatiblePreviousFormatMetadataMatches(_ session: Session,
-                                                        freeText: String) -> Bool {
-        guard let cwd = session.cwd, !cwd.isEmpty else { return false }
-        return SearchTextMatcher.hasMatch(in: cwd, query: freeText)
     }
 
     private func startBackgroundDeepScan(runID: UUID,

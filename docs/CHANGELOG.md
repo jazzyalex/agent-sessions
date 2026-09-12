@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Fixed Instant search repeatedly reparsing byte-current legacy index rows after the cwd index migration and tokenizing every word of a large open transcript for a simple prefix query. Compatible version 4 text now stays on the FTS path with cwd matches supplied from loaded metadata, while common one-term searches scan token boundaries without materializing unrelated tokens and retain the same highlighting semantics. The active-window presence poll also reuses its Claude Desktop sidecar snapshot for ten seconds instead of walking the full tree every two seconds.
+- Fixed Instant search tokenizing every word of a large open transcript for a simple prefix query. Common one-term searches now scan token boundaries without materializing unrelated tokens and retain the same highlighting semantics, while older index formats remain on the correctness-preserving fresh-parse path. The active-window presence poll also reuses its Claude Desktop sidecar snapshot for ten seconds instead of walking the full tree every two seconds.
 
 - Fixed the main window doing a full Session info telemetry scan for every opened session even when the inspector was hidden. Hidden inspectors now schedule no telemetry work, obsolete scans stop when selection changes, and Codex and Claude telemetry skip JSON decoding for record types that cannot contain usage or configuration data.
 

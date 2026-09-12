@@ -597,60 +597,13 @@ final class SessionParserTests: XCTestCase {
                        "stale FTS text must never publish")
     }
 
-    func testSearchCoordinatorUsesByteCurrentCompatibleFTSRowWithoutParsing() async throws {
+    func testSearchCoordinatorDoesNotTrustByteCurrentPreviousFormatText() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
-        let path = "/tmp/compatible-v4.jsonl"
-        let session = makeRepoSession(id: "compatible-v4", source: .codex, repoName: "repo")
-        let compatible = Session(
-            id: session.id,
-            source: session.source,
-            startTime: session.startTime,
-            endTime: session.endTime,
-            model: session.model,
-            filePath: path,
-            fileSizeBytes: 42,
-            eventCount: 1,
-            events: [],
-            cwd: "/tmp/repo",
-            repoName: session.repoName,
-            lightweightTitle: session.lightweightTitle
-        )
-
-        try await db.begin()
-        try await db.upsertFile(path: path, mtime: 7, size: 42, source: "codex")
-        try await db.upsertSessionMeta(SessionMetaRow(
-            sessionID: compatible.id, source: "codex", path: path, mtime: 7, size: 42,
-            startTS: 1_900, endTS: 2_000, model: nil, cwd: compatible.cwd, repo: "repo",
-            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
-            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
-        ))
-        try await db.upsertSessionSearch(sessionID: compatible.id, source: "codex",
-                                         mtime: 7, size: 42,
-                                         text: "compatible transcript marker",
-                                         formatVersion: 4)
-        try await db.commit()
-
-        let store = SearchCoordinatorTestStore()
-        let coordinator = SearchCoordinator(store: store, db: db)
-        coordinator.start(query: "compatible",
-                          filters: Filters(query: "compatible"),
-                          allowed: [.codex],
-                          enableDeepScan: false,
-                          all: [compatible])
-
-        try await waitForSearchResults(coordinator, expectedIDs: [compatible.id])
-        XCTAssertEqual(store.parseFullCallCount, 0,
-                       "a byte-current compatible FTS row must not fall back to a full-file parse")
-    }
-
-    func testSearchCoordinatorSupplementsCompatibleV4CWDWithoutParsing() async throws {
-        let (db, cleanup) = try makeTestIndexDB()
-        defer { cleanup() }
-        let path = "/tmp/compatible-v4-cwd.jsonl"
+        let path = "/tmp/previous-format.jsonl"
         let session = Session(
-            id: "compatible-v4-cwd",
-            source: .codex,
+            id: "previous-format",
+            source: .claude,
             startTime: Date(timeIntervalSince1970: 1_900),
             endTime: Date(timeIntervalSince1970: 2_000),
             model: nil,
@@ -658,38 +611,39 @@ final class SessionParserTests: XCTestCase {
             fileSizeBytes: 42,
             eventCount: 1,
             events: [],
-            cwd: "/tmp/needle_workspace",
+            cwd: "/tmp/repo",
             repoName: "repo",
-            lightweightTitle: "Old format row"
+            lightweightTitle: "Generated current title"
         )
 
         try await db.begin()
-        try await db.upsertFile(path: path, mtime: 7, size: 42, source: "codex")
+        try await db.upsertFile(path: path, mtime: 7, size: 42, source: "claude")
         try await db.upsertSessionMeta(SessionMetaRow(
-            sessionID: session.id, source: "codex", path: path, mtime: 7, size: 42,
+            sessionID: session.id, source: "claude", path: path, mtime: 7, size: 42,
             startTS: 1_900, endTS: 2_000, model: nil, cwd: session.cwd, repo: "repo",
             title: nil, codexInternalSessionID: nil, isHousekeeping: false,
             messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
         ))
-        // Version 4 has no cwd in its FTS document, so this text intentionally
-        // cannot satisfy the query on its own.
-        try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+        // The byte revision is current, but the v4 corpus predates the current
+        // parser/title semantics. It must take the fresh parse path rather than
+        // being treated as authoritative solely because its file stat matches.
+        try await db.upsertSessionSearch(sessionID: session.id, source: "claude",
                                          mtime: 7, size: 42,
-                                         text: "old transcript body",
+                                         text: "obsolete title",
                                          formatVersion: 4)
         try await db.commit()
 
         let store = SearchCoordinatorTestStore()
         let coordinator = SearchCoordinator(store: store, db: db)
-        coordinator.start(query: "needle_workspace",
-                          filters: Filters(query: "needle_workspace"),
-                          allowed: [.codex],
+        coordinator.start(query: "generated",
+                          filters: Filters(query: "generated"),
+                          allowed: [.claude],
                           enableDeepScan: false,
                           all: [session])
 
         try await waitForSearchResults(coordinator, expectedIDs: [session.id])
-        XCTAssertEqual(store.parseFullCallCount, 0,
-                       "the v4 cwd compatibility supplement must stay metadata-only")
+        XCTAssertEqual(store.parseFullCallCount, 1,
+                       "a previous format is not proof of current parser semantics")
     }
 
     func testSearchCoordinatorTreatsSameRevisionAtDifferentIdentityPathAsUnindexed() async throws {
