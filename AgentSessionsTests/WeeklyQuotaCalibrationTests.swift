@@ -919,21 +919,15 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                         "a restored bootstrap must populate the cross-reset carry-over")
     }
 
-    /// The carry-over must survive a RESTART, not just stay in memory: the stored
-    /// entry is anchor-keyed, so a reset orphans it and a relaunched app would
-    /// otherwise face a fresh window with ~0% consumed and nothing to divide by.
-    func testBestCalibrationSurvivesRestartAcrossAWeeklyReset() throws {
+    /// Claude exposes no durable account identity, so an unscoped carry-over must
+    /// not survive a restart and silently become another account's conversion.
+    func testUnscopedClaudeBestCalibrationDoesNotSurviveRestart() throws {
         let suite = try XCTUnwrap(UserDefaults(suiteName: "wkbest-\(UUID().uuidString)"))
         defer { suite.removePersistentDomain(forName: suite.description) }
         let oldWindowReset = t0
         let newWindowReset = t0.addingTimeInterval(604_800)
 
-        // Session 1: a full week measured, then the window rolls over.
-        let first = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
-        first.setBestBootstrapForTesting(provider: "claude", result: WeeklyQuotaBootstrapResult(
-            usedPercentPoints: 72, dollars: 1073, unpricedVolumeShare: 0,
-            windowStart: oldWindowReset.addingTimeInterval(-604_800), resetsAt: oldWindowReset,
-            scannedAt: oldWindowReset))
+        // Simulate the legacy unscoped best record left by an earlier account.
         suite.set(try JSONEncoder().encode(WeeklyQuotaBootstrapResult(
             usedPercentPoints: 72, dollars: 1073, unpricedVolumeShare: 0,
             windowStart: oldWindowReset.addingTimeInterval(-604_800), resetsAt: oldWindowReset,
@@ -948,12 +942,8 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                                usedPercentPoints: 0,
                                now: newWindowReset,
                                defaults: suite)
-        XCTAssertEqual(second.percentPointsPerDollar(provider: "claude", now: newWindowReset) ?? 0,
-                       72.0 / 1073.0, accuracy: 0.002,
-                       "the plan's conversion must outlive the window it was measured in")
-        XCTAssertFalse(second.calibrationAbandoned(
-            provider: "claude",
-            now: newWindowReset.addingTimeInterval(WeeklyQuotaCalibrationStore.waitingBudget + 60)))
+        XCTAssertNil(second.percentPointsPerDollar(provider: "claude", now: newWindowReset),
+                     "an unscoped persisted ratio cannot identify the current Claude account")
     }
 
     /// Two private stores must not see each other's state — the property that
@@ -1474,7 +1464,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 
     // MARK: - Carry-over slot
 
-    /// The regression that made every Claude session read ~21% low.
+    /// A scoped provider should migrate the best completed window into carry-over.
     ///
     /// Restore only ever consulted two keys — the carry-over slot and the CURRENT
     /// anchor's cache — so a completed window's measurement sat on disk unread.
@@ -1482,21 +1472,24 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     /// fresh window's sliver, and the `<=` promotion guard then locked it there.
     /// Live values: a completed week at 77pp/$1239.83 was ignored in favour of
     /// 7pp/$142.71.
-    func testMigratesACompletedWindowIntoTheCarryOverSlot() throws {
+    func testMigratesAScopedCompletedWindowIntoTheCarryOverSlot() throws {
         let previous = t0
         let current = t0.addingTimeInterval(604_800)
         try store(result(used: 77, dollars: 1239.83, resetsAt: previous,
-                         scannedAt: previous.addingTimeInterval(-3600)),
-                  at: key("claude", "unscoped", previous))
-        try store(result(used: 7, dollars: 142.71, resetsAt: current, scannedAt: current),
-                  at: key("claude", "unscoped", current))
+                         scannedAt: previous.addingTimeInterval(-3600),
+                         accountHash: codexAccountHash),
+                  at: key("codex", codexAccountHash, previous))
+        try store(result(used: 7, dollars: 142.71, resetsAt: current, scannedAt: current,
+                         accountHash: codexAccountHash),
+                  at: key("codex", codexAccountHash, current))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
-        store.ensureBootstrap(provider: "claude", root: root, resetsAt: current,
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: current,
                               windowMinutes: 10080, usedPercentPoints: 7,
+                              accountHash: codexAccountHash,
                               now: current, defaults: suite)
 
-        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "codex", now: current))
         XCTAssertEqual(served, 77.0 / 1239.83, accuracy: 0.0005,
                        "the completed week is the better-conditioned measurement")
         XCTAssertGreaterThan(served, 7.0 / 142.71,
@@ -1509,18 +1502,73 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let previous = t0
         let current = t0.addingTimeInterval(604_800)
         try store(result(used: 4, dollars: 60, resetsAt: previous, scannedAt: previous),
-                  at: key("claude", "unscoped", previous))
-        let bestKey = "quotaMeter.weeklyBootstrapBest.claude.unscoped"
-        try store(result(used: 70, dollars: 1000, resetsAt: previous, scannedAt: previous),
+                  at: key("codex", codexAccountHash, previous))
+        let bestKey = "quotaMeter.weeklyBootstrapBest.codex.\(codexAccountHash)"
+        try store(result(used: 70, dollars: 1000, resetsAt: previous, scannedAt: previous,
+                         accountHash: codexAccountHash),
                   at: bestKey)
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
-        store.ensureBootstrap(provider: "claude", root: root, resetsAt: current,
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: current,
                               windowMinutes: 10080, usedPercentPoints: 0,
+                              accountHash: codexAccountHash,
                               now: current, defaults: suite)
 
-        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "codex", now: current))
         XCTAssertEqual(served, 70.0 / 1000.0, accuracy: 0.0005)
+    }
+
+    func testUnscopedClaudeScanStaysInMemoryAndLeavesDefaultsEmpty() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let completed = result(used: 20, dollars: 100, resetsAt: resetsAt, scannedAt: t0)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, _, _, _, _, _, _, _, _ in completed })
+
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 20,
+                              sourceFamily: "oauth", now: t0, defaults: suite)
+        waitForScanToFinish(store, provider: "claude")
+
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "claude", now: t0),
+                        "the current process may use its own scan")
+        XCTAssertNil(suite.data(forKey: key("claude", "unscoped", resetsAt)))
+        XCTAssertNil(suite.data(forKey: "quotaMeter.weeklyBootstrapBest.claude.unscoped"))
+
+        let relaunched = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        relaunched.ensureBootstrap(provider: "claude",
+                                   root: URL(fileURLWithPath: "/nonexistent"),
+                                   resetsAt: resetsAt, windowMinutes: 10080,
+                                   usedPercentPoints: 20, sourceFamily: "oauth",
+                                   now: t0, defaults: suite)
+        XCTAssertNil(relaunched.percentPointsPerDollar(provider: "claude", now: t0))
+    }
+
+    func testUnscopedClaudeBootstrapDoesNotCarryAcrossWindowInMemory() {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        let entries = ScanEntryCounter()
+        let release = DispatchSemaphore(value: 0)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: current,
+            scanRunner: { _, _, _, _, _, _, _, _, _ in
+                entries.increment()
+                release.wait()
+                return nil
+            })
+        store.setBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 70, dollars: 1000, resetsAt: previous,
+                           scannedAt: previous))
+
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: current,
+                              windowMinutes: 10080, usedPercentPoints: 1,
+                              sourceFamily: "oauth", now: current, defaults: suite)
+        XCTAssertTrue(waitForScanEntry(entries))
+        XCTAssertNil(store.percentPointsPerDollar(provider: "claude", now: current),
+                     "a new unscoped window must wait for its own scan")
+        release.signal()
+        waitForScanToFinish(store, provider: "claude")
     }
 
     // MARK: - Freshening across a reset
@@ -1838,22 +1886,25 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     /// even though the persisted account key itself does not change.
     func testALimitShapeChangeDropsAnInMemoryBootstrap() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
-        var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0)
+        var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0,
+                            accountHash: codexAccountHash)
         cached.priceRevision = RunwayPriceTable.shared.revision
         cached.limitShape = "weekly"
-        try store(cached, at: key("claude", "unscoped", resetsAt))
+        try store(cached, at: key("codex", codexAccountHash, resetsAt))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
-        store.ensureBootstrap(provider: "claude", root: root, resetsAt: resetsAt,
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 40,
+                              accountHash: codexAccountHash,
                               limitShape: "weekly", now: t0, defaults: suite)
-        XCTAssertNotNil(store.percentPointsPerDollar(provider: "claude", now: t0))
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0))
 
-        store.ensureBootstrap(provider: "claude", root: URL(fileURLWithPath: "/nonexistent"),
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
                               resetsAt: resetsAt, windowMinutes: 10080,
-                              usedPercentPoints: 40, limitShape: "weekly+scoped",
+                              usedPercentPoints: 40, accountHash: codexAccountHash,
+                              limitShape: "weekly+scoped",
                               now: t0, defaults: suite)
-        XCTAssertNil(store.percentPointsPerDollar(provider: "claude", now: t0),
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
                      "a different plan shape must not reuse the old conversion")
     }
 

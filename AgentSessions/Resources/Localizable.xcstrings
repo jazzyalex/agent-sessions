@@ -545,6 +545,40 @@
           }
         }
       },
+      "Not available": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Not available"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "不可用"
+            }
+          }
+        }
+      },
+      "Not provided": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Not provided"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "未提供"
+            }
+          }
+        }
+      },
       "Output": {
         "comment": "User-visible Session info copy.",
         "localizations": {
@@ -796,6 +830,40 @@
             "stringUnit": {
               "state": "translated",
               "value": "提供商未记录推理区域。"
+            }
+          }
+        }
+      },
+      "The provider recorded an empty inference region.": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "The provider recorded an empty inference region."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "提供商记录的推理区域为空。"
+            }
+          }
+        }
+      },
+      "The provider reported that inference geography was unavailable.": {
+        "comment": "User-visible Session info copy.",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "The provider reported that inference geography was unavailable."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "提供商报告推理地理位置不可用。"
             }
           }
         }

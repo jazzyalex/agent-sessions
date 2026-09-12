@@ -432,8 +432,32 @@ final class SessionTelemetryEngineTests: XCTestCase {
                        5.5, accuracy: 0.000_001)
     }
 
-    func testClaudeExplicitUnknownInferenceGeoFailsClosed() async throws {
-        let line = #"{"type":"assistant","timestamp":"2026-08-26T10:00:00.000Z","isSidechain":false,"message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":100,"output_tokens":0,"inference_geo":"not_available"}}}"#
+    func testClaudeUnavailableInferenceGeoIsPreservedAndPricedAtBaseRate() async throws {
+        let line = #"{"type":"assistant","timestamp":"2026-08-26T10:00:00.000Z","isSidechain":false,"message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":1000000,"output_tokens":0,"inference_geo":"not_available"}}}"#
+        let url = try write([line])
+        let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable.makeForTesting())
+        let computed = await engine.telemetry(for: session(url, source: .claude))
+        let telemetry = try XCTUnwrap(computed)
+        XCTAssertEqual(telemetry.usageSlices.first?.inferenceGeo, "not_available")
+        XCTAssertEqual(telemetry.usageEvents.first?.inferenceGeo, "not_available")
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD),
+                       5.0, accuracy: 0.000_001)
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
+    func testClaudeEmptyInferenceGeoIsPreservedAndPricedAtBaseRate() async throws {
+        let line = #"{"type":"assistant","timestamp":"2026-08-26T10:00:00.000Z","isSidechain":false,"message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":1000000,"output_tokens":0,"inference_geo":""}}}"#
+        let url = try write([line])
+        let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable.makeForTesting())
+        let computed = await engine.telemetry(for: session(url, source: .claude))
+        let telemetry = try XCTUnwrap(computed)
+        XCTAssertEqual(telemetry.usageEvents.first?.inferenceGeo, "")
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD),
+                       5.0, accuracy: 0.000_001)
+    }
+
+    func testClaudeMalformedInferenceGeoFailsClosed() async throws {
+        let line = #"{"type":"assistant","timestamp":"2026-08-26T10:00:00.000Z","isSidechain":false,"message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":100,"output_tokens":0,"inference_geo":"moon"}}}"#
         let url = try write([line])
         let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable.makeForTesting())
         let computed = await engine.telemetry(for: session(url, source: .claude))

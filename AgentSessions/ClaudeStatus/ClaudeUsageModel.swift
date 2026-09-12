@@ -629,6 +629,7 @@ final class ClaudeUsageModel: ObservableObject {
            // supplies a countdown, already formatted into a localized date before
            // this snapshot exists — see `weeklyResetAnchorText`.
            let weeklyResetAnchorText = s.weeklyResetAnchorText,
+           let calibrationSourceFamily = s.source.weeklyCalibrationFamily,
            let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
                                                             source: .claude,
                                                             raw: weeklyResetAnchorText,
@@ -644,7 +645,7 @@ final class ClaudeUsageModel: ObservableObject {
                 windowMinutes: 10080,
                 usedPercentPoints: weeklyRatio * 100,
                 limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
-                sourceFamily: "\(s.source)",
+                sourceFamily: calibrationSourceFamily,
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(
@@ -662,7 +663,7 @@ final class ClaudeUsageModel: ObservableObject {
                     // this stays nil: the calibration is memory-only and cannot
                     // survive a possible account switch across restarts.
                     accountHash: nil,
-                    sourceFamily: "\(s.source)",
+                    sourceFamily: calibrationSourceFamily,
                     limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
                     priceRevision: RunwayPriceTable.shared.revision
                 ),

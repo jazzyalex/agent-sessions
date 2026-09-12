@@ -111,6 +111,23 @@ enum TranscriptTelemetryPresentation {
                        : localized("No price entry for: \(reasons.joined(separator: ", "))", locale: locale))
     }
 
+    static func inferenceGeoValue(_ inferenceGeo: String?, locale: Locale = .current) -> Value {
+        guard let inferenceGeo else {
+            return .absent(localized("The provider did not record an inference region.", locale: locale))
+        }
+        switch inferenceGeo {
+        case "":
+            return Value(text: localized("Not provided", locale: locale),
+                         help: localized("The provider recorded an empty inference region.", locale: locale))
+        case "not_available":
+            return Value(text: localized("Not available", locale: locale),
+                         help: localized("The provider reported that inference geography was unavailable.", locale: locale))
+        default:
+            return Value(text: inferenceGeo,
+                         help: localized("Provider-reported inference region.", locale: locale))
+        }
+    }
+
     static func weeklyValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         if let estimate = telemetry.weeklyQuotaEstimate,
            estimate.status == .estimated, let points = estimate.percentPoints {
@@ -493,11 +510,11 @@ struct TranscriptTelemetryView: View {
                 ForEach(Array(TranscriptTelemetryPresentation.pricingBasis(telemetry).enumerated()),
                         id: \.offset) { _, row in
                     SessionInfoRow(label: "Priced as", value: pricedAsValue(row))
-                    SessionInfoRow(label: "Region",
-                                   value: row.inferenceGeo.map {
-                                       TranscriptTelemetryPresentation.Value(
-                                           text: $0, help: copy("Provider-reported inference region."))
-                                   } ?? .absent(copy("The provider did not record an inference region.")))
+                    SessionInfoRow(
+                        label: "Region",
+                        value: TranscriptTelemetryPresentation.inferenceGeoValue(
+                            row.inferenceGeo, locale: locale)
+                    )
                     SessionInfoRow(label: "Context in", value: contextValue(row))
                 }
                 if let cost = telemetry.costEstimate {
@@ -540,7 +557,7 @@ struct TranscriptTelemetryView: View {
                                            help: copy("End of the weekly window this estimate is a share of."))
                                    } ?? .absent(copy("No reset time recorded.")))
                 }
-                Text("Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier.")
+                Text("Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.")
                     .font(SessionInfoType.caption)
                     .foregroundStyle(.secondary)
                 if telemetry.initialConfiguration?.provenance == .inferredFirstObservation {

@@ -861,11 +861,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         "quotaMeter.weeklyQuotaSnapshots.\(provider).\(scope.accountHash ?? "unscoped")"
     }
 
-    /// Bootstrap cache key. Includes the weekly anchor, so a new window never
-    /// reads the previous one's ratio, and the account hash where the provider
-    /// exposes one. Claude has no account scope, but its anchor is an account's
-    /// own reset instant at second precision, which discriminates in practice —
-    /// and a wrong hit is corrected by the refresh scan on the same launch.
+    /// Bootstrap cache key. Includes the weekly anchor and durable account hash,
+    /// so a new window or account never reads another one's ratio. Providers such
+    /// as Claude that expose no durable account identity remain memory-only and do
+    /// not read or write this key.
     private static func bootstrapKey(provider: String, accountHash: String?, resetsAt: Date) -> String {
         "quotaMeter.weeklyBootstrap.\(provider).\(accountHash ?? "unscoped").\(Int(resetsAt.timeIntervalSince1970))"
     }
@@ -1385,6 +1384,14 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                          sourceFamily: String? = nil,
                          now: Date = Date(),
                          defaults: UserDefaults = .standard) {
+        // A bootstrap without durable account identity may serve the current
+        // process and current quota window, but it must not survive either an app
+        // restart or a window transition. Otherwise another account can inherit
+        // an unscoped plan conversion and receive a confident wrong Wk rate.
+        // Codex production callers always supply a durable account hash. Preserve
+        // the generic/unscoped test seam for that provider, but Claude must fail
+        // closed because its production snapshot has no account identity today.
+        let canPersistBootstrap = provider != "claude" || accountHash != nil
         let storeKey = Self.bootstrapKey(provider: provider, accountHash: accountHash, resetsAt: resetsAt)
         let bestKey = Self.bestBootstrapKey(provider: provider, accountHash: accountHash)
         let priceRevision = priceRevisionProvider()
@@ -1395,6 +1402,14 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             sourceFamily: sourceFamily)
         var promoted: WeeklyQuotaBootstrapResult?
         lock.lock()
+        if !canPersistBootstrap {
+            if let current = bootstraps[provider],
+               abs(current.resetsAt.timeIntervalSince(resetsAt))
+                    >= CodexWeeklyQuotaBootstrapScanner.anchorTolerance {
+                bootstraps[provider] = nil
+            }
+            bestBootstraps[provider] = nil
+        }
         // The persisted keys are account-scoped but these maps are not, so a
         // same-process account switch would otherwise keep serving the previous
         // account's calibration under the new account's name.
@@ -1431,7 +1446,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         latestResetsAt[provider] = resetsAt
         // Restore the carried-over measurement once per process. Without this the
         // cross-reset carry only works while the app keeps running.
-        if bestBootstraps[provider] == nil,
+        if canPersistBootstrap,
+           bestBootstraps[provider] == nil,
            let data = defaults.data(forKey: bestKey),
            let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
            cached.percentPointsPerDollar != nil,
@@ -1445,19 +1461,22 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
-        migrateHistoricalBootstraps(provider: provider,
-                                    accountHash: accountHash,
-                                    priceRevision: priceRevision,
-                                    limitShape: limitShape,
-                                    sourceFamily: sourceFamily,
-                                    bestKey: bestKey,
-                                    defaults: defaults)
+        if canPersistBootstrap {
+            migrateHistoricalBootstraps(provider: provider,
+                                        accountHash: accountHash,
+                                        priceRevision: priceRevision,
+                                        limitShape: limitShape,
+                                        sourceFamily: sourceFamily,
+                                        bestKey: bestKey,
+                                        defaults: defaults)
+        }
 
         // Restore first, synchronously: a cached ratio for this exact window makes
         // the very first frame after launch a real number instead of a clock, and
         // avoids re-reading hundreds of megabytes of transcripts every launch.
         lock.lock()
-        if bootstraps[provider] == nil,
+        if canPersistBootstrap,
+           bootstraps[provider] == nil,
            let data = defaults.data(forKey: storeKey),
            let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
            // Tolerance, not equality: the provider's reset instant arrives with a
@@ -1478,7 +1497,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // from the anchor-keyed cache never scans, so without this the carry-over
         // slot stays empty and the next weekly reset has nothing to fall back on —
         // exactly the gap this was added to close.
-        if let current = bootstraps[provider],
+        if canPersistBootstrap,
+           let current = bootstraps[provider],
            (bestBootstraps[provider]?.usedPercentPoints ?? 0) <= current.usedPercentPoints {
             bestBootstraps[provider] = current
             promoted = current
@@ -1488,7 +1508,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             ledgerCoverage(provider: provider, since: $0, now: now) != nil
         } ?? false
         lock.unlock()
-        if let promoted, let encoded = try? JSONEncoder().encode(promoted) {
+        if canPersistBootstrap,
+           let promoted,
+           let encoded = try? JSONEncoder().encode(promoted) {
             defaults.set(encoded, forKey: bestKey)
         }
 
@@ -1590,13 +1612,15 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             self.scannedAnchors.insert(anchorKey)
             self.scanCooldownUntil[provider] = nil
             self.bootstraps[provider] = stamped
-            let isBest = (self.bestBootstraps[provider]?.usedPercentPoints ?? 0) <= stamped.usedPercentPoints
+            let isBest = canPersistBootstrap
+                && (self.bestBootstraps[provider]?.usedPercentPoints ?? 0) <= stamped.usedPercentPoints
             if isBest { self.bestBootstraps[provider] = stamped }
             self.lock.unlock()
             if isBest, let encoded = try? JSONEncoder().encode(stamped) {
                 defaults.set(encoded, forKey: bestKey)
             }
-            if let encoded = try? JSONEncoder().encode(stamped) {
+            if canPersistBootstrap,
+               let encoded = try? JSONEncoder().encode(stamped) {
                 defaults.set(encoded, forKey: storeKey)
             }
             CodexWeeklyQuotaBootstrapScanner.debugLog(

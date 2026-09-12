@@ -161,6 +161,15 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertEqual(model.currentSource, .oauthEndpoint)
     }
 
+    func testWeeklyCalibrationFamilyIgnoresCacheFreshnessAndDisplayText() {
+        XCTAssertEqual(ClaudeUsageSource.oauthEndpoint.weeklyCalibrationFamily, "oauth")
+        XCTAssertEqual(ClaudeUsageSource.cachedOAuth.weeklyCalibrationFamily, "oauth")
+        XCTAssertEqual(ClaudeUsageSource.webEndpoint.weeklyCalibrationFamily, "web")
+        XCTAssertEqual(ClaudeUsageSource.cachedWeb.weeklyCalibrationFamily, "web")
+        XCTAssertNil(ClaudeUsageSource.tmuxUsage.weeklyCalibrationFamily)
+        XCTAssertNil(ClaudeUsageSource.unavailable.weeklyCalibrationFamily)
+    }
+
     private static func sampleSnapshot(source: ClaudeUsageSource) -> ClaudeLimitSnapshot {
         ClaudeLimitSnapshot(fetchedAt: Date(), source: source, health: .live,
             fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",

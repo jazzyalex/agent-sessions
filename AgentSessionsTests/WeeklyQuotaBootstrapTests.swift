@@ -120,7 +120,7 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertEqual(result?.dollars ?? 0, 11.0, accuracy: 0.001)
     }
 
-    func testClaudeScanRejectsExplicitUnknownInferenceGeo() throws {
+    func testClaudeScanPricesUnavailableInferenceGeoAtBaseRate() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
                                    inferenceGeo: "not_available")], name: "c.jsonl")
@@ -128,7 +128,31 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
             priceTable: RunwayPriceTable.makeForTesting(),
             now: anchor.addingTimeInterval(-3600))
-        XCTAssertNil(result, "an all-unpriceable regional record cannot bootstrap calibration")
+        XCTAssertEqual(result?.dollars ?? 0, 10.0, accuracy: 0.001)
+        XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
+    }
+
+    func testClaudeScanPricesEmptyInferenceGeoAtBaseRate() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
+                                   inferenceGeo: "")], name: "c.jsonl")
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertEqual(result?.dollars ?? 0, 10.0, accuracy: 0.001)
+        XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
+    }
+
+    func testClaudeScanRejectsMalformedInferenceGeo() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
+                                   inferenceGeo: "moon")], name: "c.jsonl")
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertNil(result, "an all-unpriceable malformed regional record cannot bootstrap calibration")
     }
 
     private func claudeUsageLine(id: String,

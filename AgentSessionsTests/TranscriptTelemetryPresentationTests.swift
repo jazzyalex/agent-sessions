@@ -192,6 +192,15 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertEqual(basis[3].inferenceGeo, "us")
     }
 
+    func testInferenceGeoPresentationHumanizesProviderUnavailableValues() {
+        XCTAssertEqual(TranscriptTelemetryPresentation.inferenceGeoValue("not_available").text,
+                       "Not available")
+        XCTAssertEqual(TranscriptTelemetryPresentation.inferenceGeoValue("").text,
+                       "Not provided")
+        XCTAssertEqual(TranscriptTelemetryPresentation.inferenceGeoValue("us").text, "us")
+        XCTAssertEqual(TranscriptTelemetryPresentation.inferenceGeoValue(nil).text, "—")
+    }
+
     func testPricingBasisExcludesDelegatedWork() {
         let telemetry = telemetry(events: [
             usageEvent(model: "gpt-5.6-sol", context: 100),

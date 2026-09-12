@@ -98,7 +98,7 @@ struct RunwayModelPrice: Equatable, Sendable {
             )
         }
         switch inferenceGeo {
-        case nil, "global": return resolved
+        case nil, "global", "not_available", "": return resolved
         case "us":
             guard let multiplier = inferenceGeoUSMultiplier else { return nil }
             return resolved.scaled(by: multiplier)

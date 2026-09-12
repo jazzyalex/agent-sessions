@@ -1096,7 +1096,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
                        accuracy: 1e-6)
     }
 
-    func testUnknownInferenceGeoMakesLiveRunwayUnpriceable() throws {
+    func testUnavailableInferenceGeoUsesBaseRateForLiveRunway() throws {
         let t0 = Date(timeIntervalSince1970: 2_000_000)
         let t1 = t0.addingTimeInterval(30)
         let dollars = try dollarsPerHour(lines: [
@@ -1104,7 +1104,76 @@ final class ClaudeRunwayParserTests: XCTestCase {
             usageLine(id: "burn", at: t1, output: 300_000,
                       inferenceGeo: "not_available")
         ], now: t1.addingTimeInterval(1))
+        XCTAssertEqual(dollars ?? 0, 10_000 * 25.0 / 1_000_000 * 3600,
+                       accuracy: 1e-6)
+    }
+
+    func testEmptyInferenceGeoUsesBaseRateForLiveRunway() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "burn", at: t1, output: 300_000, inferenceGeo: "")
+        ], now: t1.addingTimeInterval(1))
+        XCTAssertEqual(dollars ?? 0, 10_000 * 25.0 / 1_000_000 * 3600,
+                       accuracy: 1e-6)
+    }
+
+    func testMalformedInferenceGeoKeepsLiveRunwayUnpriceable() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "burn", at: t1, output: 300_000, inferenceGeo: "moon")
+        ], now: t1.addingTimeInterval(1))
         XCTAssertNil(dollars)
+    }
+
+    func testLoaderKeepsUnavailableGeoInDollarAndWeeklyPresentations() async throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let logPath = try makeLog(lines: [
+            usageLine(id: "anchor", at: now.addingTimeInterval(-90), input: 1,
+                      inferenceGeo: "not_available"),
+            usageLine(id: "burn", at: now.addingTimeInterval(-5), output: 300_000,
+                      inferenceGeo: "not_available")
+        ])
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "session", isGoal: false, logPaths: [logPath])
+
+        func snapshot(rateUnit: RunwayRateUnit) async -> CodexRunwaySnapshot? {
+            let resetAt = now.addingTimeInterval(7 * 24 * 60 * 60)
+            let baseline = RunwayProviderBaseline(
+                source: .claude,
+                remainingPercent: 50,
+                resetAt: resetAt,
+                currentRunoutAt: resetAt,
+                observedAt: now,
+                hasProjectedRunout: false,
+                windowMinutes: 10_080,
+                rateUnit: rateUnit
+            )
+            let request = CodexRunwaySnapshotRequest(
+                baseline: baseline,
+                identities: [identity],
+                now: now,
+                maxRows: 4,
+                weeklyResetAt: resetAt,
+                weeklyPercentPointsPerDollar: 0.5,
+                weeklyWindowAvailable: true
+            )
+            return await ClaudeRunwaySnapshotLoader.snapshot(for: request)
+        }
+
+        let dollars = await snapshot(rateUnit: .dollarsPerHour)
+        XCTAssertEqual(dollars?.baseline.rateUnit, .dollarsPerHour,
+                       "real Claude geography must not trigger the token fallback")
+        XCTAssertGreaterThan(dollars?.rows.first?.displayRate ?? 0, 0)
+
+        let weekly = await snapshot(rateUnit: .weeklyPercentPerHour)
+        XCTAssertEqual(weekly?.baseline.rateUnit, .weeklyPercentPerHour)
+        XCTAssertEqual(weekly?.rows.first?.confidence, .direct)
+        XCTAssertGreaterThan(weekly?.rows.first?.displayRate ?? 0, 0,
+                             "a calibrated weekly presentation must not become n/a")
     }
 
     /// A burst that straddles a speed switch must price each half at its own tier,

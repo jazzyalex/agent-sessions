@@ -90,6 +90,17 @@ enum ClaudeUsageSource: String, Codable, CustomStringConvertible {
         case .unavailable: return "unavailable"
         }
     }
+
+    /// Stable evidence identity for weekly calibration. Display wording and cache
+    /// freshness must never become persistence keys: a cached response is the same
+    /// authoritative transport as the live response it stores.
+    var weeklyCalibrationFamily: String? {
+        switch self {
+        case .oauthEndpoint, .cachedOAuth: return "oauth"
+        case .webEndpoint, .cachedWeb: return "web"
+        case .tmuxUsage, .unavailable: return nil
+        }
+    }
 }
 
 enum ClaudeUsageHealth: String, Codable, CustomStringConvertible {

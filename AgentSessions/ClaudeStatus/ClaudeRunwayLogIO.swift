@@ -4,14 +4,16 @@ import Foundation
 /// Claude runway parser and scanner. Kept in one place so the two readers can't
 /// drift apart.
 enum ClaudeRunwayLog {
-    /// nil means the field was absent (legacy/global-default pricing). Any explicit
-    /// value outside the supported contract is retained as unknown so callers fail
-    /// closed instead of silently applying global rates.
+    /// nil means the field was absent (legacy/global-default pricing). Claude emits
+    /// `not_available` and, in older records, an empty string when no usable
+    /// inference geography is reported; callers preserve those values and price
+    /// them at the standard rate. Any other explicit value is retained as unknown
+    /// so malformed evidence still fails closed.
     static func inferenceGeo(usage: [String: Any]) -> String? {
         guard usage.keys.contains("inference_geo") else { return nil }
         guard let raw = usage["inference_geo"] as? String else { return "unknown" }
         switch raw {
-        case "us", "global": return raw
+        case "us", "global", "not_available", "": return raw
         default: return "unknown"
         }
     }

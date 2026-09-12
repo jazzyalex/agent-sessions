@@ -4666,6 +4666,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(us.outputPerMTok, global.outputPerMTok * 1.1, accuracy: 0.000_001)
         XCTAssertEqual(us.cacheWritePerMTok, global.cacheWritePerMTok.map { $0 * 1.1 })
         XCTAssertEqual(us.cacheWrite1hPerMTok, global.cacheWrite1hPerMTok.map { $0 * 1.1 })
+        XCTAssertEqual(price.rates(for: .fast, inferenceGeo: "not_available"), global)
+        XCTAssertEqual(price.rates(for: .fast, inferenceGeo: ""), global)
         XCTAssertNil(price.rates(for: .standard, inferenceGeo: "unknown"))
 
         let old = try XCTUnwrap(RunwayPriceTable.makeForTesting()
