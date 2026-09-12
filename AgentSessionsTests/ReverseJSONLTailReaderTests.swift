@@ -142,4 +142,21 @@ final class ReverseJSONLTailReaderTests: XCTestCase {
 
         XCTAssertNil(session)
     }
+
+    func testJSONLReaderMaximumBytesKeepsMovingFileAtCapturedSnapshot() throws {
+        let first = #"{"n":1}"# + "\n"
+        let second = #"{"n":2}"# + "\n"
+        write(first)
+        let snapshotByteCount = UInt64(first.utf8.count)
+
+        let handle = try FileHandle(forWritingTo: tempURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(second.utf8))
+        try handle.close()
+
+        XCTAssertEqual(try JSONLReader(url: tempURL, maximumBytes: snapshotByteCount).readLines(),
+                       [#"{"n":1}"#])
+        XCTAssertEqual(try JSONLReader(url: tempURL).readLines(),
+                       [#"{"n":1}"#, #"{"n":2}"#])
+    }
 }

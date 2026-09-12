@@ -1,5 +1,6 @@
 import XCTest
 import SQLite3
+import Combine
 @testable import AgentSessions
 
 private final class SearchCoordinatorTestStore: SearchSessionStoring {
@@ -5385,5 +5386,187 @@ final class SessionParserTests: XCTestCase {
 
         let session = SessionIndexer().parseFile(at: url)
         XCTAssertEqual(session?.codexInternalSessionIDHint, "019f7ce7-8979-7203-8867-34084576cf0c")
+    }
+
+    func testCodexAppendParseAddsOnlyNewCompleteLinesAndPreservesMetadata() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexAppend-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("rollout.jsonl")
+        let parentID = "019f7ce5-7a52-7e32-8fc5-99c3193aba48"
+        let baselineLines = [
+            #"{"timestamp":"2026-09-11T10:00:00Z","type":"session_meta","payload":{"id":"child","parent_thread_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/tmp","originator":"codex-tui","source":{"subagent":{"other":"review"}}}}"#,
+            #"{"timestamp":"2026-09-11T10:00:01Z","type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"high"}}"#,
+            #"{"timestamp":"2026-09-11T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        ]
+        try writeText(baselineLines.joined(separator: "\n") + "\n", to: url)
+
+        let indexer = SessionIndexer()
+        let baseline = try XCTUnwrap(indexer.parseFileFull(at: url, forcedID: "stable-row-id"))
+        let cursor = try XCTUnwrap(indexer.makeAppendCursor(at: url,
+                                                            lastLineIndex: baselineLines.count))
+        let appendedLines = [
+            #"{"timestamp":"2026-09-11T10:00:03Z","type":"turn_context","payload":{"model":"gpt-6-astra","effort":"xhigh"}}"#,
+            #"{"timestamp":"2026-09-11T10:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"appended"}]}}"#
+        ]
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((appendedLines.joined(separator: "\n") + "\n").utf8))
+        try handle.close()
+
+        guard case let .appended(updated, nextCursor) = indexer.parseFileAppend(
+            at: url,
+            existing: baseline,
+            cursor: cursor
+        ) else {
+            return XCTFail("Expected append parse")
+        }
+        XCTAssertEqual(updated.events.count, baseline.events.count + appendedLines.count)
+        XCTAssertEqual(Array(updated.events.prefix(baseline.events.count)), baseline.events)
+        XCTAssertEqual(updated.events[baseline.events.count].id,
+                       SessionIndexer.eventID(forPath: url.path, index: baselineLines.count + 1))
+        XCTAssertEqual(updated.id, "stable-row-id")
+        XCTAssertEqual(updated.parentSessionID, parentID)
+        XCTAssertEqual(updated.subagentType, "review")
+        XCTAssertEqual(updated.codexSurface, .subagent)
+        XCTAssertEqual(updated.model, "gpt-6-astra")
+        XCTAssertEqual(updated.reasoningEffort, "high")
+        XCTAssertEqual(nextCursor.lastLineIndex, baselineLines.count + appendedLines.count)
+        XCTAssertEqual(nextCursor.byteOffset, UInt64(try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)))
+    }
+
+    func testCodexAppendParseDefersPartialLineThenConsumesItOnceComplete() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexPartialAppend-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let baselineLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"one"}]}}"#
+        try writeText(baselineLine + "\n", to: url)
+        let indexer = SessionIndexer()
+        let baseline = try XCTUnwrap(indexer.parseFileFull(at: url))
+        let cursor = try XCTUnwrap(indexer.makeAppendCursor(at: url, lastLineIndex: 1))
+        let appendedLine = #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"two"}]}}"#
+        let split = appendedLine.index(appendedLine.startIndex, offsetBy: appendedLine.count / 2)
+
+        var handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(appendedLine[..<split].utf8))
+        try handle.close()
+        guard case .incompleteTail = indexer.parseFileAppend(at: url, existing: baseline, cursor: cursor) else {
+            return XCTFail("Expected incomplete tail deferral")
+        }
+
+        handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((String(appendedLine[split...]) + "\n").utf8))
+        try handle.close()
+        guard case let .appended(updated, _) = indexer.parseFileAppend(at: url,
+                                                                       existing: baseline,
+                                                                       cursor: cursor) else {
+            return XCTFail("Expected completed line to append")
+        }
+        XCTAssertEqual(updated.events.count, 2)
+        XCTAssertEqual(updated.events.last?.text, "two")
+    }
+
+    func testCodexAppendParseFallsBackForTruncationAndReplacement() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexAppendInvalidation-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("rollout.jsonl")
+        let line = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        try writeText(line + "\n", to: url)
+        let indexer = SessionIndexer()
+        let baseline = try XCTUnwrap(indexer.parseFileFull(at: url))
+        let cursor = try XCTUnwrap(indexer.makeAppendCursor(at: url, lastLineIndex: 1))
+
+        guard case .unchanged = indexer.parseFileAppend(at: url,
+                                                         existing: baseline,
+                                                         cursor: cursor) else {
+            return XCTFail("An unchanged cursor must not force a full parse")
+        }
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: cursor.modifiedAt.addingTimeInterval(1)],
+            ofItemAtPath: url.path
+        )
+        guard case .fallbackToFullParse = indexer.parseFileAppend(at: url,
+                                                                  existing: baseline,
+                                                                  cursor: cursor) else {
+            return XCTFail("A same-size mtime change must invalidate append state")
+        }
+
+        try writeText("{}\n", to: url)
+        guard case .fallbackToFullParse = indexer.parseFileAppend(at: url,
+                                                                  existing: baseline,
+                                                                  cursor: cursor) else {
+            return XCTFail("Truncation must invalidate append state")
+        }
+
+        try FileManager.default.removeItem(at: url)
+        try writeText(line + "\n" + line + "\n", to: url)
+        guard case .fallbackToFullParse = indexer.parseFileAppend(at: url,
+                                                                  existing: baseline,
+                                                                  cursor: cursor) else {
+            return XCTFail("Replacement must invalidate append state")
+        }
+    }
+
+    func testFocusedCodexReloadUsesInstalledAppendCursorWithoutSecondFullParse() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-CodexReloadAppend-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let baselineLine = #"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"baseline"}]}}"#
+        try writeText(baselineLine + "\n", to: url)
+        let size = try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        let sessionID = "reload-append-id"
+        let lightweight = Session(id: sessionID,
+                                  source: .codex,
+                                  startTime: nil,
+                                  endTime: nil,
+                                  model: nil,
+                                  filePath: url.path,
+                                  fileSizeBytes: size,
+                                  eventCount: 1,
+                                  events: [],
+                                  cwd: "/tmp",
+                                  repoName: "tmp",
+                                  lightweightTitle: "baseline")
+        let indexer = SessionIndexer()
+        indexer.installSessionsForReloadTesting([lightweight])
+
+        let hydrated = expectation(description: "initial full hydration")
+        var hydrationCancellable: AnyCancellable?
+        hydrationCancellable = indexer.$allSessions
+            .filter { $0.first?.events.count == 1 }
+            .prefix(1)
+            .sink { _ in hydrated.fulfill() }
+        indexer.reloadSession(id: sessionID, reason: .selection)
+        wait(for: [hydrated], timeout: 3)
+        hydrationCancellable?.cancel()
+        let afterHydration = indexer.reloadParseInvocationCountsForTesting()
+
+        let appendedLine = #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"delta"}]}}"#
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((appendedLine + "\n").utf8))
+        try handle.close()
+
+        let appended = expectation(description: "focused append hydration")
+        var appendCancellable: AnyCancellable?
+        appendCancellable = indexer.$allSessions
+            .filter { $0.first?.events.count == 2 }
+            .prefix(1)
+            .sink { _ in appended.fulfill() }
+        indexer.reloadSession(id: sessionID, force: true, reason: .focusedSessionMonitor)
+        wait(for: [appended], timeout: 3)
+        appendCancellable?.cancel()
+
+        let afterAppend = indexer.reloadParseInvocationCountsForTesting()
+        XCTAssertEqual(afterAppend.full, afterHydration.full,
+                       "Focused growth must not invoke parseFileFull again")
+        XCTAssertEqual(afterAppend.append, afterHydration.append + 1)
+        XCTAssertEqual(indexer.allSessions.first?.events.last?.text, "delta")
     }
 }

@@ -3,10 +3,17 @@ import Foundation
 final class JSONLReader {
     private let url: URL
     private let chunkSize: Int
+    private let maximumBytes: UInt64?
+    private let propagatesReadErrors: Bool
 
-    init(url: URL, chunkSize: Int = 64 * 1024) {
+    init(url: URL,
+         chunkSize: Int = 64 * 1024,
+         maximumBytes: UInt64? = nil,
+         propagatesReadErrors: Bool = false) {
         self.url = url
         self.chunkSize = chunkSize
+        self.maximumBytes = maximumBytes
+        self.propagatesReadErrors = propagatesReadErrors
     }
 
     func readLines() throws -> [String] {
@@ -43,9 +50,25 @@ final class JSONLReader {
         let maxLineBytes = 8_388_608 // 8 MB
         var skippingOversizeLine = false
         var didEmitSkipStub = false
+        var bytesRead: UInt64 = 0
+        var readError: Error?
         while autoreleasepool(invoking: {
-            let data = try? fh.read(upToCount: chunkSize) ?? Data()
-            if let data, !data.isEmpty {
+            let requestedCount: Int
+            if let maximumBytes {
+                guard bytesRead < maximumBytes else { return false }
+                requestedCount = Int(min(UInt64(chunkSize), maximumBytes - bytesRead))
+            } else {
+                requestedCount = chunkSize
+            }
+            let data: Data
+            do {
+                data = try fh.read(upToCount: requestedCount) ?? Data()
+            } catch {
+                if propagatesReadErrors { readError = error }
+                return false
+            }
+            if !data.isEmpty {
+                bytesRead += UInt64(data.count)
                 buffer.append(data)
                 // If we're currently skipping an oversize line, keep discarding until newline
                 if skippingOversizeLine {
@@ -104,6 +127,7 @@ final class JSONLReader {
                 return false
             }
         }) {}
+        if let readError { throw readError }
         if stoppedEarly { return false }
         if skippingOversizeLine {
             if !didEmitSkipStub {
