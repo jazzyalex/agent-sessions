@@ -1406,19 +1406,19 @@
         }
       }
     },
-    "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier.": {
+    "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.": {
       "comment": "Explanation of how Session info estimates API-equivalent cost. Standard names the assumed pricing tier.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. “Standard” is a pricing assumption, not an observed service tier."
+            "value": "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "费用按每个请求的模型、速度、区域和上下文大小计算，然后按公布的 API 费率汇总。“标准”是一种定价假设，并非实际观测到的服务层级。"
+            "value": "费用按每个请求的模型、速度、区域和上下文大小计算，然后按公布的 API 费率汇总。当 Claude 未提供可用的推理地理位置时，将采用公布的标准费率；明确的美国区域则采用区域定价。“标准”是一种定价假设，并非实际观测到的服务层级。"
           }
         }
       }
