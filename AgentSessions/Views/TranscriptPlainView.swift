@@ -1289,7 +1289,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource) -> some View {
-        let isOn = activeRoleFilters.contains(role)
+        // Every role active is the same thing as no filter applied, so the chips
+        // draw unhighlighted there. Four filled chips at rest read as "four
+        // filters are on" when in fact nothing is being filtered out.
+        let allActive = activeRoleFilters.count == TranscriptRoleFilter.allCases.count
+        let isOn = activeRoleFilters.contains(role) && !allActive
         // A role's occurrences are reachable when it's shown (explicitly on, or
         // the "no filter" empty-set state) and it actually has ≥1 block.
         let shown = activeRoleFilters.isEmpty || isOn
@@ -1303,7 +1307,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // The jump chevrons appear on the chip being navigated, not on all four
         // at once: eight permanent controls for one action was most of the old
         // second row's weight. ⌘G / ⇧⌘G stay available regardless.
-        let showsNav = navEnabled && (isOn || hoveredRoleFilter == role)
+        let showsNav = navEnabled && hoveredRoleFilter == role
         return HStack(spacing: 3) {
             Button(action: { toggleRoleFilter(role) }) {
                 HStack(spacing: 6) {
@@ -1330,6 +1334,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
             .help(isOn ? "Hide \(label) blocks" : "Show \(label) blocks")
 
             if showsNav {
@@ -1494,12 +1499,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "doc.on.doc")
                                     .imageScale(.medium)
-                                Text("ID \(displayLast4)")
+                                Text(displayLast4)
                                     .font(TranscriptToolbarStyle.baseFont)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         .buttonStyle(.borderless)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .help("Copy session ID: \(short) (⌘⇧C)")
                         .accessibilityLabel("Copy Session ID")
                         .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -1519,6 +1526,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
                     .font(TranscriptToolbarStyle.baseFont)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .help("Copy entire transcript to clipboard (⌥⌘C)")
                     .keyboardShortcut("c", modifiers: [.command, .option])
                     .accessibilityLabel("Copy Transcript")
@@ -1528,6 +1537,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Button("Export") { exportMarkdown(session: session) }
                     .buttonStyle(.borderless)
                     .font(TranscriptToolbarStyle.baseFont)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .help("Export transcript as Markdown")
                     .accessibilityLabel("Export Transcript")
 
@@ -1555,6 +1566,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                 }
                 .buttonStyle(.borderless)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .help("Find in session (⌘F)")
                 .accessibilityLabel("Find in session")
 

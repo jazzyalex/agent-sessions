@@ -1923,9 +1923,15 @@ struct UnifiedSessionsView: View {
             .disabled(!canResumeSelectedSession)
             .accessibilityLabel(Text("Resume"))
 
-            ToolbarGroupDivider()
+            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
+                ToolbarIcon(systemName: "photo.on.rectangle")
+            } action: {
+                showImagesForSelectedSession(showNoSelectionAlert: true)
+            }
+            .disabled(selectedSession == nil)
+            .accessibilityLabel(Text("Image Browser"))
 
-            LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+            ToolbarGroupDivider()
 
             ToolbarIconToggle(
                 isOn: $showTranscriptWindow,
@@ -1957,16 +1963,22 @@ struct UnifiedSessionsView: View {
 
     /// The analytics build state used to be a badge on a glyph. As a menu row it
     /// says the state in words instead, which is the whole reason the item moved.
+    private var layoutMenuTitle: String {
+        layoutMode == .vertical
+            ? String(localized: "Switch to Horizontal Split")
+            : String(localized: "Switch to Vertical Split")
+    }
+
     private var analyticsMenuTitle: String {
         switch analyticsPhase {
-        case .queued, .building: return String(localized: "Statistics (building…)")
-        case .failed: return String(localized: "Statistics (last build failed)")
-        case .canceled: return String(localized: "Statistics (build canceled)")
+        case .queued, .building: return String(localized: "Analytics (building…)")
+        case .failed: return String(localized: "Analytics (last build failed)")
+        case .canceled: return String(localized: "Analytics (build canceled)")
         case .ready, .idle:
-            if analyticsIsStale { return String(localized: "Statistics (update available)") }
+            if analyticsIsStale { return String(localized: "Analytics (update available)") }
             return analyticsReady
-                ? String(localized: "Statistics")
-                : String(localized: "Statistics (build required)")
+                ? String(localized: "Analytics")
+                : String(localized: "Analytics (build required)")
         }
     }
 
@@ -1987,10 +1999,7 @@ struct UnifiedSessionsView: View {
             .keyboardShortcut("o", modifiers: [.command, .shift])
             .disabled(selectedSession == nil)
 
-            Button("Image Browser") {
-                showImagesForSelectedSession(showNoSelectionAlert: true)
-            }
-            .disabled(selectedSession == nil)
+            Button(layoutMenuTitle) { onToggleLayout() }
 
             Divider()
 
@@ -4119,32 +4128,6 @@ private struct ToolbarGroupDivider: View {
     var body: some View {
         Divider()
             .frame(height: 18)
-    }
-}
-
-private struct LayoutToggleButton: View {
-    let layoutMode: LayoutMode
-    let onToggleLayout: () -> Void
-
-    private var targetMode: LayoutMode {
-        layoutMode == .vertical ? .horizontal : .vertical
-    }
-
-    private var iconName: String {
-        targetMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1"
-    }
-
-    private var helpText: String {
-        targetMode == .vertical ? "Switch to vertical split layout" : "Switch to horizontal split layout"
-    }
-
-    var body: some View {
-        ToolbarIconButton(help: helpText) { _ in
-            ToolbarIcon(systemName: iconName)
-        } action: {
-            onToggleLayout()
-        }
-        .accessibilityLabel(Text("Toggle Layout"))
     }
 }
 

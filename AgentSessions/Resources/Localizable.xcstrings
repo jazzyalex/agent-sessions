@@ -2585,7 +2585,7 @@
       }
     },
     "Analytics": {
-      "comment": "Title of the Analytics window.",
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -2597,6 +2597,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "分析"
+          }
+        }
+      }
+    },
+    "Analytics (build canceled)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (build canceled)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（生成已取消）"
+          }
+        }
+      }
+    },
+    "Analytics (build required)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (build required)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（需要生成）"
+          }
+        }
+      }
+    },
+    "Analytics (building…)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (building…)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（正在生成…）"
+          }
+        }
+      }
+    },
+    "Analytics (last build failed)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (last build failed)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（上次生成失败）"
+          }
+        }
+      }
+    },
+    "Analytics (update available)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (update available)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（有可用更新）"
           }
         }
       }
@@ -9257,23 +9342,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "估算方式"
-          }
-        }
-      }
-    },
-    "ID %@": {
-      "comment": "User-visible copy from TranscriptPlainView. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ID %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ID：%@"
           }
         }
       }
@@ -18878,108 +18946,6 @@
         }
       }
     },
-    "Statistics": {
-      "comment": "Main toolbar overflow menu item opening the usage analytics window.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计"
-          }
-        }
-      }
-    },
-    "Statistics (build canceled)": {
-      "comment": "Main toolbar overflow menu item for usage analytics, with its build state.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics (build canceled)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计（生成已取消）"
-          }
-        }
-      }
-    },
-    "Statistics (build required)": {
-      "comment": "Main toolbar overflow menu item for usage analytics, with its build state.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics (build required)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计（需要生成）"
-          }
-        }
-      }
-    },
-    "Statistics (building…)": {
-      "comment": "Main toolbar overflow menu item for usage analytics, with its build state.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics (building…)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计（正在生成…）"
-          }
-        }
-      }
-    },
-    "Statistics (last build failed)": {
-      "comment": "Main toolbar overflow menu item for usage analytics, with its build state.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics (last build failed)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计（上次生成失败）"
-          }
-        }
-      }
-    },
-    "Statistics (update available)": {
-      "comment": "Main toolbar overflow menu item for usage analytics, with its build state.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Statistics (update available)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "统计（有可用更新）"
-          }
-        }
-      }
-    },
     "Status": {
       "localizations": {
         "en": {
@@ -19225,6 +19191,23 @@
         }
       }
     },
+    "Switch to Horizontal Split": {
+      "comment": "Main toolbar overflow menu item that changes the window split arrangement.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Horizontal Split"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到水平分栏"
+          }
+        }
+      }
+    },
     "Switch to Light Mode": {
       "comment": "Main toolbar overflow menu item toggling appearance.",
       "localizations": {
@@ -19238,6 +19221,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "切换到浅色模式"
+          }
+        }
+      }
+    },
+    "Switch to Vertical Split": {
+      "comment": "Main toolbar overflow menu item that changes the window split arrangement.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Vertical Split"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到垂直分栏"
           }
         }
       }
@@ -20158,22 +20158,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "切换深色/浅色模式"
-          }
-        }
-      }
-    },
-    "Toggle Layout": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Toggle Layout"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换布局"
           }
         }
       }
