@@ -644,23 +644,6 @@
         }
       }
     },
-    "%lld / %lld sessions": {
-      "comment": "Footer count of visible sessions out of the total.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld / %lld sessions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$lld / %2$lld 个会话"
-          }
-        }
-      }
-    },
     "%lld active • %lld waiting": {
       "comment": "Menu bar summary of active and waiting agent sessions.",
       "localizations": {
@@ -838,6 +821,23 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "%lld of %lld shown": {
+      "comment": "Footer count of visible sessions out of the total while a filter is active.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld shown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已显示 %2$lld 个中的 %1$lld 个"
           }
         }
       }
@@ -1064,6 +1064,23 @@
         }
       }
     },
+    "%lld you · %lld agent · %lld tools": {
+      "comment": "Session info turn composition: blocks from the user, the agent, and tool calls.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld you · %lld agent · %lld tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 你 · %2$lld 代理 · %3$lld 工具"
+          }
+        }
+      }
+    },
     "%lld%% remaining": {
       "comment": "User-visible copy from PreferencesView+Usage. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -1199,57 +1216,6 @@
         }
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
-    },
-    "%lldd ago": {
-      "comment": "Compact relative time in days.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldd ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天前"
-          }
-        }
-      }
-    },
-    "%lldh ago": {
-      "comment": "Compact relative time in hours.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldh ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小时前"
-          }
-        }
-      }
-    },
-    "%lldm ago": {
-      "comment": "Compact relative time in minutes.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldm ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 分钟前"
-          }
-        }
-      }
     },
     "0% remaining.": {
       "comment": "Notification body shown for an exhausted usage window without a reset estimate.",
@@ -1474,23 +1440,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "60分钟"
-          }
-        }
-      }
-    },
-    "<1m ago": {
-      "comment": "Compact relative time under one minute.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "<1m ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "不到 1 分钟前"
           }
         }
       }
@@ -1767,6 +1716,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "活跃注册表目录（可选）"
+          }
+        }
+      }
+    },
+    "Activity": {
+      "comment": "Session info section heading for the session's time span and turn composition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活动"
           }
         }
       }
@@ -3116,6 +3082,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "可执行文件名：agy · 使用 Antigravity CLI 安装脚本安装"
+          }
+        }
+      }
+    },
+    "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several.": {
+      "comment": "Tooltip explaining the Session info turn composition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话记录中的区块：来自你的 %1$lld 个，来自代理的 %2$lld 个，工具调用 %3$lld 次。代理发出了 %4$lld 次计费请求——一个回合可能包含多次请求。"
           }
         }
       }
@@ -4843,6 +4826,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "清除并重建核心会话索引。仅在索引疑似损坏时使用。"
+          }
+        }
+      }
+    },
+    "Clear filters": {
+      "comment": "Accessibility label for the footer session count when a filter is active.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear filters"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除筛选"
           }
         }
       }
@@ -7835,23 +7835,6 @@
         }
       }
     },
-    "Estimates, not billing": {
-      "comment": "Session info footer clarifying that displayed costs are estimates rather than charges.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Estimates, not billing"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅为估算，并非账单"
-          }
-        }
-      }
-    },
     "Evening": {
       "localizations": {
         "en": {
@@ -8299,6 +8282,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "查找父对话"
+          }
+        }
+      }
+    },
+    "First request %@, last %@. Wall clock between them, not time spent computing — neither provider records how long a request took.": {
+      "comment": "Tooltip explaining what the Session info span measures.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First request %@, last %@. Wall clock between them, not time spent computing — neither provider records how long a request took."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次请求 %1$@，最后一次 %2$@。这是两者之间的实际时间，而非计算耗时——两家提供方都不记录单次请求的时长。"
           }
         }
       }
@@ -10534,23 +10534,6 @@
         }
       }
     },
-    "Last: %@": {
-      "comment": "Footer timestamp for the newest visible session.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最近更新：%@"
-          }
-        }
-      }
-    },
     "Later": {
       "comment": "Power Tips button that dismisses the tour for now.",
       "localizations": {
@@ -12339,6 +12322,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "新手引导现已简化为单个设置页面：选择智能体、开启额度监视器，然后开始探索。不再需要浏览多页介绍。"
+          }
+        }
+      }
+    },
+    "One request every %@ on average.": {
+      "comment": "Appended to the Session info span tooltip when a pace can be computed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One request every %@ on average."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平均每 %@ 一次请求。"
           }
         }
       }
@@ -17805,6 +17805,40 @@
         }
       }
     },
+    "Show all blocks again": {
+      "comment": "Tooltip for the only active transcript role chip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all blocks again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新显示所有区块"
+          }
+        }
+      }
+    },
+    "Show all sessions": {
+      "comment": "Tooltip for the footer session count that clears the active filters.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示所有会话"
+          }
+        }
+      }
+    },
     "Show command sessions": {
       "localizations": {
         "en": {
@@ -17913,6 +17947,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示菜单栏项目"
+          }
+        }
+      }
+    },
+    "Show only %@ blocks": {
+      "comment": "Tooltip for a transcript role chip while every role is shown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show only %@ blocks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示 %@ 区块"
           }
         }
       }
@@ -18692,6 +18743,23 @@
         }
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
+    },
+    "Span": {
+      "comment": "Session info row label for the wall-clock time between the first and last request.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Span"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跨度"
+          }
+        }
+      }
     },
     "Spawned a workflow": {
       "localizations": {
@@ -19715,6 +19783,23 @@
         }
       }
     },
+    "The transcript for this session is not loaded.": {
+      "comment": "Session info tooltip when turn composition cannot be counted yet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The transcript for this session is not loaded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话的对话记录尚未加载。"
+          }
+        }
+      }
+    },
     "The weekly Session Runway used to divide everything burned since the weekly reset by the time elapsed, so one heavy day set the displayed pace for days after. It now measures the burn between recent quota readings, and shows token throughput until it has a real reading to attribute.": {
       "localizations": {
         "en": {
@@ -19938,6 +20023,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "这会从本地存储中移除所有待处理的崩溃报告。"
+          }
+        }
+      }
+    },
+    "This transcript records fewer than two timed requests.": {
+      "comment": "Session info tooltip when there is no span to report.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transcript records fewer than two timed requests."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话记录中带时间戳的请求少于两次。"
           }
         }
       }
@@ -20449,6 +20551,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "可在“设置”>“高级”中启用。Agent Sessions 会保留菜单栏项目，以便你仍能打开 App。"
+          }
+        }
+      }
+    },
+    "Turns": {
+      "comment": "Session info row label for how the transcript's blocks divide between you, the agent, and tool calls.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turns"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回合"
           }
         }
       }

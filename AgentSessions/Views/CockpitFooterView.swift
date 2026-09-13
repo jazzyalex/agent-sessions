@@ -228,20 +228,23 @@ struct CockpitFooterView: View {
     let statusText: String
     let quotas: [QuotaData]
     let sessionCountText: String
-    let freshnessText: String?
+    /// Set only while a filter is narrowing the list, so the count can offer to
+    /// undo it. nil means the list is showing everything and the count is just a
+    /// number.
+    let clearFilters: (() -> Void)?
     let usageDisplayModeOverride: UsageDisplayMode?
 
     init(isBusy: Bool,
          statusText: String,
          quotas: [QuotaData],
          sessionCountText: String,
-         freshnessText: String? = nil,
+         clearFilters: (() -> Void)? = nil,
          usageDisplayModeOverride: UsageDisplayMode? = nil) {
         self.isBusy = isBusy
         self.statusText = statusText
         self.quotas = quotas
         self.sessionCountText = sessionCountText
-        self.freshnessText = freshnessText
+        self.clearFilters = clearFilters
         self.usageDisplayModeOverride = usageDisplayModeOverride
     }
 
@@ -302,7 +305,7 @@ struct CockpitFooterView: View {
 
             Spacer(minLength: 0)
 
-            SessionCountView(text: sessionCountText, freshnessText: freshnessText)
+            SessionCountView(text: sessionCountText, clearFilters: clearFilters)
         }
         .padding(.horizontal, CockpitFooterTheme.horizontalPadding)
         // Fixed single-row height for the common (signed-in) case; grows only when
@@ -777,23 +780,34 @@ private struct MiniUsageBar: View {
     }
 }
 
+/// The session count, and — only while something is narrowing the list — a way
+/// to undo the narrowing. The freshness stamp that used to sit beside it is
+/// gone: "Last: <1m ago" was true almost always, and a status line that never
+/// changes stops being read. Indexing state still appears, on the left, while
+/// indexing is actually happening.
 private struct SessionCountView: View {
     let text: String
-    let freshnessText: String?
+    let clearFilters: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(text)
-                .monospacedDigit()
-            if let freshnessText, !freshnessText.isEmpty {
-                DividerText(baseForeground: .secondary)
-                Text(freshnessText)
-                    .monospacedDigit()
+        if let clearFilters {
+            Button(action: clearFilters) {
+                label.underline(false)
             }
+            .buttonStyle(.plain)
+            .help("Show all sessions")
+            .accessibilityLabel(Text("Clear filters"))
+        } else {
+            label
         }
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+    }
+
+    private var label: some View {
+        Text(text)
+            .monospacedDigit()
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
 
@@ -844,8 +858,7 @@ private struct CockpitFooterPreviewHost: View {
                           lastUpdate: Date(),
                           eventTimestamp: nil),
             ],
-            sessionCountText: "12 / 42 Sessions",
-            freshnessText: "Last: 2m ago",
+            sessionCountText: "12 of 42 shown",
             usageDisplayModeOverride: modeOverride
         )
     }
@@ -936,8 +949,7 @@ private struct CockpitFooterAuthPreviewMatrix: View {
                               eventTimestamp: nil,
                               authStatus: .make(provider: .claude, state: .signedOut)),
                 ],
-                sessionCountText: "12 / 42 Sessions",
-                freshnessText: "Last: 2m ago"
+                sessionCountText: "12 of 42 shown"
             )
 
             // Expired but WITH live data → compact banner over dimmed meters.
@@ -954,8 +966,7 @@ private struct CockpitFooterAuthPreviewMatrix: View {
                               eventTimestamp: Date(),
                               authStatus: .make(provider: .codex, state: .expired)),
                 ],
-                sessionCountText: "12 / 42 Sessions",
-                freshnessText: "Last: 1m ago"
+                sessionCountText: "12 of 42 shown"
             )
         }
         .padding()

@@ -1225,13 +1225,43 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .joined(separator: ",")
     }
 
+    /// Focus-then-restore, the way filter bars normally behave: from the
+    /// everything-shown state a click narrows to that one role, and clicking the
+    /// sole remaining role widens back to everything. Only once a subset is in
+    /// play does a click add or remove one role. This is what made the old `All`
+    /// chip necessary — with focus-on-first-click there is nothing left for it
+    /// to undo.
     private func toggleRoleFilter(_ role: TranscriptRoleFilter) {
-        if activeRoleFilters.contains(role) {
+        let everything = Set(TranscriptRoleFilter.allCases)
+        if activeRoleFilters == everything {
+            activeRoleFilters = [role]
+        } else if activeRoleFilters == [role] {
+            activeRoleFilters = everything
+        } else if activeRoleFilters.contains(role) {
             activeRoleFilters.remove(role)
+            // Never leave the transcript with every role hidden: an empty set
+            // renders a blank pane with no obvious way back.
+            if activeRoleFilters.isEmpty { activeRoleFilters = everything }
         } else {
             activeRoleFilters.insert(role)
         }
         persistRoleFilters()
+    }
+
+    private func roleFilterChipHelp(_ role: TranscriptRoleFilter,
+                                    label: String, isOn: Bool) -> String {
+        let everything = Set(TranscriptRoleFilter.allCases)
+        if activeRoleFilters == everything {
+            return String(localized: "Show only \(label) blocks",
+                          comment: "Tooltip for a transcript role chip while every role is shown.")
+        }
+        if activeRoleFilters == [role] {
+            return String(localized: "Show all blocks again",
+                          comment: "Tooltip for the only active transcript role chip.")
+        }
+        return isOn
+            ? String(localized: "Hide \(label) blocks", comment: "Tooltip to hide one transcript role.")
+            : String(localized: "Show \(label) blocks", comment: "Tooltip to show one transcript role.")
     }
 
     private func roleFilterLabel(_ role: TranscriptRoleFilter) -> String {
@@ -1337,7 +1367,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .buttonStyle(.plain)
             .fixedSize(horizontal: true, vertical: false)
-            .help(isOn ? "Hide \(label) blocks" : "Show \(label) blocks")
+            .help(roleFilterChipHelp(role, label: label, isOn: isOn))
 
             if showsNav {
                 HStack(spacing: 1) {

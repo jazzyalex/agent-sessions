@@ -1004,7 +1004,7 @@ struct UnifiedSessionsView: View {
 	            statusText: footerStatusText,
 	            quotas: footerQuotas,
 	            sessionCountText: footerSessionCountText,
-	            freshnessText: footerFreshnessText
+	            clearFilters: footerIsFiltered ? { clearListFilters() } : nil
 	        )
 	    }
 
@@ -1397,29 +1397,35 @@ struct UnifiedSessionsView: View {
 	        return ""
 	    }
 
+	    /// True while something is narrowing the list. The count offers to undo it
+	    /// only in that case; an unfiltered list is just a number.
+	    private var footerIsFiltered: Bool {
+	        cachedRows.count != cachedTotalSessionCount
+	            || unified.showFavoritesOnly
+	            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+	    }
+
+	    private func clearListFilters() {
+	        unified.showFavoritesOnly = false
+	        unified.queryDraft = ""
+	        searchCoordinator.cancel()
+	    }
+
+	    /// "3,775 sessions" when nothing is filtered; "3,625 of 3,775 shown" when
+	    /// something is. The bare fraction said neither which number was which nor
+	    /// that a filter was responsible.
 	    private var footerSessionCountText: String {
 	        let visible = cachedRows.count
 	        let total = cachedTotalSessionCount
-	        let countText = visible != total
-	            ? String(localized: "\(visible) / \(total) sessions", comment: "Footer count of visible sessions out of the total.")
-	            : String(localized: "\(total) sessions", comment: "Footer count of sessions.")
+	        guard footerIsFiltered else {
+	            return String(localized: "\(total) sessions", comment: "Footer count of sessions when nothing is filtered.")
+	        }
+	        let countText = String(localized: "\(visible) of \(total) shown",
+	                               comment: "Footer count of visible sessions out of the total while a filter is active.")
 	        if unified.showFavoritesOnly {
 	            return String(localized: "\(countText) | Saved only", comment: "Footer session count while the saved-only filter is enabled.")
 	        }
 	        return countText
-	    }
-
-	    private var footerFreshnessText: String? {
-	        guard let date = cachedLatestModifiedAt else { return nil }
-	        return String(localized: "Last: \(timeAgoShort(date))", comment: "Footer timestamp for the newest visible session.")
-	    }
-
-	    private func timeAgoShort(_ date: Date, now: Date = Date()) -> String {
-	        let seconds = max(0, now.timeIntervalSince(date))
-	        if seconds < 60 { return String(localized: "<1m ago", comment: "Compact relative time under one minute.") }
-	        if seconds < 3600 { return String(localized: "\(Int(seconds / 60))m ago", comment: "Compact relative time in minutes.") }
-	        if seconds < 86400 { return String(localized: "\(Int(seconds / 3600))h ago", comment: "Compact relative time in hours.") }
-	        return String(localized: "\(Int(seconds / 86400))d ago", comment: "Compact relative time in days.")
 	    }
 
 	    private var footerQuotas: [QuotaData] {
