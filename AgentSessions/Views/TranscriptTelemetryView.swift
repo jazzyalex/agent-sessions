@@ -134,12 +134,14 @@ enum TranscriptTelemetryPresentation {
             return Value(text: "≈\(points.formatted(.number.precision(.fractionLength(2)).locale(locale)))%",
                          help: localized("Account-calibrated estimate of this session's share of the weekly allowance.", locale: locale))
         }
-        // This row survives its own absence because the reader can act on it:
-        // the estimate needs an account-window calibration, and the Quota Meter
-        // is where one comes from. Naming the fix is what earns the line.
-        let reason = telemetry.weeklyQuotaEstimate?.unavailableReason
-            ?? localized("No compatible weekly calibration for this account.", locale: locale)
-        return .absent(reason + " " + localized("Open the Quota Meter to calibrate.", locale: locale))
+        // The row keeps its place, but the tooltip states only the reason the
+        // value is missing. It must NOT suggest the Quota Meter: the engine
+        // fails closed through five distinct gates (SessionTelemetryEngine.swift
+        // ~269-311) and the Quota Meter addresses one of them. Unpriceable usage
+        // and account-identity mismatches are not calibration problems, so a
+        // blanket "calibrate" hint sends the reader somewhere that cannot help.
+        return .absent(telemetry.weeklyQuotaEstimate?.unavailableReason
+                       ?? localized("No compatible weekly calibration for this account.", locale: locale))
     }
 
     static func tokensValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {

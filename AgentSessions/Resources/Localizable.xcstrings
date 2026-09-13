@@ -12572,23 +12572,6 @@
         }
       }
     },
-    "Open the Quota Meter to calibrate.": {
-      "comment": "Appended to the Session info weekly-quota tooltip when no calibration exists.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open the Quota Meter to calibrate."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开额度监视器进行校准。"
-          }
-        }
-      }
-    },
     "Open the default email app with a pre-filled crash report draft.": {
       "localizations": {
         "en": {
