@@ -107,15 +107,19 @@ enum TranscriptTelemetryPresentation {
         let firstRequestAt: Date?
         let lastRequestAt: Date?
         let requests: Int
+        /// Requests that actually carry a timestamp. `requests` counts every
+        /// session-owned event, including ones the provider left unstamped, so it
+        /// is the wrong divisor for a span measured only over stamped ones.
+        let timedRequests: Int
         let userBlocks: Int
         let assistantBlocks: Int
         let toolBlocks: Int
 
-        /// Mean gap between consecutive requests. A long session with few
+        /// Mean gap between consecutive timed requests. A long session with few
         /// requests was mostly waiting on a person, not on the model.
         var secondsPerRequest: TimeInterval? {
-            guard let span, requests > 1, span > 0 else { return nil }
-            return span / Double(requests - 1)
+            guard let span, timedRequests > 1, span > 0 else { return nil }
+            return span / Double(timedRequests - 1)
         }
     }
 
@@ -137,8 +141,9 @@ enum TranscriptTelemetryPresentation {
             }
         }
         return ActivitySummary(span: span, firstRequestAt: first, lastRequestAt: last,
-                               requests: owned.count, userBlocks: user,
-                               assistantBlocks: assistant, toolBlocks: tools)
+                               requests: owned.count, timedRequests: stamps.count,
+                               userBlocks: user, assistantBlocks: assistant,
+                               toolBlocks: tools)
     }
 
     /// "4h 12m", "38m", "45s". nil span reads as an em dash at the call site.

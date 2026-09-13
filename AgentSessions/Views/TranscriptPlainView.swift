@@ -1369,14 +1369,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .fixedSize(horizontal: true, vertical: false)
             .help(roleFilterChipHelp(role, label: label, isOn: isOn))
 
-            if showsNav {
-                HStack(spacing: 1) {
-                    roleJumpChevron("chevron.up", role: role, direction: -1,
-                                    enabled: navEnabled, help: "Previous \(label)")
-                    roleJumpChevron("chevron.down", role: role, direction: 1,
-                                    enabled: navEnabled, help: "Next \(label)")
-                }
+            // Width is reserved whether or not the chevrons are showing: if the
+            // chip grew on hover it would push its neighbours out from under a
+            // stationary pointer, which then reveals THEIR chevrons and shifts
+            // the row back — a flicker loop at every chip boundary.
+            HStack(spacing: 1) {
+                roleJumpChevron("chevron.up", role: role, direction: -1,
+                                enabled: navEnabled, help: "Previous \(label)")
+                roleJumpChevron("chevron.down", role: role, direction: 1,
+                                enabled: navEnabled, help: "Next \(label)")
             }
+            .opacity(showsNav ? 1 : 0)
+            .allowsHitTesting(showsNav)
+            .accessibilityHidden(!showsNav)
         }
         .onHover { hovering in
             if hovering {
@@ -1654,28 +1659,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private var transcriptOverflowMenu: some View {
         Menu {
             Menu {
+                // No ⌘1/⌘2/⌘3 here: those already toggle the Codex, Claude and
+                // Antigravity source filters (UnifiedSessionsView, and the
+                // registry's PillSpec shortcuts). ⇧⌘T cycles the modes and is
+                // registered in `toolbarShortcutButtons`, which stays live
+                // whether or not this menu has been opened.
                 viewModeMenuButton(.blocks,
                                    title: "Session",
-                                   help: "Structured cards with collapsible tool calls.",
-                                   shortcut: "1")
+                                   help: "Structured cards with collapsible tool calls.")
                 viewModeMenuButton(.transcript,
                                    title: "Text",
-                                   help: "Merged chat and tools.",
-                                   shortcut: "2")
+                                   help: "Merged chat and tools.")
                 viewModeMenuButton(.json,
                                    title: "JSON",
-                                   help: "Formatted session JSON for readability.",
-                                   shortcut: "3")
+                                   help: "Formatted session JSON for readability.")
             } label: {
                 Text("View as")
             }
 
             Divider()
 
-            Button("Increase Text Size") { adjustFont(1) }
-                .keyboardShortcut("+", modifiers: .command)
-            Button("Decrease Text Size") { adjustFont(-1) }
-                .keyboardShortcut("-", modifiers: .command)
+            // Labels only. The shortcuts live in `toolbarShortcutButtons`:
+            // Menu content is built lazily, so a binding declared only here is
+            // dead until the menu is first opened — the same trap the source
+            // pills work around with zero-size buttons.
+            Button("Increase Text Size (⌘+)") { adjustFont(1) }
+            Button("Decrease Text Size (⌘−)") { adjustFont(-1) }
         } label: {
             Image(systemName: "ellipsis")
         }
@@ -1688,8 +1697,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func viewModeMenuButton(_ mode: SessionViewMode,
                                     title: LocalizedStringResource,
-                                    help: LocalizedStringResource,
-                                    shortcut: KeyEquivalent) -> some View {
+                                    help: LocalizedStringResource) -> some View {
         Button {
             setViewMode(mode)
         } label: {
@@ -1703,7 +1711,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Text(title)
             }
         }
-        .keyboardShortcut(shortcut, modifiers: .command)
         .help(Text(help))
     }
 
@@ -1753,6 +1760,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private var toolbarShortcutButtons: some View {
         // Keyboard shortcuts only; keep them zero-size to avoid visual artifacts.
         shortcutButton(action: { focusCoordinator.perform(.openTranscriptFind) }, key: "f", modifiers: .command)
+        // Text size moved into the overflow menu; these keep ⌘+/⌘− alive without
+        // depending on that menu ever being opened.
+        shortcutButton(action: { adjustFont(1) }, key: "+", modifiers: .command)
+        shortcutButton(action: { adjustFont(-1) }, key: "-", modifiers: .command)
         shortcutButton(action: { navigateNextMatch(direction: -1) }, key: "g", modifiers: [.command, .shift])
         shortcutButton(action: { navigateNextMatch(direction: 1) }, key: "g", modifiers: .command)
         shortcutButton(action: {

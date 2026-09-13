@@ -384,7 +384,6 @@ struct UnifiedSessionsView: View {
         @State private var cachedRowIDs: [String] = []
         @State private var cachedVisibleRowIDs: Set<String> = []
         @State private var cachedTotalSessionCount: Int = 0
-        @State private var cachedLatestModifiedAt: Date? = nil
 	    @State private var collapsedParents: Set<String> = []
 	    @State private var hasLoadedPersistedCollapsedParents: Bool = false
         @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
@@ -1397,16 +1396,20 @@ struct UnifiedSessionsView: View {
 	        return ""
 	    }
 
-	    /// True while something is narrowing the list. The count offers to undo it
-	    /// only in that case; an unfiltered list is just a number.
+	    /// True while a filter the footer can actually undo is narrowing the list.
+	    /// Deliberately NOT "cachedRows.count != cachedTotalSessionCount": rows also
+	    /// lag behind during search churn, and offering to clear filters when none
+	    /// are set produces a control that changes nothing when pressed. This set
+	    /// must stay in step with `clearListFilters()`.
 	    private var footerIsFiltered: Bool {
-	        cachedRows.count != cachedTotalSessionCount
-	            || unified.showFavoritesOnly
+	        unified.showFavoritesOnly
+	            || showActiveSessionsOnly
 	            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 	    }
 
 	    private func clearListFilters() {
 	        unified.showFavoritesOnly = false
+	        showActiveSessionsOnly = false
 	        unified.queryDraft = ""
 	        searchCoordinator.cancel()
 	    }
@@ -1964,7 +1967,38 @@ struct UnifiedSessionsView: View {
             ToolbarGroupDivider()
 
             mainOverflowMenu
+
+            // Menu content is built lazily, so a shortcut declared only inside
+            // `mainOverflowMenu` is dead until the menu is first opened. Same
+            // workaround the source pills already use when they collapse into
+            // AgentOverflowMenu.
+            overflowMenuShortcuts
         }
+    }
+
+    @ViewBuilder
+    private var overflowMenuShortcuts: some View {
+        hiddenShortcut(key: "k", modifiers: .command) {
+            NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
+        }
+        hiddenShortcut(key: "o", modifiers: [.command, .shift]) {
+            if let s = selectedSession { openDir(s) }
+        }
+        hiddenShortcut(key: "r", modifiers: .command) {
+            guard !unified.isIndexing, !unified.isProcessingTranscripts else { return }
+            activeCodexSessions.refreshNow()
+            unified.refresh()
+        }
+    }
+
+    private func hiddenShortcut(key: KeyEquivalent,
+                                modifiers: EventModifiers,
+                                action: @escaping () -> Void) -> some View {
+        Button("", action: action)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
     }
 
     /// The analytics build state used to be a badge on a glyph. As a menu row it
@@ -1995,14 +2029,12 @@ struct UnifiedSessionsView: View {
             Button(analyticsMenuTitle) {
                 NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
             }
-            .keyboardShortcut("k", modifiers: .command)
 
             Divider()
 
             Button("Reveal Working Directory in Finder") {
                 if let s = selectedSession { openDir(s) }
             }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
             .disabled(selectedSession == nil)
 
             Button(layoutMenuTitle) { onToggleLayout() }
@@ -2014,7 +2046,6 @@ struct UnifiedSessionsView: View {
                 activeCodexSessions.refreshNow()
                 unified.refresh()
             }
-            .keyboardShortcut("r", modifiers: .command)
             .disabled(unified.isIndexing || unified.isProcessingTranscripts)
 
             Divider()
@@ -2027,7 +2058,6 @@ struct UnifiedSessionsView: View {
                 PreferencesWindowController.shared.show(indexer: codexIndexer,
                                                         updaterController: updaterController)
             }
-            .keyboardShortcut(",", modifiers: .command)
         } label: {
             ToolbarIcon(systemName: "ellipsis")
         }
@@ -2704,7 +2734,6 @@ struct UnifiedSessionsView: View {
                 nextRows = rows.sorted(using: sortOrder)
             }
             cachedTotalSessionCount = unified.sessions.count
-            cachedLatestModifiedAt = latestModifiedAt(in: unified.sessions) ?? latestModifiedAt(in: nextRows)
 
             let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
             let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
@@ -2901,20 +2930,6 @@ struct UnifiedSessionsView: View {
                 }
             }
         }
-
-    private func latestModifiedAt(in sessions: [Session]) -> Date? {
-        var latest: Date?
-        for session in sessions {
-            guard let current = latest else {
-                latest = session.modifiedAt
-                continue
-            }
-            if session.modifiedAt > current {
-                latest = session.modifiedAt
-            }
-        }
-        return latest
-    }
 
     private var isHierarchyBrowsing: Bool {
         showSubagentHierarchy && searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -4768,51 +4783,3 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 
 // MARK: - Analytics Button
 
-private struct AnalyticsButtonView: View {
-    let isReady: Bool
-    let phase: AnalyticsIndexPhase
-    let isStale: Bool
-
-    var body: some View {
-        ToolbarIconButton(help: helpText) { _ in
-            ZStack {
-                ToolbarIcon(systemName: "chart.bar.xaxis")
-                    .opacity((isReady || phase == .ready) ? 1 : 0.5)
-                if phase == .queued || phase == .building {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else if isStale {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 8, y: -8)
-                }
-            }
-        } action: {
-            NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
-        }
-        .keyboardShortcut("k", modifiers: .command)
-        .accessibilityLabel(Text("Analytics"))
-    }
-
-    private var helpText: String {
-        switch phase {
-        case .queued, .building:
-            return "Analytics build in progress (⌘K)"
-        case .ready:
-            if isStale {
-                return "View analytics (stale data, update available) (⌘K)"
-            }
-            return "View usage analytics (⌘K)"
-        case .failed:
-            return "View analytics (last build failed, retry available) (⌘K)"
-        case .canceled:
-            return "View analytics (build canceled, restart available) (⌘K)"
-        case .idle:
-            if isReady {
-                return "View usage analytics (⌘K)"
-            }
-            return "View analytics (build required) (⌘K)"
-        }
-    }
-}

@@ -6368,18 +6368,19 @@
         }
       }
     },
-    "Decrease Text Size": {
+    "Decrease Text Size (⌘−)": {
+      "comment": "Transcript overflow menu item; the shortcut is registered separately.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Decrease Text Size"
+            "value": "Decrease Text Size (⌘−)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "缩小文本"
+            "value": "减小文字（⌘−）"
           }
         }
       }
@@ -9557,18 +9558,19 @@
         }
       }
     },
-    "Increase Text Size": {
+    "Increase Text Size (⌘+)": {
+      "comment": "Transcript overflow menu item; the shortcut is registered separately.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Increase Text Size"
+            "value": "Increase Text Size (⌘+)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "增大文本"
+            "value": "增大文字（⌘+）"
           }
         }
       }
