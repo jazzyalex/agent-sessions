@@ -249,11 +249,11 @@ ol li b{color:var(--ink); font-weight:600}
     <table style="margin-top:0">
       <tr><th style="width:24%">Restored</th><th style="width:20%">Over</th><th>Why this one</th></tr>
       <tr><td><b>Quota Meter</b></td><td>Statistics</td><td>Checked several times a day when you are burning through a weekly window; Statistics is a monthly look-back. It is also the app's signature window — burying it undersells the product.</td></tr>
-      <tr><td><b>Open in Terminal</b></td><td>Reveal in Finder</td><td>The vibe-coder move after reading a session is <code>cd</code> into that repo and keep going. Finder is the same intent for someone who works in files rather than a shell, and stays one row down in the menu.</td></tr>
+      <tr><td><b>Resume in CLI</b></td><td>Reveal in Finder</td><td>Resume continues the selected session in its original CLI (⌃⌘R). Finder reveals its files (⇧⌘O) and stays one row down in the menu.</td></tr>
       <tr><td><b>Copy</b></td><td>Text size</td><td>Pasting a transcript into an issue, a PR, or another agent is a daily action. Text size is set once and already has ⌘+ / ⌘−.</td></tr>
       <tr><td><b>Export</b></td><td>View as</td><td>Rarer than Copy but the same intent — get this out of the app — so the pair reads as one group. View mode stays demoted: that was the actual complaint.</td></tr>
     </table>
-    <p class="note" style="margin-top:12px">Main toolbar: 18 controls to 6 plus a menu. Transcript: two rows and 9 controls to one row and 6. The rule that held: <b>a glyph earns permanent space by being reached for without thinking.</b> Anything you have to look for is better as a named menu row.</p>
+    <p class="note" style="margin-top:12px">The four source pills shown below are an illustrative enabled-source configuration. The real toolbar derives all enabled agents from the registry and retains its source overflow control above four. The rule that held: <b>a glyph earns permanent space by being reached for without thinking.</b></p>
   </div>
 
   <!-- ══════════ LIGHT ══════════ -->
@@ -275,7 +275,7 @@ ol li b{color:var(--ink); font-weight:600}
             <span style="flex:1">Search sessions</span>
             <span class="chipset">
               <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-star"/></svg>Starred</span>
-              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived</span>
+              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived ▾</span>
             </span>
             <span class="kbd">⌥⌘F</span>
           </span>
@@ -292,7 +292,7 @@ ol li b{color:var(--ink); font-weight:600}
 
         <div class="body">
           <div class="list">
-            <div class="lhead"><span>Agent</span><span>Session</span><span>Msgs</span></div>
+            <div class="lhead"><span>Agent</span><span>Session <b title="Hierarchy / flat list · ⇧⌘H">≡</b> <b title="Collapse / expand all">⇅</b></span><span>Msgs</span></div>
             <div class="lrow sel"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Profile session sidebar CPU</span><span class="mg">6935</span></div>
             <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Analyze how vibe coders read</span><span class="mg">1431</span></div>
             <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Session info sidebar UI/UX</span><span class="mg">317</span></div>
@@ -389,7 +389,7 @@ ol li b{color:var(--ink); font-weight:600}
             <span style="flex:1; color:var(--w-ink)">telemetry pricing</span>
             <span class="chipset">
               <span class="fchip on"><svg viewBox="0 0 16 16"><use href="#i-star"/></svg>Starred</span>
-              <span class="fchip"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived</span>
+              <span class="fchip on"><svg viewBox="0 0 16 16"><use href="#i-archive"/></svg>Archived · 1 ▾</span>
             </span>
             <span class="kbd">⌥⌘F</span>
           </span>
@@ -406,7 +406,7 @@ ol li b{color:var(--ink); font-weight:600}
 
         <div class="body">
           <div class="list">
-            <div class="lhead"><span>Agent</span><span>Session</span><span>Msgs</span></div>
+            <div class="lhead"><span>Agent</span><span>Session <b title="Hierarchy / flat list · ⇧⌘H">≡</b> <b title="Collapse / expand all">⇅</b></span><span>Msgs</span></div>
             <div class="lrow sel"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Session info sidebar UI/UX</span><span class="mg">317</span></div>
             <div class="lrow"><span class="ag"><span class="dot" style="background:#C9762E"></span>Claude</span><span class="ti">Close telemetry pricing gaps</span><span class="mg">204</span></div>
             <div class="lrow"><span class="ag"><span class="dot" style="background:#3F63C8"></span>Codex</span><span class="ti">Bind pricing to provenance</span><span class="mg">158</span></div>
@@ -486,16 +486,23 @@ ol li b{color:var(--ink); font-weight:600}
 
   <!-- ══════════ MENUS ══════════ -->
   <section>
-    <div class="shead"><span class="num">03</span><h2>Where the remaining eight went</h2></div>
+    <div class="shead"><span class="num">03</span><h2>Relocated controls</h2></div>
     <p class="cap">Nothing was deleted. What is left in the menus is genuinely occasional — a name in a menu is more discoverable than an unlabelled glyph, and these are the ones you reach for by thinking rather than by muscle memory.</p>
     <div class="menus">
       <div class="menu">
-        <div class="mh">Main toolbar · ⋯ <span style="text-transform:none;letter-spacing:0;font-weight:400">(7 items)</span></div>
+        <div class="mh">Search · Archived ▾</div>
+        <div class="mi"><svg class="ico acc" viewBox="0 0 16 16"><use href="#i-check"/></svg>Codex archived only</div>
+        <div class="mi"><span style="width:16px"></span>Claude archived only</div>
+        <div class="mh" style="border-top:1px solid var(--hair-soft); border-bottom:0; text-transform:none; letter-spacing:0; font-weight:400; font-size:11.5px; color:var(--muted); line-height:1.5">Independent filters; other agents are unaffected. The chip shows · 1 or · 2 when active.</div>
+      </div>
+      <div class="menu">
+        <div class="mh">Main toolbar · ⋯</div>
         <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-chart"/></svg>Statistics</div>
         <div class="mdiv"></div>
-        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-folder"/></svg>Reveal in Finder<span class="r">⌃⌘R</span></div>
+        <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-folder"/></svg>Reveal in Finder<span class="r">⇧⌘O</span></div>
         <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-photo"/></svg>Image Browser</div>
         <div class="mdiv"></div>
+        <div class="mi">Live sessions only</div>
         <div class="mi"><svg class="ico" viewBox="0 0 16 16"><use href="#i-refresh"/></svg>Reindex now</div>
         <div class="mdiv"></div>
         <div class="mi sub">Appearance</div>
@@ -513,11 +520,11 @@ ol li b{color:var(--ink); font-weight:600}
 
       <div class="menu">
         <div class="mh">Transcript · ⋯ ▸ View as</div>
-        <div class="mi"><svg class="ico acc" viewBox="0 0 16 16"><use href="#i-check"/></svg>Session<span class="r">⌘1</span></div>
-        <div class="mi"><span style="width:16px"></span>Text<span class="r">⌘2</span></div>
-        <div class="mi"><span style="width:16px"></span>JSON<span class="r">⌘3</span></div>
+        <div class="mi"><svg class="ico acc" viewBox="0 0 16 16"><use href="#i-check"/></svg>Session</div>
+        <div class="mi"><span style="width:16px"></span>Text</div>
+        <div class="mi"><span style="width:16px"></span>JSON</div>
         <div class="mh" style="border-top:1px solid var(--hair-soft); border-bottom:0; text-transform:none; letter-spacing:0; font-weight:400; font-size:11.5px; color:var(--muted); line-height:1.5">
-          The dropdown that used to occupy the primary slot in the transcript toolbar, now three menu rows and three shortcuts.
+          The dropdown becomes three menu rows. ⇧⌘T still cycles modes; ⌘1–9 remain source shortcuts.
         </div>
       </div>
     </div>
@@ -525,7 +532,7 @@ ol li b{color:var(--ink); font-weight:600}
 
   <!-- ══════════ STATES ══════════ -->
   <section>
-    <div class="shead"><span class="num">04</span><h2>Transcript toolbar, four states</h2></div>
+    <div class="shead"><span class="num">04</span><h2>Transcript toolbar states</h2></div>
     <p class="cap">One row has to carry everything the two rows did. These are the states it must hold without wrapping or growing.</p>
     <div class="states">
       <div>
@@ -594,6 +601,24 @@ ol li b{color:var(--ink); font-weight:600}
               <svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg>
             </span>
             <span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="stlabel">unified search · match navigation replaces role filters, with no second strip</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="field" style="max-width:none"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span style="flex:1; color:var(--w-ink)">telemetry pricing</span><span class="kbd">4 of 17</span><span class="tb">⌃</span><span class="tb">⌄</span><svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg></span>
+            <span class="tb">Copy</span><span class="tb">Export</span><span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="stlabel">local Find plus unified search · local Find owns ⌘G, search results remain reachable</div>
+        <div class="strip"><div class="win" style="min-width:640px; border:0; border-radius:0; box-shadow:none">
+          <div class="trbar" style="border-bottom:0">
+            <span class="pill dim">3 filters</span><span class="field" style="max-width:none"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span style="flex:1; color:var(--w-ink)">anchorBlockIndex</span><span class="kbd">4 of 17</span><span class="tb">⌃</span><span class="tb">⌄</span><svg class="ico" viewBox="0 0 16 16"><use href="#i-x"/></svg></span>
+            <span class="tb">Search results · 8</span><span class="tb"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
           </div>
         </div></div>
       </div>

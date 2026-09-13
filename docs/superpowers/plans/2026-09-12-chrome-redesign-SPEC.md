@@ -5,7 +5,7 @@
 **Presentation only.** No telemetry, parser, pricing or index change.
 
 **Mockups (authoritative):**
-- `docs/superpowers/plans/assets/2026-09-12-chrome-redesign-mockups.html` — full-window light and dark, both overflow menus, four transcript-toolbar states. **Open this before writing view code.**
+- `docs/superpowers/plans/assets/2026-09-12-chrome-redesign-mockups.html` — full-window light and dark, overflow menus, and transcript-toolbar states. **Open this before writing view code.**
 - `docs/superpowers/plans/assets/2026-09-12-chrome-audit.html` — the rationale and the frequency ranking behind each move.
 
 ---
@@ -20,30 +20,30 @@ Audience: someone running 10–50 agent sessions a day across Codex and Claude. 
 
 ---
 
-## 1. Main toolbar — 18 controls to 6 plus a menu
+## 1. Main toolbar — fewer permanent controls, with no lost actions
 
 Five groups, in order:
 
 | Group | Contents |
 |---|---|
-| Sources | Codex / Claude / OpenCode / Hermes pills |
-| Search | The field, taking the reclaimed width, with `Starred` and `Archived` as scope chips inside it |
-| Actions | Quota Meter, Open in Terminal |
+| Sources | Registry-derived enabled sources: Codex and Claude plus every enabled other agent. Use the existing source overflow control when more than four are enabled. |
+| Search | The field, taking reclaimed width, with `Starred` and `Archived` scope chips. `Archived` opens two independent source-scoped toggles. |
+| Actions | Quota Meter, Resume in CLI |
 | View | Layout, Transcript pane, Session info |
 | Menu | `⋯` |
 
-**Archive stops being drawn four times.** Today each source pill carries its own archive icon; it becomes one scope chip in the search field.
+**Archive stops being duplicated beside source pills.** The `Archived` chip opens a menu with independent `Codex archived only` and `Claude archived only` checkboxes. Its active indicator shows whether one or both are selected; it is not a global archived-only Boolean. Each toggle retains its current source-scoped semantics, and neither hides other agents. The mockup's four visible source pills are one illustrative configuration, not the full supported-source list.
 
-**Into the `⋯` menu**, each gaining a name: Statistics, Reveal in Finder, Image Browser, Reindex now, Appearance ▸, Settings…
+**Into the `⋯` menu**, each gaining a name: Statistics, Reveal in Finder, Image Browser, Live sessions only, Reindex now, Appearance ▸, Settings… . Preserve the existing enablement rules for session-dependent items.
 
-**Out of the toolbar entirely:** Collapse all / Expand all move into the session list's own header, next to the rows they affect.
+**Out of the toolbar entirely:** Collapse all / Expand all and the hierarchy / flat-list toggle move into the session list's own header, next to the rows they affect. Keep ⇧⌘H for hierarchy.
 
 Restored after review, with what each beat:
 
 | Kept in toolbar | Over | Why |
 |---|---|---|
 | Quota Meter | Statistics | Checked several times a day against a weekly window; Statistics is a monthly look-back. Also the app's signature window. |
-| Open in Terminal | Reveal in Finder | The move after reading a session is `cd` into that repo. Finder is the same intent for file-first users and stays one row down in the menu. |
+| Resume in CLI | Reveal in Finder | Resume starts the selected session in its original CLI; it is not a terminal opened with `cd` into the repo. Keep ⌃⌘R for Resume and ⇧⌘O for Finder. |
 
 ## 2. Transcript toolbar — two rows to one
 
@@ -51,7 +51,7 @@ Restored after review, with what each beat:
 
 | Change | Detail |
 |---|---|
-| View mode leaves | Into `⋯ ▸ View as ▸ Session / Text / JSON`, plus ⌘1 / ⌘2 / ⌘3. This was the loudest control in the pane for the rarest choice. |
+| View mode leaves | Into `⋯ ▸ View as ▸ Session / Text / JSON`; retain ⇧⌘T to cycle modes. ⌘1 / ⌘2 / ⌘3 remain source shortcuts. This was the loudest control in the pane for the rarest choice. |
 | `All` chip disappears | No filter selected already means all roles. The chip existed only to undo the other four. |
 | ▲▼ arrows disappear | Jump-to-next stays on ⌘G / ⇧⌘G and appears on the active chip on hover. Four permanent arrow pairs served one action. |
 | Errors chip carries a count | `Errors 2` tells you whether to press it. Zero errors: no count, dimmed chip. It is the only filter with real signal. |
@@ -59,7 +59,9 @@ Restored after review, with what each beat:
 | Copy and Export stay | Same intent — get this out of the app — so they read as one group. Copy is a daily action. |
 | ID keeps its place | `⧉ a277`. The one identity string a user actually copies. |
 
-**Find-open state:** the field takes the row and the role filters collapse to a single `3 filters` chip. Drawn in the mockup.
+**Unified-search state:** when the main-window search has free text, the transcript's existing search-result navigation stays available in this same row: replace the role-filter group with query, match count, previous, next, and clear controls. Do not retain a second navigation strip. The controls continue to navigate the unified query's transcript matches and preserve ⌘G / ⇧⌘G routing.
+
+**Local Find-open state:** the Find field takes the row and the role filters collapse to a count chip. If a unified query is also active, keep a compact `Search results` control for its status and navigation; closing local Find restores the unified-search row. Local Find retains priority for ⌘G / ⇧⌘G while open. Neither search state may silently discard the other's query.
 
 ## 3. Surfaces — one warm neutral for all chrome
 
@@ -111,5 +113,5 @@ Whichever ships, it must be the only right-side panel toggle at full weight.
 - No literal colors: semantic SwiftUI colors or `NSColor` roles only.
 - No literal spacing: `LayoutTokens` only.
 - Every string that reaches the UI goes through the localization catalog — the app ships Simplified Chinese, and `scripts/validate_localization_catalogs.py` gates it.
-- Keyboard shortcuts survive every move: ⇧⌘I, ⌘F, ⌘G / ⇧⌘G, ⌘+ / ⌘−, ⌥⌘F, and the new ⌘1 / ⌘2 / ⌘3.
+- Keyboard shortcuts survive every move: ⇧⌘I, ⌘F, ⌘G / ⇧⌘G, ⌘+ / ⌘−, ⌥⌘F, ⇧⌘T, ⇧⌘H, ⌃⌘R, ⇧⌘O, and the existing source shortcuts ⌘1–9. No numeric view-mode shortcuts are added.
 - Accessibility labels move with their controls; a control that becomes a menu row keeps its label as the row title.

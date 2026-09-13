@@ -283,15 +283,16 @@ ol li b{color:var(--ink); font-weight:600}
 
     <table>
       <tr><th style="width:26%">Control</th><th style="width:16%">Real frequency</th><th>Where it goes</th></tr>
-      <tr><td><b>Source pills</b> Codex / Claude / OpenCode / Hermes</td><td>Constant</td><td class="keep">Stay, leading. This is the primary axis of the whole app.</td></tr>
+      <tr><td><b>Source pills</b> Codex / Claude / enabled other agents</td><td>Constant</td><td class="keep">Stay, leading. Derive them from the source registry; retain the existing source overflow control above four enabled agents and all source shortcuts.</td></tr>
       <tr><td><b>Search</b></td><td>Constant</td><td class="keep">Stay, and take the space the removed icons free. It is the main verb.</td></tr>
       <tr><td><b>Layout</b> / <b>Transcript pane</b> / <b>Session info</b></td><td>Daily</td><td class="keep">Stay, trailing, as one view group of three.</td></tr>
       <tr><td><b>Starred</b></td><td>Daily-ish</td><td class="move">Becomes a filter chip beside Search, where the other filters already live.</td></tr>
-      <tr><td><b>Quota Meter</b>, <b>Stats</b></td><td>Weekly</td><td class="move">Into the overflow menu, by name. Both open windows; neither needs a permanent glyph.</td></tr>
-      <tr><td><b>Terminal</b>, <b>Finder</b>, <b>Images</b></td><td>Weekly</td><td class="move">Overflow menu. These act on the <i>selected session</i> — they also belong in its context menu, which is where a power user will actually reach for them.</td></tr>
+      <tr><td><b>Quota Meter</b> / <b>Statistics</b></td><td>Daily / occasional</td><td class="keep">Quota Meter stays in the toolbar; Statistics moves to the overflow menu.</td></tr>
+      <tr><td><b>Resume in CLI</b> / <b>Finder</b> / <b>Images</b></td><td>Daily / occasional</td><td class="keep">Resume stays in the toolbar (⌃⌘R). Finder (⇧⌘O) and Image Browser move to overflow. Resume continues the selected session in its original CLI, not a shell opened at its repo.</td></tr>
+      <tr><td><b>Live sessions only</b></td><td>Occasional</td><td class="move">Move to the main overflow menu; retain its current enabled and disabled states.</td></tr>
       <tr><td><b>Refresh</b></td><td>Rarely, and it shouldn't exist</td><td class="move">Overflow menu. The index is live; a visible Refresh button advertises that you don't trust it.</td></tr>
       <tr><td><b>Dark / Light</b>, <b>Settings</b></td><td>Rarely</td><td class="move">Settings window and the app menu. Appearance is a preference, not a toolbar verb.</td></tr>
-      <tr><td><b>Collapse / Expand all</b></td><td>Occasional</td><td class="move">Into the session list's own header, next to the rows they affect.</td></tr>
+      <tr><td><b>Hierarchy / flat list</b>, <b>Collapse / Expand all</b></td><td>Occasional</td><td class="move">Into the session-list header, next to the rows they affect. Preserve ⇧⌘H for hierarchy.</td></tr>
     </table>
 
     <div class="pair">
@@ -331,7 +332,7 @@ ol li b{color:var(--ink); font-weight:600}
       </div>
 
       <div class="slab">
-        <div class="tag next">Proposed — 3 groups, search takes the reclaimed space</div>
+        <div class="tag next">Proposed — sources, search, actions, view, menu</div>
         <div class="stage">
           <div class="mac">
             <div class="bar">
@@ -347,6 +348,9 @@ ol li b{color:var(--ink); font-weight:600}
                 <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-archive"/></svg></span>
                 <span class="kbd">⌥⌘F</span></span>
               <span class="sep"></span>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-grid"/></svg>
+              <svg class="ico" viewBox="0 0 16 16"><use href="#i-term"/></svg>
+              <span class="sep"></span>
               <svg class="ico" viewBox="0 0 16 16"><use href="#i-split"/></svg>
               <svg class="ico" viewBox="0 0 16 16"><use href="#i-sidebar"/></svg>
               <svg class="ico on" viewBox="0 0 16 16"><use href="#i-gauge"/></svg>
@@ -359,7 +363,7 @@ ol li b{color:var(--ink); font-weight:600}
       </div>
     </div>
 
-    <p class="note">Archive moves inside the search field as a scope chip, which also fixes a smaller oddity: today each source pill carries its own archive icon, so the same concept is drawn four times.</p>
+    <p class="note">The four displayed source pills are illustrative, not a cap. Archived becomes one search chip opening independent Codex and Claude archived-only checkboxes; its active count reflects one or two selected sources and other agents are unaffected. The session-list header gains hierarchy / flat-list and collapse / expand controls. The full-window mockups show the final arrangement.</p>
   </section>
 
   <!-- ══════════ 5 ══════════ -->
@@ -404,6 +408,7 @@ ol li b{color:var(--ink); font-weight:600}
               <span class="pill" style="color:#C0553F; border-color:#C0553F">Errors 2</span>
               <span class="spacer"></span>
               <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-copy"/></svg>a277</span>
+              <span class="btn">Copy</span><span class="btn">Export</span>
               <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-search"/></svg><span class="kbd">⌘F</span></span>
               <span class="btn"><svg class="ico" viewBox="0 0 16 16"><use href="#i-dots"/></svg></span>
             </div>
@@ -415,11 +420,12 @@ ol li b{color:var(--ink); font-weight:600}
 
     <table>
       <tr><th style="width:30%">Change</th><th>Why</th></tr>
-      <tr><td><b>View mode leaves the toolbar</b></td><td>Into the <code>⋯</code> menu as "View as ▸ Session / Text / JSON", plus ⌘1 / ⌘2 / ⌘3. A choice made once a year does not deserve permanent primary placement.</td></tr>
+      <tr><td><b>View mode leaves the toolbar</b></td><td>Into the <code>⋯</code> menu as "View as ▸ Session / Text / JSON". ⇧⌘T still cycles modes; ⌘1–9 remain source shortcuts.</td></tr>
       <tr><td><b>"All" chip disappears</b></td><td>No filter selected already means all. The chip only existed to undo the other four.</td></tr>
       <tr><td><b>▲▼ arrows disappear</b></td><td>Jump-to-next-occurrence stays on ⌘G / ⇧⌘G and appears on the active chip on hover. Four permanent arrow pairs for one navigation action is eight controls doing one job.</td></tr>
       <tr><td><b>Errors chip carries a count</b></td><td>The one filter with real signal. <code>Errors 2</code> tells you whether to press it; a bare dot doesn't. Zero errors, no count, dimmed chip.</td></tr>
-      <tr><td><b>A− / A+, Copy, Export</b></td><td>Into the <code>⋯</code> menu. Font size is set once; ⌘+ / ⌘− already work. Copy and Export are both "get this out of the app" and read better as one menu section than two buttons.</td></tr>
+      <tr><td><b>A− / A+, Copy, Export</b></td><td>Only Text size moves into <code>⋯</code>; ⌘+ / ⌘− still work. Copy and Export stay together on the toolbar.</td></tr>
+      <tr><td><b>Unified search navigation</b></td><td>When the main query has text, show query, match count, previous, next and clear in the single transcript row instead of a second strip. Local Find takes ⌘G while open, but a Search results control keeps unified results accessible.</td></tr>
       <tr><td><b>ID keeps its place</b></td><td>The one piece of identity a vibe coder genuinely copies. Losing the "ID" prefix saves width — <code>⧉ a277</code> is unambiguous next to a copy glyph.</td></tr>
     </table>
   </section>
@@ -428,7 +434,7 @@ ol li b{color:var(--ink); font-weight:600}
     <h2>If you only ship three things</h2>
     <ol>
       <li><b>Collapse the transcript toolbar to one row</b> and move view mode into the overflow menu. This is the single largest weight reduction on screen and touches no data.</li>
-      <li><b>Empty the main toolbar down to source pills, search, three view toggles, and a menu.</b> Nothing is removed from the app — it moves to where its frequency says it belongs.</li>
+      <li><b>Reduce the main toolbar to source pills, search, Quota Meter, Resume in CLI, three view toggles, and a menu.</b> Retain source overflow and move list-scoped controls into the list header.</li>
       <li><b>Pick one warm neutral for all chrome</b> so light mode stops looking like two apps stitched together, and drop rows that can never have data.</li>
     </ol>
     <p class="note" style="margin-top:18px">Everything here is presentation. The one item that needs a decision beyond taste is the Delegated row, because hiding it is a claim about the data: it is correct for Codex today because the accumulator cannot produce delegated records, and that would have to be revisited if Codex ever reports subagent usage.</p>
