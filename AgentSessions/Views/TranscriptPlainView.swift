@@ -1289,11 +1289,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource) -> some View {
-        // Every role active is the same thing as no filter applied, so the chips
-        // draw unhighlighted there. Four filled chips at rest read as "four
-        // filters are on" when in fact nothing is being filtered out.
-        let allActive = activeRoleFilters.count == TranscriptRoleFilter.allCases.count
-        let isOn = activeRoleFilters.contains(role) && !allActive
+        // A chip's fill states one thing only: whether this role is currently
+        // shown. An earlier version dimmed every chip once all four were active,
+        // on the theory that "all on" equals "no filter" — but that made turning
+        // the last role back on look like a click that did nothing, while
+        // silently dimming the other three. Selection state is not a place to be
+        // clever.
+        let isOn = activeRoleFilters.contains(role)
         // A role's occurrences are reachable when it's shown (explicitly on, or
         // the "no filter" empty-set state) and it actually has ≥1 block.
         let shown = activeRoleFilters.isEmpty || isOn
