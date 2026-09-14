@@ -425,6 +425,10 @@ private func localizedRequestCount(_ count: Int, locale: Locale = .current) -> S
 }
 
 struct TranscriptTelemetryView: View {
+    /// Wide enough that the longest routine values — "gpt-5.6-sol · medium",
+    /// "$145.54 API-equivalent", the three-part token legend — never wrap or cut.
+    static let panelWidth: CGFloat = 300
+
     let telemetry: SessionTelemetry?
     let blocks: [SessionTranscriptBuilder.LogicalBlock]
     let loading: Bool

@@ -813,8 +813,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
+                // The transcript is the flexible column: when the pane is too
+                // narrow for both, it gives up width and clips. Without minWidth
+                // 0 its toolbar's natural width (~700pt of fixed-size chips and
+                // buttons) set a floor, the HStack overflowed, and the window
+                // clipped whatever sat on the trailing edge — the inspector.
                 transcriptBody
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 if showSessionInfo {
                     Divider()
                     // `selectedTelemetry` re-scopes to the newly selected session
@@ -840,7 +846,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         } : nil,
                         refresh: { telemetryRefresh &+= 1 },
                         close: { showSessionInfo = false })
-                        .frame(width: min(320, max(200, geometry.size.width * 0.36)))
+                        // A fixed width the panel never gives up. It used to be
+                        // 36% of the pane with a 200pt floor, which cut values
+                        // like "gpt-5.6-sol · medium" mid-word. The user opened
+                        // it on purpose; it stays whole or it isn't shown.
+                        .frame(width: TranscriptTelemetryView.panelWidth)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(1)
                 }
             }
         }
@@ -1515,6 +1527,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
             .padding(.leading, TranscriptToolbarStyle.leadingPadding)
+            .frame(minWidth: 0, alignment: .leading)
+            .clipped()
+            .layoutPriority(-1)
 
             Spacer(minLength: 12)
 
