@@ -28,22 +28,25 @@ Five groups, in order:
 |---|---|
 | Sources | Codex / Claude / OpenCode / Hermes pills |
 | Search | The field, taking the reclaimed width, with `Starred` and `Archived` as scope chips inside it |
-| Actions | Quota Meter, Open in Terminal |
-| View | Layout, Transcript pane, Session info |
+| Actions | Quota Meter, Resume in CLI, Image Browser |
+| View | Transcript pane, Session info |
 | Menu | `⋯` |
 
-**Archive stops being drawn four times.** Today each source pill carries its own archive icon; it becomes one scope chip in the search field.
+**Archive stops being duplicated beside source pills.** An `Archived` chip in the search field opens independent `Codex archived only` and `Claude archived only` toggles. It is not a global archived-only Boolean: each keeps its source-scoped meaning and neither hides other agents. Turning one on also turns its source on.
 
-**Into the `⋯` menu**, each gaining a name: Statistics, Reveal in Finder, Image Browser, Reindex now, Appearance ▸, Settings…
+**Into the `⋯` menu**, each gaining a name: Analytics, Reveal in Finder, Switch to Horizontal / Vertical Split, Reindex now, Appearance, Settings… . Shortcuts for menu items are registered outside the menu, because Menu content is built lazily.
 
-**Out of the toolbar entirely:** Collapse all / Expand all move into the session list's own header, next to the rows they affect.
+**Owner decisions after visual review (2026-09-12)** — these supersede the first draft:
+- Image Browser is a primary toolbar action; the split-layout toggle moved into `⋯`. The split is set once and left; Image Browser acts on the session being read.
+- "Statistics" is named **Analytics** everywhere.
+- The session-list controls on the leading side of the toolbar (live-only, hierarchy, collapse / expand all) were approved as they are. Moving them into a list header is not in scope for this branch.
 
 Restored after review, with what each beat:
 
 | Kept in toolbar | Over | Why |
 |---|---|---|
 | Quota Meter | Statistics | Checked several times a day against a weekly window; Statistics is a monthly look-back. Also the app's signature window. |
-| Open in Terminal | Reveal in Finder | The move after reading a session is `cd` into that repo. Finder is the same intent for file-first users and stays one row down in the menu. |
+| Resume in CLI | Reveal in Finder | Resume starts the selected session in its original CLI (⌃⌘R). Finder stays one row down in the menu (⇧⌘O). |
 
 ## 2. Transcript toolbar — two rows to one
 

@@ -1866,12 +1866,9 @@ struct UnifiedSessionsView: View {
                         .opacity(0)
                         .frame(width: 0, height: 0)
 
-                    CodexSegmentedPill(
-                        isCodexOn: $unified.includeCodex,
-                        isArchivedOn: $unified.showArchivedCodexDesktopOnly,
-                        isMonochrome: stripMonochrome
-                    )
-                    .help("Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible.")
+                    AgentTabToggle(title: "Codex", color: Color.agentCodex,
+                                   isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
+                        .help("Show or hide Codex sessions (⌘1)")
                 }
 
                 if claudeAgentEnabled {
@@ -1880,12 +1877,9 @@ struct UnifiedSessionsView: View {
                         .opacity(0)
                         .frame(width: 0, height: 0)
 
-                    ClaudeSegmentedPill(
-                        isClaudeOn: $unified.includeClaude,
-                        isArchivedOn: $unified.showArchivedClaudeDesktopOnly,
-                        isMonochrome: stripMonochrome
-                    )
-                    .help("Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.")
+                    AgentTabToggle(title: "Claude", color: Color.agentClaude,
+                                   isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
+                        .help("Show or hide Claude sessions (⌘2)")
                 }
 
                 // Codex + Claude stay as pills; the remaining enabled agents show
@@ -3973,118 +3967,6 @@ private struct ArchivedCodexDesktopIconToggle: View {
     }
 }
 
-private struct ClaudeSegmentedPill: View {
-    @Binding var isClaudeOn: Bool
-    @Binding var isArchivedOn: Bool
-    let isMonochrome: Bool
-
-    private var claudeAccent: Color { isMonochrome ? .primary : Color.agentClaude }
-    private var claudeTextColor: Color {
-        if isClaudeOn { return claudeAccent }
-        return isMonochrome ? .secondary : .primary
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: { isClaudeOn.toggle() }) {
-                Text("Claude")
-                    .font(UnifiedSessionsStyle.agentTabFont)
-                    .foregroundStyle(claudeTextColor)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Claude"))
-            .accessibilityValue(Text(isClaudeOn ? "On" : "Off"))
-
-            Rectangle()
-                .fill(UnifiedSessionsStyle.agentPillStroke)
-                .frame(width: 1)
-                .padding(.vertical, 4)
-
-            Button(action: archiveToggle) {
-                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-                    .frame(minWidth: 14)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Narrow Claude to archived Desktop sessions"))
-            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
-        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
-    }
-
-    private func archiveToggle() {
-        let next = !isArchivedOn
-        if next, !isClaudeOn { isClaudeOn = true }
-        isArchivedOn = next
-    }
-}
-
-private struct CodexSegmentedPill: View {
-    @Binding var isCodexOn: Bool
-    @Binding var isArchivedOn: Bool
-    let isMonochrome: Bool
-
-    private var codexAccent: Color { isMonochrome ? .primary : Color.agentCodex }
-    private var codexTextColor: Color {
-        if isCodexOn { return codexAccent }
-        return isMonochrome ? .secondary : .primary
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: { isCodexOn.toggle() }) {
-                Text("Codex")
-                    .font(UnifiedSessionsStyle.agentTabFont)
-                    .foregroundStyle(codexTextColor)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Codex"))
-            .accessibilityValue(Text(isCodexOn ? "On" : "Off"))
-
-            Rectangle()
-                .fill(UnifiedSessionsStyle.agentPillStroke)
-                .frame(width: 1)
-                .padding(.vertical, 4)
-
-            Button(action: archiveToggle) {
-                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-                    .frame(minWidth: 14)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Narrow Codex to archived Desktop sessions"))
-            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
-        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
-    }
-
-    private func archiveToggle() {
-        let next = !isArchivedOn
-        if next, !isCodexOn { isCodexOn = true }
-        isArchivedOn = next
-    }
-}
-
 private struct ToolbarIcon: View {
     let systemName: String
     var isActive: Bool = false
@@ -4460,6 +4342,64 @@ private struct SearchScopeChip: View {
     }
 }
 
+/// One archive control instead of an archive segment on every source pill.
+///
+/// Deliberately NOT a single archived-only Boolean: each item keeps its own
+/// source-scoped meaning — narrow that source to archived Desktop sessions,
+/// leaving every other agent visible — exactly as the pill segments did. Turning
+/// one on also turns its source on, because narrowing a hidden source to its
+/// archive would otherwise show nothing and look broken.
+private struct ArchivedScopeChip: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let codexEnabled: Bool
+    let claudeEnabled: Bool
+
+    private var activeCount: Int {
+        (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
+            + (claudeEnabled && unified.showArchivedClaudeDesktopOnly ? 1 : 0)
+    }
+
+    var body: some View {
+        if codexEnabled || claudeEnabled {
+            Menu {
+                if codexEnabled {
+                    Toggle("Codex archived only", isOn: Binding(
+                        get: { unified.showArchivedCodexDesktopOnly },
+                        set: { on in
+                            if on, !unified.includeCodex { unified.includeCodex = true }
+                            unified.showArchivedCodexDesktopOnly = on
+                        }))
+                }
+                if claudeEnabled {
+                    Toggle("Claude archived only", isOn: Binding(
+                        get: { unified.showArchivedClaudeDesktopOnly },
+                        set: { on in
+                            if on, !unified.includeClaude { unified.includeClaude = true }
+                            unified.showArchivedClaudeDesktopOnly = on
+                        }))
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(activeCount > 0 ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(activeCount > 0 ? Color.accentColor.opacity(0.14) : Color.clear))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Narrow a source to its archived Desktop sessions; other agents stay visible")
+            .accessibilityLabel(Text("Archived"))
+        }
+    }
+}
+
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
@@ -4469,6 +4409,8 @@ private struct UnifiedSearchFiltersView: View {
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
     // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
     // per-source enablement is `@Published`, so those changes still redraw this view.
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -4522,6 +4464,10 @@ private struct UnifiedSearchFiltersView: View {
                                 symbol: "star",
                                 title: "Saved",
                                 help: "Show only saved sessions")
+
+                ArchivedScopeChip(unified: unified,
+                                  codexEnabled: codexAgentEnabled,
+                                  claudeEnabled: claudeAgentEnabled)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -4782,4 +4728,3 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 }
 
 // MARK: - Analytics Button
-

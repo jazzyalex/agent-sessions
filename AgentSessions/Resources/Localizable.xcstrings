@@ -2781,6 +2781,23 @@
         }
       }
     },
+    "Archived": {
+      "comment": "Search-field scope chip that narrows sources to archived Desktop sessions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归档"
+          }
+        }
+      }
+    },
     "Archived Sessions": {
       "localizations": {
         "en": {
@@ -2793,6 +2810,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已归档会话"
+          }
+        }
+      }
+    },
+    "Archived · %lld": {
+      "comment": "Search-field Archived chip when more than one source is narrowed to its archive.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived · %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归档 · %lld"
           }
         }
       }
@@ -4686,6 +4720,23 @@
         }
       }
     },
+    "Claude archived only": {
+      "comment": "Archived scope menu toggle for Claude.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude archived only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Claude 已归档"
+          }
+        }
+      }
+    },
     "Claude rejected usage requests. Your subscription may be inactive, or Claude may be temporarily rate limiting requests. Tracking will retry automatically; hiding affects only Quota Meter.": {
       "localizations": {
         "en": {
@@ -5118,6 +5169,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Codex 探测失败"
+          }
+        }
+      }
+    },
+    "Codex archived only": {
+      "comment": "Archived scope menu toggle for Codex.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex archived only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Codex 已归档"
           }
         }
       }
@@ -11428,22 +11496,6 @@
         }
       }
     },
-    "Narrow Claude to archived Desktop sessions": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Narrow Claude to archived Desktop sessions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将 Claude 限定为已归档的 Desktop 会话"
-          }
-        }
-      }
-    },
     "Narrow Codex to archived Desktop sessions": {
       "localizations": {
         "en": {
@@ -11456,6 +11508,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "将 Codex 限定为已归档的 Desktop 会话"
+          }
+        }
+      }
+    },
+    "Narrow a source to its archived Desktop sessions; other agents stay visible": {
+      "comment": "Tooltip for the Archived scope chip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Narrow a source to its archived Desktop sessions; other agents stay visible"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将某个来源限定为其已归档的桌面会话；其他代理保持可见"
           }
         }
       }
@@ -18037,34 +18106,36 @@
         }
       }
     },
-    "Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.": {
+    "Show or hide Claude sessions (⌘2)": {
+      "comment": "Tooltip for the Claude source pill.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible."
+            "value": "Show or hide Claude sessions (⌘2)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示或隐藏 Claude 会话（⌘2）。归档图标：将 Claude 结果限定为已归档的 Desktop 会话；其他已启用的智能体仍保持可见。"
+            "value": "显示或隐藏 Claude 会话（⌘2）"
           }
         }
       }
     },
-    "Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible.": {
+    "Show or hide Codex sessions (⌘1)": {
+      "comment": "Tooltip for the Codex source pill.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible."
+            "value": "Show or hide Codex sessions (⌘1)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示或隐藏 Codex 会话（⌘1）。归档图标：将 Codex 结果限定为已归档的会话；其他已启用的智能体仍保持可见。"
+            "value": "显示或隐藏 Codex 会话（⌘1）"
           }
         }
       }
