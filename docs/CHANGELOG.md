@@ -22,6 +22,8 @@ All notable changes to this project will be documented in this file.
 <!-- Development history for this release. The release-note generator drops this heading. -->
 ### Maintenance
 
+- Added the in-app 5.3 What's New card and panel content for Session Info and the calmer toolbar, with English and Simplified Chinese copy.
+
 - Search Sessions now also responds to Shift-Command-F for people accustomed to the cross-app global-search shortcut; Option-Command-F remains available.
 
 - Session info now distinguishes model from thinking effort, retains its compact API-equivalent label while its tooltip explains that the number is an estimate rather than a charge, and preserves four decimal places below one cent. Its token bar reports cached, fresh, and output percentages, retains nonzero sub-percent shares, and exposes those shares to VoiceOver; configuration history appears only after a recorded change; transcript span names its wall-clock meaning; and the header shows when the user last refreshed the analysis. Unavailable weekly-calibration provenance is hidden with the unavailable weekly row.

@@ -221,7 +221,7 @@ final class OnboardingFeedbackTriggerTests: XCTestCase {
 
 final class WhatsNewCatalogTests: XCTestCase {
     func testAssembleForCurrentReleaseHasHighlights() {
-        let items = WhatsNewCatalog.assemble(for: "5.2")
+        let items = WhatsNewCatalog.assemble(for: "5.3")
         XCTAssertFalse(items.isEmpty)
         XCTAssertTrue(items.contains { $0.kind == .highlight })
         // At most one promo, always.
@@ -242,12 +242,22 @@ final class WhatsNewCatalogTests: XCTestCase {
     }
 
     func testHasContentForCurrentRelease() {
-        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.2"))
+        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.3"))
     }
 
     func testTeaserPresentForCurrentRelease() {
-        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.2"))
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.3"))
         XCTAssertNil(WhatsNewCatalog.teaser(for: "99.9"))
+    }
+
+    func testRelease53HasLocalizedAuthoredHighlightsAndSupport() {
+        let items = WhatsNewCatalog.assemble(for: "5.3")
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
+            "Session info",
+            "A calmer toolbar",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.map(\.kind), [.highlight, .highlight, .support])
     }
 
     func testRelease52HasLocalizedAuthoredHighlightsAndSupport() {

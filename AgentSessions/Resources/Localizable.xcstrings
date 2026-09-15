@@ -1,6 +1,74 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A calmer toolbar": {
+      "comment": "Title for the Agent Sessions 5.3 What's New toolbar highlight.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A calmer toolbar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更简洁的工具栏"
+          }
+        }
+      }
+    },
+    "Open Session info beside a Codex or Claude transcript to see its API-equivalent price, cached, fresh, and output token mix, requests, model, thinking effort, activity, and configuration history.": {
+      "comment": "Body for the Agent Sessions 5.3 What's New Session info highlight. Keep Codex, Claude, API-equivalent, and Session info as product terms.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Session info beside a Codex or Claude transcript to see its API-equivalent price, cached, fresh, and output token mix, requests, model, thinking effort, activity, and configuration history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Codex 或 Claude 转录旁打开“会话信息”，即可查看 API 等效价格、缓存、新输入和输出令牌占比、请求数、模型、思考强度、活动和配置历史。"
+          }
+        }
+      }
+    },
+    "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach.": {
+      "comment": "One-line teaser for the Agent Sessions 5.3 What's New card. Session info is the feature name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话信息显示单个会话的用量，更简洁的工具栏让常用操作触手可及。"
+          }
+        }
+      }
+    },
+    "The actions you use most stay visible, while lower-frequency controls move into the ellipsis menu. Saved and Archived are now search chips, the transcript toolbar fits on one row, and Shift-Command-F opens Search Sessions.": {
+      "comment": "Body for the Agent Sessions 5.3 What's New toolbar highlight. Saved, Archived, and Search Sessions are UI labels; preserve Shift-Command-F as a keyboard shortcut.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The actions you use most stay visible, while lower-frequency controls move into the ellipsis menu. Saved and Archived are now search chips, the transcript toolbar fits on one row, and Shift-Command-F opens Search Sessions."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "常用操作保持可见，不常用控件移入省略号菜单。已保存和已归档现为搜索标签，转录工具栏收为一行，Shift-Command-F 可打开“搜索会话”。"
+          }
+        }
+      }
+    },
     "%@ %@ session": {
       "localizations": {
         "en": {

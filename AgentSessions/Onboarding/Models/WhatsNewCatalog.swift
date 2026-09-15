@@ -111,10 +111,33 @@ enum WhatsNewCatalog {
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
         "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe.",
         "5.1": "Two more agents join the lineup: Devin CLI and fx.",
-        "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model."
+        "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.",
+        "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.3": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "gauge.with.dots.needle.67percent",
+                title: "Session info",
+                body: "Open Session info beside a Codex or Claude transcript to see its API-equivalent price, cached, fresh, and output token mix, requests, model, thinking effort, activity, and configuration history."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "ellipsis.circle",
+                title: "A calmer toolbar",
+                body: "The actions you use most stay visible, while lower-frequency controls move into the ellipsis menu. Saved and Archived are now search chips, the transcript toolbar fits on one row, and Shift-Command-F opens Search Sessions."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.2": [
             WhatsNewItem(
                 kind: .highlight,
