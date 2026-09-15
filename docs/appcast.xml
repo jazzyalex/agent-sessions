@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.2</title>
-            <pubDate>Wed, 09 Sep 2026 14:43:05 -0700</pubDate>
+            <title>5.3</title>
+            <pubDate>Mon, 14 Sep 2026 19:21:45 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,28 +27,32 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.2</h2>
+<h2>What&#x27;s New in 5.3</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Agent Sessions now supports localization, with Simplified Chinese as its first translated language.</strong> The app interface, settings, onboarding, accessibility labels, and permission messages are translated while transcripts, file paths, commands, IDs, and provider names remain unchanged.</li>
-<li><strong>Want to help bring Agent Sessions to another language?</strong> Contributions are welcome, and no Swift experience is required. See the <a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/localization.md">localization guide</a> to get started.</li>
+<li><strong>Session Info: what a Codex or Claude session contained, beside its transcript.</strong> Press Shift-Command-I or the gauge button to see what the session would cost at published API rates, its tokens split into cached, fresh, and output, the request count, the model and thinking effort, and how turns divided between you, the agent, and tools. Model and effort changes appear as markers in the transcript and as a history that jumps to each one. The price is an estimate, not your plan bill.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li><strong>A calmer main toolbar.</strong> Source filters, search, Quota Meter, Resume, Image Browser, and the transcript and Session Info controls stay in view. Analytics, Reveal in Finder, layout, Reindex, appearance, and Settings moved into the ⋯ menu, and Saved and Archived are now chips inside the search field.</li>
+<li><strong>The transcript toolbar is one row.</strong> Role filters lead: click one to show only that role, click it again to show everything. The Errors chip shows a count, and view mode moved to the ⋯ menu; Shift-Command-T still cycles modes.</li>
+<li><strong>Search Sessions also opens with Shift-Command-F</strong>, alongside Option-Command-F.</li>
+<li><strong>Large and active transcripts stay responsive.</strong> Simple searches inside a large open transcript no longer process the whole file, and a running Codex session reads only its newly added records.</li>
+<li><strong>The window footer shows a count only while a filter is active</strong>, such as &quot;3,625 of 3,775 shown&quot;. Click it to clear the filters.</li>
+<li><strong>Quota Meter dollar estimates cover more pricing cases:</strong> Claude US-only inference, the original Claude Opus 4 rate, and GPT-5.5 and GPT-5.4 long-context requests.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Session-list cards take silence and dismissal seriously.</strong> The app waits for every active source to settle, freezes one card per launch, and leaves five quiet days before changing campaigns. Star, translation, and add-an-agent invitations are staggered at 25, 40, and 60 distinct opened sessions. Bounded cards advance only once per launch, × means never ask again, and the wrapping layout preserves full copy and useful accessibility labels at the narrowest width.</li>
-<li><strong>Quota Meter reads Claude&#x27;s weekly limit even when plugins push it below the first terminal page.</strong> The <code>/usage</code> fallback now walks the bounded view before parsing, so a visible current-session figure no longer hides the all-models weekly window and leaves Claude usage monitoring broken.</li>
-<li><strong>Quota Meter recognizes Astra sessions.</strong> Added GPT-6 Astra pricing, including cached input, fast mode, and long-context rates, so dollar and calibrated weekly burn no longer show <code>n/a</code> solely because the model was unknown.</li>
-<li><strong>Quota Meter&#x27;s <code>Wk</code> rates no longer turn a short burst or mismatched evidence into a confident weekly rate.</strong> Codex request twins are excluded from cumulative counters, completed sessions remain attributable for five minutes, and oversized records no longer squeeze that history out. Rates require one minute of evidence and decay across five minutes. Calibration is scoped to the current weekly anchor and rejects malformed, incomplete, contradictory, late, or unresolved long-context evidence. Sol requests above 272K input tokens use long-context prices, unknown GPT suffixes fail closed, and the tooltip explains the estimate.</li>
-<li><strong>Quota Meter keeps its Session Runway rate selector in the toolbar.</strong> Adding the agent-visibility control no longer displaces the Wk/Hr/$/tk selector at the normal window width. The lower-priority font-size shortcut has moved out of the toolbar; Standard and Enlarged remain available in Quota Meter Settings.</li>
-<li><strong>Quota Meter no longer reconnects forever when Claude account access is unavailable.</strong> A persistent billing response becomes <code>Claude plan inactive</code> after 90 seconds, with a one-shot notification and Hide action. Long server-directed limits stay on <code>rate limited · check plan</code>, server retry timing wins over stale cold-start work, and permission-only 403 responses still use normal fallbacks. Codex or Claude can also be hidden independently without stopping tracking, menu-bar data, the main-window footer, or indexing.</li>
+<li><strong>Opening a Codex parent session no longer breaks up its subagent tree.</strong> Subagent counts, row order, selection, and scroll position stay in place while the transcript loads.</li>
+<li><strong>The Quota Meter weekly burn tooltip is translated in Simplified Chinese.</strong></li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.2</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.3</a></p>
 </div>
             ]]></description>
-            <sparkle:version>73</sparkle:version>
-            <sparkle:shortVersionString>5.2</sparkle:shortVersionString>
+            <sparkle:version>74</sparkle:version>
+            <sparkle:shortVersionString>5.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.2/AgentSessions-5.2.dmg" length="24266868" type="application/octet-stream" sparkle:edSignature="F6autwXH/jYKr2IK04eSi6beZmG3ZHu7OckXNeyRjdsMBqs7F1FFumZ3fbhIJAffGUGnfwgEsvI91rVoxe+zCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.3/AgentSessions-5.3.dmg" length="25618915" type="application/octet-stream" sparkle:edSignature="2SjlsrKbYegIuOeQmqoBxswOMt0ff+ksTASv4tfjd31WMHlmN3MSpkH5odzla+0NEu1QdhUhIo4WMQNFS4J1Cw=="/>
         </item>
     </channel>
 </rss>
