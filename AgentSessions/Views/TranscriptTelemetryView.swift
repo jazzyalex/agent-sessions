@@ -94,6 +94,67 @@ enum TranscriptTelemetryPresentation {
         return telemetry.usageSummary?.recordedTotalTokens
     }
 
+    // MARK: - Session activity
+
+    /// Wall-clock span and turn composition for one transcript.
+    ///
+    /// Deliberately NOT an "active vs idle" split: neither provider records how
+    /// long a request took, so any such figure would be invented. What the
+    /// transcript does state is when the first and last priced requests happened
+    /// and how the blocks divide up, and that is all this reports.
+    struct ActivitySummary: Equatable {
+        let span: TimeInterval?
+        let firstRequestAt: Date?
+        let lastRequestAt: Date?
+        let requests: Int
+        /// Requests that actually carry a timestamp. `requests` counts every
+        /// session-owned event, including ones the provider left unstamped, so it
+        /// is the wrong divisor for a span measured only over stamped ones.
+        let timedRequests: Int
+        let userBlocks: Int
+        let assistantBlocks: Int
+        let toolBlocks: Int
+
+        /// Mean gap between consecutive timed requests. A long session with few
+        /// requests was mostly waiting on a person, not on the model.
+        var secondsPerRequest: TimeInterval? {
+            guard let span, timedRequests > 1, span > 0 else { return nil }
+            return span / Double(timedRequests - 1)
+        }
+    }
+
+    static func activity(_ telemetry: SessionTelemetry,
+                         blocks: [SessionTranscriptBuilder.LogicalBlock]) -> ActivitySummary {
+        let owned = telemetry.usageEvents.filter { $0.ownership == .session }
+        let stamps = owned.compactMap(\.observedAt).sorted()
+        let first = stamps.first
+        let last = stamps.last
+        var span: TimeInterval?
+        if let first, let last, last > first { span = last.timeIntervalSince(first) }
+        var user = 0, assistant = 0, tools = 0
+        for block in blocks {
+            switch block.kind {
+            case .user: user += 1
+            case .assistant: assistant += 1
+            case .toolCall: tools += 1
+            default: break
+            }
+        }
+        return ActivitySummary(span: span, firstRequestAt: first, lastRequestAt: last,
+                               requests: owned.count, timedRequests: stamps.count,
+                               userBlocks: user, assistantBlocks: assistant,
+                               toolBlocks: tools)
+    }
+
+    /// "4h 12m", "38m", "45s". nil span reads as an em dash at the call site.
+    static func durationText(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
+        if hours > 0 { return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h" }
+        if minutes > 0 { return "\(minutes)m" }
+        return "\(secs)s"
+    }
+
     // MARK: - Displayable values
 
     static func costValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
@@ -134,6 +195,12 @@ enum TranscriptTelemetryPresentation {
             return Value(text: "≈\(points.formatted(.number.precision(.fractionLength(2)).locale(locale)))%",
                          help: localized("Account-calibrated estimate of this session's share of the weekly allowance.", locale: locale))
         }
+        // The row keeps its place, but the tooltip states only the reason the
+        // value is missing. It must NOT suggest the Quota Meter: the engine
+        // fails closed through five distinct gates (SessionTelemetryEngine.swift
+        // ~269-311) and the Quota Meter addresses one of them. Unpriceable usage
+        // and account-identity mismatches are not calibration problems, so a
+        // blanket "calibrate" hint sends the reader somewhere that cannot help.
         return .absent(telemetry.weeklyQuotaEstimate?.unavailableReason
                        ?? localized("No compatible weekly calibration for this account.", locale: locale))
     }
@@ -337,6 +404,18 @@ enum TranscriptTelemetryPresentation {
             "\(formattedTokens) tokens across \(requestCount) requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.",
             locale: locale)
     }
+
+    static func turnsSummary(you: Int, agent: Int, tools: Int,
+                             locale: Locale = .current) -> String {
+        localized("\(you) you \u{00B7} \(agent) agent \u{00B7} \(tools) tools", locale: locale)
+    }
+
+    static func turnsHelp(you: Int, agent: Int, tools: Int, requests: Int,
+                          locale: Locale = .current) -> String {
+        localized(
+            "Blocks in this transcript: \(you) from you, \(agent) from the agent, \(tools) tool calls. The agent made \(requests) priced requests \u{2014} a single turn can span several.",
+            locale: locale)
+    }
 }
 
 private func localizedRequestCount(_ count: Int, locale: Locale = .current) -> String {
@@ -346,6 +425,10 @@ private func localizedRequestCount(_ count: Int, locale: Locale = .current) -> S
 }
 
 struct TranscriptTelemetryView: View {
+    /// Wide enough that the longest routine values — "gpt-5.6-sol · medium",
+    /// "$145.54 API-equivalent", the three-part token legend — never wrap or cut.
+    static let panelWidth: CGFloat = 300
+
     let telemetry: SessionTelemetry?
     let blocks: [SessionTranscriptBuilder.LogicalBlock]
     let loading: Bool
@@ -376,6 +459,8 @@ struct TranscriptTelemetryView: View {
                         Divider()
                         facts(telemetry)
                         Divider()
+                        activity(telemetry)
+                        Divider()
                         history(telemetry)
                         Divider()
                         basis(telemetry)
@@ -396,7 +481,7 @@ struct TranscriptTelemetryView: View {
             Divider()
             footer
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Surface.chrome)
     }
 
     private var header: some View {
@@ -410,11 +495,12 @@ struct TranscriptTelemetryView: View {
         .padding(LayoutTokens.md)
     }
 
+    /// Refresh alone. "Estimates, not billing" was a standing caveat about the
+    /// numbers above it, and a caveat that never changes stops being read — the
+    /// same point is made where it applies, in the cost tooltip and in the
+    /// collapsed "How this was estimated" group.
     private var footer: some View {
         HStack {
-            Text("Estimates, not billing")
-                .font(SessionInfoType.caption)
-                .foregroundStyle(.secondary)
             Spacer()
             Button("Refresh", action: refresh)
                 .buttonStyle(.link)
@@ -475,17 +561,25 @@ struct TranscriptTelemetryView: View {
             SessionInfoRow(label: isSubagent ? "Subagent model" : "Model",
                            value: TranscriptTelemetryPresentation.configurationValue(
                             telemetry.currentConfiguration, locale: locale))
+            // Weekly quota keeps its row even when absent: the reader can act on
+            // it. Calibration is what is missing, and the tooltip names the fix.
             SessionInfoRow(label: "Weekly quota",
                            value: TranscriptTelemetryPresentation.weeklyValue(telemetry, locale: locale))
-            SessionInfoRow(label: "Delegated", value: delegatedValue(telemetry))
+            // Delegated does NOT keep its row. A permanent em dash teaches the
+            // reader to ignore the line, and for a provider that cannot record
+            // delegated work the dash is permanent by construction.
+            if let delegated = delegatedValue(telemetry) {
+                SessionInfoRow(label: "Delegated to subagents", value: delegated)
+            }
         }
     }
 
-    private func delegatedValue(_ telemetry: SessionTelemetry) -> TranscriptTelemetryPresentation.Value {
-        guard let descendants = telemetry.descendantTopLineTokens else {
-            return .absent(TranscriptTelemetryPresentation.localized(
-                "This session recorded no delegated work.", locale: locale))
-        }
+    /// nil when the row must not be drawn at all — this transcript records no
+    /// delegated work, either because the session delegated none or because the
+    /// provider cannot express it. Both are the unremarkable default; only the
+    /// exception is worth a line.
+    private func delegatedValue(_ telemetry: SessionTelemetry) -> TranscriptTelemetryPresentation.Value? {
+        guard let descendants = telemetry.descendantTopLineTokens else { return nil }
         let compact = descendants.formatted(
             .number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
         return .init(
@@ -493,6 +587,51 @@ struct TranscriptTelemetryView: View {
                 compactTokens: compact, requestCount: delegatedRequestCount, locale: locale),
             help: TranscriptTelemetryPresentation.delegatedHelp(
                 tokens: descendants, requestCount: delegatedRequestCount, locale: locale))
+    }
+
+    /// What the session spent its time on. Every figure here comes from this
+    /// transcript's own records — no cross-session aggregate is involved.
+    private func activity(_ telemetry: SessionTelemetry) -> some View {
+        let summary = TranscriptTelemetryPresentation.activity(telemetry, blocks: blocks)
+        return SessionInfoSection(title: "Activity") {
+            VStack(alignment: .leading, spacing: LayoutTokens.xs) {
+                SessionInfoRow(label: "Span", value: spanValue(summary))
+                SessionInfoRow(label: "Turns", value: turnsValue(summary))
+            }
+        }
+    }
+
+    private func spanValue(_ summary: TranscriptTelemetryPresentation.ActivitySummary)
+        -> TranscriptTelemetryPresentation.Value {
+        guard let span = summary.span, let first = summary.firstRequestAt,
+              let last = summary.lastRequestAt else {
+            return .absent(TranscriptTelemetryPresentation.localized(
+                "This transcript records fewer than two timed requests.", locale: locale))
+        }
+        var help = TranscriptTelemetryPresentation.localized(
+            "First request \(first.formatted(date: .omitted, time: .shortened)), last \(last.formatted(date: .omitted, time: .shortened)). Wall clock between them, not time spent computing — neither provider records how long a request took.",
+            locale: locale)
+        if let pace = summary.secondsPerRequest {
+            help += " " + TranscriptTelemetryPresentation.localized(
+                "One request every \(TranscriptTelemetryPresentation.durationText(pace)) on average.",
+                locale: locale)
+        }
+        return .init(text: TranscriptTelemetryPresentation.durationText(span), help: help)
+    }
+
+    private func turnsValue(_ summary: TranscriptTelemetryPresentation.ActivitySummary)
+        -> TranscriptTelemetryPresentation.Value {
+        guard summary.userBlocks + summary.assistantBlocks + summary.toolBlocks > 0 else {
+            return .absent(TranscriptTelemetryPresentation.localized(
+                "The transcript for this session is not loaded.", locale: locale))
+        }
+        return .init(
+            text: TranscriptTelemetryPresentation.turnsSummary(
+                you: summary.userBlocks, agent: summary.assistantBlocks,
+                tools: summary.toolBlocks, locale: locale),
+            help: TranscriptTelemetryPresentation.turnsHelp(
+                you: summary.userBlocks, agent: summary.assistantBlocks,
+                tools: summary.toolBlocks, requests: summary.requests, locale: locale))
     }
 
     private func history(_ telemetry: SessionTelemetry) -> some View {

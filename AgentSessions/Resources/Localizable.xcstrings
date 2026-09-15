@@ -1,1445 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@: unavailable": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "%@: unavailable"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "%1$@：不可用"
-            }
-          }
-        }
-      },
-      "%@ · inferred": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "%@ · inferred"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "%@ · 推断"
-            }
-          }
-        }
-      },
-      "API-equivalent estimate at published rates: %@ USD. Not a subscription charge.": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "API-equivalent estimate at published rates: %@ USD. Not a subscription charge."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "按已公布费率估算的 API 等值费用：%@ 美元。并非订阅费用。"
-            }
-          }
-        }
-      },
-      "Account-calibrated estimate of this session's share of the weekly allowance.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Account-calibrated estimate of this session's share of the weekly allowance."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "根据账户校准结果估算此会话占每周额度的比例。"
-            }
-          }
-        }
-      },
-      "Cached": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Cached"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "已缓存"
-            }
-          }
-        }
-      },
-      "Cached input %@, fresh input %@, output %@.": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Cached input %@, fresh input %@, output %@."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "缓存输入 %@，新输入 %@，输出 %@。"
-            }
-          }
-        }
-      },
-      "Calculated": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Calculated"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "计算时间"
-            }
-          }
-        }
-      },
-      "Context in": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Context in"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "上下文输入"
-            }
-          }
-        }
-      },
-      "Context presented to each request: %@ to %@ tokens.": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Context presented to each request: %@ to %@ tokens."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "每个请求提供的上下文：%1$@ 至 %2$@ 个令牌。"
-            }
-          }
-        }
-      },
-      "Date of the price manifest used.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Date of the price manifest used."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "所用价格清单的日期。"
-            }
-          }
-        }
-      },
-      "Delegated": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Delegated"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "已委派"
-            }
-          }
-        }
-      },
-      "End of the weekly window this estimate is a share of.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "End of the weekly window this estimate is a share of."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此估算所占每周周期的结束时间。"
-            }
-          }
-        }
-      },
-      "Fresh": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Fresh"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "新输入"
-            }
-          }
-        }
-      },
-      "Fresh includes %@ cache-write tokens.": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Fresh includes %@ cache-write tokens."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "新输入包含 %@ 个缓存写入令牌。"
-            }
-          }
-        }
-      },
-      "Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "包括新输入、缓存输入、缓存写入和输出。推理令牌计入输出。"
-            }
-          }
-        }
-      },
-      "Full revision: %lld": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Full revision: %lld"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "完整修订版本：%lld"
-            }
-          }
-        }
-      },
-      "Granularity of the account quota reading behind this estimate.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Granularity of the account quota reading behind this estimate."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此估算所依据的账户额度读数粒度。"
-            }
-          }
-        }
-      },
-      "History": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "History"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "历史记录"
-            }
-          }
-        }
-      },
-      "Inferred from the first record, not a session-start setting.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Inferred from the first record, not a session-start setting."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "根据第一条记录推断，并非会话启动时的设置。"
-            }
-          }
-        }
-      },
-      "Manifest": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Manifest"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "清单"
-            }
-          }
-        }
-      },
-      "Model": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Model"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "模型"
-            }
-          }
-        }
-      },
-      "Model %@ → %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Model %@ → %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "模型 %1$@ → %2$@"
-            }
-          }
-        }
-      },
-      "Model changed: %@ → %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Model changed: %@ → %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "模型已更改：%1$@ → %2$@"
-            }
-          }
-        }
-      },
-      "No compatible weekly calibration for this account.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No compatible weekly calibration for this account."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此账户没有兼容的每周校准数据。"
-            }
-          }
-        }
-      },
-      "No manifest fingerprint recorded.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No manifest fingerprint recorded."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录清单指纹。"
-            }
-          }
-        }
-      },
-      "No price entry for: %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No price entry for: %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "没有以下项目的价格条目：%@"
-            }
-          }
-        }
-      },
-      "No priceable usage was recorded in this transcript.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No priceable usage was recorded in this transcript."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此会话记录中没有可计价的用量。"
-            }
-          }
-        }
-      },
-      "No quota observation recorded.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No quota observation recorded."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录额度观测时间。"
-            }
-          }
-        }
-      },
-      "No quota precision recorded.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No quota precision recorded."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录额度精度。"
-            }
-          }
-        }
-      },
-      "No quota source recorded.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No quota source recorded."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录额度来源。"
-            }
-          }
-        }
-      },
-      "No request recorded its context size.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No request recorded its context size."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "没有请求记录其上下文大小。"
-            }
-          }
-        }
-      },
-      "No reset time recorded.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "No reset time recorded."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录重置时间。"
-            }
-          }
-        }
-      },
-      "Not available": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Not available"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "不可用"
-            }
-          }
-        }
-      },
-      "Not provided": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Not provided"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未提供"
-            }
-          }
-        }
-      },
-      "Output": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Output"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "输出"
-            }
-          }
-        }
-      },
-      "Output includes %@ reasoning tokens.": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Output includes %@ reasoning tokens."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "输出包含 %@ 个推理令牌。"
-            }
-          }
-        }
-      },
-      "Precision": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Precision"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "精度"
-            }
-          }
-        }
-      },
-      "Price table": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Price table"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "价格表"
-            }
-          }
-        }
-      },
-      "Priced as": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Priced as"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "计价依据"
-            }
-          }
-        }
-      },
-      "Provider-reported inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Provider-reported inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商报告的推理区域。"
-            }
-          }
-        }
-      },
-      "Quota observed": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Quota observed"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "额度观测"
-            }
-          }
-        }
-      },
-      "Quota resets": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Quota resets"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "额度重置"
-            }
-          }
-        }
-      },
-      "Quota source": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Quota source"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "额度来源"
-            }
-          }
-        }
-      },
-      "Recorded by the provider.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Recorded by the provider."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "由提供商记录。"
-            }
-          }
-        }
-      },
-      "Region": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Region"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "区域"
-            }
-          }
-        }
-      },
-      "Revision": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Revision"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "修订版本"
-            }
-          }
-        }
-      },
-      "Started %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Started %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "开始时为 %@"
-            }
-          }
-        }
-      },
-      "Subagent model": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Subagent model"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "子代理模型"
-            }
-          }
-        }
-      },
-      "The provider did not record an inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider did not record an inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商未记录推理区域。"
-            }
-          }
-        }
-      },
-      "The provider recorded an empty inference region.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider recorded an empty inference region."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商记录的推理区域为空。"
-            }
-          }
-        }
-      },
-      "The provider reported that inference geography was unavailable.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "The provider reported that inference geography was unavailable."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "提供商报告推理地理位置不可用。"
-            }
-          }
-        }
-      },
-      "Thinking effort %@ → %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Thinking effort %@ → %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "思考强度 %1$@ → %2$@"
-            }
-          }
-        }
-      },
-      "Thinking effort changed: %@ → %@": {
-        "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Thinking effort changed: %@ → %@"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "思考强度已更改：%1$@ → %2$@"
-            }
-          }
-        }
-      },
-      "This session recorded no delegated work.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "This session recorded no delegated work."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此会话未记录委派工作。"
-            }
-          }
-        }
-      },
-      "This transcript records no model or effort setting.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "This transcript records no model or effort setting."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此会话记录未包含模型或思考强度设置。"
-            }
-          }
-        }
-      },
-      "This transcript records no usage.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "This transcript records no usage."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此会话记录未包含用量。"
-            }
-          }
-        }
-      },
-      "Time not recorded": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Time not recorded"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "未记录时间"
-            }
-          }
-        }
-      },
-      "Unavailable": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Unavailable"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "不可用"
-            }
-          }
-        }
-      },
-      "Weekly quota": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Weekly quota"
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "每周额度"
-            }
-          }
-        }
-      },
-      "When the account quota reading was taken. A carried calibration can be far older than this.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "When the account quota reading was taken. A carried calibration can be far older than this."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "账户额度读数的采集时间。沿用的校准数据可能比此时间早得多。"
-            }
-          }
-        }
-      },
-      "When this estimate was computed.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "When this estimate was computed."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "此估算的计算时间。"
-            }
-          }
-        }
-      },
-      "Which account window the calibration came from.": {
-        "comment": "User-visible Session info copy.",
-        "localizations": {
-          "en": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "Which account window the calibration came from."
-            }
-          },
-          "zh-Hans": {
-            "stringUnit": {
-              "state": "translated",
-              "value": "校准数据来自哪个账户周期。"
-            }
-          }
-        }
-      },
-      "%lld request priced on this basis.": {
-        "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%lld request priced on this basis."
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%lld requests priced on this basis."
-                  }
-                }
-              }
-            }
-          },
-          "zh-Hans": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%lld 个请求按此依据计价。"
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%lld 个请求按此依据计价。"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "%@ · %lld requests": {
-        "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ · %2$lld request"
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ · %2$lld requests"
-                  }
-                }
-              }
-            }
-          },
-          "zh-Hans": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ · %2$lld 个请求"
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ · %2$lld 个请求"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "%@ tokens across %lld requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.": {
-        "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-        "localizations": {
-          "en": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ tokens across %2$lld request, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost."
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ tokens across %2$lld requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost."
-                  }
-                }
-              }
-            }
-          },
-          "zh-Hans": {
-            "variations": {
-              "plural": {
-                "one": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ 个令牌，涵盖 %2$lld 个请求；这些内容记录在此处，但不计入上方总数。会话记录无法识别每个请求属于哪个子代理——请打开子代理会话查看其自身的配置和费用。"
-                  }
-                },
-                "other": {
-                  "stringUnit": {
-                    "state": "translated",
-                    "value": "%1$@ 个令牌，涵盖 %2$lld 个请求；这些内容记录在此处，但不计入上方总数。会话记录无法识别每个请求属于哪个子代理——请打开子代理会话查看其自身的配置和费用。"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-    "Hide Session info (⇧⌘I)": {
-      "comment": "Tooltip for the button that closes the Session info inspector. Preserve the keyboard shortcut symbols.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hide Session info (⇧⌘I)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隐藏会话信息（⇧⌘I）"
-          }
-        }
-      }
-    },
-    "How this was estimated": {
-      "comment": "Title of the expandable Session info section that explains estimate inputs and provenance.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "How this was estimated"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "估算方式"
-          }
-        }
-      }
-    },
-    "Loading session information…": {
-      "comment": "Status shown while the Session info inspector loads telemetry from the selected transcript.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loading session information…"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在载入会话信息…"
-          }
-        }
-      }
-    },
-    "No changes recorded": {
-      "comment": "Empty state for a Session info configuration-history timeline.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No changes recorded"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未记录任何更改"
-          }
-        }
-      }
-    },
-    "No supported telemetry, or the transcript could not be read.": {
-      "comment": "Session info empty state when the selected source has no supported telemetry or its transcript is unreadable.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No supported telemetry, or the transcript could not be read."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有受支持的遥测数据，或无法读取会话记录。"
-          }
-        }
-      }
-    },
-    "Session info": {
-      "comment": "Title of the inspector that summarizes the selected session's configuration, usage, and estimated cost.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Session info"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "会话信息"
-          }
-        }
-      }
-    },
-    "Show this change in the transcript": {
-      "comment": "Tooltip for a Session info history row that scrolls to the corresponding transcript marker.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show this change in the transcript"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在会话记录中显示此更改"
-          }
-        }
-      }
-    },
-    "Started configuration is inferred from the first record, not a session-start setting.": {
-      "comment": "Session info note explaining that the initial configuration is inferred rather than explicitly recorded at session start.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Started configuration is inferred from the first record, not a session-start setting."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "启动配置根据第一条记录推断，并非会话启动时的设置。"
-          }
-        }
-      }
-    },
-    "tokens": {
-      "comment": "Unit label beside a session's total token count.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "tokens"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "令牌"
-          }
-        }
-      }
-    },
-    "%@: %@": {
-      "comment": "Label and value in a Session info detail row. Preserve both placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@：%2$@"
-          }
-        }
-      }
-    },
-    "%lld request": {
-      "comment": "Count of requests represented by a Session info summary or pricing row.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld request"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld requests"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个请求"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld 个请求"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "API-equivalent": {
-      "comment": "Caption for an estimated cost calculated at published API prices rather than a subscription bill.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API-equivalent"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API 等值费用"
-          }
-        }
-      }
-    },
-    "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.": {
-      "comment": "Explanation of how Session info estimates API-equivalent cost. Standard names the assumed pricing tier.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "费用按每个请求的模型、速度、区域和上下文大小计算，然后按公布的 API 费率汇总。当 Claude 未提供可用的推理地理位置时，将采用公布的标准费率；明确的美国区域则采用区域定价。“标准”是一种定价假设，并非实际观测到的服务层级。"
-          }
-        }
-      }
-    },
-    "Estimates, not billing": {
-      "comment": "Session info footer clarifying that displayed costs are estimates rather than charges.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Estimates, not billing"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅为估算，并非账单"
-          }
-        }
-      }
-    },
     "%@ %@ session": {
       "localizations": {
         "en": {
@@ -1831,6 +392,47 @@
         }
       }
     },
+    "%@ tokens across %lld requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost.": {
+      "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ tokens across %2$lld request, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ tokens across %2$lld requests, recorded here but excluded from the totals above. The transcript does not identify which subagent each request belongs to — open a subagent session for its own configuration and cost."
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ 个令牌，涵盖 %2$lld 个请求；这些内容记录在此处，但不计入上方总数。会话记录无法识别每个请求属于哪个子代理——请打开子代理会话查看其自身的配置和费用。"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ 个令牌，涵盖 %2$lld 个请求；这些内容记录在此处，但不计入上方总数。会话记录无法识别每个请求属于哪个子代理——请打开子代理会话查看其自身的配置和费用。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%@ used in %lld%% of sessions": {
       "localizations": {
         "en": {
@@ -1933,6 +535,64 @@
         }
       }
     },
+    "%@ · %lld requests": {
+      "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld request"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld requests"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld 个请求"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld 个请求"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%@ · inferred": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · inferred"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 推断"
+          }
+        }
+      }
+    },
     "%@ — no active session": {
       "comment": "User-visible copy from CockpitFooterView. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -1950,19 +610,36 @@
         }
       }
     },
-    "%lld / %lld sessions": {
-      "comment": "Footer count of visible sessions out of the total.",
+    "%@: %@": {
+      "comment": "Label and value in a Session info detail row. Preserve both placeholders and allow value reordering for grammar.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld / %lld sessions"
+            "value": "%@: %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld / %2$lld 个会话"
+            "value": "%1$@：%2$@"
+          }
+        }
+      }
+    },
+    "%@: unavailable": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@：不可用"
           }
         }
       }
@@ -2107,23 +784,6 @@
         }
       }
     },
-    "%lld saved": {
-      "comment": "User-visible copy from PinnedSessionsView. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld saved"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已保存 %lld 个会话"
-          }
-        }
-      }
-    },
     "%lld messages • %@": {
       "comment": "Analytics agent row showing a localized message count and duration.",
       "localizations": {
@@ -2165,6 +825,122 @@
         }
       }
     },
+    "%lld of %lld shown": {
+      "comment": "Footer count of visible sessions out of the total while a filter is active.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld shown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已显示 %2$lld 个中的 %1$lld 个"
+          }
+        }
+      }
+    },
+    "%lld request": {
+      "comment": "Count of requests represented by a Session info summary or pricing row.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld request"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld requests"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld request priced on this basis.": {
+      "comment": "Pluralized Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld request priced on this basis."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld requests priced on this basis."
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求按此依据计价。"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个请求按此依据计价。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld saved": {
+      "comment": "User-visible copy from PinnedSessionsView. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld saved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存 %lld 个会话"
+          }
+        }
+      }
+    },
     "%lld sessions": {
       "comment": "Footer count of sessions.",
       "localizations": {
@@ -2199,6 +975,47 @@
                 "stringUnit": {
                   "state": "translated",
                   "value": "%lld 个会话"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld sessions found": {
+      "comment": "Session discovery count. Use the singular form for one session.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld session found"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld sessions found"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "找到 %lld 个会话"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "找到 %lld 个会话"
                 }
               }
             }
@@ -2247,43 +1064,19 @@
         }
       }
     },
-    "%lld sessions found": {
-      "comment": "Session discovery count. Use the singular form for one session.",
+    "%lld you · %lld agent · %lld tools": {
+      "comment": "Session info turn composition: blocks from the user, the agent, and tool calls.",
       "localizations": {
         "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld session found"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld sessions found"
-                }
-              }
-            }
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld you · %lld agent · %lld tools"
           }
         },
         "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "找到 %lld 个会话"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "找到 %lld 个会话"
-                }
-              }
-            }
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 你 · %2$lld 代理 · %3$lld 工具"
           }
         }
       }
@@ -2423,57 +1216,6 @@
         }
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
-    },
-    "%lldd ago": {
-      "comment": "Compact relative time in days.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldd ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天前"
-          }
-        }
-      }
-    },
-    "%lldh ago": {
-      "comment": "Compact relative time in hours.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldh ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小时前"
-          }
-        }
-      }
-    },
-    "%lldm ago": {
-      "comment": "Compact relative time in minutes.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lldm ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 分钟前"
-          }
-        }
-      }
     },
     "0% remaining.": {
       "comment": "Notification body shown for an exhausted usage window without a reset estimate.",
@@ -2702,23 +1444,6 @@
         }
       }
     },
-    "<1m ago": {
-      "comment": "Compact relative time under one minute.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "<1m ago"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "不到 1 分钟前"
-          }
-        }
-      }
-    },
     "A calmer first run": {
       "localizations": {
         "en": {
@@ -2847,6 +1572,40 @@
         }
       }
     },
+    "API-equivalent": {
+      "comment": "Caption for an estimated cost calculated at published API prices rather than a subscription bill.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 等值费用"
+          }
+        }
+      }
+    },
+    "API-equivalent estimate at published rates: %@ USD. Not a subscription charge.": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent estimate at published rates: %@ USD. Not a subscription charge."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按已公布费率估算的 API 等值费用：%@ 美元。并非订阅费用。"
+          }
+        }
+      }
+    },
     "Abort resetting preferences": {
       "localizations": {
         "en": {
@@ -2892,6 +1651,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "关于 Agent Sessions"
+          }
+        }
+      }
+    },
+    "Account-calibrated estimate of this session's share of the weekly allowance.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account-calibrated estimate of this session's share of the weekly allowance."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据账户校准结果估算此会话占每周额度的比例。"
           }
         }
       }
@@ -2944,36 +1720,19 @@
         }
       }
     },
-    "Estimated weekly burn pace from the last five minutes of local activity.": {
-      "comment": "Tooltip explaining the estimated weekly quota burn rate and its five-minute local activity window.",
+    "Activity": {
+      "comment": "Session info section heading for the session's time span and turn composition.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimated weekly burn pace from the last five minutes of local activity."
+            "value": "Activity"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "根据最近五分钟的本地活动估算的每周配额消耗速率。"
-          }
-        }
-      }
-    },
-    "Help translate": {
-      "comment": "Primary action on the translation contribution card.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Help translate"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "协助翻译"
+            "value": "活动"
           }
         }
       }
@@ -3292,6 +2051,22 @@
         }
       }
     },
+    "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions 坚持本地优先、独立开发并持续维护。为项目加 GitHub Star 或提供赞助，都能帮助它继续发展。"
+          }
+        }
+      }
+    },
     "Agent Sessions is now available in English and Simplified Chinese. Help bring it to your language—no Swift required.": {
       "comment": "Body of the translation contribution card. Simplified Chinese names the currently shipped Chinese locale specifically.",
       "localizations": {
@@ -3305,22 +2080,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Agent Sessions 现已支持英语和简体中文。帮助我们将它翻译成你的语言——无需会 Swift。"
-          }
-        }
-      }
-    },
-    "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent Sessions 坚持本地优先、独立开发并持续维护。为项目加 GitHub Star 或提供赞助，都能帮助它继续发展。"
           }
         }
       }
@@ -3792,7 +2551,7 @@
       }
     },
     "Analytics": {
-      "comment": "Title of the Analytics window.",
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -3804,6 +2563,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "分析"
+          }
+        }
+      }
+    },
+    "Analytics (build canceled)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (build canceled)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（生成已取消）"
+          }
+        }
+      }
+    },
+    "Analytics (build required)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (build required)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（需要生成）"
+          }
+        }
+      }
+    },
+    "Analytics (building…)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (building…)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（正在生成…）"
+          }
+        }
+      }
+    },
+    "Analytics (last build failed)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (last build failed)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（上次生成失败）"
+          }
+        }
+      }
+    },
+    "Analytics (update available)": {
+      "comment": "Main toolbar overflow menu item opening the usage analytics window, with its build state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics (update available)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析（有可用更新）"
           }
         }
       }
@@ -3937,6 +2781,23 @@
         }
       }
     },
+    "Archived": {
+      "comment": "Search-field scope chip that narrows sources to archived Desktop sessions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归档"
+          }
+        }
+      }
+    },
     "Archived Sessions": {
       "localizations": {
         "en": {
@@ -3949,6 +2810,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已归档会话"
+          }
+        }
+      }
+    },
+    "Archived · %lld": {
+      "comment": "Search-field Archived chip when more than one source is narrowed to its archive.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived · %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已归档 · %lld"
           }
         }
       }
@@ -4238,6 +3116,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "可执行文件名：agy · 使用 Antigravity CLI 安装脚本安装"
+          }
+        }
+      }
+    },
+    "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several.": {
+      "comment": "Tooltip explaining the Session info turn composition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话记录中的区块：来自你的 %1$lld 个，来自代理的 %2$lld 个，工具调用 %3$lld 次。代理发出了 %4$lld 次计费请求——一个回合可能包含多次请求。"
           }
         }
       }
@@ -4607,6 +3502,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "按智能体"
+          }
+        }
+      }
+    },
+    "Cached": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cached"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已缓存"
+          }
+        }
+      }
+    },
+    "Cached input %@, fresh input %@, output %@.": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cached input %@, fresh input %@, output %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存输入 %@，新输入 %@，输出 %@。"
+          }
+        }
+      }
+    },
+    "Calculated": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calculated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计算时间"
           }
         }
       }
@@ -5438,22 +4384,6 @@
         }
       }
     },
-    "Choose transcript view": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose transcript view"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择对话记录视图"
-          }
-        }
-      }
-    },
     "Choose when Quota Meter shows the session runway drawer.": {
       "localizations": {
         "en": {
@@ -5790,6 +4720,23 @@
         }
       }
     },
+    "Claude archived only": {
+      "comment": "Archived scope menu toggle for Claude.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude archived only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Claude 已归档"
+          }
+        }
+      }
+    },
     "Claude rejected usage requests. Your subscription may be inactive, or Claude may be temporarily rate limiting requests. Tracking will retry automatically; hiding affects only Quota Meter.": {
       "localizations": {
         "en": {
@@ -5934,6 +4881,23 @@
         }
       }
     },
+    "Clear filters": {
+      "comment": "Accessibility label for the footer session count when a filter is active.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear filters"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除筛选"
+          }
+        }
+      }
+    },
     "Clear search": {
       "localizations": {
         "en": {
@@ -6027,22 +4991,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "额度监视器中的云端会话"
-          }
-        }
-      }
-    },
-    "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "额度监视器的额度耗尽倒计时基于最新的 5 小时用量速率，因此显示的重置前预计时间可能比通知提醒更长。此显示设置与通知发送相互独立。"
           }
         }
       }
@@ -6225,6 +5173,23 @@
         }
       }
     },
+    "Codex archived only": {
+      "comment": "Archived scope menu toggle for Codex.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex archived only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Codex 已归档"
+          }
+        }
+      }
+    },
     "Codex changed its usage format — can't verify": {
       "comment": "Help text for an unrecognized Codex usage format.",
       "localizations": {
@@ -6366,6 +5331,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "会消耗约 1–2 条消息的令牌用量"
+          }
+        }
+      }
+    },
+    "Context in": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context in"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文输入"
+          }
+        }
+      }
+    },
+    "Context presented to each request: %@ to %@ tokens.": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context presented to each request: %@ to %@ tokens."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个请求提供的上下文：%1$@ 至 %2$@ 个令牌。"
           }
         }
       }
@@ -6952,6 +5951,23 @@
         }
       }
     },
+    "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.": {
+      "comment": "Explanation of how Session info estimates API-equivalent cost. Standard names the assumed pricing tier.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "费用按每个请求的模型、速度、区域和上下文大小计算，然后按公布的 API 费率汇总。当 Claude 未提供可用的推理地理位置时，将采用公布的标准费率；明确的美国区域则采用区域定价。“标准”是一种定价假设，并非实际观测到的服务层级。"
+          }
+        }
+      }
+    },
     "Could not open session": {
       "localizations": {
         "en": {
@@ -7387,6 +6403,23 @@
         }
       }
     },
+    "Date of the price manifest used.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date of the price manifest used."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所用价格清单的日期。"
+          }
+        }
+      }
+    },
     "Debug": {
       "localizations": {
         "en": {
@@ -7403,34 +6436,19 @@
         }
       }
     },
-    "Decrease Text Size": {
+    "Decrease Text Size (⌘−)": {
+      "comment": "Transcript overflow menu item; the shortcut is registered separately.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Decrease Text Size"
+            "value": "Decrease Text Size (⌘−)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "缩小文本"
-          }
-        }
-      }
-    },
-    "Decrease text size (⌘−)": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Decrease text size (⌘−)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "缩小文本（⌘−）"
+            "value": "减小文字（⌘−）"
           }
         }
       }
@@ -7591,6 +6609,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "默认：~/.local/share/opencode/storage/session"
+          }
+        }
+      }
+    },
+    "Delegated to subagents": {
+      "comment": "Session info row label for tokens spent by subagents recorded in this transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delegated to subagents"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已委派给子代理"
           }
         }
       }
@@ -8562,6 +7597,23 @@
         }
       }
     },
+    "End of the weekly window this estimate is a share of.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End of the weekly window this estimate is a share of."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此估算所占每周周期的结束时间。"
+          }
+        }
+      }
+    },
     "Enlarged": {
       "localizations": {
         "en": {
@@ -8831,6 +7883,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "错误：%@"
+          }
+        }
+      }
+    },
+    "Estimated weekly burn pace from the last five minutes of local activity.": {
+      "comment": "Tooltip explaining the estimated weekly quota burn rate and its five-minute local activity window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated weekly burn pace from the last five minutes of local activity."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据最近五分钟的本地活动估算的每周配额消耗速率。"
           }
         }
       }
@@ -9286,6 +8355,23 @@
         }
       }
     },
+    "First request %@, last %@. Wall clock between them, not time spent computing — neither provider records how long a request took.": {
+      "comment": "Tooltip explaining what the Session info span measures.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First request %@, last %@. Wall clock between them, not time spent computing — neither provider records how long a request took."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次请求 %1$@，最后一次 %2$@。这是两者之间的实际时间，而非计算耗时——两家提供方都不记录单次请求的时长。"
+          }
+        }
+      }
+    },
     "Fix %@ usage": {
       "comment": "User-visible copy from AuthRemediationBanner. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -9432,6 +8518,57 @@
         }
       }
     },
+    "Fresh": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fresh"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新输入"
+          }
+        }
+      }
+    },
+    "Fresh includes %@ cache-write tokens.": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fresh includes %@ cache-write tokens."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新输入包含 %@ 个缓存写入令牌。"
+          }
+        }
+      }
+    },
+    "Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "包括新输入、缓存输入、缓存写入和输出。推理令牌计入输出。"
+          }
+        }
+      }
+    },
     "Friday": {
       "localizations": {
         "en": {
@@ -9460,6 +8597,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "完全磁盘访问权限…"
+          }
+        }
+      }
+    },
+    "Full revision: %lld": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full revision: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完整修订版本：%lld"
           }
         }
       }
@@ -9556,6 +8710,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "GitHub："
+          }
+        }
+      }
+    },
+    "Granularity of the account quota reading behind this estimate.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granularity of the account quota reading behind this estimate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此估算所依据的账户额度读数粒度。"
           }
         }
       }
@@ -9750,6 +8921,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "帮助改进 Agent Sessions"
+          }
+        }
+      }
+    },
+    "Help translate": {
+      "comment": "Primary action on the translation contribution card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Help translate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "协助翻译"
           }
         }
       }
@@ -10000,6 +9188,23 @@
         }
       }
     },
+    "Hide Session info (⇧⌘I)": {
+      "comment": "Tooltip for the button that closes the Session info inspector. Preserve the keyboard shortcut symbols.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Session info (⇧⌘I)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏会话信息（⇧⌘I）"
+          }
+        }
+      }
+    },
     "Hide housekeeping-only sessions": {
       "localizations": {
         "en": {
@@ -10112,6 +9317,23 @@
         }
       }
     },
+    "History": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史记录"
+          }
+        }
+      }
+    },
     "How do I get this?": {
       "localizations": {
         "en": {
@@ -10176,19 +9398,19 @@
         }
       }
     },
-    "ID %@": {
-      "comment": "User-visible copy from TranscriptPlainView. Preserve runtime placeholders and allow value reordering for grammar.",
+    "How this was estimated": {
+      "comment": "Title of the expandable Session info section that explains estimate inputs and provenance.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "ID %@"
+            "value": "How this was estimated"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "ID：%@"
+            "value": "估算方式"
           }
         }
       }
@@ -10404,34 +9626,19 @@
         }
       }
     },
-    "Increase Text Size": {
+    "Increase Text Size (⌘+)": {
+      "comment": "Transcript overflow menu item; the shortcut is registered separately.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Increase Text Size"
+            "value": "Increase Text Size (⌘+)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "增大文本"
-          }
-        }
-      }
-    },
-    "Increase text size (⌘+)": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Increase text size (⌘+)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "增大文本（⌘+）"
+            "value": "增大文字（⌘+）"
           }
         }
       }
@@ -10589,6 +9796,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在索引会话…"
+          }
+        }
+      }
+    },
+    "Inferred from the first record, not a session-start setting.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inferred from the first record, not a session-start setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据第一条记录推断，并非会话启动时的设置。"
           }
         }
       }
@@ -11380,23 +10604,6 @@
         }
       }
     },
-    "Last: %@": {
-      "comment": "Footer timestamp for the newest visible session.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最近更新：%@"
-          }
-        }
-      }
-    },
     "Later": {
       "comment": "Power Tips button that dismisses the tour for now.",
       "localizations": {
@@ -11704,6 +10911,23 @@
         }
       }
     },
+    "Loading session information…": {
+      "comment": "Status shown while the Session info inspector loads telemetry from the selected transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading session information…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在载入会话信息…"
+          }
+        }
+      }
+    },
     "Loading transcript": {
       "localizations": {
         "en": {
@@ -11844,6 +11068,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "主窗口"
+          }
+        }
+      }
+    },
+    "Manifest": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manifest"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清单"
           }
         }
       }
@@ -11993,6 +11234,57 @@
         }
       }
     },
+    "Model": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型"
+          }
+        }
+      }
+    },
+    "Model %@ → %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model %@ → %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型 %1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "Model changed: %@ → %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model changed: %@ → %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型已更改：%1$@ → %2$@"
+          }
+        }
+      }
+    },
     "Modified Date": {
       "localizations": {
         "en": {
@@ -12053,6 +11345,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "单色"
+          }
+        }
+      }
+    },
+    "More options": {
+      "comment": "Accessibility label and tooltip for the main toolbar overflow menu.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More options"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多选项"
+          }
+        }
+      }
+    },
+    "More transcript options": {
+      "comment": "Accessibility label and tooltip for the transcript toolbar overflow menu.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More transcript options"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多对话记录选项"
           }
         }
       }
@@ -12170,22 +11496,6 @@
         }
       }
     },
-    "Narrow Claude to archived Desktop sessions": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Narrow Claude to archived Desktop sessions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将 Claude 限定为已归档的 Desktop 会话"
-          }
-        }
-      }
-    },
     "Narrow Codex to archived Desktop sessions": {
       "localizations": {
         "en": {
@@ -12198,6 +11508,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "将 Codex 限定为已归档的 Desktop 会话"
+          }
+        }
+      }
+    },
+    "Narrow a source to its archived Desktop sessions; other agents stay visible": {
+      "comment": "Tooltip for the Archived scope chip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Narrow a source to its archived Desktop sessions; other agents stay visible"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将某个来源限定为其已归档的桌面会话；其他代理保持可见"
           }
         }
       }
@@ -12415,6 +11742,40 @@
         }
       }
     },
+    "No changes recorded": {
+      "comment": "Empty state for a Session info configuration-history timeline.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No changes recorded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录任何更改"
+          }
+        }
+      }
+    },
+    "No compatible weekly calibration for this account.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No compatible weekly calibration for this account."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此账户没有兼容的每周校准数据。"
+          }
+        }
+      }
+    },
     "No data": {
       "localizations": {
         "en": {
@@ -12463,6 +11824,23 @@
         }
       }
     },
+    "No manifest fingerprint recorded.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No manifest fingerprint recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录清单指纹。"
+          }
+        }
+      }
+    },
     "No parent session ID is available for this side chat": {
       "localizations": {
         "en": {
@@ -12475,6 +11853,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "此支线对话没有可用的父会话 ID"
+          }
+        }
+      }
+    },
+    "No price entry for: %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No price entry for: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有以下项目的价格条目：%@"
+          }
+        }
+      }
+    },
+    "No priceable usage was recorded in this transcript.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No priceable usage was recorded in this transcript."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话记录中没有可计价的用量。"
           }
         }
       }
@@ -12495,6 +11907,57 @@
         }
       }
     },
+    "No quota observation recorded.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No quota observation recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录额度观测时间。"
+          }
+        }
+      }
+    },
+    "No quota precision recorded.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No quota precision recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录额度精度。"
+          }
+        }
+      }
+    },
+    "No quota source recorded.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No quota source recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录额度来源。"
+          }
+        }
+      }
+    },
     "No release notes for this version. Tips are always in Help → Power Tips.": {
       "localizations": {
         "en": {
@@ -12507,6 +11970,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "此版本没有发布说明。你随时可以在“帮助”→“实用技巧”中查看技巧。"
+          }
+        }
+      }
+    },
+    "No request recorded its context size.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No request recorded its context size."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有请求记录其上下文大小。"
+          }
+        }
+      }
+    },
+    "No reset time recorded.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reset time recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录重置时间。"
           }
         }
       }
@@ -12543,6 +12040,23 @@
         }
       }
     },
+    "No supported telemetry, or the transcript could not be read.": {
+      "comment": "Session info empty state when the selected source has no supported telemetry or its transcript is unreadable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported telemetry, or the transcript could not be read."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有受支持的遥测数据，或无法读取会话记录。"
+          }
+        }
+      }
+    },
     "None": {
       "localizations": {
         "en": {
@@ -12555,6 +12069,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "无"
+          }
+        }
+      }
+    },
+    "Not available": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
           }
         }
       }
@@ -12603,6 +12134,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "暂不"
+          }
+        }
+      }
+    },
+    "Not provided": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not provided"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未提供"
           }
         }
       }
@@ -12849,6 +12397,23 @@
         }
       }
     },
+    "One request every %@ on average.": {
+      "comment": "Appended to the Session info span tooltip when a pace can be computed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One request every %@ on average."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平均每 %@ 一次请求。"
+          }
+        }
+      }
+    },
     "Only enable the providers you use.": {
       "localizations": {
         "en": {
@@ -12911,6 +12476,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开“完全磁盘访问权限”…"
+          }
+        }
+      }
+    },
+    "Open GitHub": {
+      "comment": "Primary action on the GitHub star invitation; opens the repository but does not star it automatically.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open GitHub"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 GitHub"
           }
         }
       }
@@ -13349,6 +12931,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "可选：扫描以 JSONL 存储的已导出 droid exec --output-format stream-json 日志"
+          }
+        }
+      }
+    },
+    "Output": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Output"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出"
+          }
+        }
+      }
+    },
+    "Output includes %@ reasoning tokens.": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Output includes %@ reasoning tokens."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出包含 %@ 个推理令牌。"
           }
         }
       }
@@ -13835,6 +13451,23 @@
         }
       }
     },
+    "Precision": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Precision"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "精度"
+          }
+        }
+      }
+    },
     "Predicted run-out soon": {
       "localizations": {
         "en": {
@@ -13931,6 +13564,23 @@
         }
       }
     },
+    "Preview": {
+      "comment": "Primary action on the Quota Meter card when usage tracking is already enabled; opens an explainer before showing the meter.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览"
+          }
+        }
+      }
+    },
     "Previous Unified Search match (⇧⌘G)": {
       "localizations": {
         "en": {
@@ -13975,6 +13625,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "上一个匹配项（⇧⌘G）"
+          }
+        }
+      }
+    },
+    "Price table": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Price table"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "价格表"
+          }
+        }
+      }
+    },
+    "Priced as": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Priced as"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计价依据"
           }
         }
       }
@@ -14200,6 +13884,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "推广"
+          }
+        }
+      }
+    },
+    "Provider-reported inference region.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provider-reported inference region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商报告的推理区域。"
           }
         }
       }
@@ -14525,6 +14226,22 @@
         }
       }
     },
+    "Quota Meter rates you can trust": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota Meter rates you can trust"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可信的用量计速率"
+          }
+        }
+      }
+    },
     "Quota Meter rows expose useful session context.": {
       "localizations": {
         "en": {
@@ -14537,6 +14254,73 @@
           "stringUnit": {
             "state": "translated",
             "value": "额度监视器中的每一行都会显示实用的会话上下文。"
+          }
+        }
+      }
+    },
+    "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器的额度耗尽倒计时基于最新的 5 小时用量速率，因此显示的重置前预计时间可能比通知提醒更长。此显示设置与通知发送相互独立。"
+          }
+        }
+      }
+    },
+    "Quota observed": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota observed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度观测"
+          }
+        }
+      }
+    },
+    "Quota resets": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota resets"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度重置"
+          }
+        }
+      }
+    },
+    "Quota source": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度来源"
           }
         }
       }
@@ -14765,6 +14549,23 @@
         }
       }
     },
+    "Recorded by the provider.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recorded by the provider."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由提供商记录。"
+          }
+        }
+      }
+    },
     "Reduce Noise": {
       "localizations": {
         "en": {
@@ -14890,6 +14691,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法刷新"
+          }
+        }
+      }
+    },
+    "Region": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Region"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "区域"
+          }
+        }
+      }
+    },
+    "Reindex Now": {
+      "comment": "Main toolbar overflow menu item that rebuilds the session index.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reindex Now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即重新索引"
+          }
+        }
+      }
+    },
+    "Reindexing…": {
+      "comment": "Main toolbar overflow menu item while an index rebuild is running.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reindexing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在重新索引…"
           }
         }
       }
@@ -15440,6 +15292,23 @@
         }
       }
     },
+    "Reveal Working Directory in Finder": {
+      "comment": "Main toolbar overflow menu item for the selected session's folder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal Working Directory in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Finder 中显示工作目录"
+          }
+        }
+      }
+    },
     "Reveal internal probe sessions in the Quota Meter. Leave OFF for normal use to avoid noise.": {
       "localizations": {
         "en": {
@@ -15756,6 +15625,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "查看你的 OpenCode 会话"
+          }
+        }
+      }
+    },
+    "Revision": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revision"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修订版本"
           }
         }
       }
@@ -17443,6 +17329,23 @@
         }
       }
     },
+    "Session info": {
+      "comment": "Title of the inspector that summarizes the selected session's configuration, usage, and estimated cost.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话信息"
+          }
+        }
+      }
+    },
     "Session runway rate: 5-hour, tokens, dollars, or weekly.": {
       "localizations": {
         "en": {
@@ -17617,6 +17520,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "在 Claude Desktop 中将此 Claude 会话重新设为活跃状态"
+          }
+        }
+      }
+    },
+    "Set up": {
+      "comment": "Primary action on the Quota Meter card when usage tracking is disabled; opens an explainer and consent step.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置"
           }
         }
       }
@@ -17956,18 +17876,36 @@
         }
       }
     },
-    "Show all block types": {
+    "Show all blocks again": {
+      "comment": "Tooltip for the only active transcript role chip.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show all block types"
+            "value": "Show all blocks again"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示所有块类型"
+            "value": "重新显示所有区块"
+          }
+        }
+      }
+    },
+    "Show all sessions": {
+      "comment": "Tooltip for the footer session count that clears the active filters.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示所有会话"
           }
         }
       }
@@ -18052,23 +17990,6 @@
         }
       }
     },
-    "Preview": {
-      "comment": "Primary action on the Quota Meter card when usage tracking is already enabled; opens an explainer before showing the meter.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preview"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "预览"
-          }
-        }
-      }
-    },
     "Show menu bar icons": {
       "localizations": {
         "en": {
@@ -18101,6 +18022,23 @@
         }
       }
     },
+    "Show only %@ blocks": {
+      "comment": "Tooltip for a transcript role chip while every role is shown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show only %@ blocks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示 %@ 区块"
+          }
+        }
+      }
+    },
     "Show only live sessions in the list (Codex, Claude)": {
       "localizations": {
         "en": {
@@ -18113,6 +18051,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "列表中仅显示实时会话（Codex、Claude）"
+          }
+        }
+      }
+    },
+    "Show only saved sessions": {
+      "comment": "Tooltip for the Saved scope chip inside the search field.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show only saved sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示已保存的会话"
           }
         }
       }
@@ -18151,34 +18106,36 @@
         }
       }
     },
-    "Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.": {
+    "Show or hide Claude sessions (⌘2)": {
+      "comment": "Tooltip for the Claude source pill.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible."
+            "value": "Show or hide Claude sessions (⌘2)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示或隐藏 Claude 会话（⌘2）。归档图标：将 Claude 结果限定为已归档的 Desktop 会话；其他已启用的智能体仍保持可见。"
+            "value": "显示或隐藏 Claude 会话（⌘2）"
           }
         }
       }
     },
-    "Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible.": {
+    "Show or hide Codex sessions (⌘1)": {
+      "comment": "Tooltip for the Codex source pill.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible."
+            "value": "Show or hide Codex sessions (⌘1)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示或隐藏 Codex 会话（⌘1）。归档图标：将 Codex 结果限定为已归档的会话；其他已启用的智能体仍保持可见。"
+            "value": "显示或隐藏 Codex 会话（⌘1）"
           }
         }
       }
@@ -18569,6 +18526,23 @@
         }
       }
     },
+    "Show this change in the transcript": {
+      "comment": "Tooltip for a Session info history row that scrolls to the corresponding transcript marker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show this change in the transcript"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话记录中显示此更改"
+          }
+        }
+      }
+    },
     "Show usage in the footer": {
       "localizations": {
         "en": {
@@ -18693,6 +18667,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "登录 claude.ai 后启用 Web API 模式，或安装 Claude CLI，让 Agent Sessions 直接读取用量。"
+          }
+        }
+      }
+    },
+    "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增简体中文支持，用量计的每周速率采用更严格的证据模型。"
           }
         }
       }
@@ -18826,6 +18816,23 @@
         }
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
+    },
+    "Span": {
+      "comment": "Session info row label for the wall-clock time between the first and last request.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Span"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跨度"
+          }
+        }
+      }
     },
     "Spawned a workflow": {
       "localizations": {
@@ -18998,23 +19005,6 @@
         }
       }
     },
-    "Open GitHub": {
-      "comment": "Primary action on the GitHub star invitation; opens the repository but does not star it automatically.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open GitHub"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开 GitHub"
-          }
-        }
-      }
-    },
     "Start Exploring": {
       "localizations": {
         "en": {
@@ -19059,6 +19049,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "开始跟踪以查看活动规律"
+          }
+        }
+      }
+    },
+    "Started %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始时为 %@"
+          }
+        }
+      }
+    },
+    "Started configuration is inferred from the first record, not a session-start setting.": {
+      "comment": "Session info note explaining that the initial configuration is inferred rather than explicitly recorded at session start.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started configuration is inferred from the first record, not a session-start setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动配置根据第一条记录推断，并非会话启动时的设置。"
           }
         }
       }
@@ -19210,6 +19234,23 @@
         }
       }
     },
+    "Subagent model": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subagent model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "子代理模型"
+          }
+        }
+      }
+    },
     "Sunday": {
       "localizations": {
         "en": {
@@ -19270,6 +19311,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "在相对和绝对修改时间之间切换"
+          }
+        }
+      }
+    },
+    "Switch to Dark Mode": {
+      "comment": "Main toolbar overflow menu item toggling appearance.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Dark Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到深色模式"
+          }
+        }
+      }
+    },
+    "Switch to Horizontal Split": {
+      "comment": "Main toolbar overflow menu item that changes the window split arrangement.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Horizontal Split"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到水平分栏"
+          }
+        }
+      }
+    },
+    "Switch to Light Mode": {
+      "comment": "Main toolbar overflow menu item toggling appearance.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Light Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到浅色模式"
+          }
+        }
+      }
+    },
+    "Switch to Vertical Split": {
+      "comment": "Main toolbar overflow menu item that changes the window split arrangement.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Vertical Split"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到垂直分栏"
           }
         }
       }
@@ -19680,6 +19789,57 @@
         }
       }
     },
+    "The provider did not record an inference region.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The provider did not record an inference region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商未记录推理区域。"
+          }
+        }
+      }
+    },
+    "The provider recorded an empty inference region.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The provider recorded an empty inference region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商记录的推理区域为空。"
+          }
+        }
+      }
+    },
+    "The provider reported that inference geography was unavailable.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The provider reported that inference geography was unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商报告推理地理位置不可用。"
+          }
+        }
+      }
+    },
     "The right CLI wins": {
       "localizations": {
         "en": {
@@ -19692,6 +19852,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "优先使用正确的 CLI"
+          }
+        }
+      }
+    },
+    "The transcript for this session is not loaded.": {
+      "comment": "Session info tooltip when turn composition cannot be counted yet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The transcript for this session is not loaded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话的对话记录尚未加载。"
           }
         }
       }
@@ -19724,6 +19901,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "主题"
+          }
+        }
+      }
+    },
+    "Thinking effort %@ → %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thinking effort %@ → %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "思考强度 %1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "Thinking effort changed: %@ → %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thinking effort changed: %@ → %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "思考强度已更改：%1$@ → %2$@"
           }
         }
       }
@@ -19889,6 +20100,57 @@
         }
       }
     },
+    "This transcript records fewer than two timed requests.": {
+      "comment": "Session info tooltip when there is no span to report.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transcript records fewer than two timed requests."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话记录中带时间戳的请求少于两次。"
+          }
+        }
+      }
+    },
+    "This transcript records no model or effort setting.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transcript records no model or effort setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话记录未包含模型或思考强度设置。"
+          }
+        }
+      }
+    },
+    "This transcript records no usage.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transcript records no usage."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话记录未包含用量。"
+          }
+        }
+      }
+    },
     "This will remove %lld sessions from Saved and move their local archive copies to the Trash. Original session files are not deleted.": {
       "comment": "User-visible copy from PinnedSessionsView. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -19978,6 +20240,23 @@
         }
       }
     },
+    "Time not recorded": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time not recorded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未记录时间"
+          }
+        }
+      }
+    },
     "Time of Day": {
       "localizations": {
         "en": {
@@ -20054,22 +20333,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "切换深色/浅色模式"
-          }
-        }
-      }
-    },
-    "Toggle Layout": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Toggle Layout"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换布局"
           }
         }
       }
@@ -20187,23 +20450,6 @@
         }
       }
     },
-    "Translation guide": {
-      "comment": "Secondary action on the translation contribution card; opens the contributor guide.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Translation guide"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "了解翻译流程"
-          }
-        }
-      }
-    },
     "Transcript": {
       "comment": "Title of a transcript context menu.",
       "localizations": {
@@ -20265,6 +20511,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "对话记录"
+          }
+        }
+      }
+    },
+    "Translation guide": {
+      "comment": "Secondary action on the translation contribution card; opens the contributor guide.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation guide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "了解翻译流程"
           }
         }
       }
@@ -20365,19 +20628,19 @@
         }
       }
     },
-    "Set up": {
-      "comment": "Primary action on the Quota Meter card when usage tracking is disabled; opens an explainer and consent step.",
+    "Turns": {
+      "comment": "Session info row label for how the transcript's blocks divide between you, the agent, and tool calls.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Set up"
+            "value": "Turns"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "设置"
+            "value": "回合"
           }
         }
       }
@@ -20460,6 +20723,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法执行指定的二进制文件。请检查路径后重试。"
+          }
+        }
+      }
+    },
+    "Unavailable": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
           }
         }
       }
@@ -21521,18 +21801,19 @@
         }
       }
     },
-    "View Style": {
+    "View as": {
+      "comment": "Transcript overflow submenu that chooses the transcript rendering.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "View Style"
+            "value": "View as"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "视图样式"
+            "value": "显示方式"
           }
         }
       }
@@ -21748,34 +22029,35 @@
         }
       }
     },
-    "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.": {
+    "Weekly pace is measured, not averaged": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model."
+            "value": "Weekly pace is measured, not averaged"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新增简体中文支持，用量计的每周速率采用更严格的证据模型。"
+            "value": "每周消耗速度采用实测值，而非平均值"
           }
         }
       }
     },
-    "Quota Meter rates you can trust": {
+    "Weekly quota": {
+      "comment": "User-visible Session info copy.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quota Meter rates you can trust"
+            "value": "Weekly quota"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "可信的用量计速率"
+            "value": "每周额度"
           }
         }
       }
@@ -21792,22 +22074,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "每周速率现在会等待足够的近期证据，拒绝不匹配的配额数据，并在会话结束后继续归因五分钟。现已包含 Astra 和 Sol 长上下文定价；输入不可用时会明确显示不可用，而不会给出看似确定的数值。"
-          }
-        }
-      }
-    },
-    "Weekly pace is measured, not averaged": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weekly pace is measured, not averaged"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每周消耗速度采用实测值，而非平均值"
           }
         }
       }
@@ -22037,6 +22303,23 @@
         }
       }
     },
+    "When the account quota reading was taken. A carried calibration can be far older than this.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When the account quota reading was taken. A carried calibration can be far older than this."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "账户额度读数的采集时间。沿用的校准数据可能比此时间早得多。"
+          }
+        }
+      }
+    },
     "When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.": {
       "localizations": {
         "en": {
@@ -22053,6 +22336,23 @@
         }
       }
     },
+    "When this estimate was computed.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this estimate was computed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此估算的计算时间。"
+          }
+        }
+      }
+    },
     "When you’re working but on track to fit the 5-hour window, show a smiling face or a quiet dot in the run-out column.": {
       "localizations": {
         "en": {
@@ -22065,6 +22365,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作期间，如果按当前进度不会超出 5 小时时段，则在耗尽时间列中显示笑脸或低调的圆点。"
+          }
+        }
+      }
+    },
+    "Which account window the calibration came from.": {
+      "comment": "User-visible Session info copy.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Which account window the calibration came from."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "校准数据来自哪个账户周期。"
           }
         }
       }
@@ -22685,6 +23002,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "仅 tmux"
+          }
+        }
+      }
+    },
+    "tokens": {
+      "comment": "Unit label beside a session's total token count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "令牌"
           }
         }
       }

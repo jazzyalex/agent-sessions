@@ -28,15 +28,18 @@ Five groups, in order:
 |---|---|
 | Sources | Registry-derived enabled sources: Codex and Claude plus every enabled other agent. Use the existing source overflow control when more than four are enabled. |
 | Search | The field, taking reclaimed width, with `Starred` and `Archived` scope chips. `Archived` opens two independent source-scoped toggles. |
-| Actions | Quota Meter, Resume in CLI |
-| View | Layout, Transcript pane, Session info |
+| Actions | Quota Meter, Resume in CLI, Image Browser |
+| View | Transcript pane, Session info |
 | Menu | `⋯` |
 
-**Archive stops being duplicated beside source pills.** The `Archived` chip opens a menu with independent `Codex archived only` and `Claude archived only` checkboxes. Its active indicator shows whether one or both are selected; it is not a global archived-only Boolean. Each toggle retains its current source-scoped semantics, and neither hides other agents. The mockup's four visible source pills are one illustrative configuration, not the full supported-source list.
+**Archive stops being duplicated beside source pills.** The `Archived` chip opens a menu with independent `Codex archived only` and `Claude archived only` checkboxes. Its active indicator shows whether one or both are selected; it is not a global archived-only Boolean. Each toggle retains its current source-scoped semantics, neither hides other agents, and enables its source when selected. The mockup's four visible source pills are one illustrative configuration, not the full supported-source list.
 
-**Into the `⋯` menu**, each gaining a name: Statistics, Reveal in Finder, Image Browser, Live sessions only, Reindex now, Appearance ▸, Settings… . Preserve the existing enablement rules for session-dependent items.
+**Into the `⋯` menu**, each gaining a name: Analytics, Reveal in Finder, Switch to Horizontal / Vertical Split, Reindex now, Appearance, Settings… . Preserve the existing enablement rules for session-dependent items. Shortcuts for menu items are registered outside the menu, because Menu content is built lazily.
 
-**Out of the toolbar entirely:** Collapse all / Expand all and the hierarchy / flat-list toggle move into the session list's own header, next to the rows they affect. Keep ⇧⌘H for hierarchy.
+**Owner decisions after visual review (2026-09-12)** — these supersede the first draft:
+- Image Browser is a primary toolbar action; the split-layout toggle moved into `⋯`. The split is set once and left; Image Browser acts on the session being read.
+- "Statistics" is named **Analytics** everywhere.
+- The session-list controls on the leading side of the toolbar (live-only, hierarchy, collapse / expand all) were approved as they are. Moving them into a list header is not in scope for this branch.
 
 Restored after review, with what each beat:
 

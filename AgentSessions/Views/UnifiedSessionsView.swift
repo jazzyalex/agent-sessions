@@ -384,7 +384,6 @@ struct UnifiedSessionsView: View {
         @State private var cachedRowIDs: [String] = []
         @State private var cachedVisibleRowIDs: Set<String> = []
         @State private var cachedTotalSessionCount: Int = 0
-        @State private var cachedLatestModifiedAt: Date? = nil
 	    @State private var collapsedParents: Set<String> = []
 	    @State private var hasLoadedPersistedCollapsedParents: Bool = false
         @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
@@ -981,7 +980,7 @@ struct UnifiedSessionsView: View {
 	    /// Flat "sidebar" tone for the Session-list pane — the standard window/chrome
 	    /// gray, one value step off the transcript's brighter text background, so the
 	    /// panes read as distinct without depending on column widths.
-	    private static let listPaneBackground = Color(nsColor: .windowBackgroundColor)
+	    private static let listPaneBackground = Surface.chrome
 
 	    /// A single 1px hairline at the list/transcript boundary, in the system
 	    /// `separatorColor` so it matches every other divider in the window and
@@ -1004,7 +1003,7 @@ struct UnifiedSessionsView: View {
 	            statusText: footerStatusText,
 	            quotas: footerQuotas,
 	            sessionCountText: footerSessionCountText,
-	            freshnessText: footerFreshnessText
+	            clearFilters: footerIsFiltered ? { clearListFilters() } : nil
 	        )
 	    }
 
@@ -1397,29 +1396,39 @@ struct UnifiedSessionsView: View {
 	        return ""
 	    }
 
+	    /// True while a filter the footer can actually undo is narrowing the list.
+	    /// Deliberately NOT "cachedRows.count != cachedTotalSessionCount": rows also
+	    /// lag behind during search churn, and offering to clear filters when none
+	    /// are set produces a control that changes nothing when pressed. This set
+	    /// must stay in step with `clearListFilters()`.
+	    private var footerIsFiltered: Bool {
+	        unified.showFavoritesOnly
+	            || showActiveSessionsOnly
+	            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+	    }
+
+	    private func clearListFilters() {
+	        unified.showFavoritesOnly = false
+	        showActiveSessionsOnly = false
+	        unified.queryDraft = ""
+	        searchCoordinator.cancel()
+	    }
+
+	    /// "3,775 sessions" when nothing is filtered; "3,625 of 3,775 shown" when
+	    /// something is. The bare fraction said neither which number was which nor
+	    /// that a filter was responsible.
 	    private var footerSessionCountText: String {
 	        let visible = cachedRows.count
 	        let total = cachedTotalSessionCount
-	        let countText = visible != total
-	            ? String(localized: "\(visible) / \(total) sessions", comment: "Footer count of visible sessions out of the total.")
-	            : String(localized: "\(total) sessions", comment: "Footer count of sessions.")
+	        guard footerIsFiltered else {
+	            return String(localized: "\(total) sessions", comment: "Footer count of sessions when nothing is filtered.")
+	        }
+	        let countText = String(localized: "\(visible) of \(total) shown",
+	                               comment: "Footer count of visible sessions out of the total while a filter is active.")
 	        if unified.showFavoritesOnly {
 	            return String(localized: "\(countText) | Saved only", comment: "Footer session count while the saved-only filter is enabled.")
 	        }
 	        return countText
-	    }
-
-	    private var footerFreshnessText: String? {
-	        guard let date = cachedLatestModifiedAt else { return nil }
-	        return String(localized: "Last: \(timeAgoShort(date))", comment: "Footer timestamp for the newest visible session.")
-	    }
-
-	    private func timeAgoShort(_ date: Date, now: Date = Date()) -> String {
-	        let seconds = max(0, now.timeIntervalSince(date))
-	        if seconds < 60 { return String(localized: "<1m ago", comment: "Compact relative time under one minute.") }
-	        if seconds < 3600 { return String(localized: "\(Int(seconds / 60))m ago", comment: "Compact relative time in minutes.") }
-	        if seconds < 86400 { return String(localized: "\(Int(seconds / 3600))h ago", comment: "Compact relative time in hours.") }
-	        return String(localized: "\(Int(seconds / 86400))d ago", comment: "Compact relative time in days.")
 	    }
 
 	    private var footerQuotas: [QuotaData] {
@@ -1857,12 +1866,9 @@ struct UnifiedSessionsView: View {
                         .opacity(0)
                         .frame(width: 0, height: 0)
 
-                    CodexSegmentedPill(
-                        isCodexOn: $unified.includeCodex,
-                        isArchivedOn: $unified.showArchivedCodexDesktopOnly,
-                        isMonochrome: stripMonochrome
-                    )
-                    .help("Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible.")
+                    AgentTabToggle(title: "Codex", color: Color.agentCodex,
+                                   isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
+                        .help("Show or hide Codex sessions (⌘1)")
                 }
 
                 if claudeAgentEnabled {
@@ -1871,12 +1877,9 @@ struct UnifiedSessionsView: View {
                         .opacity(0)
                         .frame(width: 0, height: 0)
 
-                    ClaudeSegmentedPill(
-                        isClaudeOn: $unified.includeClaude,
-                        isArchivedOn: $unified.showArchivedClaudeDesktopOnly,
-                        isMonochrome: stripMonochrome
-                    )
-                    .help("Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.")
+                    AgentTabToggle(title: "Claude", color: Color.agentClaude,
+                                   isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
+                        .help("Show or hide Claude sessions (⌘2)")
                 }
 
                 // Codex + Claude stay as pills; the remaining enabled agents show
@@ -1897,68 +1900,11 @@ struct UnifiedSessionsView: View {
                 UnifiedProjectFilterBadgeView(unified: unified)
             }
         }
+        // Ranked by how often a control is reached for without thinking. Two
+        // action glyphs, three view toggles, and one menu for everything that is
+        // looked for rather than reflexed at — a named menu row is more
+        // discoverable than an unlabelled glyph, not less.
         ToolbarItemGroup(placement: .automatic) {
-            ToolbarIconToggle(
-                isOn: $unified.showFavoritesOnly,
-                onSymbol: "star.fill",
-                offSymbol: "star",
-                help: "Show only saved sessions",
-                activeColor: .primary,
-                accessibilityLabel: "Saved"
-            )
-
-            AnalyticsButtonView(
-                isReady: analyticsReady,
-                phase: analyticsPhase,
-                isStale: analyticsIsStale
-            )
-
-            ToolbarGroupDivider()
-
-            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
-                ToolbarIcon(systemName: "terminal")
-            } action: {
-                if let s = selectedSession { resume(s) }
-            }
-            .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(!canResumeSelectedSession)
-            .accessibilityLabel(Text("Resume"))
-
-            ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
-                ToolbarIcon(systemName: "folder")
-            } action: {
-                if let s = selectedSession { openDir(s) }
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
-            .disabled(selectedSession == nil)
-            .accessibilityLabel(Text("Open Working Directory"))
-
-            ToolbarIconButton(help: "Refresh sessions list/index (core indexing, not Analytics) (⌘R)") { _ in
-                ZStack {
-                    ToolbarIcon(systemName: "arrow.clockwise")
-                        .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
-                    if unified.isIndexing || unified.isProcessingTranscripts {
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 7, height: 7)
-                            .offset(x: 8, y: -8)
-                    }
-                }
-            } action: {
-                activeCodexSessions.refreshNow()
-                unified.refresh()
-            }
-            .keyboardShortcut("r", modifiers: .command)
-            .accessibilityLabel(Text("Refresh"))
-
-            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
-                ToolbarIcon(systemName: "photo.on.rectangle")
-            } action: {
-                showImagesForSelectedSession(showNoSelectionAlert: true)
-            }
-            .disabled(selectedSession == nil)
-            .accessibilityLabel(Text("Image Browser"))
-
             ToolbarIconButton(
                 help: liveSessionsFeatureEnabled
                     ? "Open the Quota Meter."
@@ -1971,6 +1917,23 @@ struct UnifiedSessionsView: View {
             .disabled(!liveSessionsFeatureEnabled)
             .accessibilityLabel(Text("Quota Meter"))
 
+            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
+                ToolbarIcon(systemName: "terminal")
+            } action: {
+                if let s = selectedSession { resume(s) }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .control])
+            .disabled(!canResumeSelectedSession)
+            .accessibilityLabel(Text("Resume"))
+
+            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
+                ToolbarIcon(systemName: "photo.on.rectangle")
+            } action: {
+                showImagesForSelectedSession(showNoSelectionAlert: true)
+            }
+            .disabled(selectedSession == nil)
+            .accessibilityLabel(Text("Image Browser"))
+
             ToolbarGroupDivider()
 
             ToolbarIconToggle(
@@ -1982,33 +1945,121 @@ struct UnifiedSessionsView: View {
                 accessibilityLabel: "Transcript Window"
             )
 
+            // A meter, not an "about" glyph: the panel reports what the session
+            // consumed. `info.circle` reads as Help everywhere else in macOS and
+            // sat one slot from the sidebar toggle at identical weight.
             ToolbarIconToggle(
                 isOn: $showSessionInfo,
-                onSymbol: "info.circle.fill",
-                offSymbol: "info.circle",
+                onSymbol: "gauge.with.needle.fill",
+                offSymbol: "gauge.with.needle",
                 help: showSessionInfo ? "Hide Session info (⇧⌘I)" : "Show Session info (⇧⌘I)",
                 activeColor: .primary,
                 accessibilityLabel: "Session info"
             )
             .disabled(!showTranscriptWindow)
 
-            LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+            ToolbarGroupDivider()
 
-            ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
-                ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
-            } action: {
+            mainOverflowMenu
+
+            // Menu content is built lazily, so a shortcut declared only inside
+            // `mainOverflowMenu` is dead until the menu is first opened. Same
+            // workaround the source pills already use when they collapse into
+            // AgentOverflowMenu.
+            overflowMenuShortcuts
+        }
+    }
+
+    @ViewBuilder
+    private var overflowMenuShortcuts: some View {
+        hiddenShortcut(key: "k", modifiers: .command) {
+            NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
+        }
+        hiddenShortcut(key: "o", modifiers: [.command, .shift]) {
+            if let s = selectedSession { openDir(s) }
+        }
+        hiddenShortcut(key: "r", modifiers: .command) {
+            guard !unified.isIndexing, !unified.isProcessingTranscripts else { return }
+            activeCodexSessions.refreshNow()
+            unified.refresh()
+        }
+    }
+
+    private func hiddenShortcut(key: KeyEquivalent,
+                                modifiers: EventModifiers,
+                                action: @escaping () -> Void) -> some View {
+        Button("", action: action)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+    }
+
+    /// The analytics build state used to be a badge on a glyph. As a menu row it
+    /// says the state in words instead, which is the whole reason the item moved.
+    private var layoutMenuTitle: String {
+        layoutMode == .vertical
+            ? String(localized: "Switch to Horizontal Split")
+            : String(localized: "Switch to Vertical Split")
+    }
+
+    private var analyticsMenuTitle: String {
+        switch analyticsPhase {
+        case .queued, .building: return String(localized: "Analytics (building…)")
+        case .failed: return String(localized: "Analytics (last build failed)")
+        case .canceled: return String(localized: "Analytics (build canceled)")
+        case .ready, .idle:
+            if analyticsIsStale { return String(localized: "Analytics (update available)") }
+            return analyticsReady
+                ? String(localized: "Analytics")
+                : String(localized: "Analytics (build required)")
+        }
+    }
+
+    /// Everything below daily use. Each item keeps its shortcut and gains a name.
+    @ViewBuilder
+    private var mainOverflowMenu: some View {
+        Menu {
+            Button(analyticsMenuTitle) {
+                NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
+            }
+
+            Divider()
+
+            Button("Reveal Working Directory in Finder") {
+                if let s = selectedSession { openDir(s) }
+            }
+            .disabled(selectedSession == nil)
+
+            Button(layoutMenuTitle) { onToggleLayout() }
+
+            Divider()
+
+            Button(unified.isIndexing || unified.isProcessingTranscripts
+                   ? "Reindexing…" : "Reindex Now") {
+                activeCodexSessions.refreshNow()
+                unified.refresh()
+            }
+            .disabled(unified.isIndexing || unified.isProcessingTranscripts)
+
+            Divider()
+
+            Button(effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") {
                 codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
             }
-            .accessibilityLabel(Text("Toggle Dark/Light"))
 
-            ToolbarIconButton(help: "Open settings for appearance, indexing, and agents (⌘,)") { isHovering in
-                ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
-            } action: {
-                PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
+            Button("Settings…") {
+                PreferencesWindowController.shared.show(indexer: codexIndexer,
+                                                        updaterController: updaterController)
             }
-            .keyboardShortcut(",", modifiers: .command)
-            .accessibilityLabel(Text("Settings"))
+        } label: {
+            ToolbarIcon(systemName: "ellipsis")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("More options")
+        .accessibilityLabel(Text("More options"))
     }
 
     /// Enabled agents other than Codex/Claude (which always render as segmented pills),
@@ -2677,7 +2728,6 @@ struct UnifiedSessionsView: View {
                 nextRows = rows.sorted(using: sortOrder)
             }
             cachedTotalSessionCount = unified.sessions.count
-            cachedLatestModifiedAt = latestModifiedAt(in: unified.sessions) ?? latestModifiedAt(in: nextRows)
 
             let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
             let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
@@ -2874,20 +2924,6 @@ struct UnifiedSessionsView: View {
                 }
             }
         }
-
-    private func latestModifiedAt(in sessions: [Session]) -> Date? {
-        var latest: Date?
-        for session in sessions {
-            guard let current = latest else {
-                latest = session.modifiedAt
-                continue
-            }
-            if session.modifiedAt > current {
-                latest = session.modifiedAt
-            }
-        }
-        return latest
-    }
 
     private var isHierarchyBrowsing: Bool {
         showSubagentHierarchy && searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -3931,118 +3967,6 @@ private struct ArchivedCodexDesktopIconToggle: View {
     }
 }
 
-private struct ClaudeSegmentedPill: View {
-    @Binding var isClaudeOn: Bool
-    @Binding var isArchivedOn: Bool
-    let isMonochrome: Bool
-
-    private var claudeAccent: Color { isMonochrome ? .primary : Color.agentClaude }
-    private var claudeTextColor: Color {
-        if isClaudeOn { return claudeAccent }
-        return isMonochrome ? .secondary : .primary
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: { isClaudeOn.toggle() }) {
-                Text("Claude")
-                    .font(UnifiedSessionsStyle.agentTabFont)
-                    .foregroundStyle(claudeTextColor)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Claude"))
-            .accessibilityValue(Text(isClaudeOn ? "On" : "Off"))
-
-            Rectangle()
-                .fill(UnifiedSessionsStyle.agentPillStroke)
-                .frame(width: 1)
-                .padding(.vertical, 4)
-
-            Button(action: archiveToggle) {
-                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-                    .frame(minWidth: 14)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Narrow Claude to archived Desktop sessions"))
-            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
-        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
-    }
-
-    private func archiveToggle() {
-        let next = !isArchivedOn
-        if next, !isClaudeOn { isClaudeOn = true }
-        isArchivedOn = next
-    }
-}
-
-private struct CodexSegmentedPill: View {
-    @Binding var isCodexOn: Bool
-    @Binding var isArchivedOn: Bool
-    let isMonochrome: Bool
-
-    private var codexAccent: Color { isMonochrome ? .primary : Color.agentCodex }
-    private var codexTextColor: Color {
-        if isCodexOn { return codexAccent }
-        return isMonochrome ? .secondary : .primary
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button(action: { isCodexOn.toggle() }) {
-                Text("Codex")
-                    .font(UnifiedSessionsStyle.agentTabFont)
-                    .foregroundStyle(codexTextColor)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Codex"))
-            .accessibilityValue(Text(isCodexOn ? "On" : "Off"))
-
-            Rectangle()
-                .fill(UnifiedSessionsStyle.agentPillStroke)
-                .frame(width: 1)
-                .padding(.vertical, 4)
-
-            Button(action: archiveToggle) {
-                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-                    .frame(minWidth: 14)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Narrow Codex to archived Desktop sessions"))
-            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
-        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
-    }
-
-    private func archiveToggle() {
-        let next = !isArchivedOn
-        if next, !isCodexOn { isCodexOn = true }
-        isArchivedOn = next
-    }
-}
-
 private struct ToolbarIcon: View {
     let systemName: String
     var isActive: Bool = false
@@ -4107,32 +4031,6 @@ private struct ToolbarGroupDivider: View {
     var body: some View {
         Divider()
             .frame(height: 18)
-    }
-}
-
-private struct LayoutToggleButton: View {
-    let layoutMode: LayoutMode
-    let onToggleLayout: () -> Void
-
-    private var targetMode: LayoutMode {
-        layoutMode == .vertical ? .horizontal : .vertical
-    }
-
-    private var iconName: String {
-        targetMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1"
-    }
-
-    private var helpText: String {
-        targetMode == .vertical ? "Switch to vertical split layout" : "Switch to horizontal split layout"
-    }
-
-    var body: some View {
-        ToolbarIconButton(help: helpText) { _ in
-            ToolbarIcon(systemName: iconName)
-        } action: {
-            onToggleLayout()
-        }
-        .accessibilityLabel(Text("Toggle Layout"))
     }
 }
 
@@ -4413,6 +4311,95 @@ private struct ProjectCellView: View {
     }
 }
 
+/// A scope toggle living inside the search field. Reads as part of the query,
+/// which is what it is, instead of as another toolbar action.
+private struct SearchScopeChip: View {
+    @Binding var isOn: Bool
+    let symbol: String
+    let title: LocalizedStringResource
+    let help: LocalizedStringResource
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? "\(symbol).fill" : symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(isOn ? Color.accentColor.opacity(0.14) : Color.clear)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(Text(help))
+        .accessibilityLabel(Text(title))
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// One archive control instead of an archive segment on every source pill.
+///
+/// Deliberately NOT a single archived-only Boolean: each item keeps its own
+/// source-scoped meaning — narrow that source to archived Desktop sessions,
+/// leaving every other agent visible — exactly as the pill segments did. Turning
+/// one on also turns its source on, because narrowing a hidden source to its
+/// archive would otherwise show nothing and look broken.
+private struct ArchivedScopeChip: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let codexEnabled: Bool
+    let claudeEnabled: Bool
+
+    private var activeCount: Int {
+        (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
+            + (claudeEnabled && unified.showArchivedClaudeDesktopOnly ? 1 : 0)
+    }
+
+    var body: some View {
+        if codexEnabled || claudeEnabled {
+            Menu {
+                if codexEnabled {
+                    Toggle("Codex archived only", isOn: Binding(
+                        get: { unified.showArchivedCodexDesktopOnly },
+                        set: { on in
+                            if on, !unified.includeCodex { unified.includeCodex = true }
+                            unified.showArchivedCodexDesktopOnly = on
+                        }))
+                }
+                if claudeEnabled {
+                    Toggle("Claude archived only", isOn: Binding(
+                        get: { unified.showArchivedClaudeDesktopOnly },
+                        set: { on in
+                            if on, !unified.includeClaude { unified.includeClaude = true }
+                            unified.showArchivedClaudeDesktopOnly = on
+                        }))
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(activeCount > 0 ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(activeCount > 0 ? Color.accentColor.opacity(0.14) : Color.clear))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Narrow a source to its archived Desktop sessions; other agents stay visible")
+            .accessibilityLabel(Text("Archived"))
+        }
+    }
+}
+
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
@@ -4422,6 +4409,8 @@ private struct UnifiedSearchFiltersView: View {
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
     // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
     // per-source enablement is `@Published`, so those changes still redraw this view.
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -4466,6 +4455,19 @@ private struct UnifiedSearchFiltersView: View {
                     .buttonStyle(.plain)
                     .help("Clear search (⎋)")
                 }
+
+                // Saved is a scope on the result set, so it belongs inside the
+                // field with the other scoping, not as a separate toolbar glyph.
+                Divider().frame(height: 14)
+
+                SearchScopeChip(isOn: $unified.showFavoritesOnly,
+                                symbol: "star",
+                                title: "Saved",
+                                help: "Show only saved sessions")
+
+                ArchivedScopeChip(unified: unified,
+                                  codexEnabled: codexAgentEnabled,
+                                  claudeEnabled: claudeAgentEnabled)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -4726,52 +4728,3 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 }
 
 // MARK: - Analytics Button
-
-private struct AnalyticsButtonView: View {
-    let isReady: Bool
-    let phase: AnalyticsIndexPhase
-    let isStale: Bool
-
-    var body: some View {
-        ToolbarIconButton(help: helpText) { _ in
-            ZStack {
-                ToolbarIcon(systemName: "chart.bar.xaxis")
-                    .opacity((isReady || phase == .ready) ? 1 : 0.5)
-                if phase == .queued || phase == .building {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else if isStale {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 8, y: -8)
-                }
-            }
-        } action: {
-            NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
-        }
-        .keyboardShortcut("k", modifiers: .command)
-        .accessibilityLabel(Text("Analytics"))
-    }
-
-    private var helpText: String {
-        switch phase {
-        case .queued, .building:
-            return "Analytics build in progress (⌘K)"
-        case .ready:
-            if isStale {
-                return "View analytics (stale data, update available) (⌘K)"
-            }
-            return "View usage analytics (⌘K)"
-        case .failed:
-            return "View analytics (last build failed, retry available) (⌘K)"
-        case .canceled:
-            return "View analytics (build canceled, restart available) (⌘K)"
-        case .idle:
-            if isReady {
-                return "View usage analytics (⌘K)"
-            }
-            return "View analytics (build required) (⌘K)"
-        }
-    }
-}

@@ -152,6 +152,7 @@
 		3C0D8FBA8DED2516A91DB1BC /* AppEdition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4FDB19BD9DB1AD8419CD3A4 /* AppEdition.swift */; };
 		3C5157564143363256F3A419 /* DroidSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A39A36FCB3A36B34E58751E /* DroidSessionDiscovery.swift */; };
 		3C83A86E1D235B70F250367C /* DevinSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AEAE73F8F5ADE42A97DCC3 /* DevinSessionParser.swift */; };
+		3CF3EF748CB91FDD1DE2AF27 /* SurfaceTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = C331A98BDAADE7995E1FA682 /* SurfaceTokens.swift */; };
 		3D5D656E2B7612DADF1C3F7D /* TranscriptSelectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17A2A2775262E7824CF16EF /* TranscriptSelectionCoordinatorTests.swift */; };
 		3D7BE6551A4D05AE1747DA77 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35186F4194824F3250DE3B8E /* AppRuntime.swift */; };
 		3E148808D4BED935A6B8BB9E /* GrokSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30ED3B403E362B4B09E7F5FE /* GrokSourceDescriptor.swift */; };
@@ -1113,6 +1114,7 @@
 		C29E004E088B0110C36DAAAC /* UnifiedSearchState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/UnifiedSearchState.swift; sourceTree = SOURCE_ROOT; };
 		C311CBC276711A2955D27C8E /* Stage0GoldenFixturesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Stage0GoldenFixturesTests.swift; sourceTree = SOURCE_ROOT; };
 		C331372717FD62646BBF983D /* CrashReportEnvelope.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashReportEnvelope.swift; sourceTree = SOURCE_ROOT; };
+		C331A98BDAADE7995E1FA682 /* SurfaceTokens.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SurfaceTokens.swift; sourceTree = SOURCE_ROOT; };
 		C35D0B28960656D80B562067 /* CursorSessionParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CursorSessionParserTests.swift; sourceTree = SOURCE_ROOT; };
 		C38E9C19252845D630A7E8EB /* FxSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/FxSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		C3CA0F6D57ED5B6A5B8969C9 /* PreferencesView+Devin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AgentSessions/Views/Preferences/PreferencesView+Devin.swift"; sourceTree = SOURCE_ROOT; };
@@ -2238,6 +2240,7 @@
 				086B93F46C722F12E0D60EB7 /* LRUCache.swift */,
 				3C446908FDB8386C87D95091 /* LayoutTokens.swift */,
 				570990F2F009184F2447DA02 /* CombineLatestArray.swift */,
+				C331A98BDAADE7995E1FA682 /* SurfaceTokens.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -3174,6 +3177,7 @@
 				37BCE0FCDC7708107714AA9C /* CopilotTelemetryAccumulator.swift in Sources */,
 				FAA1BCD1385D988CE955AB2F /* TranscriptTelemetryView.swift in Sources */,
 				04CB13BBDAB354AF39ED116A /* SessionInfoComponents.swift in Sources */,
+				3CF3EF748CB91FDD1DE2AF27 /* SurfaceTokens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
