@@ -5195,8 +5195,18 @@ final class SessionParserTests: XCTestCase {
 
     func testOpenClawParserUsesTelegramPrefixAsProjectOrigin() throws {
         let fm = FileManager.default
+        let titleStrategyKey = "OpenClawTitleStrategy"
+        let previousTitleStrategy = UserDefaults.standard.string(forKey: titleStrategyKey)
+        UserDefaults.standard.set(OpenClawSessionParser.TitleStrategy.originThenPrompt.rawValue, forKey: titleStrategyKey)
         let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Origin-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: tmp) }
+        defer {
+            try? fm.removeItem(at: tmp)
+            if let previousTitleStrategy {
+                UserDefaults.standard.set(previousTitleStrategy, forKey: titleStrategyKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: titleStrategyKey)
+            }
+        }
 
         let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
         try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
@@ -5213,6 +5223,31 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(light?.repoName, "telegram")
         XCTAssertEqual(light?.repoDisplay, "telegram")
         XCTAssertEqual(full?.repoName, "telegram")
+        XCTAssertEqual(light?.listTitle, "A M (@jazzyalex) — hi")
+        XCTAssertEqual(full?.lightweightTitle, light?.lightweightTitle)
+        XCTAssertEqual(full?.listTitle, light?.listTitle)
+    }
+
+    func testOpenClawFullParserPreservesFirstToolTitleFallback() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ToolTitle-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-tool","timestamp":"2026-04-24T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let assistant = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"read","arguments":{"path":"README.md"}}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("tool.jsonl")
+        try (header + assistant).write(to: url, atomically: true, encoding: .utf8)
+
+        let light = try XCTUnwrap(OpenClawSessionParser.parseFile(at: url))
+        let full = try XCTUnwrap(OpenClawSessionParser.parseFileFull(at: url))
+
+        XCTAssertEqual(light.listTitle, "read")
+        XCTAssertEqual(full.lightweightTitle, light.lightweightTitle)
+        XCTAssertEqual(full.listTitle, light.listTitle)
     }
 
     func testOpenClawParserUsesCronPrefixAsProjectOrigin() throws {

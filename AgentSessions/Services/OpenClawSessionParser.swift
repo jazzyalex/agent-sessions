@@ -175,6 +175,8 @@ final class OpenClawSessionParser {
         var cwd: String? = nil
         var model: String? = nil
         var origin: String? = nil
+        var title: String? = nil
+        var firstToolName: String? = nil
         var tmin: Date? = nil
         var tmax: Date? = nil
 
@@ -269,6 +271,9 @@ final class OpenClawSessionParser {
                                 if origin == nil {
                                     origin = deriveOrigin(fromUserText: trimmed)
                                 }
+                                if title == nil {
+                                    title = deriveTitle(fromUserText: trimmed)
+                                }
                             }
                         }
                         let text = extractText(fromContent: msg["content"])
@@ -318,6 +323,9 @@ final class OpenClawSessionParser {
                                 case "toolcall":
                                     let toolCallId = stringValue(from: block, keys: ["id", "toolCallId", "tool_call_id", "toolCallID"])
                                     let toolName = stringValue(from: block, keys: ["name", "tool_name"])
+                                    if firstToolName == nil, let toolName, !toolName.isEmpty {
+                                        firstToolName = toolName
+                                    }
                                     let args = block["arguments"]
                                     events.append(SessionEvent(
                                         id: baseID + String(format: "-t%02d", blockIndex),
@@ -356,6 +364,9 @@ final class OpenClawSessionParser {
                     } else if role == "toolresult" {
                         let toolCallId = stringValue(from: msg, keys: ["toolCallId", "tool_call_id", "toolCallID"])
                         let toolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
+                        if firstToolName == nil, let toolName, !toolName.isEmpty {
+                            firstToolName = toolName
+                        }
                         let output = extractText(fromContent: msg["content"])
                         let isError = ((msg["isError"] as? Bool) ?? (msg["is_error"] as? Bool) ?? false)
                         events.append(SessionEvent(
@@ -428,6 +439,9 @@ final class OpenClawSessionParser {
         let start = tmin ?? mtime
         let end = tmax ?? mtime
         let isHousekeeping = !sawNonHousekeepingUser && sawHeartbeatPrompt
+        if title == nil, let firstToolName, !firstToolName.isEmpty {
+            title = firstToolName
+        }
 
         return Session(
             id: id,
@@ -441,7 +455,7 @@ final class OpenClawSessionParser {
             events: events,
             cwd: cwd,
             repoName: origin ?? systemOriginLabel,
-            lightweightTitle: nil,
+            lightweightTitle: title,
             lightweightCommands: nil,
             isHousekeeping: isHousekeeping,
             deletedAt: meta.deletedAt
