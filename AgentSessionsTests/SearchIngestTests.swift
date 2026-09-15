@@ -299,22 +299,24 @@ final class SearchIngestTests: XCTestCase {
         let hot = Session(id: "hot", source: .codex, startTime: nil, endTime: nil, model: nil,
                           filePath: "/tmp/hot.jsonl", fileSizeBytes: largeSize, eventCount: 1, events: [],
                           cwd: nil, repoName: nil, lightweightTitle: "hot")
+        let currentKeys = Set(current.map { SearchCoordinator.SessionKey(source: .codex, id: $0) })
+        let staleKeys = Set(stale.map { SearchCoordinator.SessionKey(source: .codex, id: $0) })
         XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(hot,
-                                                                        indexedIDs: current,
+                                                                        indexedIDs: currentKeys,
                                                                         seenIDs: [],
                                                                         enableDeepScan: false,
                                                                         smallSearchThreshold: threshold,
-                                                                        staleIDs: stale),
+                                                                        staleIDs: staleKeys),
                       "large stale session must be included for a fresh scan despite the size gate")
 
         // If the same stale session was already returned by FTS (in `seen`), it must NOT be
         // scanned again — no double-scan / duplicate in merged results.
         XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(hot,
-                                                                         indexedIDs: current,
-                                                                         seenIDs: ["hot"],
+                                                                         indexedIDs: currentKeys,
+                                                                         seenIDs: [SearchCoordinator.SessionKey(hot)],
                                                                          enableDeepScan: false,
                                                                          smallSearchThreshold: threshold,
-                                                                         staleIDs: stale),
+                                                                         staleIDs: staleKeys),
                        "a session already in FTS results must not be re-added as an unindexed candidate")
 
         // The current session stays on the FTS path (never a scan candidate).
@@ -322,11 +324,11 @@ final class SearchIngestTests: XCTestCase {
                              filePath: "/tmp/stable.jsonl", fileSizeBytes: 42, eventCount: 1, events: [],
                              cwd: nil, repoName: nil, lightweightTitle: "stable")
         XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(stable,
-                                                                         indexedIDs: current,
+                                                                         indexedIDs: currentKeys,
                                                                          seenIDs: [],
                                                                          enableDeepScan: false,
                                                                          smallSearchThreshold: threshold,
-                                                                         staleIDs: stale),
+                                                                         staleIDs: staleKeys),
                        "a current (fresh FTS) session must not be scanned")
     }
 

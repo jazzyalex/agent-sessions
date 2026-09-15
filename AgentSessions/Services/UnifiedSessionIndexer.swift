@@ -297,6 +297,39 @@ final class UnifiedSessionIndexer: ObservableObject {
         let sessions: [Session]
         let favoritesVersion: UInt64
     }
+    /// Small membership key for the unified search dataset. Contains BOTH the
+    /// source and the session id so the same id under different sources counts
+    /// as distinct. Deliberately excludes cwd, title, and events.
+    struct SearchDatasetMembershipKey: Hashable, Sendable {
+        let source: SessionSource
+        let id: String
+    }
+    /// Pure membership seam: derives the dataset membership from sessions.
+    static func searchDatasetMembership(for sessions: [Session]) -> Set<SearchDatasetMembershipKey> {
+        Set(sessions.map { SearchDatasetMembershipKey(source: $0.source, id: $0.id) })
+    }
+    /// Pure revision seam: returns the advanced revision when membership
+    /// differs, otherwise nil. Reorder and metadata-only changes compare equal.
+    static func advancedSearchDatasetMembershipRevision(from old: Set<SearchDatasetMembershipKey>,
+                                                        to new: Set<SearchDatasetMembershipKey>,
+                                                        current: UInt64) -> UInt64? {
+        guard old != new else { return nil }
+        return current &+ 1
+    }
+    /// Centralized authoritative publish for `allSessions`. Compares the new
+    /// (source, id) membership with the stored membership and increments
+    /// `searchDatasetMembershipRevision` only on addition/removal/source+id
+    /// change. All authoritative array replacements must route through here.
+    private func publishUnifiedAllSessions(_ sessions: [Session]) {
+        allSessions = sessions
+        let newMembership = Self.searchDatasetMembership(for: sessions)
+        if let advanced = Self.advancedSearchDatasetMembershipRevision(from: storedSearchDatasetMembership,
+                                                                       to: newMembership,
+                                                                       current: searchDatasetMembershipRevision) {
+            storedSearchDatasetMembership = newMembership
+            searchDatasetMembershipRevision = advanced
+        }
+    }
     struct CoreIndexingProgress: Equatable {
         let processed: Int
         let total: Int
@@ -319,6 +352,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         let total: Int
     }
     @Published private(set) var allSessions: [Session] = []
+    /// Monotonically increasing revision for the unified dataset membership.
+    /// Advances only when the set of (source, id) pairs changes (addition,
+    /// removal, or source+id change). Reorder and metadata/hydration
+    /// replacement with identical membership leave it unchanged.
+    @Published private(set) var searchDatasetMembershipRevision: UInt64 = 0
+    private var storedSearchDatasetMembership: Set<SearchDatasetMembershipKey> = []
     @Published private(set) var sessions: [Session] = []
     @Published private(set) var launchState: LaunchState = .idle
 
@@ -329,7 +368,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var dateTo: Date? = nil
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
-    @Published var projectFilter: String? = nil
+    @Published var projectSelection: ProjectSelection? = nil
     @Published var hasCommandsOnly: Bool = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly") {
         didSet {
             UserDefaults.standard.set(hasCommandsOnly, forKey: "UnifiedHasCommandsOnly")
@@ -669,7 +708,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self.publishAfterCurrentUpdate { [weak self] in
                     guard let self,
                           Self.shouldPublishAggregationResult(result, currentFavoritesVersion: self.favoritesSnapshotVersion) else { return }
-                    self.allSessions = result.sessions
+                    self.publishUnifiedAllSessions(result.sessions)
                     self.rebuildClaudeArchiveOverlay()
                 }
             }
@@ -785,12 +824,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       dateTo: to,
                                       model: model,
                                       kinds: kinds,
-                                      repoName: self.projectFilter,
+                                      repoName: nil,
                                       pathContains: nil,
                                       archivedCodexDesktopOnly: self.showArchivedCodexDesktopOnly,
                                       archivedClaudeDesktopOnly: self.showArchivedClaudeDesktopOnly,
                                       archivedClaudeSessionIDs: self.archivedClaudeSessionIDs,
-                                      sideChatsOnly: false)
+                                      sideChatsOnly: false,
+                                      selectedProjectIdentity: self.projectSelection?.identity)
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
@@ -2179,14 +2219,14 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // Remove a session from the unified list (e.g., missing file cleanup)
     func removeSession(id: String) {
-        allSessions.removeAll { $0.id == id }
+        publishUnifiedAllSessions(allSessions.filter { $0.id != id })
         recomputeNow()
     }
 
     func applySearch() { query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     func recomputeNow() {
-        // Debounce rapid recompute calls (e.g., from projectFilter changes) to prevent UI freezes
+        // Debounce rapid recompute calls (e.g., from projectSelection changes) to prevent UI freezes
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
@@ -2328,12 +2368,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                               dateTo: dateTo,
                               model: selectedModel,
                               kinds: selectedKinds,
-                              repoName: projectFilter,
+                              repoName: nil,
                               pathContains: nil,
                               archivedCodexDesktopOnly: showArchivedCodexDesktopOnly,
                               archivedClaudeDesktopOnly: showArchivedClaudeDesktopOnly,
                               archivedClaudeSessionIDs: archivedClaudeSessionIDs,
-                              sideChatsOnly: false)
+                              sideChatsOnly: false,
+                              selectedProjectIdentity: projectSelection?.identity)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
         // Optional quick filter: sessions with commands (tool calls)

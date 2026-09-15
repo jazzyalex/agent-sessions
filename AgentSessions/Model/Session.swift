@@ -22,6 +22,89 @@ public enum SessionSurface: String, Codable, Sendable {
 
 public typealias CodexSessionSurface = SessionSurface
 
+/// Exact, path-provable project identity for UI-selected project filtering.
+/// The canonical root distinguishes independent clones even when they share a
+/// basename or Git origin. In-memory only; no DB/storage migration.
+public struct ProjectIdentity: Hashable, Sendable {
+    public let canonicalRootPath: String
+
+    public init(canonicalRootPath: String) {
+        self.canonicalRootPath = canonicalRootPath
+    }
+}
+
+/// A UI-selected project: exact identity plus display affordances.
+public struct ProjectSelection: Hashable, Sendable {
+    public let identity: ProjectIdentity
+    public let displayName: String
+    public let disambiguationPath: String?
+
+    public init(identity: ProjectIdentity, displayName: String, disambiguationPath: String? = nil) {
+        self.identity = identity
+        self.displayName = displayName
+        self.disambiguationPath = disambiguationPath
+    }
+}
+
+extension ProjectSelection {
+    /// Pure UI factory: exact identity from the row, display affordances from
+    /// the row plus the currently visible rows around it. Returns nil when the
+    /// row's identity is unprovable, so callers hide exact filter actions
+    /// instead of falling back to a name substring. Never consults Git origin
+    /// or cwd substrings: ambiguity is decided by exact identity equality.
+    public static func makeSelection(for row: Session, among rows: [Session]) -> ProjectSelection? {
+        guard let identity = row.rowProjectIdentity else { return nil }
+        let displayName = Self.displayName(for: row)
+        var rivalParents: [[String]] = []
+        for other in rows {
+            guard let otherIdentity = other.rowProjectIdentity else { continue }
+            guard otherIdentity != identity else { continue }
+            guard Self.displayName(for: other) == displayName else { continue }
+            rivalParents.append(Self.parentComponents(of: otherIdentity.canonicalRootPath))
+        }
+        guard !rivalParents.isEmpty else { return ProjectSelection(identity: identity, displayName: displayName) }
+        let parentPath = URL(fileURLWithPath: identity.canonicalRootPath).deletingLastPathComponent().path
+        let suffix = Self.shortestDistinguishingSuffix(
+            own: Self.parentComponents(of: identity.canonicalRootPath),
+            rivals: rivalParents,
+            fallback: parentPath)
+        return ProjectSelection(identity: identity, displayName: displayName, disambiguationPath: suffix)
+    }
+
+    private static func displayName(for row: Session) -> String {
+        if let name = row.rowRepoName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return row.rowRepoDisplay
+    }
+
+    /// Canonical parent path split into components (excluding the root), so
+    /// suffixes compare by whole directory names and never by substrings.
+    private static func parentComponents(of canonicalRootPath: String) -> [String] {
+        URL(fileURLWithPath: canonicalRootPath).deletingLastPathComponent().pathComponents
+            .filter { $0 != "/" }
+    }
+
+    /// Shortest trailing parent-component run that matches no rival sharing the
+    /// display name, formatted compactly (`…/parent`, `…/ancestor/parent`). A
+    /// shared immediate parent basename therefore widens to the ancestors that
+    /// actually differ. Falls back to the full canonical parent path when no
+    /// suffix distinguishes (degenerate only: distinct roots under one parent
+    /// with equal display names).
+    private static func shortestDistinguishingSuffix(own: [String], rivals: [[String]], fallback: String) -> String {
+        let depth = max(max(own.count, rivals.map(\.count).max() ?? 0), 1)
+        for length in 1...depth {
+            let ownSuffix = Array(own.suffix(length))
+            guard !ownSuffix.isEmpty else { continue }
+            let distinguished = rivals.allSatisfy { Array($0.suffix(length)) != ownSuffix }
+            if distinguished {
+                return "…/" + ownSuffix.joined(separator: "/")
+            }
+        }
+        return fallback
+    }
+}
+
 public enum SessionRelationshipKind: String, Codable, Sendable {
     case root
     case subagent
@@ -953,6 +1036,19 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     public var rowRepoDisplay: String {
         rowRepoName ?? (lightweightCwdIfPresent != nil ? "Other" : "—")
+    }
+
+    /// Exact project identity for UI-selected project filtering, derived from
+    /// the same lightweight cwd input as `rowRepoName` (never event metadata,
+    /// never Git origin). Nil for virtual Desktop-Chats classifier rows and
+    /// for stored-label-only/unprovable rows, so callers can hide exact filter
+    /// actions.
+    public var rowProjectIdentity: ProjectIdentity? {
+        if CodexDesktopProjectClassifier.projectNameOverride(for: self) != nil { return nil }
+        if ClaudeDesktopProjectClassifier.projectNameOverride(for: self) != nil { return nil }
+        guard let cwd = lightweightCwdIfPresent else { return nil }
+        guard let canonical = Self.canonicalProjectRoot(forCwd: cwd, displayName: rowRepoName) else { return nil }
+        return ProjectIdentity(canonicalRootPath: canonical)
     }
     public var isWorktree: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isWorktree }) ?? false }
     public var isSubmodule: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isSubmodule }) ?? false }
@@ -2003,4 +2099,108 @@ private extension Session {
         return resolved
     }
 
+}
+
+// MARK: - Exact project identity (5.3.1)
+
+extension Session {
+    /// Canonical project root for one lightweight cwd, or nil when path
+    /// identity is not provable. Priority: real Git evidence (cached
+    /// discovery shared with `isWorktree`/`isSubmodule`; worktrees resolve to
+    /// the base checkout), then known embedded layouts gated on display
+    /// agreement, then a conservative exact-cwd fallback. Never consults Git
+    /// origin: independent clones stay distinct.
+    static func canonicalProjectRoot(forCwd cwd: String, displayName: String?) -> String? {
+        let trimmed = cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        // Reject before URL construction: URL(fileURLWithPath:) resolves a
+        // relative string against the process working directory, producing an
+        // absolute-looking path that proves nothing about project identity.
+        guard trimmed.hasPrefix("/") else { return nil }
+        let standardized = URL(fileURLWithPath: trimmed).standardizedFileURL.path
+        guard standardized.hasPrefix("/") else { return nil }
+        if let info = gitInfo(from: trimmed) {
+            if info.isWorktree {
+                if let base = gitWorktreeBaseCheckoutRoot(forWorktreeRoot: info.root) {
+                    return base
+                }
+            } else {
+                return URL(fileURLWithPath: info.root).standardizedFileURL.path
+            }
+        }
+        let display = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let display, !display.isEmpty {
+            if let base = structuralEmbeddedBaseRoot(forStandardizedPath: standardized, displayName: display) {
+                return base
+            }
+            if URL(fileURLWithPath: standardized).lastPathComponent == display {
+                return standardized
+            }
+        }
+        return nil
+    }
+
+    /// Base checkout for a real Git worktree root: parses its `.git` file
+    /// gitdir target and canonicalizes to the path immediately before
+    /// `/.git/worktrees/<id>`. Nil when the `.git` entry is missing or does
+    /// not describe a worktree.
+    static func gitWorktreeBaseCheckoutRoot(forWorktreeRoot root: String) -> String? {
+        let gitFileURL = URL(fileURLWithPath: root).appendingPathComponent(".git", isDirectory: false)
+        guard let content = try? String(contentsOf: gitFileURL, encoding: .utf8),
+              let gitdir = gitdirTarget(fromGitFileContents: content) else { return nil }
+        return gitWorktreeBasePath(gitdir: gitdir, worktreeRootPath: root)
+    }
+
+    static func gitdirTarget(fromGitFileContents content: String) -> String? {
+        let prefix = "gitdir:"
+        for rawLine in content.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix(prefix) else { continue }
+            let target = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !target.isEmpty { return String(target) }
+        }
+        return nil
+    }
+
+    /// Pure seam: base checkout path immediately before `/.git/worktrees/<id>`
+    /// in a (possibly relative, worktree-root-anchored) gitdir target.
+    static func gitWorktreeBasePath(gitdir: String, worktreeRootPath: String) -> String? {
+        let resolved: String
+        if gitdir.hasPrefix("/") {
+            resolved = URL(fileURLWithPath: gitdir).standardizedFileURL.path
+        } else {
+            resolved = URL(fileURLWithPath: worktreeRootPath)
+                .appendingPathComponent(gitdir)
+                .standardizedFileURL.path
+        }
+        guard let range = resolved.range(of: "/.git/worktrees/") else { return nil }
+        let base = String(resolved[..<range.lowerBound])
+        guard base.hasPrefix("/"), base.count > 1 else { return nil }
+        return base
+    }
+
+    /// Pure string/path seam for the known embedded worktree layouts
+    /// (`base/.worktrees/<name>`, `base/.codex/worktrees/<name>`,
+    /// `base/.claude/worktrees/<name>`). Returns the structural base only when
+    /// its basename agrees with the resolved display project; otherwise nil,
+    /// so an unrelated nested directory never merges into the base.
+    static func structuralEmbeddedBaseRoot(forStandardizedPath path: String, displayName: String) -> String? {
+        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        if let index = components.lastIndex(of: ".worktrees"),
+           index > 0, index + 1 < components.count {
+            let baseName = components[index - 1]
+            if baseName == displayName, baseName != "/", !baseName.isEmpty {
+                return NSString.path(withComponents: Array(components[..<index]))
+            }
+        }
+        if let index = components.lastIndex(of: "worktrees"),
+           index > 1, index + 1 < components.count,
+           components[index - 1] == ".codex" || components[index - 1] == ".claude" {
+            let baseName = components[index - 2]
+            if baseName == displayName, baseName != "/", !baseName.isEmpty {
+                return NSString.path(withComponents: Array(components[..<(index - 1)]))
+            }
+        }
+        return nil
+    }
 }

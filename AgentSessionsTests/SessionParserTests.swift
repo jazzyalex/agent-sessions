@@ -750,6 +750,61 @@ final class SessionParserTests: XCTestCase {
                                        expectedIDs: [ordinaryAndTool.id, toolOnly.id])
     }
 
+    func testSearchCoordinatorTitleHitDoesNotExcludeItsRankedToolHit() async throws {
+        let defaults = UserDefaults.standard
+        let key = PreferencesKey.Advanced.enableRecentToolIOIndex
+        let previous = defaults.object(forKey: key)
+        defaults.set(true, forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let titleAndTool = makeRepoSession(id: "a-title-and-tool", source: .codex, repoName: "repo")
+        let lowerRankedTool = makeRepoSession(id: "b-lower-ranked-tool", source: .codex, repoName: "repo")
+
+        try await db.begin()
+        for session in [titleAndTool, lowerRankedTool] {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "codex", path: session.filePath,
+                mtime: 10, size: 20, startTS: 1, endTS: 2, model: nil,
+                cwd: session.cwd, repo: session.rowRepoName, title: nil,
+                codexInternalSessionID: nil, isHousekeeping: false, messages: 1,
+                commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, text: "ordinary unrelated body")
+            let toolText = session.id == titleAndTool.id
+                ? "RankedToolNeedle953"
+                : "RankedToolNeedle953 " + String(repeating: "filler ", count: 100)
+            try await db.upsertSessionToolIO(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, refTS: 2, text: toolText)
+        }
+        try await db.commit()
+
+        let rankedToolIDs = try await db.searchSessionIDsToolIOFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "RankedToolNeedle953",
+            includeSystemProbes: true, limit: 1
+        )
+        XCTAssertEqual(rankedToolIDs, [titleAndTool.id], "fixture must rank the title-bearing tool hit first")
+
+        let titleOverride = [SearchCoordinator.SessionKey(titleAndTool): "RankedToolNeedle953"]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db,
+                                            ftsResultLimitForTesting: 1)
+        coordinator.start(query: "RankedToolNeedle953",
+                          filters: Filters(query: "RankedToolNeedle953"),
+                          allowed: [.codex], enableDeepScan: false,
+                          all: [titleAndTool, lowerRankedTool],
+                          effectiveDisplayTitles: titleOverride)
+        try await waitForSearchResults(coordinator, expectedIDs: [titleAndTool.id])
+        XCTAssertEqual(coordinator.results.map(\.id), [titleAndTool.id],
+                       "a cheap title match must not remove its real tool hit before ranked capacity is applied")
+    }
+
     /// Successor guard to the regression above (SPEC §8.5). The allow-list the views hand to
     /// `SearchCoordinator.start` is now produced in one place —
     /// `UnifiedSessionIndexer.allowedSearchSources()` — and follows one policy for every registered
@@ -1659,6 +1714,133 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNil(thread.gitBranch)
         XCTAssertNil(thread.gitOriginURL)
         XCTAssertEqual(thread.bestTitle, "State title fallback")
+    }
+
+    private func codexFallbackThread(firstUserMessage: String?, title: String? = nil) -> SessionIndexer.CodexStateThread {
+        SessionIndexer.CodexStateThread(
+            id: "thread-fallback",
+            rolloutPath: "/tmp/rollout-fallback.jsonl",
+            cwd: nil,
+            gitBranch: nil,
+            gitOriginURL: nil,
+            title: title,
+            firstUserMessage: firstUserMessage
+        )
+    }
+
+    func testCodexFallbackPastedFileWrapperReturnsRequest() throws {
+        let thread = codexFallbackThread(firstUserMessage: "# Files pasted by the user:\nfoo.txt contents\n## My request:\nFix the login bug")
+        XCTAssertEqual(thread.bestTitle, "Fix the login bug")
+    }
+
+    func testCodexFallbackStripsRepeatedControlBlocks() throws {
+        let raw = """
+        # AGENTS.md instructions for /tmp/repo
+        <INSTRUCTIONS>follow these</INSTRUCTIONS>
+        <app-context>synthetic context</app-context>
+        <environment_context>synthetic env</environment_context>
+        Real request here
+        """
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: raw).bestTitle, "Real request here")
+    }
+
+    func testCodexFallbackPreservesOrdinaryContent() throws {
+        let cases = [
+            "# Heading\nSome **bold** text",
+            "```swift\nlet x = 1\n```",
+            "/tmp/repo/file.swift",
+            "日本語のテストメッセージです",
+            "Use <div> tag here"
+        ]
+        for raw in cases {
+            XCTAssertEqual(codexFallbackThread(firstUserMessage: raw).bestTitle, raw, "input must be preserved: \(raw)")
+        }
+    }
+
+    func testCodexFallbackPreservesMalformedWrappers() throws {
+        let unclosed = "<app-context>unclosed content"
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: unclosed).bestTitle, unclosed)
+        let missingDelimiter = "# Files pasted by the user:\nfoo.txt contents\nNo delimiter here"
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: missingDelimiter).bestTitle, missingDelimiter)
+        let incompleteAgents = "# AGENTS.md instructions for /tmp/repo\n<INSTRUCTIONS>incomplete"
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: incompleteAgents).bestTitle, incompleteAgents)
+    }
+
+    func testCodexFallbackPreservesMarkerAfterContent() throws {
+        let raw = "Fix the login bug\n<app-context>later</app-context>"
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: raw).bestTitle, raw)
+    }
+
+    func testCodexExplicitTitleWinsOverWrappedFallback() throws {
+        let wrapped = "# Files pasted by the user:\nfoo\n## My request:\nWrapped request"
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: wrapped, title: "Explicit state title").bestTitle, "Explicit state title")
+        XCTAssertEqual(codexFallbackThread(firstUserMessage: wrapped, title: "<app-context>Explicit</app-context>").bestTitle, "<app-context>Explicit</app-context>")
+    }
+
+    func testCodexFallbackScaffoldingOnlyProducesNil() throws {
+        XCTAssertNil(codexFallbackThread(firstUserMessage: "<app-context>only scaffolding</app-context>").bestTitle)
+        XCTAssertNil(codexFallbackThread(firstUserMessage: "# Files pasted by the user:\nfoo\n## My request:").bestTitle)
+    }
+
+    func testCodexStateLongPastedWrapperSanitizesToRequest() throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-StateLongWrapper-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: dbURL) }
+        let filler = String(repeating: "a", count: 66000)
+        let message = "# Files pasted by the user:\n\(filler)\n## My request:\nFix the login bug"
+        XCTAssertGreaterThan(message.components(separatedBy: "## My request:").first?.count ?? 0, 65536)
+        try executeSQLite("""
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            first_user_message TEXT NOT NULL
+        );
+        """, at: dbURL)
+        try executeSQLite("""
+        INSERT INTO threads (id, rollout_path, cwd, title, first_user_message)
+        VALUES ('thread-long-wrapper', '/tmp/rollout-long-wrapper.jsonl', '/tmp/long-wrapper', '', '\(message)');
+        """, at: dbURL)
+
+        let lookup = SessionIndexer.readCodexStateThreads(from: dbURL)
+        let thread = try XCTUnwrap(lookup.byID["thread-long-wrapper"])
+        XCTAssertEqual(thread.bestTitle, "Fix the login bug")
+    }
+
+    func testCodexStateLongMalformedWrapperStaysBounded() throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-StateLongMalformed-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: dbURL) }
+        let filler = String(repeating: "a", count: 66000)
+        let message = "# Files pasted by the user:\n\(filler)\nNo delimiter here"
+        XCTAssertGreaterThan(message.count, 65536)
+        try executeSQLite("""
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            first_user_message TEXT NOT NULL
+        );
+        """, at: dbURL)
+        try executeSQLite("""
+        INSERT INTO threads (id, rollout_path, cwd, title, first_user_message)
+        VALUES ('thread-long-malformed', '/tmp/rollout-long-malformed.jsonl', '/tmp/long-malformed', '', '\(message)');
+        """, at: dbURL)
+
+        let lookup = SessionIndexer.readCodexStateThreads(from: dbURL)
+        let thread = try XCTUnwrap(lookup.byID["thread-long-malformed"])
+        let title = try XCTUnwrap(thread.bestTitle)
+        XCTAssertEqual(title.count, 512)
+        XCTAssertEqual(title, String(message.prefix(512)))
+    }
+
+    func testCodexFallbackOversizedOrdinaryMessageStaysBounded() throws {
+        let raw = String(repeating: "a", count: 600)
+        let title = try XCTUnwrap(codexFallbackThread(firstUserMessage: raw).bestTitle)
+        XCTAssertEqual(title.count, 512)
+        XCTAssertEqual(title, String(repeating: "a", count: 512))
     }
 
     func testNumericRepositoryNamesDoNotNormalizeAsGeneratedWorktrees() throws {
@@ -5723,5 +5905,855 @@ final class SessionParserTests: XCTestCase {
                        "The in-flight builder plus one latest pending snapshot should be the only builds")
         let cached = try XCTUnwrap(indexer.searchTranscriptCache.getCached(sessionID))
         XCTAssertTrue(cached.contains("delta-two"), "The newest pending snapshot must win publication")
+    }
+
+    // MARK: - 5.3.1 effective row-title search
+
+    func testFilterEngineFindsCustomTitleViaListTitle() throws {
+        let session = Session(
+            id: "effective-title-filter",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/codex/effective-title-filter.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Generic lightweight fallback",
+            customTitle: "ZebraCustomAlpha824"
+        )
+        // The model-level row title surfaces the custom title.
+        XCTAssertTrue(session.listTitle.contains("ZebraCustomAlpha824"))
+        let filters = Filters(query: "ZebraCustomAlpha824")
+        XCTAssertTrue(FilterEngine.sessionMatches(session, filters: filters, allowTranscriptGeneration: false))
+        // An unrelated preamble query must not match through the title path.
+        XCTAssertFalse(FilterEngine.sessionMatches(session, filters: Filters(query: "PreambleNoMatchQzx"),
+                                                    allowTranscriptGeneration: false))
+    }
+
+    func testSearchCoordinatorFindsChangedCustomTitleAbsentFromFTS() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let session = Session(
+            id: "changed-custom-title",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/codex/changed-custom-title.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Old lightweight",
+            customTitle: "ZebraChangedBeta512"
+        )
+        try await db.begin()
+        try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: session.id, source: "codex", path: session.filePath, mtime: 10, size: 20,
+            startTS: 1, endTS: 2, model: nil, cwd: "/tmp/repo", repo: "repo",
+            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        // Byte-current row whose FTS text predates the title change: no reindex.
+        try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                         mtime: 10, size: 20,
+                                         text: "old unrelated body without the new name")
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "ZebraChangedBeta512",
+                          filters: Filters(query: "ZebraChangedBeta512"),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: [session])
+        try await waitForSearchResults(coordinator, expectedIDs: [session.id])
+    }
+
+    func testSearchCoordinatorFindsClaudeArchiveDisplayTitleAbsentFromFTS() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let session = Session(
+            id: "claude-archive-title",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/claude/claude-archive-title.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Generic claude row title"
+        )
+        try await db.begin()
+        try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "claude")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: session.id, source: "claude", path: session.filePath, mtime: 10, size: 20,
+            startTS: 1, endTS: 2, model: nil, cwd: "/tmp/repo", repo: "repo",
+            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        try await db.upsertSessionSearch(sessionID: session.id, source: "claude",
+                                         mtime: 10, size: 20,
+                                         text: "generic archived body without the sidecar name")
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "ZebraSidecarGamma731",
+                          filters: Filters(query: "ZebraSidecarGamma731"),
+                          allowed: [.claude],
+                          enableDeepScan: false,
+                          all: [session],
+                          effectiveDisplayTitles: [SearchCoordinator.SessionKey(session): "ZebraSidecarGamma731"])
+        try await waitForSearchResults(coordinator, expectedIDs: [session.id])
+    }
+
+    func testSearchCoordinatorTitleOnlyHonorsSourceAndMetadataFilter() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        func titleSession(id: String, source: SessionSource, model: String?) -> Session {
+            Session(
+                id: id, source: source, startTime: nil, endTime: nil, model: model,
+                filePath: "/tmp/\(source.rawValue)/\(id).jsonl",
+                eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+                lightweightTitle: "ZebraHonorDelta441",
+                customTitle: "ZebraHonorDelta441"
+            )
+        }
+        let matching = titleSession(id: "title-ok", source: .codex, model: "expected-model")
+        let wrongModel = titleSession(id: "title-wrong-model", source: .codex, model: "other-model")
+        let wrongSource = titleSession(id: "title-wrong-source", source: .opencode, model: "expected-model")
+        let all = [matching, wrongModel, wrongSource]
+
+        try await db.begin()
+        for session in all {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: session.source.rawValue)
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: session.source.rawValue, path: session.filePath,
+                mtime: 10, size: 20, startTS: 1, endTS: 2, model: session.model,
+                cwd: "/tmp/repo", repo: "repo", title: nil, codexInternalSessionID: nil,
+                isHousekeeping: false, messages: 1, commands: 0,
+                parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            try await db.upsertSessionSearch(sessionID: session.id, source: session.source.rawValue,
+                                             mtime: 10, size: 20,
+                                             text: "generic body without the title token")
+        }
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "ZebraHonorDelta441",
+                          filters: Filters(query: "ZebraHonorDelta441", model: "expected-model"),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: all)
+        try await waitForSearchResults(coordinator, expectedIDs: [matching.id])
+    }
+
+    func testSearchCoordinatorDedupesFTSAndTitleWithStableOrder() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        func orderedSession(id: String, title: String) -> Session {
+            Session(
+                id: id, source: .codex, startTime: nil, endTime: nil, model: nil,
+                filePath: "/tmp/codex/\(id).jsonl",
+                eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+                lightweightTitle: title, customTitle: title
+            )
+        }
+        let dual = orderedSession(id: "order-dual", title: "ZebraOrderEpsilon918")
+        let titleB = orderedSession(id: "order-title-b", title: "ZebraOrderEpsilon918")
+        let titleC = orderedSession(id: "order-title-c", title: "ZebraOrderEpsilon918")
+        let all = [dual, titleB, titleC]
+
+        try await db.begin()
+        for session in all {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "codex", path: session.filePath,
+                mtime: 10, size: 20, startTS: 1, endTS: 2, model: nil,
+                cwd: "/tmp/repo", repo: "repo", title: nil, codexInternalSessionID: nil,
+                isHousekeeping: false, messages: 1, commands: 0,
+                parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            let text = session.id == dual.id
+                ? "ZebraOrderEpsilon918 body hit"
+                : "generic body without the token"
+            try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, text: text)
+        }
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "ZebraOrderEpsilon918",
+                          filters: Filters(query: "ZebraOrderEpsilon918"),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: all)
+        try await waitForSearchResults(coordinator, expectedIDs: [dual.id, titleB.id, titleC.id])
+        XCTAssertEqual(coordinator.results.map(\.id), [dual.id, titleB.id, titleC.id])
+        XCTAssertEqual(Set(coordinator.results.map(\.id)).count, 3, "dual FTS+title hit must appear once")
+    }
+
+    func testSearchCoordinatorLegacyPathRetainsSeededEffectiveTitles() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        // No rows seeded: hasSearchData is false so the coordinator falls back
+        // to legacy search. Seeded effective titles must still be retained.
+        let listTitleSession = Session(
+            id: "legacy-list-title",
+            source: .codex, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/codex/legacy-list-title.jsonl",
+            eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+            lightweightTitle: "ZebraLegacyZeta207",
+            customTitle: "ZebraLegacyZeta207"
+        )
+        let overrideSession = Session(
+            id: "legacy-override-title",
+            source: .codex, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/codex/legacy-override-title.jsonl",
+            eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+            lightweightTitle: "Generic legacy row"
+        )
+        let all = [listTitleSession, overrideSession]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "ZebraLegacyZeta207",
+                          filters: Filters(query: "ZebraLegacyZeta207"),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: all,
+                          effectiveDisplayTitles: [SearchCoordinator.SessionKey(overrideSession): "ZebraLegacyZeta207"])
+        // The override session matches only via the seeded snapshot; the legacy
+        // scan must retain (not wipe or duplicate) both seeded hits.
+        for _ in 0..<50 {
+            let ids = Set(coordinator.results.map(\.id))
+            if ids == Set([listTitleSession.id, overrideSession.id]) { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(Set(coordinator.results.map(\.id)),
+                       Set([listTitleSession.id, overrideSession.id]))
+        XCTAssertEqual(coordinator.results.map(\.id).count,
+                       Set(coordinator.results.map(\.id)).count, "seeded titles must not duplicate")
+    }
+
+    func testClaudeDisplayTitleSnapshotReturnsOverrideAndExcludesUnrelatedRows() {
+        let claude = Session(
+            id: "snapshot-claude",
+            source: .claude, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/claude/snapshot-claude.jsonl",
+            eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+            lightweightTitle: "Generic claude row"
+        )
+        let codex = Session(
+            id: "snapshot-codex",
+            source: .codex, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/codex/snapshot-codex.jsonl",
+            eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+            lightweightTitle: "Generic codex row"
+        )
+        let blankClaude = Session(
+            id: "snapshot-blank",
+            source: .claude, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/claude/snapshot-blank.jsonl",
+            eventCount: 0, events: [], cwd: "/tmp/repo", repoName: "repo",
+            lightweightTitle: "Another claude row"
+        )
+        // Mirrors production: `unified.claudeDesktopTitle(for:)` returns the
+        // sidecar title for the archived Claude row and nil elsewhere.
+        let snapshot = UnifiedSessionsView.claudeDisplayTitleSnapshot(
+            sessions: [claude, codex, blankClaude]
+        ) { session in
+            session.id == claude.id ? "ZebraSnapshotSidecar613" : nil
+        }
+        XCTAssertEqual(snapshot, [SearchCoordinator.SessionKey(claude): "ZebraSnapshotSidecar613"])
+        // Whitespace-only overrides are excluded like nils.
+        let blankSnapshot = UnifiedSessionsView.claudeDisplayTitleSnapshot(
+            sessions: [blankClaude]
+        ) { _ in "   " }
+        XCTAssertTrue(blankSnapshot.isEmpty)
+    }
+
+    func testEffectiveDisplayTitleOverrideDoesNotCrossSameIDSourceBoundary() async throws {
+        let sharedID = "same-id-title-boundary"
+        let codex = makeProjectIdentitySession(
+            id: sharedID, source: .codex, cwd: "/AS531/title/codex",
+            title: "Generic Codex title"
+        )
+        let claude = makeProjectIdentitySession(
+            id: sharedID, source: .claude, cwd: "/AS531/title/claude",
+            title: "Generic Claude title"
+        )
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: nil)
+        coordinator.start(
+            query: "ZebraSourceBoundary846",
+            filters: Filters(query: "ZebraSourceBoundary846"),
+            allowed: [.codex, .claude],
+            enableDeepScan: false,
+            all: [codex, claude],
+            effectiveDisplayTitles: [
+                SearchCoordinator.SessionKey(claude): "ZebraSourceBoundary846"
+            ]
+        )
+
+        for _ in 0..<50 {
+            if coordinator.results.map(\.source) == [.claude] { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(coordinator.results.map(\.source), [.claude],
+                       "a Claude sidecar title must not leak to a Codex row with the same bare id")
+    }
+
+    // MARK: - Exact project identity (5.3.1, canary AS531-PROJECT-IDENTITY-EXACT)
+
+    private func makeProjectIdentitySession(
+        id: String,
+        source: SessionSource = .codex,
+        cwd: String?,
+        repoName: String? = nil,
+        model: String? = nil,
+        title: String? = nil,
+        filePath: String? = nil,
+        events: [SessionEvent] = [],
+        codexSurface: CodexSessionSurface? = nil,
+        originator: String? = nil
+    ) -> Session {
+        Session(
+            id: id,
+            source: source,
+            startTime: nil,
+            endTime: nil,
+            model: model,
+            filePath: filePath ?? "/tmp/AS531/\(id).jsonl",
+            eventCount: events.count,
+            events: events,
+            cwd: cwd,
+            repoName: repoName,
+            lightweightTitle: title ?? id,
+            codexSurface: codexSurface,
+            originator: originator
+        )
+    }
+
+    private func sameOriginEvent() -> SessionEvent {
+        SessionEvent(
+            id: "same-origin",
+            timestamp: nil,
+            kind: .meta,
+            role: nil,
+            text: nil,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: #"{"git_origin_url":"https://example.test/acme/same.git"}"#
+        )
+    }
+
+    func testProjectIdentitySameBasenameDistinctRootsUnequal() throws {
+        let a = makeProjectIdentitySession(id: "ident-a", cwd: "/AS531-ident/alpha/app")
+        let b = makeProjectIdentitySession(id: "ident-b", cwd: "/AS531-ident/beta/app")
+        XCTAssertEqual(a.rowRepoName, "app")
+        XCTAssertEqual(b.rowRepoName, "app")
+        let identityA = try XCTUnwrap(a.rowProjectIdentity)
+        let identityB = try XCTUnwrap(b.rowProjectIdentity)
+        XCTAssertEqual(identityA.canonicalRootPath, "/AS531-ident/alpha/app")
+        XCTAssertEqual(identityB.canonicalRootPath, "/AS531-ident/beta/app")
+        XCTAssertNotEqual(identityA, identityB, "AS531-PROJECT-IDENTITY-EXACT: distinct roots stay distinct")
+    }
+
+    func testProjectIdentityBaseCheckoutPlusRealAndEmbeddedWorktreesEqual() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AS531Identity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let base = root.appendingPathComponent("app", isDirectory: true)
+        try fm.createDirectory(at: base.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+
+        let worktree = root.appendingPathComponent("app-wt", isDirectory: true)
+        try fm.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try writeText("gitdir: \(base.appendingPathComponent(".git/worktrees/wt1").path)\n",
+                      to: worktree.appendingPathComponent(".git"))
+
+        let baseSession = makeProjectIdentitySession(id: "ident-base", cwd: base.path)
+        let worktreeSession = makeProjectIdentitySession(id: "ident-wt", cwd: worktree.path)
+        let embeddedSession = makeProjectIdentitySession(
+            id: "ident-emb",
+            cwd: base.appendingPathComponent(".worktrees/feat").path
+        )
+        let baseIdentity = try XCTUnwrap(baseSession.rowProjectIdentity)
+        XCTAssertEqual(try XCTUnwrap(worktreeSession.rowProjectIdentity), baseIdentity,
+                       "real Git worktree resolves to the base checkout")
+        XCTAssertEqual(try XCTUnwrap(embeddedSession.rowProjectIdentity), baseIdentity,
+                       "embedded .worktrees path resolves to the base checkout")
+    }
+
+    func testProjectIdentityStructuralSeamRequiresDisplayAgreement() throws {
+        let base = makeProjectIdentitySession(id: "struct-base", cwd: "/AS531-structural/app")
+        let embedded = makeProjectIdentitySession(id: "struct-emb", cwd: "/AS531-structural/app/.worktrees/feat")
+        let codexEmbedded = makeProjectIdentitySession(id: "struct-codex", cwd: "/AS531-structural/app/.codex/worktrees/feat")
+        let claudeEmbedded = makeProjectIdentitySession(id: "struct-claude", cwd: "/AS531-structural/app/.claude/worktrees/feat")
+        let baseIdentity = try XCTUnwrap(base.rowProjectIdentity)
+        XCTAssertEqual(try XCTUnwrap(embedded.rowProjectIdentity), baseIdentity)
+        XCTAssertEqual(try XCTUnwrap(codexEmbedded.rowProjectIdentity), baseIdentity)
+        XCTAssertEqual(try XCTUnwrap(claudeEmbedded.rowProjectIdentity), baseIdentity)
+
+        XCTAssertEqual(Session.structuralEmbeddedBaseRoot(forStandardizedPath: "/AS531-structural/app/.codex/worktrees/feat", displayName: "app"),
+                       "/AS531-structural/app")
+        XCTAssertEqual(Session.structuralEmbeddedBaseRoot(forStandardizedPath: "/AS531-structural/app/.claude/worktrees/feat", displayName: "app"),
+                       "/AS531-structural/app")
+        XCTAssertNil(Session.structuralEmbeddedBaseRoot(forStandardizedPath: "/AS531-structural/other/.worktrees/feat", displayName: "app"),
+                    "base basename must agree with the resolved display project")
+        XCTAssertNil(Session.structuralEmbeddedBaseRoot(forStandardizedPath: "/AS531-structural/app/.worktrees/feat", displayName: "other"))
+    }
+
+    func testProjectIdentityIgnoresOriginForIndependentClones() throws {
+        let origin = sameOriginEvent()
+        let one = makeProjectIdentitySession(id: "clone-one", cwd: "/AS531-clone/one/proj", events: [origin])
+        let two = makeProjectIdentitySession(id: "clone-two", cwd: "/AS531-clone/two/proj", events: [origin])
+        XCTAssertEqual(one.gitRepositoryURL, two.gitRepositoryURL, "fixture must share one origin")
+        XCTAssertNotNil(one.gitRepositoryURL)
+        let identityOne = try XCTUnwrap(one.rowProjectIdentity)
+        let identityTwo = try XCTUnwrap(two.rowProjectIdentity)
+        XCTAssertNotEqual(identityOne, identityTwo, "identity must not consult origin")
+    }
+
+    func testProjectIdentityNilForVirtualAndStoredLabelOnlyRows() throws {
+        let codexChats = makeProjectIdentitySession(
+            id: "virtual-codex",
+            cwd: "/Users/test/Documents/Codex/2026-09-01/slug",
+            codexSurface: .desktop
+        )
+        XCTAssertEqual(codexChats.rowRepoName, "Codex Desktop Chats")
+        XCTAssertNil(codexChats.rowProjectIdentity)
+
+        let claudeChats = makeProjectIdentitySession(
+            id: "virtual-claude",
+            source: .claude,
+            cwd: "/sessions/peaceful-awesome-bohr",
+            originator: "Claude Desktop"
+        )
+        XCTAssertEqual(claudeChats.rowRepoName, "Claude Desktop Chats")
+        XCTAssertNil(claudeChats.rowProjectIdentity)
+
+        let storedOnly = makeProjectIdentitySession(id: "stored-only", cwd: nil, repoName: "myproj")
+        XCTAssertEqual(storedOnly.rowRepoName, "myproj")
+        XCTAssertNil(storedOnly.rowProjectIdentity, "stored-label-only rows are unprovable")
+    }
+
+    func testSelectedProjectIdentityExcludesSimilarAndDifferentRootApps() throws {
+        let app = makeProjectIdentitySession(id: "exact-app", cwd: "/AS531-fuzzy/main/app")
+        let appServer = makeProjectIdentitySession(id: "exact-app-server", cwd: "/AS531-fuzzy/main/app-server")
+        let mobileApp = makeProjectIdentitySession(id: "exact-mobile-app", cwd: "/AS531-fuzzy/main/mobile-app")
+        let otherRootApp = makeProjectIdentitySession(id: "exact-other-app", cwd: "/AS531-fuzzy/other/app")
+        let selected = try XCTUnwrap(app.rowProjectIdentity)
+        for session in [appServer, mobileApp, otherRootApp] {
+            XCTAssertNotEqual(try XCTUnwrap(session.rowProjectIdentity), selected)
+        }
+        let filtered = FilterEngine.filterSessions(
+            [app, appServer, mobileApp, otherRootApp],
+            filters: Filters(selectedProjectIdentity: selected),
+            allowTranscriptGeneration: false
+        )
+        XCTAssertEqual(filtered.map(\.id), ["exact-app"])
+    }
+
+    func testRepoOperatorRemainsFuzzySubstring() throws {
+        let app = makeProjectIdentitySession(id: "fuzzy-app", cwd: "/AS531-fuzzy/main/app")
+        let appServer = makeProjectIdentitySession(id: "fuzzy-app-server", cwd: "/AS531-fuzzy/main/app-server")
+        let mobileApp = makeProjectIdentitySession(id: "fuzzy-mobile-app", cwd: "/AS531-fuzzy/main/mobile-app")
+        let otherRootApp = makeProjectIdentitySession(id: "fuzzy-other-app", cwd: "/AS531-fuzzy/other/app")
+        let filtered = FilterEngine.filterSessions(
+            [app, appServer, mobileApp, otherRootApp],
+            filters: Filters(query: "repo:app"),
+            allowTranscriptGeneration: false
+        )
+        XCTAssertEqual(filtered.map(\.id), ["fuzzy-app", "fuzzy-app-server", "fuzzy-mobile-app", "fuzzy-other-app"])
+    }
+
+    func testSelectedProjectIdentityComposesWithModelAndText() throws {
+        let first = makeProjectIdentitySession(id: "compose-1", cwd: "/AS531-compose/app", model: "m1", title: "Fix login bug")
+        let second = makeProjectIdentitySession(id: "compose-2", cwd: "/AS531-compose/app", model: "m2", title: "Fix login bug")
+        let third = makeProjectIdentitySession(id: "compose-3", cwd: "/AS531-compose/app", model: "m1", title: "Update dashboard")
+        let selected = try XCTUnwrap(first.rowProjectIdentity)
+        let filtered = FilterEngine.filterSessions(
+            [first, second, third],
+            filters: Filters(query: "login", model: "m1", selectedProjectIdentity: selected),
+            allowTranscriptGeneration: false
+        )
+        XCTAssertEqual(filtered.map(\.id), ["compose-1"])
+    }
+
+    func testSearchCoordinatorSelectedProjectSurvivesFTSLimitOne() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let unrelated = makeProjectIdentitySession(
+            id: "a-unrelated",
+            cwd: "/AS531-fts/other",
+            title: "a unrelated",
+            filePath: "/tmp/AS531-fts/a-unrelated.jsonl"
+        )
+        let selected = makeProjectIdentitySession(
+            id: "b-selected",
+            cwd: "/AS531-fts/selected",
+            title: "b selected",
+            filePath: "/tmp/AS531-fts/b-selected.jsonl"
+        )
+        let selectedIdentity = try XCTUnwrap(selected.rowProjectIdentity)
+        XCTAssertNotEqual(try XCTUnwrap(unrelated.rowProjectIdentity), selectedIdentity)
+
+        try await db.begin()
+        for session in [unrelated, selected] {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "codex", path: session.filePath, mtime: 10, size: 20,
+                startTS: 1, endTS: 2, model: nil, cwd: session.cwd, repo: session.rowRepoName,
+                title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+                messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            let text = session.id == unrelated.id ? "matchterm alpha" : "matchterm beta"
+            try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, text: text)
+        }
+        try await db.commit()
+
+        let firstPage = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "matchterm*", includeSystemProbes: true,
+            limit: 1
+        )
+        XCTAssertEqual(firstPage, [unrelated.id], "fixture must rank the unrelated hit first")
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db, ftsResultLimitForTesting: 1)
+        coordinator.start(query: "matchterm",
+                          filters: Filters(query: "matchterm", selectedProjectIdentity: selectedIdentity),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: [unrelated, selected])
+        try await waitForSearchResults(coordinator, expectedIDs: [selected.id])
+    }
+
+    func testSearchCoordinatorExactProjectDoesNotLeakSameIDFromAnotherSource() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let sharedID = "cross-source-project-collision"
+        let codex = makeProjectIdentitySession(
+            id: sharedID, source: .codex, cwd: "/AS531/collision/outside",
+            title: "CollisionNeedle268", filePath: "/tmp/AS531/collision/codex.jsonl"
+        )
+        let claude = makeProjectIdentitySession(
+            id: sharedID, source: .claude, cwd: "/AS531/collision/selected",
+            title: "CollisionNeedle268", filePath: "/tmp/AS531/collision/claude.jsonl"
+        )
+        let selectedIdentity = try XCTUnwrap(claude.rowProjectIdentity)
+        XCTAssertNotEqual(try XCTUnwrap(codex.rowProjectIdentity), selectedIdentity)
+
+        // The persistent schema currently owns this bare id on the Codex side.
+        // The live selected-project candidate is Claude and must not inherit the
+        // Codex row's FTS eligibility merely because the ids collide.
+        try await db.begin()
+        try await db.upsertFile(path: codex.filePath, mtime: 10, size: 20, source: "codex")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: codex.id, source: "codex", path: codex.filePath,
+            mtime: 10, size: 20, startTS: 1, endTS: 2, model: nil,
+            cwd: codex.cwd, repo: codex.rowRepoName, title: nil,
+            codexInternalSessionID: nil, isHousekeeping: false, messages: 1,
+            commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        try await db.upsertSessionSearch(sessionID: codex.id, source: "codex",
+                                         mtime: 10, size: 20, text: "CollisionNeedle268")
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "CollisionNeedle268",
+                          filters: Filters(query: "CollisionNeedle268",
+                                           selectedProjectIdentity: selectedIdentity),
+                          allowed: [.codex, .claude], enableDeepScan: false,
+                          all: [codex, claude],
+                          effectiveDisplayTitles: [
+                            SearchCoordinator.SessionKey(claude): "CollisionNeedle268"
+                          ])
+        for _ in 0..<50 {
+            if coordinator.results.map(\.source) == [.claude] { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(coordinator.results.map(\.source), [.claude],
+                       "exact project filtering must retain the selected Claude row and reject the colliding Codex owner")
+    }
+
+    func testProjectIdentityRejectsRelativeCwd() throws {
+        XCTAssertNil(Session.canonicalProjectRoot(forCwd: "relative/app", displayName: "app"))
+        XCTAssertNil(Session.canonicalProjectRoot(forCwd: "relative/app", displayName: nil))
+        let session = makeProjectIdentitySession(id: "relative-cwd", cwd: "relative/app")
+        XCTAssertNil(session.rowProjectIdentity, "a relative cwd resolves process-relative and proves nothing")
+    }
+
+    func testProjectSelectionUnambiguousHasNoDiscriminator() throws {
+        let target = makeProjectIdentitySession(id: "sel-clean", cwd: "/AS531-sel/alpha/app")
+        let other = makeProjectIdentitySession(id: "sel-other", cwd: "/AS531-sel/beta/other")
+        let selection = try XCTUnwrap(ProjectSelection.makeSelection(for: target, among: [target, other]))
+        XCTAssertEqual(selection.displayName, "app")
+        XCTAssertNil(selection.disambiguationPath)
+        XCTAssertEqual(selection.identity, try XCTUnwrap(target.rowProjectIdentity))
+    }
+
+    func testProjectSelectionDuplicateDisplayNameGetsDiscriminator() throws {
+        let first = makeProjectIdentitySession(id: "sel-dup-a", cwd: "/AS531-seldup/alpha/app")
+        let second = makeProjectIdentitySession(id: "sel-dup-b", cwd: "/AS531-seldup/beta/app")
+        let selectionA = try XCTUnwrap(ProjectSelection.makeSelection(for: first, among: [first, second]))
+        let selectionB = try XCTUnwrap(ProjectSelection.makeSelection(for: second, among: [first, second]))
+        XCTAssertEqual(selectionA.displayName, "app")
+        XCTAssertEqual(selectionB.displayName, "app")
+        XCTAssertEqual(selectionA.disambiguationPath, "…/alpha")
+        XCTAssertEqual(selectionB.disambiguationPath, "…/beta")
+        XCTAssertNotEqual(selectionA, selectionB, "independent same-basename clones stay distinct")
+    }
+
+    func testProjectSelectionSameParentBasenameWidensToAncestors() throws {
+        let first = makeProjectIdentitySession(id: "sel-anc-a", cwd: "/AS531-selanc/east/shared/app")
+        let second = makeProjectIdentitySession(id: "sel-anc-b", cwd: "/AS531-selanc/west/shared/app")
+        let selectionA = try XCTUnwrap(ProjectSelection.makeSelection(for: first, among: [first, second]))
+        let selectionB = try XCTUnwrap(ProjectSelection.makeSelection(for: second, among: [first, second]))
+        XCTAssertEqual(selectionA.displayName, "app")
+        XCTAssertEqual(selectionB.displayName, "app")
+        XCTAssertEqual(selectionA.disambiguationPath, "…/east/shared")
+        XCTAssertEqual(selectionB.disambiguationPath, "…/west/shared")
+        XCTAssertNotEqual(selectionA, selectionB, "matching parent basenames must still discriminate")
+    }
+
+    func testProjectSelectionNilForUnprovableRow() throws {
+        let storedOnly = makeProjectIdentitySession(id: "sel-stored", cwd: nil, repoName: "myproj")
+        XCTAssertNil(ProjectSelection.makeSelection(for: storedOnly, among: [storedOnly]))
+        let relative = makeProjectIdentitySession(id: "sel-relative", cwd: "relative/app")
+        XCTAssertNil(ProjectSelection.makeSelection(for: relative, among: [relative]))
+    }
+
+    func testSearchCoordinatorArchivedClaudeOnlySurvivesFTSLimitOne() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let archived = makeProjectIdentitySession(
+            id: "b-archived-claude",
+            source: .claude,
+            cwd: "/AS531-arch/a",
+            title: "b archived",
+            filePath: "/tmp/AS531-arch/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl"
+        )
+        let plain = makeProjectIdentitySession(
+            id: "a-plain-claude",
+            source: .claude,
+            cwd: "/AS531-arch/b",
+            title: "a plain",
+            filePath: "/tmp/AS531-arch/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl"
+        )
+        let archivedKey = try XCTUnwrap(archived.claudeArchiveJoinKey)
+
+        try await db.begin()
+        for session in [plain, archived] {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "claude")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "claude", path: session.filePath, mtime: 10, size: 20,
+                startTS: 1, endTS: 2, model: nil, cwd: session.cwd, repo: session.rowRepoName,
+                title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+                messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            let text = session.id == plain.id ? "matchterm alpha" : "matchterm beta"
+            try await db.upsertSessionSearch(sessionID: session.id, source: "claude",
+                                             mtime: 10, size: 20, text: text)
+        }
+        try await db.commit()
+
+        let firstPage = try await db.searchSessionIDsFTS(
+            sources: ["claude"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "matchterm*", includeSystemProbes: true,
+            limit: 1
+        )
+        XCTAssertEqual(firstPage, [plain.id], "fixture must rank the non-archived hit first unscoped")
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db, ftsResultLimitForTesting: 1)
+        coordinator.start(query: "matchterm",
+                          filters: Filters(query: "matchterm",
+                                           archivedClaudeDesktopOnly: true,
+                                           archivedClaudeSessionIDs: [archivedKey]),
+                          allowed: [.claude],
+                          enableDeepScan: false,
+                          all: [plain, archived])
+        try await waitForSearchResults(coordinator, expectedIDs: [archived.id])
+    }
+
+    // MARK: - Search dataset membership refresh (canary AS531-DATASET-MEMBERSHIP-REFRESH)
+
+    func testSearchDatasetMembershipDistinguishesSameIDAcrossSources() {
+        let codex = makeRepoSession(id: "same-id", source: .codex, repoName: "r")
+        let claude = makeRepoSession(id: "same-id", source: .claude, repoName: "r")
+        let membership = UnifiedSessionIndexer.searchDatasetMembership(for: [codex, claude])
+        XCTAssertEqual(membership.count, 2, "AS531-DATASET-MEMBERSHIP-REFRESH: same id across sources must differ")
+        XCTAssertTrue(membership.contains(UnifiedSessionIndexer.SearchDatasetMembershipKey(source: .codex, id: "same-id")))
+        XCTAssertTrue(membership.contains(UnifiedSessionIndexer.SearchDatasetMembershipKey(source: .claude, id: "same-id")))
+    }
+
+    func testSearchDatasetMembershipIgnoresReorderAndMetadataChange() {
+        let a = makeRepoSession(id: "a", source: .codex, repoName: "r")
+        let b = makeRepoSession(id: "b", source: .claude, repoName: "r")
+        let base = UnifiedSessionIndexer.searchDatasetMembership(for: [a, b])
+        let reordered = UnifiedSessionIndexer.searchDatasetMembership(for: [b, a])
+        XCTAssertEqual(base, reordered, "AS531-DATASET-MEMBERSHIP-REFRESH: reorder must compare equal")
+        let aMetadataChanged = Session(
+            id: "a", source: .codex, startTime: nil, endTime: nil, model: "other",
+            filePath: "/tmp/codex/a.jsonl", eventCount: 1,
+            events: [SessionEvent(id: "e", timestamp: nil, kind: .user, role: "user", text: "hello",
+                                  toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil,
+                                  parentID: nil, isDelta: false, rawJSON: "{}")],
+            cwd: "/tmp/other", repoName: "other", lightweightTitle: "Changed Title")
+        let metadataChanged = UnifiedSessionIndexer.searchDatasetMembership(for: [aMetadataChanged, b])
+        XCTAssertEqual(base, metadataChanged, "AS531-DATASET-MEMBERSHIP-REFRESH: metadata/hydration change must compare equal")
+        XCTAssertNil(UnifiedSessionIndexer.advancedSearchDatasetMembershipRevision(from: base, to: reordered, current: 7))
+        XCTAssertNil(UnifiedSessionIndexer.advancedSearchDatasetMembershipRevision(from: base, to: metadataChanged, current: 7))
+    }
+
+    func testSearchDatasetMembershipDetectsAdditionAndRemoval() {
+        let a = makeRepoSession(id: "a", source: .codex, repoName: "r")
+        let b = makeRepoSession(id: "b", source: .codex, repoName: "r")
+        let base = UnifiedSessionIndexer.searchDatasetMembership(for: [a])
+        let added = UnifiedSessionIndexer.searchDatasetMembership(for: [a, b])
+        let removed = UnifiedSessionIndexer.searchDatasetMembership(for: [])
+        XCTAssertNotEqual(base, added, "AS531-DATASET-MEMBERSHIP-REFRESH: addition must differ")
+        XCTAssertNotEqual(base, removed, "AS531-DATASET-MEMBERSHIP-REFRESH: removal must differ")
+        XCTAssertEqual(UnifiedSessionIndexer.advancedSearchDatasetMembershipRevision(from: base, to: added, current: 7), 8)
+        XCTAssertEqual(UnifiedSessionIndexer.advancedSearchDatasetMembershipRevision(from: added, to: base, current: 8), 9)
+    }
+
+    @MainActor
+    func testSearchDatasetRestartCoalescerCollapsesBurstToLatestAction() async throws {
+        let coalescer = SearchDatasetRestartCoalescer()
+        var publications: [Int] = []
+        coalescer.schedule(after: 0.02) { publications.append(1) }
+        coalescer.schedule(after: 0.02) { publications.append(2) }
+        coalescer.schedule(after: 0.02) { publications.append(3) }
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        XCTAssertEqual(publications, [3],
+                       "AS531-DATASET-MEMBERSHIP-REFRESH: one provider burst must restart search once")
+    }
+
+    private func makePreserveTitleSession(id: String, titleMarker: String) -> Session {
+        Session(
+            id: id, source: .codex, startTime: nil, endTime: nil, model: nil,
+            filePath: "/tmp/codex/\(id).jsonl", eventCount: 0, events: [],
+            cwd: "/tmp/repo", repoName: "repo", lightweightTitle: titleMarker, customTitle: titleMarker)
+    }
+
+    func testSearchCoordinatorPreserveTrueReplacesAfterRefresh() async throws {
+        let old = makePreserveTitleSession(id: "preserve-old", titleMarker: "PreserveOldMarker417")
+        let new = makePreserveTitleSession(id: "preserve-new", titleMarker: "PreserveNewMarker418")
+        let all = [old, new]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: nil)
+        coordinator.start(query: "PreserveOldMarker417",
+                          filters: Filters(query: "PreserveOldMarker417"),
+                          allowed: [.codex], enableDeepScan: false, all: all)
+        try await waitForSearchResults(coordinator, expectedIDs: [old.id])
+        coordinator.start(query: "PreserveNewMarker418",
+                          filters: Filters(query: "PreserveNewMarker418"),
+                          allowed: [.codex], enableDeepScan: false, all: all,
+                          preserveResultsUntilRefreshPublishes: true)
+        // The refresh must never flash old results away: poll until the new
+        // hit arrives, failing if an empty intermediate is observed. On fast
+        // machines the first observation may already be the new hit.
+        for _ in 0..<50 {
+            let ids = coordinator.results.map(\.id)
+            if ids == [new.id] { break }
+            if ids.isEmpty {
+                XCTFail("AS531-DATASET-MEMBERSHIP-REFRESH: preserve true flashed old results before refresh published")
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try await waitForSearchResults(coordinator, expectedIDs: [new.id])
+        XCTAssertEqual(coordinator.results.map(\.id), [new.id],
+                       "AS531-DATASET-MEMBERSHIP-REFRESH: first publication must replace, not append")
+    }
+
+    func testSearchCoordinatorPreserveTrueZeroResultClearsOldResults() async throws {
+        let old = makePreserveTitleSession(id: "preserve-zero-old", titleMarker: "PreserveZeroOld519")
+        let other = makePreserveTitleSession(id: "preserve-zero-other", titleMarker: "UnrelatedTitle520")
+        let all = [old, other]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: nil)
+        coordinator.start(query: "PreserveZeroOld519",
+                          filters: Filters(query: "PreserveZeroOld519"),
+                          allowed: [.codex], enableDeepScan: false, all: all)
+        try await waitForSearchResults(coordinator, expectedIDs: [old.id])
+        // Let the first run reach idle so the second start is not racing a
+        // still-scanning predecessor; waitForSearchResults can return on the
+        // seed publication while the legacy tail is still running.
+        for _ in 0..<50 {
+            if !coordinator.isRunning { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        coordinator.start(query: "NoSuchMarkerZzz999",
+                          filters: Filters(query: "NoSuchMarkerZzz999"),
+                          allowed: [.codex], enableDeepScan: false, all: all,
+                          preserveResultsUntilRefreshPublishes: true)
+        // Wait for the durable completed state rather than requiring a sample
+        // of transient `isRunning == true`: this two-row search can start and
+        // finish between polling intervals. The old result prevents a false
+        // positive before the refresh has published.
+        for _ in 0..<100 {
+            if coordinator.results.isEmpty, !coordinator.isRunning { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(coordinator.results.isEmpty,
+                      "AS531-DATASET-MEMBERSHIP-REFRESH: zero-result refresh must clear preserved old rows")
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
+    func testSearchCoordinatorDefaultPreserveFalseClearsImmediately() async throws {
+        let old = makePreserveTitleSession(id: "default-old", titleMarker: "DefaultOldMarker621")
+        let new = makePreserveTitleSession(id: "default-new", titleMarker: "DefaultNewMarker622")
+        let all = [old, new]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: nil)
+        coordinator.start(query: "DefaultOldMarker621",
+                          filters: Filters(query: "DefaultOldMarker621"),
+                          allowed: [.codex], enableDeepScan: false, all: all)
+        try await waitForSearchResults(coordinator, expectedIDs: [old.id])
+        coordinator.start(query: "DefaultNewMarker622",
+                          filters: Filters(query: "DefaultNewMarker622"),
+                          allowed: [.codex], enableDeepScan: false, all: all)
+        // Default (preserve false) retains the existing clear semantics: the
+        // ordered initialization clears before the new run publishes. Poll for
+        // the cleared or replaced state; the new hit must win without the old.
+        try await waitForSearchResults(coordinator, expectedIDs: [new.id])
+        XCTAssertEqual(coordinator.results.map(\.id), [new.id],
+                       "AS531-DATASET-MEMBERSHIP-REFRESH: default must replace via clear-then-publish")
+    }
+
+    func testSearchCoordinatorStalePreservingRunCannotPublishOverNewer() async throws {
+        // Best-effort ordering check on top of the existing runID guards: no
+        // deterministic pause seam exists to hold run A mid-scan, so this
+        // starts a preserving run immediately superseded by a newer run and
+        // asserts the newer results win and stick. The authoritative guard is
+        // the existing runID equality check on every publication.
+        let a = makePreserveTitleSession(id: "stale-a", titleMarker: "StaleMarkerA723")
+        let b = makePreserveTitleSession(id: "stale-b", titleMarker: "StaleMarkerB724")
+        let all = [a, b]
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: nil)
+        coordinator.start(query: "StaleMarkerA723",
+                          filters: Filters(query: "StaleMarkerA723"),
+                          allowed: [.codex], enableDeepScan: false, all: all,
+                          preserveResultsUntilRefreshPublishes: true)
+        coordinator.start(query: "StaleMarkerB724",
+                          filters: Filters(query: "StaleMarkerB724"),
+                          allowed: [.codex], enableDeepScan: false, all: all,
+                          preserveResultsUntilRefreshPublishes: true)
+        try await waitForSearchResults(coordinator, expectedIDs: [b.id])
+        let settled = coordinator.results.map(\.id)
+        try await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertEqual(coordinator.results.map(\.id), settled,
+                       "AS531-DATASET-MEMBERSHIP-REFRESH: superseded run must not publish after newer results")
+        XCTAssertEqual(settled, [b.id])
     }
 }

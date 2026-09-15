@@ -37,6 +37,12 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     /// so a Preferences change re-points discovery without an app restart.
     private var discovery: AntigravitySessionDiscovery
     private var lastSessionsRootOverride: String = ""
+    internal var hydrateOverride: (() async throws -> [Session]?)? = nil
+    internal var parseLightweightOverride: ((URL) -> Session?)? = nil
+    internal var discoverSnapshotOverride: (() -> AntigravitySessionDiscovery.DiscoverySnapshot)? = nil
+    internal var deletePersistedPathsOverride: (([String]) async throws -> Void)? = nil
+    internal var archiveMergeOverride: (([Session]) -> [Session])? = nil
+    internal var reconciliationShouldContinueOverride: (() -> Bool)? = nil
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
@@ -138,14 +144,27 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
 		        Task.detached(priority: prio) { [weak self, token, executionProfile] in
 		            guard let self else { return }
 
+	            let discoverSnapshot: () -> AntigravitySessionDiscovery.DiscoverySnapshot = {
+	                if let override = self.discoverSnapshotOverride {
+	                    return override()
+	                }
+	                return scanDiscovery.discoverSnapshot()
+	            }
+	            let discoverFiles: () -> [URL] = { discoverSnapshot().files }
+
 	            let config = SessionIndexingEngine.ScanConfig(
 		                source: .antigravity,
 		                discoverFiles: {
-		                    let files = scanDiscovery.discoverSessionFiles()
+		                    let files = discoverFiles()
 	                    LaunchProfiler.log("Antigravity.refresh: file enumeration done (files=\(files.count))")
 	                    return files
 	                },
-	                parseLightweight: { AntigravitySessionParser.parseFile(at: $0) },
+	                parseLightweight: { [weak self] url in
+                    if let override = self?.parseLightweightOverride {
+                        return override(url)
+                    }
+                    return AntigravitySessionParser.parseFile(at: url)
+                },
 		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
 		                throttler: self.progressThrottler,
                         workerCount: executionProfile.workerCount,
@@ -166,13 +185,68 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
 		            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(
-	                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
-	                config: config
-	            )
+                hydrate: {
+                    if let override = self.hydrateOverride {
+                        return try await override()
+                    }
+                    return try await self.hydrateFromIndexDBIfAvailable()
+                },
+                config: config
+            )
 
-	            var previewTimes: [String: Date] = [:]
-	            previewTimes.reserveCapacity(result.sessions.count)
-		            for s in result.sessions {
+            guard self.refreshToken == token else { return }
+            if Task.isCancelled { return }
+
+            var hydratedReconciled: [Session]? = nil
+            var hydratedDeletionError: Error? = nil
+            if case .hydrated = result.kind {
+                let snapshot = discoverSnapshot()
+                guard self.refreshToken == token else { return }
+                if Task.isCancelled { return }
+                let shouldContinue: () -> Bool = {
+                    if self.refreshToken != token { return false }
+                    if Task.isCancelled { return false }
+                    if let override = self.reconciliationShouldContinueOverride, !override() { return false }
+                    return true
+                }
+                let reconciliation = Self.reconcileHydratedSessions(
+                    hydrated: result.sessions,
+                    snapshot: snapshot,
+                    parseNew: config.parseLightweight,
+                    currentStat: { Self.fileStat(for: $0) },
+                    shouldContinue: shouldContinue
+                )
+                guard self.refreshToken == token else { return }
+                if Task.isCancelled { return }
+                let withArchives: [Session] = {
+                    if let override = self.archiveMergeOverride {
+                        return override(reconciliation.sessions)
+                    }
+                    return SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: reconciliation.sessions, source: .antigravity)
+                }()
+                guard self.refreshToken == token else { return }
+                if Task.isCancelled { return }
+                if !reconciliation.confirmedMissingPaths.isEmpty {
+                    do {
+                        if let deleteOverride = self.deletePersistedPathsOverride {
+                            try await deleteOverride(reconciliation.confirmedMissingPaths)
+                        } else {
+                            let db = try IndexDB()
+                            _ = try await db.deleteSessionsForPaths(source: SessionSource.antigravity.rawValue, paths: reconciliation.confirmedMissingPaths)
+                        }
+                    } catch {
+                        hydratedDeletionError = error
+                    }
+                }
+                guard self.refreshToken == token else { return }
+                if Task.isCancelled { return }
+                hydratedReconciled = withArchives
+            }
+
+            let sessionsForPreview = hydratedReconciled ?? result.sessions
+            var previewTimes: [String: Date] = [:]
+            previewTimes.reserveCapacity(sessionsForPreview.count)
+            for s in sessionsForPreview {
 		                let url = URL(fileURLWithPath: s.filePath)
 		                if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
 		                   let m = rv.contentModificationDate {
@@ -180,21 +254,27 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
 		                }
 		            }
 		            let previewTimesByID = previewTimes
+		            let hydratedReconciledSnapshot = hydratedReconciled
+		            let hydratedDeletionErrorSnapshot = hydratedDeletionError
 
 		            await MainActor.run {
 		                guard self.refreshToken == token else { return }
 		                switch result.kind {
 	                case .hydrated:
-                    LaunchProfiler.log("Antigravity.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
-                    self.allSessions = result.sessions
+                    guard let reconciled = hydratedReconciledSnapshot else { return }
+                    LaunchProfiler.log("Antigravity.refresh: DB hydrate hit (sessions=\(reconciled.count))")
+                    self.allSessions = reconciled
                     self.isIndexing = false
-	                    self.filesProcessed = result.sessions.count
-		                    self.totalFiles = result.sessions.count
-		                    self.progressText = "Loaded \(result.sessions.count) from index"
+	                    self.filesProcessed = reconciled.count
+		                    self.totalFiles = reconciled.count
+		                    if hydratedDeletionErrorSnapshot != nil {
+		                        self.indexingError = "Index cleanup did not persist; showing reconciled rows."
+		                    }
+		                    self.progressText = "Loaded \(reconciled.count) from index"
 		                    self.launchPhase = .ready
 		                    self.previewMTimeByID = previewTimesByID
 		                    #if DEBUG
-		                    print("[Launch] Hydrated Antigravity sessions from DB: count=\(result.sessions.count)")
+		                    print("[Launch] Hydrated Antigravity sessions from DB: count=\(reconciled.count)")
 		                    #endif
 		                    return
 	                case .scanned:
@@ -260,6 +340,92 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
         let list = try await repo.fetchSessions(for: .antigravity)
         guard !list.isEmpty else { return nil }
         return list.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    internal static func normalizedSessionPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardized.path
+    }
+
+    internal static func normalizedSessionPath(for url: URL) -> String {
+        URL(fileURLWithPath: url.path).standardized.path
+    }
+
+    internal struct HydratedReconciliation {
+        var sessions: [Session]
+        var confirmedMissingPaths: [String]
+    }
+
+    internal static func reconcileHydratedSessions(
+        hydrated: [Session],
+        snapshot: AntigravitySessionDiscovery.DiscoverySnapshot,
+        parseNew: (URL) -> Session?,
+        currentStat: (URL) -> SessionFileStat? = { fileStat(for: $0) },
+        shouldContinue: () -> Bool = { true }
+    ) -> HydratedReconciliation {
+        var hydratedByPath: [String: Session] = [:]
+        hydratedByPath.reserveCapacity(hydrated.count)
+        for s in hydrated {
+            let key = normalizedSessionPath(s.filePath)
+            if hydratedByPath[key] == nil { hydratedByPath[key] = s }
+        }
+        var discoveredByPath: [String: URL] = [:]
+        discoveredByPath.reserveCapacity(snapshot.files.count)
+        for url in snapshot.files {
+            let key = normalizedSessionPath(for: url)
+            if discoveredByPath[key] == nil { discoveredByPath[key] = url }
+        }
+        var placeholders: [Session] = []
+        placeholders.reserveCapacity(hydrated.count)
+        var placeholderIndexByPath: [String: Int] = [:]
+        var confirmedMissing: [String] = []
+        for s in hydrated {
+            let key = normalizedSessionPath(s.filePath)
+            if !snapshot.isAuthoritative(path: s.filePath) {
+                placeholderIndexByPath[key] = placeholders.count
+                placeholders.append(s)
+                continue
+            }
+            if discoveredByPath[key] == nil {
+                confirmedMissing.append(key)
+                continue
+            }
+            placeholderIndexByPath[key] = placeholders.count
+            placeholders.append(s)
+        }
+        for url in snapshot.files {
+            if !shouldContinue() { break }
+            let key = normalizedSessionPath(for: url)
+            if let cached = hydratedByPath[key] {
+                guard snapshot.isAuthoritative(path: cached.filePath) else { continue }
+                guard let stat = currentStat(url) else { continue }
+                let cachedSecond = Int64(cached.modifiedAt.timeIntervalSince1970)
+                let cachedSize = cached.fileSizeBytes.map { Int64($0) }
+                if cachedSecond == stat.mtime && cachedSize == stat.size { continue }
+                guard shouldContinue() else { break }
+                if let reparsed = parseNew(url) {
+                    if let idx = placeholderIndexByPath[key] {
+                        placeholders[idx] = reparsed
+                    } else {
+                        placeholderIndexByPath[key] = placeholders.count
+                        placeholders.append(reparsed)
+                    }
+                }
+                continue
+            }
+            guard shouldContinue() else { break }
+            if let session = parseNew(url) {
+                let parsedKey = normalizedSessionPath(session.filePath)
+                if placeholderIndexByPath[parsedKey] == nil {
+                    placeholderIndexByPath[parsedKey] = placeholders.count
+                    placeholders.append(session)
+                }
+            }
+        }
+        let ordered = placeholders.sorted {
+            if $0.modifiedAt != $1.modifiedAt { return $0.modifiedAt > $1.modifiedAt }
+            return $0.id < $1.id
+        }
+        return HydratedReconciliation(sessions: ordered, confirmedMissingPaths: confirmedMissing.sorted())
     }
 
     func applySearch() {

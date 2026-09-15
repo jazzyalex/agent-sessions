@@ -571,6 +571,7 @@ struct Filters: Equatable {
     var archivedClaudeDesktopOnly: Bool = false
     var archivedClaudeSessionIDs: Set<String> = []
     var sideChatsOnly: Bool = false
+    var selectedProjectIdentity: ProjectIdentity? = nil
 }
 
 enum FilterEngine {
@@ -605,6 +606,10 @@ enum FilterEngine {
             let isArchived = session.claudeArchiveJoinKey
                 .map { filters.archivedClaudeSessionIDs.contains($0) } ?? false
             if !isArchived { return false }
+        }
+
+        if let selected = filters.selectedProjectIdentity {
+            guard session.rowProjectIdentity == selected else { return false }
         }
 
         if let repo = effectiveRepo, !repo.isEmpty {
@@ -654,7 +659,9 @@ enum FilterEngine {
         }
 
         // Priority 2: Fallback to indexed metadata that exists even for lightweight DB-hydrated rows.
-        if SearchTextMatcher.hasMatch(in: session.title, query: q) { return true }
+        // Use the model-level row title so a caller-provided effective title is searchable
+        // without parsing the heavier title preamble or reindexing.
+        if SearchTextMatcher.hasMatch(in: session.listTitle, query: q) { return true }
         if let repo = session.repoName, SearchTextMatcher.hasMatch(in: repo, query: q) { return true }
 
         // Priority 3: Lightweight sessions without cache cannot search event text.

@@ -468,6 +468,7 @@ struct UnifiedSessionsView: View {
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
     @StateObject private var searchCoordinator: SearchCoordinator
+    @StateObject private var datasetSearchRestartCoalescer = SearchDatasetRestartCoalescer()
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
     // Debounced selection-propagation task (see handleSelectionChange). Key-repeat
@@ -574,6 +575,7 @@ struct UnifiedSessionsView: View {
 			                    claudeUsageModel.setStripVisible(false)
 			                    selectionPropagationTask?.cancel()
 			                    selectionPropagationTask = nil
+                                datasetSearchRestartCoalescer.cancel()
 			                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unified.setAppActive(true)
@@ -626,6 +628,9 @@ struct UnifiedSessionsView: View {
 
         let afterFx = afterDevin
             .onChange(of: unified.includeFx) { _, _ in restartSearchIfRunning() }
+            .onChange(of: unified.searchDatasetMembershipRevision) { _, _ in
+                restartSearchForDatasetMembershipChangeIfNeeded()
+            }
 
         let afterActiveOnly = afterFx
             .onChange(of: showActiveSessionsOnly) { _, _ in
@@ -1096,7 +1101,9 @@ struct UnifiedSessionsView: View {
                     worktree: isNestedHierarchyRow ? nil : s.rowProjectWorktreeDisplayName
                 )
                     .onTapGesture(count: 2) {
-                        if let name = s.rowRepoName { unified.projectFilter = name; unified.recomputeNow() }
+                        if let selection = ProjectSelection.makeSelection(for: s, among: cachedRows) {
+                            applyProjectSelection(selection)
+                        }
                     }
             }
             .width(min: showProject ? 120 : 0,
@@ -1175,11 +1182,11 @@ struct UnifiedSessionsView: View {
                 Button("Copy Resume Command") { copyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID) }
                     .disabled(!canCopyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
-                if let name = s.rowRepoName, !name.isEmpty {
+                if let selection = ProjectSelection.makeSelection(for: s, among: cachedRows) {
                     Divider()
-                    Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
+                    Button("Filter by Project: \(selection.displayName)") { applyProjectSelection(selection) }
                         .keyboardShortcut("p", modifiers: [.command, .option])
-                        .help("Show only sessions from \(name) (⌥⌘P)")
+                        .help("Show only sessions from \(selection.displayName) (⌥⌘P)")
                 }
                 if unified.isArchivedClaudeDesktop(s) {
                     let canRestore = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
@@ -1401,18 +1408,21 @@ struct UnifiedSessionsView: View {
 	    /// lag behind during search churn, and offering to clear filters when none
 	    /// are set produces a control that changes nothing when pressed. This set
 	    /// must stay in step with `clearListFilters()`.
-	    private var footerIsFiltered: Bool {
-	        unified.showFavoritesOnly
-	            || showActiveSessionsOnly
-	            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-	    }
+    private var footerIsFiltered: Bool {
+        unified.showFavoritesOnly
+            || showActiveSessionsOnly
+            || unified.projectSelection != nil
+            || !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
-	    private func clearListFilters() {
-	        unified.showFavoritesOnly = false
-	        showActiveSessionsOnly = false
-	        unified.queryDraft = ""
-	        searchCoordinator.cancel()
-	    }
+    private func clearListFilters() {
+        unified.showFavoritesOnly = false
+        showActiveSessionsOnly = false
+        unified.projectSelection = nil
+        unified.queryDraft = ""
+        unified.recomputeNow()
+        searchCoordinator.cancel()
+    }
 
 	    /// "3,775 sessions" when nothing is filtered; "3,625 of 3,775 shown" when
 	    /// something is. The bare fraction said neither which number was which nor
@@ -1895,9 +1905,9 @@ struct UnifiedSessionsView: View {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
                 .frame(maxWidth: 520)
         }
-        if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
+        if unified.projectSelection != nil {
             ToolbarItem(placement: .automatic) {
-                UnifiedProjectFilterBadgeView(unified: unified)
+                UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
             }
         }
         // Ranked by how often a control is reached for without thinking. Three
@@ -2587,7 +2597,7 @@ struct UnifiedSessionsView: View {
             searchCoordinator.cancel()
         }
 
-        if unified.projectFilter != nil { unified.projectFilter = nil }
+        if unified.projectSelection != nil { unified.projectSelection = nil }
         if unified.dateFrom != nil { unified.dateFrom = nil }
         if unified.dateTo != nil { unified.dateTo = nil }
         if unified.selectedModel != nil { unified.selectedModel = nil }
@@ -3633,6 +3643,37 @@ struct UnifiedSessionsView: View {
         return "~\(count)"
     }
     
+    /// Immutable snapshot of the titles actually displayed for rows, keyed by
+    /// source-qualified session identity. Mirrors row rendering (`SessionTitleCell` receives
+    /// `unified.claudeDesktopTitle(for:)` as its display override): only
+    /// nonempty overrides are included, everything else falls back to
+    /// `session.listTitle` inside the coordinator. Pure over its inputs so
+    /// search tests can pin it without a live indexer.
+    static func claudeDisplayTitleSnapshot(
+        sessions: [Session],
+        titleFor: (Session) -> String?
+    ) -> [SearchCoordinator.SessionKey: String] {
+        var out: [SearchCoordinator.SessionKey: String] = [:]
+        out.reserveCapacity(sessions.count)
+        for session in sessions {
+            guard let title = titleFor(session)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty else { continue }
+            out[SearchCoordinator.SessionKey(session)] = title
+        }
+        return out
+    }
+
+    /// Single helper for setting or clearing the exact project selection: the
+    /// list recomputes and any nonempty search restarts whether the coordinator
+    /// is running or already completed, so the search coordinator always
+    /// receives the selected identity and never retains an old search universe.
+    /// An empty query cancels instead of starting a search.
+    private func applyProjectSelection(_ selection: ProjectSelection?) {
+        unified.projectSelection = selection
+        unified.recomputeNow()
+        restartSearchForActiveQuery()
+    }
+
     private func restartSearchIfRunning() {
         restartSearch(onlyIfRunning: true)
     }
@@ -3645,10 +3686,28 @@ struct UnifiedSessionsView: View {
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         guard FilterEngine.parseOperators(q).sideChatsOnly else { return }
-        restartSearchForActiveQuery()
+        scheduleDatasetSearchRestart()
     }
 
-    private func restartSearch(onlyIfRunning: Bool) {
+    /// Dataset-membership refresh: a nonempty search, running or completed,
+    /// restarts when the unified (source, id) membership changes. Passes
+    /// preserveResultsUntilRefreshPublishes so old results stay visible until
+    /// the new run's first publication replaces them.
+    private func restartSearchForDatasetMembershipChangeIfNeeded() {
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        scheduleDatasetSearchRestart()
+    }
+
+    private func scheduleDatasetSearchRestart() {
+        guard NSApp.isActive else { return }
+        datasetSearchRestartCoalescer.schedule {
+            guard NSApp.isActive else { return }
+            restartSearch(onlyIfRunning: false, preserveResultsUntilRefreshPublishes: true)
+        }
+    }
+
+    private func restartSearch(onlyIfRunning: Bool, preserveResultsUntilRefreshPublishes: Bool = false) {
         guard !onlyIfRunning || searchCoordinator.isRunning else { return }
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { searchCoordinator.cancel(); return }
@@ -3657,15 +3716,22 @@ struct UnifiedSessionsView: View {
                               dateTo: unified.dateTo,
                               model: unified.selectedModel,
                               kinds: unified.selectedKinds,
-                              repoName: unified.projectFilter,
+                              repoName: nil,
                               pathContains: nil,
                               archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
-                              sideChatsOnly: false)
+                              archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
+                              archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
+                              sideChatsOnly: false,
+                              selectedProjectIdentity: unified.projectSelection?.identity)
         searchCoordinator.start(query: q,
                                 filters: filters,
                                 allowed: unified.allowedSearchSources(),
                                 enableDeepScan: searchCoordinator.deepScanEnabled,
-                                all: unified.allSessions)
+                                all: unified.allSessions,
+                                effectiveDisplayTitles: Self.claudeDisplayTitleSnapshot(
+                                    sessions: unified.allSessions,
+                                    titleFor: { unified.claudeDesktopTitle(for: $0) }),
+                                preserveResultsUntilRefreshPublishes: preserveResultsUntilRefreshPublishes)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
@@ -4554,15 +4620,21 @@ private struct UnifiedSearchFiltersView: View {
                               dateTo: unified.dateTo,
                               model: unified.selectedModel,
                               kinds: unified.selectedKinds,
-                              repoName: unified.projectFilter,
+                              repoName: nil,
                               pathContains: nil,
                               archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
-                              sideChatsOnly: false)
+                              archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
+                              archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
+                              sideChatsOnly: false,
+                              selectedProjectIdentity: unified.projectSelection?.identity)
         search.start(query: q,
                      filters: filters,
                      allowed: unified.allowedSearchSources(),
                      enableDeepScan: deepScan,
-                     all: unified.allSessions)
+                     all: unified.allSessions,
+                     effectiveDisplayTitles: UnifiedSessionsView.claudeDisplayTitleSnapshot(
+                         sessions: unified.allSessions,
+                         titleFor: { unified.claudeDesktopTitle(for: $0) }))
     }
 
     private func startSearchImmediate() {
@@ -4581,15 +4653,21 @@ private struct UnifiedSearchFiltersView: View {
                                   dateTo: unified.dateTo,
                                   model: unified.selectedModel,
                                   kinds: unified.selectedKinds,
-                                  repoName: unified.projectFilter,
+                                  repoName: nil,
                                   pathContains: nil,
                                   archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
-                                  sideChatsOnly: false)
+                                  archivedClaudeDesktopOnly: unified.showArchivedClaudeDesktopOnly,
+                                  archivedClaudeSessionIDs: unified.archivedClaudeSessionIDs,
+                                  sideChatsOnly: false,
+                                  selectedProjectIdentity: unified.projectSelection?.identity)
             search.start(query: q,
                          filters: filters,
                          allowed: unified.allowedSearchSources(),
                          enableDeepScan: false,
-                         all: unified.allSessions)
+                         all: unified.allSessions,
+                         effectiveDisplayTitles: UnifiedSessionsView.claudeDisplayTitleSnapshot(
+                             sessions: unified.allSessions,
+                             titleFor: { unified.claudeDesktopTitle(for: $0) }))
         }
         searchDebouncer = work
         let delay: TimeInterval = FeatureFlags.increaseDeepSearchDebounce ? 0.28 : 0.15
@@ -4606,6 +4684,7 @@ private struct UnifiedSearchFiltersView: View {
 
 private struct UnifiedProjectFilterBadgeView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
+    var onClear: () -> Void
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
@@ -4613,16 +4692,15 @@ private struct UnifiedProjectFilterBadgeView: View {
         HStack(spacing: 4) {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
-            if let projectFilter = unified.projectFilter {
-                Text(projectFilter)
+            if let selection = unified.projectSelection {
+                Text(Self.badgeText(for: selection))
                     .font(.system(size: 12))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 220, alignment: .leading)
             }
             Button(action: {
-                unified.projectFilter = nil
-                unified.recomputeNow()
+                onClear()
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
@@ -4639,6 +4717,13 @@ private struct UnifiedProjectFilterBadgeView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// The normal name when unambiguous; name plus the concise parent-path
+    /// discriminator when another visible project shares the name.
+    static func badgeText(for selection: ProjectSelection) -> String {
+        guard let path = selection.disambiguationPath, !path.isEmpty else { return selection.displayName }
+        return "\(selection.displayName) (\(path))"
     }
 }
 

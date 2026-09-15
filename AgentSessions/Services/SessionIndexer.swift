@@ -1703,7 +1703,93 @@ final class SessionIndexer: ObservableObject {
 
         var bestTitle: String? {
             if let title = Self.nonEmpty(title) { return title }
-            return Self.nonEmpty(firstUserMessage)
+            return Self.sanitizedFallbackTitle(from: firstUserMessage)
+        }
+
+        /// Leading literals the fallback sanitizer can strip at position zero.
+        /// The state-db reader mirrors this list to pass scaffolded messages
+        /// through complete so whole wrappers reach the sanitizer.
+        /// Keep both sides aligned when adding a recognized scaffold form.
+        static let codexFallbackScaffoldPrefixes = [
+            "# Files pasted by the user:",
+            "<app-context>",
+            "<environment_context>",
+            "<permissions instructions>",
+            "<skills_instructions>",
+            "<apps_instructions>",
+            "<plugins_instructions>",
+            "<recommended_plugins>",
+            "<collaboration_mode>",
+            "<INSTRUCTIONS>",
+            "# AGENTS.md instructions for"
+        ]
+
+        static func sanitizedFallbackTitle(from raw: String?) -> String? {
+            guard var rest = Self.nonEmpty(raw) else { return nil }
+            let pairedTags = codexFallbackScaffoldPrefixes
+                .filter { $0.hasPrefix("<") && $0.hasSuffix(">") && $0 != "<INSTRUCTIONS>" }
+                .map { String($0.dropFirst().dropLast()) }
+            var madeProgress = true
+            while madeProgress {
+                madeProgress = false
+                if rest.hasPrefix("# Files pasted by the user:") {
+                    let lines = rest.components(separatedBy: "\n")
+                    var delimiterIndex: Int?
+                    for idx in 1..<lines.count {
+                        if lines[idx].trimmingCharacters(in: .whitespacesAndNewlines) == "## My request:" {
+                            delimiterIndex = idx
+                            break
+                        }
+                    }
+                    guard let delimiter = delimiterIndex else { return boundedTitle(rest) }
+                    let after = lines[(delimiter + 1)...].joined(separator: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if after.isEmpty { return nil }
+                    rest = after
+                    madeProgress = true
+                    continue
+                }
+                var strippedPaired = false
+                for tag in pairedTags {
+                    let open = "<\(tag)>"
+                    let close = "</\(tag)>"
+                    guard rest.hasPrefix(open) else { continue }
+                    guard let searchStart = rest.index(rest.startIndex, offsetBy: open.count, limitedBy: rest.endIndex),
+                          let closeRange = rest.range(of: close, range: searchStart..<rest.endIndex) else {
+                        return boundedTitle(rest)
+                    }
+                    let after = String(rest[closeRange.upperBound...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if after.isEmpty { return nil }
+                    rest = after
+                    madeProgress = true
+                    strippedPaired = true
+                    break
+                }
+                if strippedPaired { continue }
+                if rest.hasPrefix("# AGENTS.md instructions for") {
+                    guard let openRange = rest.range(of: "<INSTRUCTIONS>"),
+                          let closeRange = rest.range(of: "</INSTRUCTIONS>", range: openRange.upperBound..<rest.endIndex) else {
+                        return boundedTitle(rest)
+                    }
+                    let after = String(rest[closeRange.upperBound...])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if after.isEmpty { return nil }
+                    rest = after
+                    madeProgress = true
+                    continue
+                }
+            }
+            let final = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !final.isEmpty else { return nil }
+            return boundedTitle(final)
+        }
+
+        private static func boundedTitle(_ value: String) -> String {
+            if value.count > SessionIndexer.codexStateFirstUserMessageTitleLimit {
+                return String(value.prefix(SessionIndexer.codexStateFirstUserMessageTitleLimit))
+            }
+            return value
         }
 
         private static func nonEmpty(_ value: String?) -> String? {
@@ -1774,9 +1860,19 @@ final class SessionIndexer: ObservableObject {
         let columns = codexStateThreadColumns(in: db)
         let gitBranchExpression = columns.contains("git_branch") ? "git_branch" : "NULL"
         let gitOriginExpression = columns.contains("git_origin_url") ? "git_origin_url" : "NULL"
+        let scaffoldPredicate = CodexStateThread.codexFallbackScaffoldPrefixes
+            .map { prefix in
+                let escaped = prefix
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_")
+                    .replacingOccurrences(of: "'", with: "''")
+                return "first_user_message LIKE '\(escaped)%' ESCAPE '\\'"
+            }
+            .joined(separator: " OR ")
         let sql = """
         SELECT id, rollout_path, cwd, \(gitBranchExpression), \(gitOriginExpression), title,
-               CASE WHEN length(trim(title)) > 0 THEN NULL ELSE substr(first_user_message, 1, ?) END
+               CASE WHEN length(trim(title)) > 0 THEN NULL WHEN \(scaffoldPredicate) THEN first_user_message ELSE substr(first_user_message, 1, ?) END
         FROM threads;
         """
         var stmt: OpaquePointer?

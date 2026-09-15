@@ -59,23 +59,23 @@ final class PiSessionParserTests: XCTestCase {
         let largeCursor = makeSearchCandidate(id: "large-cursor", source: .cursor, fileSizeBytes: FeatureFlags.searchSmallSizeBytes * 2)
 
         XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(smallPi,
-                                                                        indexedIDs: [],
-                                                                        seenIDs: [],
+                                                                        indexedIDs: Set<SearchCoordinator.SessionKey>(),
+                                                                        seenIDs: Set<SearchCoordinator.SessionKey>(),
                                                                         enableDeepScan: false,
                                                                         smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
         XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(largePi,
-                                                                         indexedIDs: [],
-                                                                         seenIDs: [],
+                                                                         indexedIDs: Set<SearchCoordinator.SessionKey>(),
+                                                                         seenIDs: Set<SearchCoordinator.SessionKey>(),
                                                                          enableDeepScan: false,
                                                                          smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
         XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(largePi,
-                                                                        indexedIDs: [],
-                                                                        seenIDs: [],
+                                                                        indexedIDs: Set<SearchCoordinator.SessionKey>(),
+                                                                        seenIDs: Set<SearchCoordinator.SessionKey>(),
                                                                         enableDeepScan: true,
                                                                         smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
         XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(largeCursor,
-                                                                        indexedIDs: [],
-                                                                        seenIDs: [],
+                                                                        indexedIDs: Set<SearchCoordinator.SessionKey>(),
+                                                                        seenIDs: Set<SearchCoordinator.SessionKey>(),
                                                                         enableDeepScan: false,
                                                                         smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
     }
