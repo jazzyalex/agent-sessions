@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **OpenCode sessions are recognizable before you open them.** Timestamp-only default names now fall back to the session's first user prompt in both current SQLite and legacy JSON storage, while real names and subagent labels keep their existing precedence.
 - **Droid session names survive transcript loading and search prewarming.** Full parsing now retains the explicit title already shown by the lightweight list instead of replacing it with the first prompt.
 - **OpenClaw source-aware titles stay stable after full parsing.** Telegram origin-plus-prompt labels and tool-name fallbacks no longer regress to raw message envelopes or generic text after search prewarming.
+- **Claude prompt titles stay clean after transcript loading.** Full parsing and search prewarming now preserve the same title as the session list instead of exposing local-command Caveat wrappers.
 
 ## [5.3] - 2026-09-14
 

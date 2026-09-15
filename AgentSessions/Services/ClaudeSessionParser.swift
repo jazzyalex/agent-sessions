@@ -123,28 +123,36 @@ final class ClaudeSessionParser {
         let fileID = forcedID ?? hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
-        let session = Session(
-            id: fileID,
-            source: .claude,
-            startTime: tmin,
-            endTime: tmax,
-            model: llmModel ?? model,
-            filePath: url.path,
-            fileSizeBytes: size >= 0 ? size : nil,
-            eventCount: nonMetaCount,
-            events: events,
-            cwd: cwd,
-            repoName: nil,
-            lightweightTitle: hasExplicitCustomTitle ? nil : aiTitle,
-            isHousekeeping: isHousekeeping,
-            codexInternalSessionIDHint: sessionID,
-            parentSessionID: parentSessionID,
-            subagentType: subagentType,
-            customTitle: hasExplicitCustomTitle ? customTitle : nil,
-            originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
-            originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
-            surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil
-        )
+        let sourceFallbackTitle = hasExplicitCustomTitle ? nil : (aiTitle ?? customTitle)
+        let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
+        func makeSession(lightweightTitle: String?) -> Session {
+            Session(
+                id: fileID,
+                source: .claude,
+                startTime: tmin,
+                endTime: tmax,
+                model: llmModel ?? model,
+                filePath: url.path,
+                fileSizeBytes: size >= 0 ? size : nil,
+                eventCount: nonMetaCount,
+                events: events,
+                cwd: cwd,
+                repoName: nil,
+                lightweightTitle: lightweightTitle,
+                isHousekeeping: isHousekeeping,
+                codexInternalSessionIDHint: sessionID,
+                parentSessionID: parentSessionID,
+                subagentType: subagentType,
+                customTitle: explicitCustomTitle,
+                originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
+                originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
+                surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil
+            )
+        }
+
+        let titleProbe = makeSession(lightweightTitle: sourceFallbackTitle)
+        let lightweightTitle = sourceFallbackTitle ?? titleProbe.title
+        let session = makeSession(lightweightTitle: hasExplicitCustomTitle ? nil : lightweightTitle)
         return enrichWithDesktopMetadataIfNeeded(session, url: url)
     }
 
