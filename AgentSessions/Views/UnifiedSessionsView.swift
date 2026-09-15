@@ -4526,6 +4526,16 @@ private struct UnifiedSearchFiltersView: View {
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .opacity(0.001)
                 .frame(width: 1, height: 1)
+
+            Button(action: {
+                focus.perform(.closeAllSearch)
+                focus.perform(.openSessionSearch)
+                requestSearchFocus()
+            }) { EmptyView() }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .opacity(0.001)
+                .frame(width: 1, height: 1)
         }
     }
 

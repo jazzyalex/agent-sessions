@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Session info now distinguishes model from thinking effort, labels its dollar figure as an estimated API price rather than a charge, and preserves four decimal places below one cent. Its token bar reports cached, fresh, and output percentages, retains nonzero sub-percent shares, and exposes those shares to VoiceOver; configuration history appears only after a recorded change; transcript span names its wall-clock meaning; and the header shows when the user last refreshed the analysis. Unavailable weekly-calibration provenance is hidden with the unavailable weekly row.
+- Search Sessions now also responds to Shift-Command-F for people accustomed to the cross-app global-search shortcut; Option-Command-F remains available.
+
+- Session info now distinguishes model from thinking effort, retains its compact API-equivalent label while its tooltip explains that the number is an estimate rather than a charge, and preserves four decimal places below one cent. Its token bar reports cached, fresh, and output percentages, retains nonzero sub-percent shares, and exposes those shares to VoiceOver; configuration history appears only after a recorded change; transcript span names its wall-clock meaning; and the header shows when the user last refreshed the analysis. Unavailable weekly-calibration provenance is hidden with the unavailable weekly row.
 
 - Session info no longer shows a Weekly quota row that current Codex transcripts cannot populate: the files do not carry a durable account identity to safely match an individual session to the account-wide weekly calibration.
 

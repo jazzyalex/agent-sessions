@@ -561,7 +561,7 @@ struct TranscriptTelemetryView: View {
                     .font(SessionInfoType.hero)
                     .monospacedDigit()
                     .foregroundStyle(cost.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                Text("Estimated API price")
+                Text("API-equivalent")
                     .font(SessionInfoType.caption)
                     .foregroundStyle(.secondary)
             }
