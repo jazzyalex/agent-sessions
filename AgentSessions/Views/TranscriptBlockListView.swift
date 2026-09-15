@@ -1080,7 +1080,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                ideTarget: IDEOpener.Target = .systemDefault,
                ideBinaryOverridePath: String = "",
                activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) {
-        guard table != nil else { return }
+        guard let table else { return }
 
         let newMarkers = TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
         let markersChanged = newMarkers != telemetryMarkers
@@ -3046,7 +3046,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// origin block's anchor (the offset the native drag started at) and the
     /// current point as focus; subsequent calls just extend the focus.
     func beginOrExtendCrossBlockDrag(originOrdinal: Int, anchorOffset: Int, event: NSEvent) {
-        guard let table else { return }
+        guard table != nil else { return }
         refreshExcludedOrdinals()
 
         if !crossBlockDragActive {
