@@ -31,13 +31,14 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost.
+- **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
-## What's New in 5.2
+## What's New in 5.3
 
-- Agent Sessions is now available in English and Simplified Chinese, with an in-app invitation for established users to help add another language.
-- Quota Meter weekly rates use stricter, recent evidence; Astra and Sol long-context pricing are included, and uncertain inputs fail closed.
-- Session-list invitations wait for every enabled source to settle, respect dismissal consistently, and avoid repeating or rotating too quickly.
+- **Session Info** for Codex and Claude: press ⇧⌘I to see a session's API-equivalent price, cached/fresh/output token mix, requests, model and thinking effort, and turn counts. Model and effort changes form a history that jumps to each point in the transcript.
+- **A calmer toolbar.** Analytics, Reindex, layout, and Settings moved into the ⋯ menu; Saved and Archived are chips in the search field; the transcript toolbar is one row.
+- Search Sessions also opens with ⇧⌘F, large active transcripts stay responsive, and opening a Codex parent session keeps its subagent tree intact.
 
 ## Supported sources
 
@@ -76,6 +77,21 @@ The dollar view is an API-equivalent estimate, not your subscription bill.
 
 <p align="center">
   <img src="docs/assets/quota-meter-session-burn.png" alt="Quota Meter showing weekly burn rates for active Codex sessions and a Claude session" width="100%" style="max-width:770px;border-radius:8px;"/>
+</p>
+
+## Session Info
+
+Open Session Info beside any Codex or Claude transcript with ⇧⌘I or the gauge button in the toolbar. It reads the session's own records.
+
+- Price at published API rates, total tokens, and request count.
+- A cached / fresh / output bar, so a heavily cached session reads at a glance.
+- Current model and thinking effort, with a history of changes that jumps to each point in the transcript.
+- Transcript span and how turns divided between you, the agent, and tools.
+
+The price is an API-equivalent estimate, not your subscription bill.
+
+<p align="center">
+  <img src="docs/assets/session-info-codex.png" alt="Session Info beside a Codex transcript, showing price at API rates, a 98% cached token mix, model and thinking effort, activity, and a history of model and effort changes" width="100%" style="max-width:816px;border-radius:8px;"/>
 </p>
 
 ## Install

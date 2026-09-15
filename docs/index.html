@@ -496,6 +496,7 @@
       <div class="nav-links">
         <a class="hide-sm" href="#features">Features</a>
         <a class="hide-sm" href="#quota-meter">Quota Meter</a>
+        <a class="hide-sm" href="#session-info">Session Info</a>
         <a class="hide-sm" href="#guides">Guides</a>
         <a class="hide-sm" href="social-banners/">Media</a>
         <a href="bench/">Bench</a>
@@ -617,6 +618,29 @@
         <div class="shots">
           <img src="assets/quota-meter-session-burn.png"
                alt="Quota Meter showing weekly burn rates for active Codex sessions and a Claude session">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="session-info" style="padding-top:0;">
+    <div class="grid">
+      <div class="feat span6 showcase">
+        <div class="shots">
+          <img src="assets/session-info-codex.png"
+               alt="Session Info beside a Codex transcript, showing price at API rates, a 98% cached token mix, model and thinking effort, activity, and a history of model and effort changes">
+        </div>
+        <div class="copy">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/><path d="M6.5 9h5"/><path d="M6.5 13h5"/></svg></div>
+          <h3 style="font-size:28px;">Session Info</h3>
+          <p>What one Codex or Claude session used, beside its transcript. Press ⇧⌘I and the panel reads the session's own records:</p>
+          <ul class="blist">
+            <li><b>Price at API rates</b> — what the session's requests would cost at published API prices, with the pricing basis one click away.</li>
+            <li><b>Token mix</b> — total tokens and requests, split into cached, fresh, and output, so a heavily cached session reads at a glance.</li>
+            <li><b>Model and thinking effort</b> — the current settings, plus a history of changes that jumps to each point in the transcript.</li>
+            <li><b>Activity</b> — the transcript's span and how turns divided between you, the agent, and tools.</li>
+          </ul>
+          <p class="support-note" style="text-align:left;margin-top:14px;">The price is an estimate, not your plan bill.</p>
         </div>
       </div>
     </div>

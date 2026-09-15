@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+- **Session Info: what a Codex or Claude session contained, beside its transcript.** Press Shift-Command-I or the gauge button to see what the session would cost at published API rates, its tokens split into cached, fresh, and output, the request count, the model and thinking effort, and how turns divided between you, the agent, and tools. Model and effort changes appear as markers in the transcript and as a history that jumps to each one. The price is an estimate, not your plan bill.
+
+### Improvements
+- **A calmer main toolbar.** Source filters, search, Quota Meter, Resume, Image Browser, and the transcript and Session Info controls stay in view. Analytics, Reveal in Finder, layout, Reindex, appearance, and Settings moved into the ⋯ menu, and Saved and Archived are now chips inside the search field.
+- **The transcript toolbar is one row.** Role filters lead: click one to show only that role, click it again to show everything. The Errors chip shows a count, and view mode moved to the ⋯ menu; Shift-Command-T still cycles modes.
+- **Search Sessions also opens with Shift-Command-F**, alongside Option-Command-F.
+- **Large and active transcripts stay responsive.** Simple searches inside a large open transcript no longer process the whole file, and a running Codex session reads only its newly added records.
+- **The window footer shows a count only while a filter is active**, such as "3,625 of 3,775 shown". Click it to clear the filters.
+- **Quota Meter dollar estimates cover more pricing cases:** Claude US-only inference, the original Claude Opus 4 rate, and GPT-5.5 and GPT-5.4 long-context requests.
+
+### Bug Fixes
+- **Opening a Codex parent session no longer breaks up its subagent tree.** Subagent counts, row order, selection, and scroll position stay in place while the transcript loads.
+- **The Quota Meter weekly burn tooltip is translated in Simplified Chinese.**
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
 - Search Sessions now also responds to Shift-Command-F for people accustomed to the cross-app global-search shortcut; Option-Command-F remains available.
 
 - Session info now distinguishes model from thinking effort, retains its compact API-equivalent label while its tooltip explains that the number is an estimate rather than a charge, and preserves four decimal places below one cent. Its token bar reports cached, fresh, and output percentages, retains nonzero sub-percent shares, and exposes those shares to VoiceOver; configuration history appears only after a recorded change; transcript span names its wall-clock meaning; and the header shows when the user last refreshed the analysis. Unavailable weekly-calibration provenance is hidden with the unavailable weekly row.

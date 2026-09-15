@@ -562,7 +562,7 @@ struct TranscriptTelemetryView: View {
                     .monospacedDigit()
                     .foregroundStyle(cost.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 Text("API-equivalent")
-                    .font(SessionInfoType.caption)
+                    .font(SessionInfoType.row)
                     .foregroundStyle(.secondary)
             }
             .help(cost.help)
