@@ -19,8 +19,12 @@ final class DroidSessionParserTests: XCTestCase {
         let url = try writeTempJSONL(lines)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let preview = DroidSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
         XCTAssertEqual(session.source, .droid)
+        XCTAssertEqual(preview.listTitle, "Test Droid")
+        XCTAssertEqual(session.listTitle, preview.listTitle)
+        XCTAssertNotEqual(session.listTitle, "Run a command")
 
         XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 - **Session retrieval now stays exact and current.** Project filtering distinguishes same-named clones while grouping real Git worktrees with their checkout, active searches refresh when sessions are added or removed without flashing blank, displayed titles are searchable even when the full-text index is stale, Codex fallback titles omit injected context wrappers, and Antigravity cache hydration reconciles confirmed changes and deletions without dropping data when a source root is temporarily unavailable.
+- **OpenCode sessions are recognizable before you open them.** Timestamp-only default names now fall back to the session's first user prompt in both current SQLite and legacy JSON storage, while real names and subagent labels keep their existing precedence.
+- **Droid session names survive transcript loading and search prewarming.** Full parsing now retains the explicit title already shown by the lightweight list instead of replacing it with the first prompt.
 
 ## [5.3] - 2026-09-14
 

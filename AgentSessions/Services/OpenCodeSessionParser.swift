@@ -2,6 +2,10 @@ import Foundation
 
 /// Parser for OpenCode sessions stored under ~/.local/share/opencode/storage
 final class OpenCodeSessionParser {
+    private static let generatedDefaultTitleRegex = try! NSRegularExpression(
+        pattern: #"^New session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"#
+    )
+
     private enum StorageSchemaVersion: Int {
         case legacy = 1
         case v2 = 2
@@ -137,11 +141,18 @@ final class OpenCodeSessionParser {
         let createdDate = obj.time?.created.flatMap { Date(timeIntervalSince1970: TimeInterval($0) / 1000.0) }
         let updatedDate = obj.time?.updated.flatMap { Date(timeIntervalSince1970: TimeInterval($0) / 1000.0) }
 
-        // Count messages + commands cheaply by scanning the corresponding message directory, if present.
-        let (eventCount, modelID, commandCount) = lightweightMessageMetadata(for: obj.id, sessionURL: url)
-
-        let sessionTitle = Self.normalizedSessionTitle(obj.title)
-        let subagentType = Self.deriveSubagentTypeFromTitle(sessionTitle)
+        let storedTitle = Self.normalizedSessionTitle(obj.title)
+        let generatedDefaultTitle = Self.isGeneratedDefaultSessionTitle(storedTitle)
+        // OpenCode's timestamp-only default carries no recognition value. Pay the
+        // part-read cost only for those rows; named sessions keep the old fast path.
+        let (eventCount, modelID, commandCount, firstUserTitle) = lightweightMessageMetadata(
+            for: obj.id,
+            sessionURL: url,
+            includeFirstUserTitle: generatedDefaultTitle
+        )
+        let sessionTitle = Self.effectiveSessionTitle(storedTitle: storedTitle, firstUserText: firstUserTitle)
+        let customTitle = generatedDefaultTitle ? nil : storedTitle
+        let subagentType = Self.deriveSubagentTypeFromTitle(storedTitle)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -158,7 +169,7 @@ final class OpenCodeSessionParser {
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: obj.parentID,
             subagentType: subagentType,
-            customTitle: sessionTitle
+            customTitle: customTitle
         )
     }
 
@@ -225,8 +236,12 @@ final class OpenCodeSessionParser {
         let allEvents = warningEvents + events
 
         let nonMetaCount = allEvents.filter { $0.kind != .meta }.count
-        let sessionTitle = Self.normalizedSessionTitle(obj.title)
-        let subagentType = Self.deriveSubagentTypeFromTitle(sessionTitle)
+        let storedTitle = Self.normalizedSessionTitle(obj.title)
+        let generatedDefaultTitle = Self.isGeneratedDefaultSessionTitle(storedTitle)
+        let firstUserTitle = allEvents.first(where: { $0.kind == .user })?.text
+        let sessionTitle = Self.effectiveSessionTitle(storedTitle: storedTitle, firstUserText: firstUserTitle)
+        let customTitle = generatedDefaultTitle ? nil : storedTitle
+        let subagentType = Self.deriveSubagentTypeFromTitle(storedTitle)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -243,13 +258,54 @@ final class OpenCodeSessionParser {
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: obj.parentID,
             subagentType: subagentType,
-            customTitle: sessionTitle
+            customTitle: customTitle
         )
     }
 
     static func normalizedSessionTitle(_ title: String?) -> String? {
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// OpenCode assigns this exact timestamp shape before it has generated or
+    /// received a meaningful name. Do not reject user titles that merely start
+    /// with "New session -".
+    static func isGeneratedDefaultSessionTitle(_ title: String?) -> Bool {
+        guard let title else { return false }
+        let range = NSRange(title.startIndex..<title.endIndex, in: title)
+        return generatedDefaultTitleRegex.firstMatch(in: title, range: range)?.range == range
+    }
+
+    static func effectiveSessionTitle(storedTitle: String?, firstUserText: String?) -> String? {
+        guard isGeneratedDefaultSessionTitle(storedTitle) else {
+            return normalizedSessionTitle(storedTitle)
+        }
+        let collapsed = firstUserText?
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ") ?? ""
+        guard !collapsed.isEmpty else { return nil }
+        return String(collapsed.prefix(512))
+    }
+
+    static func preferredUserSummaryText(from message: MessageJSON) -> String? {
+        for candidate in [message.summary?.title, message.summary?.body] {
+            guard let candidate else { continue }
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return candidate }
+        }
+        return nil
+    }
+
+    private static func ordersBefore<T: Comparable>(
+        _ lhs: (value: T?, fileName: String),
+        _ rhs: (value: T?, fileName: String)
+    ) -> Bool {
+        switch (lhs.value, rhs.value) {
+        case let (l?, r?) where l != r: return l < r
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: return lhs.fileName < rhs.fileName
+        }
     }
 
     /// Derive subagent type from OpenCode title pattern: "... (@<agent> subagent)"
@@ -305,24 +361,29 @@ final class OpenCodeSessionParser {
             .appendingPathComponent(sessionID, isDirectory: true)
     }
 
-    private static func lightweightMessageMetadata(for sessionID: String, sessionURL: URL) -> (count: Int, modelID: String?, commands: Int) {
+    private static func lightweightMessageMetadata(
+        for sessionID: String,
+        sessionURL: URL,
+        includeFirstUserTitle: Bool
+    ) -> (count: Int, modelID: String?, commands: Int, firstUserTitle: String?) {
         let root = messagesRoot(for: sessionID, sessionURL: sessionURL)
         let storageRoot = storageRoot(for: sessionURL)
         let layout = storageLayout(for: storageRoot)
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return (0, nil, 0)
+            return (0, nil, 0, nil)
         }
         guard let enumerator = fm.enumerator(at: root,
                                              includingPropertiesForKeys: [.isRegularFileKey],
                                              options: [.skipsHiddenFiles]) else {
-            return (0, nil, 0)
+            return (0, nil, 0, nil)
         }
         var count = 0
         var firstModelID: String?
         var commands = 0
         var legacyIndex: [String: [URL]]? = nil
+        var userMessages: [(created: Int64?, fileName: String, message: MessageJSON)] = []
         for case let url as URL in enumerator {
             if url.lastPathComponent.hasPrefix("msg_") && url.pathExtension.lowercased() == "json" {
                 count += 1
@@ -334,6 +395,9 @@ final class OpenCodeSessionParser {
                    let mid = (msg.model?.modelID ?? msg.modelID), !mid.isEmpty {
                     firstModelID = mid
                 }
+                if includeFirstUserTitle, msg.role?.lowercased() == "user" {
+                    userMessages.append((msg.time?.created, url.lastPathComponent, msg))
+                }
                 if let tools = msg.tools,
                    (tools.todowrite ?? false) || (tools.todoread ?? false) || (tools.task ?? false) {
                     commands += 1
@@ -343,7 +407,31 @@ final class OpenCodeSessionParser {
                 }
             }
         }
-        return (count, firstModelID, commands)
+        var firstUserTitle: String?
+        if includeFirstUserTitle {
+            userMessages.sort { lhs, rhs in
+                ordersBefore(
+                    (value: lhs.created, fileName: lhs.fileName),
+                    (value: rhs.created, fileName: rhs.fileName)
+                )
+            }
+            if let first = userMessages.first {
+                let parts = loadPartEvents(
+                    for: first.message,
+                    storageRoot: storageRoot,
+                    layout: layout,
+                    legacyIndex: &legacyIndex,
+                    fallbackTimestamp: first.created.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000.0) }
+                )
+                firstUserTitle = parts.text.compactMap(\.text).first(where: {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                })
+                if firstUserTitle == nil {
+                    firstUserTitle = preferredUserSummaryText(from: first.message)
+                }
+            }
+        }
+        return (count, firstModelID, commands, firstUserTitle)
     }
 
     private static func loadMessages(for sessionID: String, sessionURL: URL) -> ([SessionEvent], String?, Int) {
@@ -380,10 +468,10 @@ final class OpenCodeSessionParser {
         }
 
         messageFiles.sort { lhs, rhs in
-            switch (lhs.created, rhs.created) {
-            case let (l?, r?): return l < r
-            default: return lhs.fileName < rhs.fileName
-            }
+            ordersBefore(
+                (value: lhs.created, fileName: lhs.fileName),
+                (value: rhs.created, fileName: rhs.fileName)
+            )
         }
 
         for item in messageFiles {
@@ -539,10 +627,10 @@ final class OpenCodeSessionParser {
         }
 
         loaded.sort { lhs, rhs in
-            switch (lhs.start, rhs.start) {
-            case let (l?, r?): return l < r
-            default: return lhs.fileName < rhs.fileName
-            }
+            ordersBefore(
+                (value: lhs.start, fileName: lhs.fileName),
+                (value: rhs.start, fileName: rhs.fileName)
+            )
         }
 
         var parts = PartEvents()

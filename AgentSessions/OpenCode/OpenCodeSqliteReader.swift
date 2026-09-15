@@ -102,11 +102,21 @@ struct OpenCodeSqliteReader {
             let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
             let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
 
-            // Fetch message count and first model in a separate quick query
-            let (msgCount, modelID) = lightweightMessageMeta(db: db, sessionID: id)
-
-            let sessionTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
-            let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(sessionTitle)
+            let storedTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
+            let generatedDefaultTitle = OpenCodeSessionParser.isGeneratedDefaultSessionTitle(storedTitle)
+            // Fetch message count and first model in a separate quick query. Only
+            // timestamp-default rows also inspect their first user text part.
+            let (msgCount, modelID, firstUserTitle) = lightweightMessageMeta(
+                db: db,
+                sessionID: id,
+                includeFirstUserTitle: generatedDefaultTitle
+            )
+            let sessionTitle = OpenCodeSessionParser.effectiveSessionTitle(
+                storedTitle: storedTitle,
+                firstUserText: firstUserTitle
+            )
+            let customTitle = generatedDefaultTitle ? nil : storedTitle
+            let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(storedTitle)
             sessions.append(Session(
                 id: id,
                 source: .opencode,
@@ -123,7 +133,7 @@ struct OpenCodeSqliteReader {
                 lightweightCommands: nil,
                 parentSessionID: parentID,
                 subagentType: subagentType,
-                customTitle: sessionTitle
+                customTitle: customTitle
             ))
             step = sqlite3_step(stmt)
         }
@@ -131,22 +141,53 @@ struct OpenCodeSqliteReader {
         return sessions
     }
 
-    private static func lightweightMessageMeta(db: OpaquePointer?, sessionID: String) -> (count: Int, modelID: String?) {
-        let sql = "SELECT data FROM message WHERE session_id = ? ORDER BY time_created LIMIT 20;"
+    private static func lightweightMessageMeta(
+        db: OpaquePointer?,
+        sessionID: String,
+        includeFirstUserTitle: Bool
+    ) -> (count: Int, modelID: String?, firstUserTitle: String?) {
+        let orderedMessages = "ORDER BY time_created IS NULL, time_created, id"
+        let sql = "SELECT id, data FROM message WHERE session_id = ? \(orderedMessages) LIMIT 20;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, nil) }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, nil, nil) }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 
         var count = 0
         var modelID: String?
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            count += 1
-            if modelID == nil, let dataStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-               let data = dataStr.data(using: .utf8),
-               let msg = try? JSONDecoder().decode(OpenCodeSessionParser.MessageJSON.self, from: data) {
+        var firstUserMessageID: String?
+        var firstUserSummary: String?
+        func inspectCurrentMessage(_ statement: OpaquePointer?) {
+            let messageID = text(statement, 0)
+            guard let dataStr = sqlite3_column_text(statement, 1).map({ String(cString: $0) }),
+                  let data = dataStr.data(using: .utf8),
+                  let msg = try? JSONDecoder().decode(OpenCodeSessionParser.MessageJSON.self, from: data) else {
+                return
+            }
+            if modelID == nil {
                 modelID = msg.model?.modelID ?? msg.modelID
             }
+            if includeFirstUserTitle,
+               firstUserMessageID == nil,
+               msg.role?.lowercased() == "user" {
+                firstUserMessageID = messageID
+                firstUserSummary = OpenCodeSessionParser.preferredUserSummaryText(from: msg)
+            }
+        }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            count += 1
+            inspectCurrentMessage(stmt)
+        }
+        if includeFirstUserTitle, firstUserMessageID == nil {
+            let tailSQL = "SELECT id, data FROM message WHERE session_id = ? \(orderedMessages) LIMIT -1 OFFSET 20;"
+            var tailStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, tailSQL, -1, &tailStmt, nil) == SQLITE_OK {
+                sqlite3_bind_text(tailStmt, 1, (sessionID as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                while sqlite3_step(tailStmt) == SQLITE_ROW, firstUserMessageID == nil {
+                    inspectCurrentMessage(tailStmt)
+                }
+            }
+            sqlite3_finalize(tailStmt)
         }
         // Get actual total count
         let countSQL = "SELECT COUNT(*) FROM message WHERE session_id = ?;"
@@ -158,7 +199,21 @@ struct OpenCodeSqliteReader {
             }
             sqlite3_finalize(countStmt)
         }
-        return (count, modelID)
+        var firstUserTitle: String?
+        if let firstUserMessageID {
+            firstUserTitle = loadPartDicts(db: db, messageID: firstUserMessageID)
+                .compactMap { part -> String? in
+                    guard (part.dict["type"] as? String)?.lowercased() == "text" else { return nil }
+                    guard let text = part.dict["text"] as? String,
+                          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                    return text
+                }
+                .first
+            if firstUserTitle == nil {
+                firstUserTitle = firstUserSummary
+            }
+        }
+        return (count, modelID, firstUserTitle)
     }
 
     private static func queryFullSession(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
@@ -183,7 +238,7 @@ struct OpenCodeSqliteReader {
         let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
 
         // 2. Load all messages ordered by time_created
-        let msgSQL = "SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created;"
+        let msgSQL = "SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created IS NULL, time_created, id;"
         var msgStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, msgSQL, -1, &msgStmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(msgStmt) }
@@ -287,8 +342,15 @@ struct OpenCodeSqliteReader {
         }
 
         let nonMetaCount = events.filter { $0.kind != .meta }.count
-        let sessionTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
-        let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(sessionTitle)
+        let storedTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
+        let generatedDefaultTitle = OpenCodeSessionParser.isGeneratedDefaultSessionTitle(storedTitle)
+        let firstUserTitle = events.first(where: { $0.kind == .user })?.text
+        let sessionTitle = OpenCodeSessionParser.effectiveSessionTitle(
+            storedTitle: storedTitle,
+            firstUserText: firstUserTitle
+        )
+        let customTitle = generatedDefaultTitle ? nil : storedTitle
+        let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(storedTitle)
         return Session(
             id: id,
             source: .opencode,
@@ -305,12 +367,12 @@ struct OpenCodeSqliteReader {
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: parentID,
             subagentType: subagentType,
-            customTitle: sessionTitle
+            customTitle: customTitle
         )
     }
 
     private static func loadPartDicts(db: OpaquePointer?, messageID: String) -> [(id: String, dict: [String: Any], rawJSON: String)] {
-        let sql = "SELECT id, data FROM part WHERE message_id = ? ORDER BY time_created;"
+        let sql = "SELECT id, data FROM part WHERE message_id = ? ORDER BY time_created IS NULL, time_created, id;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }

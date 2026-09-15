@@ -277,6 +277,7 @@ final class DroidSessionParser {
 
         var events: [SessionEvent] = []
         var sessionID: String? = forcedID
+        var title: String? = nil
         var cwd: String? = nil
         var tmin: Date? = nil
         var tmax: Date? = nil
@@ -295,6 +296,7 @@ final class DroidSessionParser {
 
                 if normalizedType(type) == "sessionstart" {
                     if sessionID == nil { sessionID = obj["id"] as? String }
+                    if title == nil { title = obj["title"] as? String }
                     if cwd == nil { cwd = obj["cwd"] as? String }
                     return
                 }
@@ -484,7 +486,7 @@ final class DroidSessionParser {
             events: events,
             cwd: cwd,
             repoName: nil,
-            lightweightTitle: nil,
+            lightweightTitle: title,
             lightweightCommands: events.filter { $0.kind == .tool_call }.count
         )
     }

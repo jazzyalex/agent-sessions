@@ -3081,6 +3081,40 @@ final class SessionParserTests: XCTestCase {
 
         let metaTexts = parsed.events.filter { $0.kind == .meta }.compactMap { $0.text }
         XCTAssertTrue(metaTexts.contains(where: { $0.contains("OpenCode part: new-type") }), "Expected unknown OpenCode part type to be preserved as a meta event for JSON view")
+
+        // OpenCode's timestamp-only bootstrap name must not outrank the real
+        // first user prompt in either the lightweight or hydrated row.
+        let generatedTitleJSON = sessionJSON.replacingOccurrences(
+            of: "Quick check-in",
+            with: "New session - 2026-09-15T06:53:15.144Z"
+        )
+        try generatedTitleJSON.data(using: .utf8)!.write(to: sessionURL)
+        let generatedPreview = try XCTUnwrap(OpenCodeSessionParser.parseFile(at: sessionURL))
+        XCTAssertNil(generatedPreview.customTitle)
+        XCTAssertEqual(generatedPreview.lightweightTitle, "Hello there")
+        XCTAssertEqual(generatedPreview.listTitle, "Hello there")
+
+        let generatedFull = try XCTUnwrap(OpenCodeSessionParser.parseFileFull(at: sessionURL))
+        XCTAssertNil(generatedFull.customTitle)
+        XCTAssertEqual(generatedFull.lightweightTitle, "Hello there")
+        XCTAssertEqual(generatedFull.listTitle, "Hello there")
+        XCTAssertFalse(OpenCodeSessionParser.isGeneratedDefaultSessionTitle("New session - planning"))
+
+        // A blank summary title must not suppress the body fallback when older
+        // JSON storage has no text part for the first user message.
+        try fm.removeItem(at: userPartDir.appendingPathComponent("prt_user_0001.json"))
+        let summaryFallbackMessage = """
+        {
+          "id": "\(userMsgID)",
+          "sessionID": "\(sessionID)",
+          "role": "user",
+          "time": { "created": \(createdMillis + 10) },
+          "summary": { "title": "   ", "body": "Summary body fallback" }
+        }
+        """
+        try summaryFallbackMessage.data(using: .utf8)!.write(to: messageDir.appendingPathComponent("msg_0001.json"))
+        let summaryFallbackPreview = try XCTUnwrap(OpenCodeSessionParser.parseFile(at: sessionURL))
+        XCTAssertEqual(summaryFallbackPreview.listTitle, "Summary body fallback")
     }
 
     func testHermesUnwrapDelegateOutputDecodesDoubleEncodedSummary() {
@@ -3226,6 +3260,43 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("SQLite response") })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "grep" })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("Found 1 match") })
+
+        try executeSQLite("""
+        UPDATE session
+        SET title = 'New session - 2026-09-15T06:53:15.144Z'
+        WHERE id = 'ses_sqlite_demo';
+        """, at: dbURL)
+
+        // Keep the first user message beyond the existing 20-record model
+        // probe. Generated-title recognition must continue until it finds it.
+        let assistantPrelude = (0..<21).map { index in
+            """
+            INSERT INTO message (id, session_id, time_created, time_updated, data)
+            VALUES ('msg_prelude_\(index)', 'ses_sqlite_demo', \(1776369990000 + index), \(1776369990000 + index), '{"role":"assistant"}');
+            """
+        }.joined(separator: "\n")
+        try executeSQLite(assistantPrelude, at: dbURL)
+
+        let generatedPreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertNil(generatedPreview.customTitle)
+        XCTAssertEqual(generatedPreview.lightweightTitle, "Hello from SQLite")
+        XCTAssertEqual(generatedPreview.listTitle, "Hello from SQLite")
+
+        let generatedFull = try XCTUnwrap(
+            OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")
+        )
+        XCTAssertNil(generatedFull.customTitle)
+        XCTAssertEqual(generatedFull.lightweightTitle, "Hello from SQLite")
+        XCTAssertEqual(generatedFull.listTitle, "Hello from SQLite")
+
+        try executeSQLite("""
+        DELETE FROM part WHERE id = 'prt_user_text_sqlite';
+        UPDATE message
+        SET data = '{"role":"user","summary":{"title":"   ","body":"SQLite summary fallback"}}'
+        WHERE id = 'msg_user_sqlite';
+        """, at: dbURL)
+        let summaryFallbackPreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertEqual(summaryFallbackPreview.listTitle, "SQLite summary fallback")
     }
 
     func testOpenCodeSQLiteSearchIngestTracksIdentityUpdatesAndRemoval() async throws {
