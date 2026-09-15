@@ -91,7 +91,7 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertEqual(TranscriptTelemetryPresentation.costValue(telemetry).text, "—")
         XCTAssertEqual(TranscriptTelemetryPresentation.weeklyValue(telemetry).text, "—")
         XCTAssertEqual(TranscriptTelemetryPresentation.tokensValue(telemetry).text, "—")
-        XCTAssertEqual(TranscriptTelemetryPresentation.configurationValue(nil).text, "—")
+        XCTAssertEqual(TranscriptTelemetryPresentation.modelValue(nil).text, "—")
         // The reason is a tooltip, never layout.
         XCTAssertFalse(TranscriptTelemetryPresentation.weeklyValue(telemetry).help.isEmpty)
     }
@@ -235,6 +235,27 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertEqual(share?.cacheWriteTokens, 100)
         XCTAssertEqual(share?.reasoningTokens, 70)
         XCTAssertEqual(share?.cachedFraction ?? 0, 600.0 / 1100.0, accuracy: 0.0001)
+        XCTAssertEqual(TranscriptTelemetryPresentation.tokenSharePercent(
+            share?.cachedFraction ?? 0, locale: Locale(identifier: "en_US")), "55%")
+    }
+
+    func testTokenShareKeepsNonzeroSubPercentValuesAndAccessibilityCopy() {
+        let share = TelemetryTokenShare(cached: 996, fresh: 1, output: 3,
+                                        cacheWriteTokens: 0, reasoningTokens: 0)
+        let locale = Locale(identifier: "en_US")
+        XCTAssertEqual(TranscriptTelemetryPresentation.tokenSharePercent(share.freshFraction, locale: locale),
+                       "<1%")
+        let accessibility = TranscriptTelemetryPresentation.tokenShareAccessibilityText(share, locale: locale)
+        XCTAssertTrue(accessibility.contains("cached 100%"))
+        XCTAssertTrue(accessibility.contains("fresh <1%"))
+        XCTAssertTrue(accessibility.contains("output <1%"))
+    }
+
+    func testTokenShareMinimumWidthsFitWithinTheBar() {
+        let widths = TokenShareLayout.segmentWidths(fractions: [0.997, 0.001, 0.002], totalWidth: 100)
+        XCTAssertEqual(widths.reduce(0, +), 100, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(widths[1], 1)
+        XCTAssertGreaterThanOrEqual(widths[2], 1)
     }
 
     func testTokenShareIsUnavailableWithoutAComponentBreakdown() {
@@ -285,6 +306,16 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
     func testHistoryRowsAreEmptyWhenNothingWasRecorded() {
         XCTAssertTrue(TranscriptTelemetryPresentation.historyRows(
             telemetry: telemetry(events: []), blocks: []).isEmpty)
+    }
+
+    func testHistoryVisibilityRequiresAConfigurationChange() {
+        let started = SessionConfiguration(model: "gpt-5.6-sol", reasoningEffort: "medium",
+                                           observedAt: nil, anchorLine: 0,
+                                           provenance: .effectiveTurnContext)
+        XCTAssertFalse(TranscriptTelemetryPresentation.shouldShowHistory(
+            telemetry(events: [], initial: started, current: started)))
+        XCTAssertTrue(TranscriptTelemetryPresentation.shouldShowHistory(
+            telemetry(events: [], changes: [change(3)], initial: started, current: started)))
     }
 
     func testSessionInfoPresentationResolvesCompleteLocalizedCopy() {
@@ -340,6 +371,27 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
                                   priceTableRevision: 7)))
         XCTAssertEqual(value.text, "$12.37")
         XCTAssertTrue(value.help.contains("12.3655"))
+    }
+
+    func testCostPreservesSubCentPrecision() {
+        let value = TranscriptTelemetryPresentation.costValue(costOnlyTelemetry(
+            TelemetryCostEstimate(apiEquivalentUSD: 0.0042, unpricedModels: [],
+                                  missingPriceComponents: [], priceTableUpdated: "2026-09-10",
+                                  priceTableRevision: 7)), locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "$0.0042")
+        XCTAssertTrue(value.help.contains("Reference value"))
+    }
+
+    func testModelAndThinkingValuesStaySeparate() {
+        let configuration = SessionConfiguration(model: "gpt-5.6-sol", reasoningEffort: "high",
+                                                 observedAt: nil, anchorLine: 0,
+                                                 provenance: .effectiveTurnContext)
+        XCTAssertEqual(TranscriptTelemetryPresentation.modelValue(configuration).text, "gpt-5.6-sol")
+        XCTAssertEqual(TranscriptTelemetryPresentation.thinkingValue(configuration)?.text, "high")
+        XCTAssertNil(TranscriptTelemetryPresentation.thinkingValue(
+            SessionConfiguration(model: "gpt-5.6-sol", reasoningEffort: nil,
+                                 observedAt: nil, anchorLine: 0,
+                                 provenance: .effectiveTurnContext)))
     }
 
     func testUnpricedModelsAreNamedInHelpNotInTheValue() {

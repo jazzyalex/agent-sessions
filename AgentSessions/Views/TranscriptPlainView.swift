@@ -507,6 +507,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var telemetryOwner: String?
     @State private var telemetryLoading = false
     @State private var telemetryRefresh = 0
+    @State private var telemetryUpdatedAt: Date?
 
     private var telemetrySelectionKey: String {
         guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return "none" }
@@ -844,6 +845,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             richConfigJumpBlockIndex = index
                             richConfigJumpToken &+= 1
                         } : nil,
+                        lastUpdatedAt: telemetryOwner == telemetrySelectionKey ? telemetryUpdatedAt : nil,
                         refresh: { telemetryRefresh &+= 1 },
                         close: { showSessionInfo = false })
                         // A fixed width the panel never gives up. It used to be
@@ -872,6 +874,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let owner = telemetrySelectionKey
             sessionTelemetry = nil
             telemetryOwner = owner
+            telemetryUpdatedAt = nil
             guard let id = sessionID, let session = resolvedSessionForRender(id: id) else {
                 telemetryLoading = false
                 return
@@ -880,6 +883,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let result = await SessionTelemetryEngine.shared.telemetry(for: session)
             guard !Task.isCancelled, owner == telemetrySelectionKey else { return }
             sessionTelemetry = result
+            telemetryUpdatedAt = Date()
             telemetryLoading = false
         }
     }

@@ -159,10 +159,16 @@ enum TranscriptTelemetryPresentation {
 
     static func costValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         if let dollars = telemetry.costEstimate?.apiEquivalentUSD {
+            let text: String
+            if dollars > 0 && dollars < 0.01 {
+                text = dollars.formatted(.currency(code: "USD").precision(.fractionLength(4)).locale(locale))
+            } else {
+                text = dollars.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(locale))
+            }
             return Value(
-                text: dollars.formatted(.currency(code: "USD").precision(.fractionLength(2))),
+                text: text,
                 help: localized(
-                    "API-equivalent estimate at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Not a subscription charge.",
+                    "Estimated API price at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Reference value, not a subscription charge.",
                     locale: locale))
         }
         let reasons = (telemetry.costEstimate?.unpricedModels ?? [])
@@ -213,14 +219,44 @@ enum TranscriptTelemetryPresentation {
                      help: localized("Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.", locale: locale))
     }
 
-    static func configurationValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value {
-        guard let value, value.model != nil || value.reasoningEffort != nil else {
-            return .absent(localized("This transcript records no model or effort setting.", locale: locale))
+    static func modelValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value {
+        guard let model = value?.model else {
+            return .absent(localized("This transcript records no model setting.", locale: locale))
         }
-        return Value(text: configuration(value),
-                     help: value.provenance == .inferredFirstObservation
-                         ? localized("Inferred from the first record, not a session-start setting.", locale: locale)
-                         : localized("Recorded by the provider.", locale: locale))
+        return Value(text: model, help: configurationHelp(value, locale: locale))
+    }
+
+    /// nil means the provider never recorded a thinking setting, so the sidebar
+    /// omits the row rather than presenting a permanent absent value.
+    static func thinkingValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value? {
+        guard let effort = value?.reasoningEffort else { return nil }
+        return Value(text: effort, help: configurationHelp(value, locale: locale))
+    }
+
+    static func tokenSharePercent(_ fraction: Double, locale: Locale = .current) -> String {
+        guard fraction > 0 else { return fraction.formatted(.percent.precision(.fractionLength(0)).locale(locale)) }
+        if fraction < 0.01 { return localized("<1%", locale: locale) }
+        return fraction.formatted(.percent.precision(.fractionLength(0)).locale(locale))
+    }
+
+    static func tokenShareAccessibilityText(_ share: TelemetryTokenShare,
+                                            locale: Locale = .current) -> String {
+        let cached = tokenSharePercent(share.cachedFraction, locale: locale)
+        let fresh = tokenSharePercent(share.freshFraction, locale: locale)
+        let output = tokenSharePercent(share.outputFraction, locale: locale)
+        return localized(
+            "Token share: cached \(cached), fresh \(fresh), output \(output). \(tokenShareHelp(share, locale: locale))",
+            locale: locale)
+    }
+
+    static func shouldShowHistory(_ telemetry: SessionTelemetry) -> Bool {
+        !telemetry.configurationChanges.isEmpty
+    }
+
+    private static func configurationHelp(_ value: SessionConfiguration?, locale: Locale) -> String {
+        value?.provenance == .inferredFirstObservation
+            ? localized("Inferred from the first record, not a session-start setting.", locale: locale)
+            : localized("Recorded by the provider.", locale: locale)
     }
 
     static func rowAccessibilityLabel(label: String.LocalizationValue,
@@ -442,6 +478,7 @@ struct TranscriptTelemetryView: View {
     /// nil in Terminal and JSON modes, and while the transcript snapshot still
     /// belongs to a previously selected session.
     let jumpToBlock: ((Int) -> Void)?
+    let lastUpdatedAt: Date?
     let refresh: () -> Void
     let close: () -> Void
 
@@ -460,8 +497,10 @@ struct TranscriptTelemetryView: View {
                         facts(telemetry)
                         Divider()
                         activity(telemetry)
-                        Divider()
-                        history(telemetry)
+                        if TranscriptTelemetryPresentation.shouldShowHistory(telemetry) {
+                            Divider()
+                            history(telemetry)
+                        }
                         Divider()
                         basis(telemetry)
                     } else if loading {
@@ -478,37 +517,35 @@ struct TranscriptTelemetryView: View {
                 .padding(LayoutTokens.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
-            footer
         }
         .background(Surface.chrome)
     }
 
     private var header: some View {
-        HStack {
-            Text("Session info").font(.headline)
-            Spacer()
-            Button(action: close) { Image(systemName: "xmark") }
-                .buttonStyle(.plain)
-                .help("Hide Session info (⇧⌘I)")
-        }
-        .padding(LayoutTokens.md)
-    }
-
-    /// Refresh alone. "Estimates, not billing" was a standing caveat about the
-    /// numbers above it, and a caveat that never changes stops being read — the
-    /// same point is made where it applies, in the cost tooltip and in the
-    /// collapsed "How this was estimated" group.
-    private var footer: some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: LayoutTokens.sm) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Session info").font(.headline)
+                if let lastUpdatedAt {
+                    Text("Updated \(lastUpdatedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(SessionInfoType.caption)
+                        .foregroundStyle(.secondary)
+                        .help("Session info updates only when you select a session or choose Refresh.")
+                } else if loading {
+                    Text("Updating…")
+                        .font(SessionInfoType.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             Button("Refresh", action: refresh)
                 .buttonStyle(.link)
                 .font(SessionInfoType.row)
                 .disabled(loading)
+            Button(action: close) { Image(systemName: "xmark") }
+                .buttonStyle(.plain)
+                .help("Hide Session info (⇧⌘I)")
         }
-        .padding(.horizontal, LayoutTokens.md)
-        .padding(.vertical, LayoutTokens.sm)
+        .padding(LayoutTokens.md)
     }
 
     /// One hero (cost) and one subhero (tokens). Two large numbers read as two
@@ -524,7 +561,7 @@ struct TranscriptTelemetryView: View {
                     .font(SessionInfoType.hero)
                     .monospacedDigit()
                     .foregroundStyle(cost.text == "—" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                Text("API-equivalent")
+                Text("Estimated API price")
                     .font(SessionInfoType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -559,12 +596,12 @@ struct TranscriptTelemetryView: View {
     private func facts(_ telemetry: SessionTelemetry) -> some View {
         VStack(alignment: .leading, spacing: LayoutTokens.xs) {
             SessionInfoRow(label: isSubagent ? "Subagent model" : "Model",
-                           value: TranscriptTelemetryPresentation.configurationValue(
+                           value: TranscriptTelemetryPresentation.modelValue(
                             telemetry.currentConfiguration, locale: locale))
-            // Weekly quota keeps its row even when absent: the reader can act on
-            // it. Calibration is what is missing, and the tooltip names the fix.
-            SessionInfoRow(label: "Weekly quota",
-                           value: TranscriptTelemetryPresentation.weeklyValue(telemetry, locale: locale))
+            if let thinking = TranscriptTelemetryPresentation.thinkingValue(
+                telemetry.currentConfiguration, locale: locale) {
+                SessionInfoRow(label: "Thinking", value: thinking)
+            }
             // Delegated does NOT keep its row. A permanent em dash teaches the
             // reader to ignore the line, and for a provider that cannot record
             // delegated work the dash is permanent by construction.
@@ -595,7 +632,7 @@ struct TranscriptTelemetryView: View {
         let summary = TranscriptTelemetryPresentation.activity(telemetry, blocks: blocks)
         return SessionInfoSection(title: "Activity") {
             VStack(alignment: .leading, spacing: LayoutTokens.xs) {
-                SessionInfoRow(label: "Span", value: spanValue(summary))
+                SessionInfoRow(label: "Transcript span", value: spanValue(summary))
                 SessionInfoRow(label: "Turns", value: turnsValue(summary))
             }
         }
@@ -665,7 +702,7 @@ struct TranscriptTelemetryView: View {
                                                 help: copy("Full revision: \(cost.priceTableRevision)")))
                     SessionInfoRow(label: "Manifest", value: manifestValue(cost))
                 }
-                if let weekly = telemetry.weeklyQuotaEstimate {
+                if let weekly = telemetry.weeklyQuotaEstimate, weekly.status == .estimated {
                     // All five calibration fields stay visible: precision and the
                     // observed/reset timestamps are how a reader judges whether the
                     // percentage is worth anything, and a carried bootstrap ratio can

@@ -18,6 +18,25 @@ enum SessionInfoPalette {
     static let output = AnyShapeStyle(Color.orange)
 }
 
+/// Gives every nonzero segment a visible hairline without letting the three
+/// widths exceed the bar. The remainder stays proportional to measured usage.
+enum TokenShareLayout {
+    static func segmentWidths(fractions: [Double], totalWidth: CGFloat,
+                              minimumVisibleWidth: CGFloat = 1) -> [CGFloat] {
+        guard totalWidth > 0 else { return Array(repeating: 0, count: fractions.count) }
+        let nonzero = fractions.indices.filter { fractions[$0] > 0 }
+        guard !nonzero.isEmpty else { return Array(repeating: 0, count: fractions.count) }
+
+        let totalFraction = nonzero.reduce(0) { $0 + fractions[$1] }
+        let minimum = min(minimumVisibleWidth, totalWidth / CGFloat(nonzero.count))
+        let remainder = totalWidth - minimum * CGFloat(nonzero.count)
+        return fractions.map { fraction in
+            guard fraction > 0 else { return 0 }
+            return minimum + remainder * CGFloat(fraction / totalFraction)
+        }
+    }
+}
+
 struct SessionInfoSection<Content: View>: View {
     let title: LocalizedStringResource?
     @ViewBuilder let content: Content
@@ -73,46 +92,50 @@ struct TokenShareBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: LayoutTokens.xs) {
             GeometryReader { geometry in
+                let widths = TokenShareLayout.segmentWidths(
+                    fractions: [share.cachedFraction, share.freshFraction, share.outputFraction],
+                    totalWidth: geometry.size.width)
                 HStack(spacing: 0) {
-                    segment(share.cachedFraction, width: geometry.size.width, color: SessionInfoPalette.cached)
-                    segment(share.freshFraction, width: geometry.size.width, color: SessionInfoPalette.fresh)
-                    segment(share.outputFraction, width: geometry.size.width, color: SessionInfoPalette.output)
+                    segment(width: widths[0], color: SessionInfoPalette.cached)
+                    segment(width: widths[1], color: SessionInfoPalette.fresh)
+                    segment(width: widths[2], color: SessionInfoPalette.output)
                 }
             }
             .frame(height: 6)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
 
             HStack(spacing: LayoutTokens.md) {
-                legend("Cached", share.cached, SessionInfoPalette.cached)
-                legend("Fresh", share.fresh, SessionInfoPalette.fresh)
-                legend("Output", share.output, SessionInfoPalette.output)
+                legend("Cached", share.cachedFraction, SessionInfoPalette.cached)
+                legend("Fresh", share.freshFraction, SessionInfoPalette.fresh)
+                legend("Output", share.outputFraction, SessionInfoPalette.output)
             }
         }
         .help(Text(verbatim: helpText))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: helpText))
+        .accessibilityLabel(Text(verbatim: accessibilityText))
     }
 
     private var helpText: String {
         TranscriptTelemetryPresentation.tokenShareHelp(share, locale: locale)
     }
 
-    private func segment(_ fraction: Double, width: CGFloat, color: AnyShapeStyle) -> some View {
-        Rectangle()
-            .fill(color)
-            .frame(width: fraction > 0 ? max(1, width * fraction) : 0)
+    private var accessibilityText: String {
+        TranscriptTelemetryPresentation.tokenShareAccessibilityText(share, locale: locale)
     }
 
-    private func legend(_ name: LocalizedStringResource, _ tokens: Int, _ color: AnyShapeStyle) -> some View {
+    private func segment(width: CGFloat, color: AnyShapeStyle) -> some View {
+        Rectangle()
+            .fill(color)
+            .frame(width: width)
+    }
+
+    private func legend(_ name: LocalizedStringResource, _ fraction: Double, _ color: AnyShapeStyle) -> some View {
         HStack(spacing: LayoutTokens.xs) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(color)
                 .frame(width: 7, height: 7)
-            // One fraction digit: plain compactName rounds 17,892,480 to "18M",
-            // which reads as a suspiciously round number for a measured total.
-            (Text(name) + Text(verbatim: " " + tokens.formatted(
-                .number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale)
-            )))
+            (Text(name) + Text(verbatim: " " + TranscriptTelemetryPresentation.tokenSharePercent(
+                fraction, locale: locale)))
                 .font(SessionInfoType.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
