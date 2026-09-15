@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.3] - 2026-09-14
+
 ### Highlights
 - **Session Info: what a Codex or Claude session contained, beside its transcript.** Press Shift-Command-I or the gauge button to see what the session would cost at published API rates, its tokens split into cached, fresh, and output, the request count, the model and thinking effort, and how turns divided between you, the agent, and tools. Model and effort changes appear as markers in the transcript and as a history that jumps to each one. The price is an estimate, not your plan bill.
 
