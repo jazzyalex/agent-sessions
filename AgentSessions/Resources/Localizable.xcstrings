@@ -4930,19 +4930,19 @@
         }
       }
     },
-    "Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions.": {
-      "comment": "Power Tip description. Keep Command-1 unchanged as the literal keyboard shortcut.",
+    "Click Archived beside the search field, then choose Codex archived only to narrow to archived Desktop sessions.": {
+      "comment": "Power Tip description. Keep Codex unchanged as the product name.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions."
+            "value": "Click Archived beside the search field, then choose Codex archived only to narrow to archived Desktop sessions."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按 Codex 筛选器上的归档图标（Command-1），只查看已归档的 Desktop 会话。"
+            "value": "点按搜索栏旁的“已归档”，然后选择“仅 Codex 已归档”，只查看已归档的 Desktop 会话。"
           }
         }
       }
@@ -21381,19 +21381,19 @@
         }
       }
     },
-    "Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript.": {
-      "comment": "Power Tip description. Keep Claude and Command-2 unchanged as literal product and keyboard shortcut names.",
+    "Click Archived beside the search field, choose Claude archived only, then restore in place from the transcript.": {
+      "comment": "Power Tip description. Keep Claude unchanged as the product name.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript."
+            "value": "Click Archived beside the search field, choose Claude archived only, then restore in place from the transcript."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 Claude 筛选器上的归档图标（Command-2），然后在对话记录中原位恢复。"
+            "value": "点按搜索栏旁的“已归档”，选择“仅 Claude 已归档”，然后在对话记录中原位恢复。"
           }
         }
       }

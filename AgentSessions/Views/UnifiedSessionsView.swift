@@ -1900,8 +1900,8 @@ struct UnifiedSessionsView: View {
                 UnifiedProjectFilterBadgeView(unified: unified)
             }
         }
-        // Ranked by how often a control is reached for without thinking. Two
-        // action glyphs, three view toggles, and one menu for everything that is
+        // Ranked by how often a control is reached for without thinking. Three
+        // action glyphs, two view toggles, and one menu for everything that is
         // looked for rather than reflexed at — a named menu row is more
         // discoverable than an unlabelled glyph, not less.
         ToolbarItemGroup(placement: .automatic) {

@@ -288,7 +288,7 @@ ol li b{color:var(--ink); font-weight:600}
       <tr><td><b>Layout</b> / <b>Transcript pane</b> / <b>Session info</b></td><td>Daily</td><td class="keep">Stay, trailing, as one view group of three.</td></tr>
       <tr><td><b>Starred</b></td><td>Daily-ish</td><td class="move">Becomes a filter chip beside Search, where the other filters already live.</td></tr>
       <tr><td><b>Quota Meter</b> / <b>Statistics</b></td><td>Daily / occasional</td><td class="keep">Quota Meter stays in the toolbar; Statistics moves to the overflow menu.</td></tr>
-      <tr><td><b>Resume in CLI</b> / <b>Finder</b> / <b>Images</b></td><td>Daily / occasional</td><td class="keep">Resume stays in the toolbar (⌃⌘R). Finder (⇧⌘O) and Image Browser move to overflow. Resume continues the selected session in its original CLI, not a shell opened at its repo.</td></tr>
+      <tr><td><b>Resume in CLI</b> / <b>Finder</b> / <b>Images</b></td><td>Daily / occasional</td><td class="keep">Resume (⌃⌘R) and Image Browser stay in the toolbar. Finder (⇧⌘O) moves to overflow. Resume continues the selected session in its original CLI, not a shell opened at its repo.</td></tr>
       <tr><td><b>Live sessions only</b></td><td>Occasional</td><td class="move">Move to the main overflow menu; retain its current enabled and disabled states.</td></tr>
       <tr><td><b>Refresh</b></td><td>Rarely, and it shouldn't exist</td><td class="move">Overflow menu. The index is live; a visible Refresh button advertises that you don't trust it.</td></tr>
       <tr><td><b>Dark / Light</b>, <b>Settings</b></td><td>Rarely</td><td class="move">Settings window and the app menu. Appearance is a preference, not a toolbar verb.</td></tr>
@@ -434,7 +434,7 @@ ol li b{color:var(--ink); font-weight:600}
     <h2>If you only ship three things</h2>
     <ol>
       <li><b>Collapse the transcript toolbar to one row</b> and move view mode into the overflow menu. This is the single largest weight reduction on screen and touches no data.</li>
-      <li><b>Reduce the main toolbar to source pills, search, Quota Meter, Resume in CLI, three view toggles, and a menu.</b> Retain source overflow and move list-scoped controls into the list header.</li>
+      <li><b>Reduce the main toolbar to source pills, search, Quota Meter, Resume in CLI, Image Browser, two view toggles, and a menu.</b> Retain source overflow and keep the approved list-scoped controls in place.</li>
       <li><b>Pick one warm neutral for all chrome</b> so light mode stops looking like two apps stitched together, and drop rows that can never have data.</li>
     </ol>
     <p class="note" style="margin-top:18px">Everything here is presentation. The one item that needs a decision beyond taste is the Delegated row, because hiding it is a claim about the data: it is correct for Codex today because the accumulator cannot produce delegated records, and that would have to be revisited if Codex ever reports subagent usage.</p>

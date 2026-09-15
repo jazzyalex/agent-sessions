@@ -323,12 +323,12 @@ extension OnboardingContent {
                     Screen.Tip(
                         id: "search-codex-archives",
                         title: "Search Codex archives",
-                        description: "Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions."
+                        description: "Click Archived beside the search field, then choose Codex archived only to narrow to archived Desktop sessions."
                     ),
                     Screen.Tip(
                         id: "restore-claude-archives",
                         title: "Restore Claude archives",
-                        description: "Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript."
+                        description: "Click Archived beside the search field, choose Claude archived only, then restore in place from the transcript."
                     )
                 ]
             ),
