@@ -69,7 +69,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
-        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .droid] {
+        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline, .droid] {
             XCTAssertFalse(AgentEnablement.isEnabled(source, defaults: defaults),
                            "\(source.rawValue) is availability-gated and must stay off when unavailable")
         }

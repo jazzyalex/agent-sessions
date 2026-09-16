@@ -713,6 +713,41 @@
           "patterns": ["/\\.fx/sessions/[^/]+/checkpoint\\.json$"]
         }
       }
+    },
+    "cline": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["cline", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.cline.max_verified_version",
+      "upstream": [
+        { "kind": "npm_latest", "package": "cline" }
+      ],
+      "risk_keywords": {
+        "schema": [
+          "session", "manifest", "messages", "schema", "migration", "format",
+          "storage", "transcript", "sessionhistoryorigin", "cline_data_dir"
+        ],
+        "usage": []
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "cline_latest_session",
+          "roots": ["$CLINE_DATA_DIR/sessions", "~/.cline/data/sessions"],
+          "glob": "*/*.json",
+          "exclude_globs": ["*.messages.json"]
+        },
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "Cline CLI and Desktop share one session directory per id. The canonical <id>.json manifest must have an adjacent <id>.messages.json transcript; the manifest's absolute messages_path is never followed.",
+          "patterns": ["/sessions/([^/]+)/\\1\\.json$"],
+          "required_companion_files": [
+            {
+              "path": "{stem}.messages.json",
+              "must_parse": "cline_messages_v1",
+              "note": "Cline transcript support depends on an adjacent v1 transcript whose sessionId matches the v1 manifest session_id and whose messages field is an array. Missing, malformed, mismatched, or unsupported-version companions fail the monitoring contract. Following manifest.messages_path would escape the selected root."
+            }
+          ]
+        }
+      }
     }
   }
 }

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "session_id": "cline-desktop-continued",
+  "source": "desktop",
+  "pid": 4343,
+  "started_at": "2026-09-15T20:25:52.339Z",
+  "ended_at": "2026-09-15T20:36:50.694Z",
+  "exit_code": 0,
+  "status": "completed",
+  "interactive": true,
+  "provider": "cline",
+  "model": "gpt-5.6-terra",
+  "cwd": "/tmp/as-agent-fixture/project",
+  "workspace_root": "/tmp/as-agent-fixture/project",
+  "enable_tools": true,
+  "enable_spawn": false,
+  "enable_teams": false,
+  "prompt": "Review the fixture project.",
+  "metadata": {
+    "title": "Review the fixture project",
+    "sessionHistoryOrigin": {
+      "mode": "import",
+      "trigger": "codex"
+    },
+    "importedFrom": {
+      "tool": "codex",
+      "sourceSessionId": "redacted-source-session",
+      "sourcePath": "/tmp/as-agent-fixture/source-session.jsonl",
+      "importedAt": "2026-09-15T20:25:52.339Z",
+      "sourceProvider": "openai-native",
+      "sourceModel": "gpt-5.6-terra"
+    }
+  },
+  "messages_path": "/tmp/as-agent-fixture/cline/desktop_continued/cline-desktop-continued.messages.json"
+}

@@ -146,13 +146,25 @@ def check_marketing_contract():
     shared_phrase = "12 other coding agents"
     for name, contents in (("README.md", readme), ("docs/index.html", homepage)):
         if shared_phrase not in contents:
-            problems.append("%s must use the shared 15-source promise: %r." % (name, shared_phrase))
+            problems.append("%s must use the shared released 15-source promise: %r." % (name, shared_phrase))
+
+    meta_match = re.search(
+        r'<meta name="description"\s+content="([^"]+)"\s*/>', homepage, re.MULTILINE
+    )
+    released_meta_phrase = "12 other coding-agent histories"
+    if not meta_match or released_meta_phrase not in meta_match.group(1):
+        problems.append("docs/index.html primary meta description must use the released source count.")
+
+    if "Cline CLI and Cline Desktop support" not in readme:
+        problems.append("README.md must present Cline CLI and Desktop as released in 5.4.")
+    if "Cline<em>new in 5.4</em>" not in homepage or "Desktop &middot; CLI" not in homepage:
+        problems.append("docs/index.html must list released Cline Desktop and CLI support.")
 
     source_rows = re.findall(
         r'<tr(?! class="addrow")[^>]*><td class="name">', homepage
     )
-    if len(source_rows) != 15:
-        problems.append("docs/index.html support table has %d source rows; expected 15." % len(source_rows))
+    if len(source_rows) != 16:
+        problems.append("docs/index.html support table has %d rows; expected 15 active sources plus legacy Droid." % len(source_rows))
 
     if "quota-meter-runway-rate-small.gif" in readme:
         problems.append("README.md references the retired quota-meter runway GIF.")

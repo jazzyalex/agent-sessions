@@ -29,18 +29,16 @@ the repository or a real session as the preflight input.
 Every source is merged as ordinary reviewed code. Agent Sessions does not download source
 plugins, execute contributed agent code, or infer support from an installed binary.
 
-### Most-wanted evidence: Cline
+### Recently added evidence: Cline
 
 Among the two locally reviewed new candidates on 2026-08-17, [Cline](https://github.com/cline/cline)
 had the larger public GitHub-star signal than [Qwen Code](https://github.com/QwenLM/qwen-code).
 That dated comparison is a reproducible prioritization signal, not usage telemetry or a claim
-about every coding agent. Cline's [CLI reference](https://docs.cline.bot/cli/cli-reference)
-documents session history and resume,
-but this checkout has no local Cline installation or publishable fixture. If you use the
-current Cline CLI on macOS, the most useful contribution is a new-agent-source proposal that
-verifies the local storage root, SQLite schema/version, CLI-versus-IDE source marker, deletion
-behavior, and a synthetic or fully sanitized session fixture. Do not implement from public
-documentation alone.
+about every coding agent. The unreleased Agent Sessions 5.4 work adds Cline CLI and Desktop from locally observed
+manifest/messages pairs, redacted fixtures, parser/discovery tests, and weekly format monitoring.
+The storage layout is observed behavior rather than a stable public API. Current Cline users can
+help most by volunteering as a format steward and reporting drift through `./scripts/steward_check.py cline`;
+never attach raw sessions or hand-redacted transcripts.
 
 ## Translate Agent Sessions
 

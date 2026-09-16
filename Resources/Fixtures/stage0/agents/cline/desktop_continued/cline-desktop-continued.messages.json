@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "sessionId": "cline-desktop-continued",
+  "updated_at": "2026-09-15T20:36:50.694Z",
+  "origin": {
+    "source": "desktop",
+    "mode": "import",
+    "sessionId": "cline-desktop-continued",
+    "trigger": "codex"
+  },
+  "system_prompt": "You are a coding assistant working in a disposable fixture project.",
+  "agent": null,
+  "messages": [
+    {
+      "role": "user",
+      "ts": 1789503952339,
+      "id": "cline-desktop-user-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "Review the fixture project."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "ts": 1789503953000,
+      "id": "cline-desktop-user-2",
+      "content": [
+        {
+          "type": "text",
+          "text": "Focus on the parser contract."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "ts": 1789503960000,
+      "id": "cline-desktop-assistant-1",
+      "modelInfo": {
+        "id": "gpt-5.6-terra",
+        "provider": "openai-native"
+      },
+      "metrics": {
+        "inputTokens": 33474,
+        "outputTokens": 216,
+        "cacheReadTokens": 18176,
+        "cacheWriteTokens": 0,
+        "cost": 0
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The parser contract is consistent."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "ts": 1789504000000,
+      "id": "cline-desktop-user-3",
+      "content": [
+        {
+          "type": "text",
+          "text": "Check the follow-up path too."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "ts": 1789504010000,
+      "id": "cline-desktop-assistant-2",
+      "modelInfo": {
+        "id": "gpt-5.6-terra",
+        "provider": "openai-native"
+      },
+      "metrics": {
+        "inputTokens": 36764,
+        "outputTokens": 239,
+        "cacheReadTokens": 32512,
+        "cacheWriteTokens": 0,
+        "cost": 0
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The continued conversation remains ordered."
+        }
+      ]
+    }
+  ]
+}

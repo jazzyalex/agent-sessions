@@ -592,8 +592,65 @@ MATRIX_KEY_FOR_AGENT: dict[str, str] = {
     "qwen": "qwen_code",
     "devin": "devin_cli",
     "fx": "fx",
+    "cline": "cline",
     "droid": "droid",
 }
+
+
+def _verified_versions_by_agent(matrix_versions: dict[str, str]) -> dict[str, str | None]:
+    """Resolve configured agent names through the one shared matrix-key map."""
+    return {
+        agent_name: matrix_versions.get(matrix_key)
+        for agent_name, matrix_key in MATRIX_KEY_FOR_AGENT.items()
+    }
+
+
+def _cline_effective_roots(
+    configured_roots: list[str], environment: dict[str, str] | None = None
+) -> list[str]:
+    """Apply Cline's authoritative CLINE_DATA_DIR precedence to monitor roots."""
+    env = os.environ if environment is None else environment
+    data_dir = (env.get("CLINE_DATA_DIR") or "").strip()
+    if data_dir:
+        return [str(Path(os.path.expanduser(os.path.expandvars(data_dir))) / "sessions")]
+    return [root for root in configured_roots if "$CLINE_DATA_DIR" not in root]
+
+
+def _cline_pair_stat(manifest: Path) -> tuple[float, int] | None:
+    """Logical mtime/size for a Cline manifest and its adjacent transcript."""
+    paths = [manifest, manifest.with_name(f"{manifest.stem}.messages.json")]
+    stats: list[os.stat_result] = []
+    for path in paths:
+        try:
+            if path.is_file():
+                stats.append(path.stat())
+        except OSError:
+            continue
+    if not stats:
+        return None
+    return max(st.st_mtime for st in stats), sum(int(st.st_size) for st in stats)
+
+
+def _newest_cline_files(
+    roots: list[str], glob: str, count: int, exclude_globs: list[str] | None = None
+) -> list[Path]:
+    """Newest Cline manifests ranked by the logical manifest/messages pair."""
+    candidates: set[Path] = set()
+    for root_value in roots:
+        root = _expand_path(root_value)
+        if not root.exists():
+            continue
+        matches = root.glob(glob) if "*" in glob and "/" not in glob else root.rglob(glob)
+        candidates.update(matches)
+    scored: list[tuple[float, Path]] = []
+    for path in candidates:
+        if not path.is_file() or _path_matches_any_exclude(path, exclude_globs):
+            continue
+        logical = _cline_pair_stat(path)
+        if logical is not None:
+            scored.append((logical[0], path))
+    scored.sort(key=lambda item: (item[0], str(item[1])), reverse=True)
+    return [path for _, path in scored[:count]]
 
 
 def _newest_files(
@@ -716,6 +773,10 @@ def _check_required_companion_files(
     the file to load as a JSON object — for Grok that is the difference between
     "sessions disappear" (missing) and "every session loses its id, cwd, title and
     both timestamps" (present but unparseable), and both are app-visible breaks.
+    A path may contain `{stem}` or `{name}` when the companion repeats the sampled
+    filename, such as Cline's `<id>.json` plus `<id>.messages.json`.
+    `cline_messages_v1` additionally checks both v1 contract numbers, matching
+    session ids, and an array-valued `messages` field.
     """
     if not isinstance(entries_cfg, list) or not entries_cfg:
         return []
@@ -734,8 +795,12 @@ def _check_required_companion_files(
             continue
 
         must_parse = entry.get("must_parse")
-        target = base / rel
+        local_path = Path(local_file)
+        rendered_rel = rel.replace("{stem}", local_path.stem).replace("{name}", local_path.name)
+        target = base / rendered_rel
         record: dict[str, Any] = {"path": rel, "resolved": str(target)}
+        if rendered_rel != rel:
+            record["rendered_path"] = rendered_rel
         if must_parse is not None:
             record["must_parse"] = must_parse
 
@@ -749,6 +814,24 @@ def _check_required_companion_files(
             record["ok"] = err is None
             if err:
                 record["error"] = err
+        elif must_parse == "cline_messages_v1":
+            manifest, manifest_error = _read_json_object(local_path)
+            transcript, transcript_error = _read_json_object(target)
+            error = manifest_error or transcript_error
+            if error is None and manifest is not None and transcript is not None:
+                manifest_id = manifest.get("session_id")
+                transcript_id = transcript.get("sessionId") or transcript.get("session_id")
+                if manifest.get("version") != 1 or transcript.get("version") != 1:
+                    error = "unsupported_contract_version"
+                elif not isinstance(manifest_id, str) or not manifest_id:
+                    error = "missing_manifest_session_id"
+                elif transcript_id != manifest_id:
+                    error = "session_id_mismatch"
+                elif not isinstance(transcript.get("messages"), list):
+                    error = "messages_not_array"
+            record["ok"] = error is None
+            if error:
+                record["error"] = error
         else:
             # An unrecognized rule must fail loudly. Treating it as "no requirement"
             # would turn a config typo into exactly the silent pass this check exists
@@ -1851,6 +1934,79 @@ def _fx_checkpoint_schema_fingerprint(path: Path) -> dict[str, Any]:
     }
 
 
+def _cline_session_schema_fingerprint(path: Path) -> dict[str, Any]:
+    """Fingerprint Cline's manifest and its identity-matched transcript together."""
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        keys = type_keys.setdefault(event_type, set())
+        for key, value in obj.items():
+            if value is not None:
+                keys.add(key)
+
+    manifest, manifest_error = _read_json_object(path)
+    if manifest is not None:
+        _add("manifest", manifest)
+        metadata = manifest.get("metadata")
+        if isinstance(metadata, dict):
+            _add("manifest.metadata", metadata)
+            for nested_key in ("sessionHistoryOrigin", "importedFrom", "git", "checkpoint", "usage", "aggregateUsage"):
+                nested = metadata.get(nested_key)
+                if isinstance(nested, dict):
+                    _add(f"manifest.metadata.{nested_key}", nested)
+
+    transcript_path = path.with_name(f"{path.stem}.messages.json")
+    transcript, transcript_error = _read_json_object(transcript_path)
+    contract_errors: list[str] = []
+    if manifest is not None and manifest.get("version") != 1:
+        contract_errors.append("unsupported_manifest_version")
+    if transcript is not None:
+        _add("transcript", transcript)
+        if transcript.get("version") != 1:
+            contract_errors.append("unsupported_transcript_version")
+        manifest_id = manifest.get("session_id") if manifest is not None else None
+        transcript_id = transcript.get("sessionId") or transcript.get("session_id")
+        if not isinstance(manifest_id, str) or not manifest_id:
+            contract_errors.append("missing_manifest_session_id")
+        elif transcript_id != manifest_id:
+            contract_errors.append("session_id_mismatch")
+        if not isinstance(transcript.get("messages"), list):
+            contract_errors.append("messages_not_array")
+        origin = transcript.get("origin")
+        if isinstance(origin, dict):
+            _add("transcript.origin", origin)
+        for message in transcript.get("messages") if isinstance(transcript.get("messages"), list) else []:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            role_bucket = role if isinstance(role, str) and role else "unknown"
+            _add(f"message.{role_bucket}", message)
+            for nested_key in ("modelInfo", "metrics"):
+                nested = message.get(nested_key)
+                if isinstance(nested, dict):
+                    _add(f"message.{role_bucket}.{nested_key}", nested)
+            for block in message.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                bucket = block_type if isinstance(block_type, str) and block_type else "unknown"
+                _add(f"content.{bucket}", block)
+
+    parse_errors = int(manifest_error is not None) + int(transcript_error is not None) + len(contract_errors)
+    return {
+        "file": str(path),
+        "transcript_file": str(transcript_path) if transcript_error is None else None,
+        "manifest_error": manifest_error,
+        "transcript_error": transcript_error,
+        "contract_errors": contract_errors,
+        "type_counts": {key: type_counts[key] for key in sorted(type_counts)},
+        "type_keys": {key: sorted(type_keys[key]) for key in sorted(type_keys)},
+        "parse_errors": parse_errors,
+    }
+
+
 def _devin_sqlite_latest_session_schema_fingerprint(
     db_path: Path, *, max_nodes: int
 ) -> dict[str, Any]:
@@ -2201,6 +2357,16 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(base)
             if bp.exists():
                 fps.append(_fx_checkpoint_schema_fingerprint(bp))
+    elif agent_name == "cline":
+        # The matrix lists both files in each fixture pair. The manifest is the
+        # canonical session file; its fingerprinter opens the adjacent transcript.
+        for p in filtered:
+            base = p.split(" (")[0].strip()
+            if not base.endswith(".json") or base.endswith(".messages.json"):
+                continue
+            bp = Path(base)
+            if bp.exists():
+                fps.append(_cline_session_schema_fingerprint(bp))
     elif agent_name == "opencode":
         for p in filtered:
             if not p.endswith(".json"):
@@ -3676,23 +3842,7 @@ def main(argv: list[str]) -> int:
 
     matrix_versions = _read_verified_versions_from_matrix(Path("docs/agent-support/agent-support-matrix.yml"))
     matrix_obj = Path("docs/agent-support/agent-support-matrix.yml").read_text(encoding="utf-8", errors="replace")
-    # Map config agent names to matrix keys
-    verified_map = {
-        "codex": matrix_versions.get("codex_cli"),
-        "claude": matrix_versions.get("claude_code"),
-        "opencode": matrix_versions.get("opencode"),
-        "hermes": matrix_versions.get("hermes"),
-        "antigravity": matrix_versions.get("antigravity"),
-        "copilot": matrix_versions.get("copilot_cli"),
-        "openclaw": matrix_versions.get("openclaw"),
-        "cursor": matrix_versions.get("cursor"),
-        "pi": matrix_versions.get("pi"),
-        "kimi": matrix_versions.get("kimi_code"),
-        "grok": matrix_versions.get("grok_cli"),
-        "qwen": matrix_versions.get("qwen_code"),
-        "devin": matrix_versions.get("devin_cli"),
-        "fx": matrix_versions.get("fx"),
-    }
+    verified_map = _verified_versions_by_agent(matrix_versions)
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
     evidence: dict[str, list[str]] = {}
@@ -3945,6 +4095,31 @@ def main(argv: list[str]) -> int:
                     newest = _newest_file(roots, glob)
                     if newest:
                         local_fp = _fx_checkpoint_schema_fingerprint(newest)
+                elif kind == "cline_latest_session":
+                    roots = _cline_effective_roots(roots)
+                    exclude_cfg = local_schema_cfg.get("exclude_globs")
+                    exclude_globs = [g for g in exclude_cfg if isinstance(g, str)] if isinstance(exclude_cfg, list) else None
+                    recent = _newest_cline_files(
+                        roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
+                    )
+                    if recent:
+                        newest = recent[0]
+                        sampled_fps = [_cline_session_schema_fingerprint(path) for path in recent]
+                        local_fp = sampled_fps[0]
+                        local_fp["type_keys"] = _merge_type_keys(sampled_fps)
+                        merged_counts: dict[str, int] = {}
+                        for fingerprint in sampled_fps:
+                            for event_type, count in (fingerprint.get("type_counts") or {}).items():
+                                merged_counts[event_type] = merged_counts.get(event_type, 0) + int(count)
+                        local_fp["type_counts"] = dict(sorted(merged_counts.items()))
+                        local_fp["parse_errors"] = sum(
+                            int(fingerprint.get("parse_errors") or 0) for fingerprint in sampled_fps
+                        )
+                        local_fp["sampled_files"] = [str(path) for path in recent]
+                        logical_stat = _cline_pair_stat(newest)
+                        if logical_stat is not None:
+                            local_fp["logical_mtime_epoch"] = logical_stat[0]
+                            local_fp["logical_size"] = logical_stat[1]
                 elif kind == "cursor_transcript_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)
@@ -4046,8 +4221,11 @@ def main(argv: list[str]) -> int:
             if isinstance(weekly_details, dict):
                 local_schema_obj = weekly_details.get("local_schema")
                 if isinstance(local_schema_obj, dict):
+                    logical_mtime = local_schema_obj.get("logical_mtime_epoch")
+                    if isinstance(logical_mtime, (int, float)):
+                        sample_mtime_epoch = float(logical_mtime)
                     fpath = local_schema_obj.get("file")
-                    if isinstance(fpath, str):
+                    if sample_mtime_epoch is None and isinstance(fpath, str):
                         try:
                             st = os.stat(fpath)
                             sample_mtime_epoch = float(st.st_mtime)

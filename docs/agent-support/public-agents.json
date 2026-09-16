@@ -13,6 +13,7 @@
     { "id": "grok", "public_name": "Grok CLI" },
     { "id": "qwen", "public_name": "Qwen Code" },
     { "id": "devin", "public_name": "Devin CLI" },
-    { "id": "fx", "public_name": "fx" }
+    { "id": "fx", "public_name": "fx" },
+    { "id": "cline", "public_name": "Cline" }
   ]
 }

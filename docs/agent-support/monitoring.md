@@ -17,11 +17,13 @@ This is intentionally **non-destructive**:
 
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 12 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, `qwen` (release watch + minimal probes + schema fingerprints).
+- Weekly: all 15 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, `qwen`, `devin`, `fx`, `cline` (release watch + local schema fingerprints; minimal probes where configured). Cline release/version comparison covers the CLI; Desktop currently contributes shared-format evidence but has no automated upstream version channel.
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
 - A contract may declare `required_companion_files` — sidecars that must sit beside the sampled
   transcript for the app to discover the session at all. Entries are relative to the transcript's
   own directory and are either a bare path (existence) or `{path, must_parse: "json_object", note}`.
+  `{stem}` and `{name}` expand from the sampled file for identity-matched companions such as
+  Cline's `<id>.messages.json` beside `<id>.json`.
   A breach fails the contract, which means `severity: high`, `verdict: monitoring_broken`, and a
   `probe_or_discovery_failed` blocker. Grok declares `summary.json`: `GrokSessionDiscovery` skips
   any session directory that lacks it, so its loss removes every Grok session from the app while

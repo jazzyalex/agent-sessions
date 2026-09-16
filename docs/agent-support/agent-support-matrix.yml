@@ -1,8 +1,9 @@
-agent_sessions_version: "5.2"
-as_of_commit: "cb723ae"
-as_of_date: 2026-09-10
+agent_sessions_version: "5.4-unreleased"
+as_of_commit: "00dd21de+working-tree"
+as_of_date: 2026-09-15
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-09-15: added Cline CLI 3.0.62 and Cline Desktop 0.0.28 shared local-session support from a 13-session schema survey (12 CLI, 1 Desktop), redacted manifest/messages fixtures, 44 focused Cline tests, a clean Debug build, and a clean 2,873-test full xcresult (2,870 passed, 3 skipped, 0 failed). Weekly agent_watch monitoring fingerprints both files and enforces their v1 identity-matched companion contract using logical pair freshness. Resume, live status, images, subagent hierarchy, and telemetry remain unsupported. This matrix line describes the uncommitted working tree based on 00dd21de."
   - "2026-09-10 transcript telemetry follow-up: verified installed Codex 0.154.0 (scripts/probe_scan_output/agent_watch/20260910-202530-842309Z-p61010-prebump/report.json) and Claude 2.1.267 (scripts/probe_scan_output/agent_watch/20260910-202431-895555Z-p60050-prebump/report.json) from fresh prebump sessions. Their last current upstream checks named the same versions; the final weekly pass was conservatively installed-only because those latest-version reads came from cache. Claude assistant.perTurnEffort now drives the effective effort timeline when populated; six additive attachment records are internal metadata/noise. Codex's additive task_complete.error.codex_error_info.http_connection_failed flag is internal error metadata/noise. Normal fixture coverage for both agents was refreshed from all local sessions. Final weekly report: scripts/probe_scan_output/agent_watch/20260910-202619-049835Z-p61272/report.json."
   - "Snapshot taken at the 2026-08-21 format check. Qwen Code support (ef4e9253) shipped in v5.0 and is recorded in the 2026-08-17 ledger entry; the 2026-08-21 check is recorded under agent_sessions_version 5.0.1."
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -294,3 +295,33 @@ agents:
       - "AgentSessionsTests/FxSessionParserTests.swift"
       - "AgentSessionsTests/FxSessionDiscoveryTests.swift"
       - "AgentSessionsTests/FxIntegrationSurfaceTests.swift"
+  cline:
+    max_verified_version: "3.0.62"
+    desktop_max_verified_version: "0.0.28"
+    version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.28 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
+    support_scope: "tier-2 shared local manifest/messages transcript discovery for Cline CLI and Desktop, browsing, search, Preferences controls, colors, saved-session backfill, and analytics source filtering"
+    unsupported_surfaces:
+      - "resume/copy-resume (the CLI's --id semantics were not proven as a safe existing-session resume contract)"
+      - "live/active status"
+      - "image extraction"
+      - "usage/rate-limit tracking"
+      - "subagent hierarchy"
+    notes:
+      - "Both installed surfaces write the same observed two-file session format under ~/.cline/data/sessions/<session-id>/ (or $CLINE_DATA_DIR/sessions): <session-id>.json is the manifest and <session-id>.messages.json is the transcript. This is local evidence, not a stable public Cline API contract. The manifest session_id is authoritative, a conflicting transcript sessionId is rejected, and the absolute messages_path is never followed."
+      - "A schema-only survey covered 13 local sessions: 12 source=cli and 1 source=desktop. The Desktop session was a continued imported conversation; the CLI fixture covers text, thinking, tool_use, tool_result, model, workspace, title, and millisecond event timestamps."
+      - "Preview and full-parse limits, displayed size, focused-session invalidation, search freshness, and saved-session archives cover the manifest/messages pair, so transcript growth is not hidden behind an unchanged manifest and archived transcripts remain readable."
+      - "Weekly release/version comparison currently covers Cline CLI. Desktop has no automated upstream version channel; its verified bundle version is recorded separately, while shared-format drift is monitored from recent CLI and Desktop session pairs."
+    evidence_docs:
+      - "https://docs.cline.bot/cli/cli-reference"
+      - "https://docs.cline.bot/getting-started/config"
+      - "https://cline.bot/"
+    evidence_captures:
+      - "local schema-only survey of ~/.cline/data/sessions and ~/.cline/data/db/sessions.db (13 sessions; no prompt/output text retained)"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.json (+ adjacent .messages.json)"
+      - "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.json (+ adjacent .messages.json)"
+    evidence_tests:
+      - "AgentSessionsTests/ClineSessionParserTests.swift"
+      - "AgentSessionsTests/ClineSessionDiscoveryTests.swift"
+      - "AgentSessionsTests/ClineIntegrationTests.swift"
+      - "scripts/tests/test_cline_monitoring.py"

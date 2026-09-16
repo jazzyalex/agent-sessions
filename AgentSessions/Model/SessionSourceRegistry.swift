@@ -43,7 +43,8 @@ enum SessionSourceRegistry {
         .grok,
         .qwen,
         .devin,
-        .fx
+        .fx,
+        .cline
     ])
 
     /// Identity parsing and URL classification are one capability. Keeping the closures

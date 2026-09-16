@@ -34,15 +34,15 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
-## What's New in 5.3
+## What's New in 5.4
 
-- **Session Info** for Codex and Claude: press ⇧⌘I to see a session's API-equivalent price, cached/fresh/output token mix, requests, model and thinking effort, and turn counts. Model and effort changes form a history that jumps to each point in the transcript.
-- **A calmer toolbar.** Analytics, Reindex, layout, and Settings moved into the ⋯ menu; Saved and Archived are chips in the search field; the transcript toolbar is one row.
-- Search Sessions also opens with ⇧⌘F, large active transcripts stay responsive, and opening a Codex parent session keeps its subagent tree intact.
+- **Cline CLI and Cline Desktop support.** Browse and search local prompts, responses, thinking, and tool activity from both Cline surfaces, with clear origin labels and Cline-specific Settings controls.
+- **More reliable session retrieval.** Project filtering distinguishes same-named clones, active searches refresh cleanly, displayed titles remain searchable, and cache hydration preserves confirmed sessions when a source is temporarily unavailable.
+- **Clearer session titles.** Claude, OpenClaw, OpenCode, and Droid keep recognizable source-aware titles after full transcript loading and search prewarming.
 
 ## Supported sources
 
-Agent Sessions reads 14 active agent formats plus legacy Droid sessions. Capabilities differ by source and installed CLI version.
+Agent Sessions 5.4 reads 15 active agent formats plus legacy Droid sessions. Capabilities differ by source and installed CLI version.
 
 | Source | Browse and search | Resume |
 |---|---:|---:|
@@ -60,6 +60,7 @@ Agent Sessions reads 14 active agent formats plus legacy Droid sessions. Capabil
 | Qwen Code | Yes | Active sessions; end-to-end unverified |
 | Devin CLI | Yes | Supported active sessions |
 | fx | Yes | Command plan tested; interactive reopen unverified |
+| Cline CLI and Desktop | Yes | No |
 | Droid | Legacy sessions | No active monitoring |
 
 Format-maintenance owners, verification dates, and tested versions are in [STEWARDS.md](STEWARDS.md). [Session-Bench](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme-bench) compares ten agents across 20 evidence-backed format gates.

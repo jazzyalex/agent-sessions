@@ -3,13 +3,13 @@ import XCTest
 
 /// Every source must state, explicitly, what telemetry it can and cannot produce.
 /// The field is non-optional on `SessionSourceDescriptor` so the compiler forces a
-/// declaration for each of the 15 sources — a new source cannot silently inherit
+/// declaration for every source — a new source cannot silently inherit
 /// "no telemetry" and then be mistaken for a source that was audited and found
 /// wanting.
 final class TelemetryCapabilityTests: XCTestCase {
 
     func testEverySourceDeclaresCapabilities() {
-        XCTAssertEqual(SessionSource.allCases.count, 15,
+        XCTAssertEqual(SessionSource.allCases.count, 16,
                        "A source was added or removed — update the telemetry capability table too")
         for source in SessionSource.allCases {
             _ = SessionSourceRegistry.descriptor(for: source).telemetry

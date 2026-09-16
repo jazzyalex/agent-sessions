@@ -54,7 +54,8 @@ final class ViewRegistryDerivationTests: XCTestCase {
             (.grok, "Grok CLI", nil),
             (.qwen, "Qwen Code", nil),
             (.devin, "Devin CLI", nil),
-            (.fx, "fx", nil)
+            (.fx, "fx", nil),
+            (.cline, "Cline", nil)
         ]
 
         XCTAssertEqual(derived.count, expected.count)
@@ -86,6 +87,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
         }
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .droid).resumeAgentLabel)
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .openclaw).resumeAgentLabel)
+        XCTAssertNil(SessionSourceRegistry.descriptor(for: .cline).resumeAgentLabel)
     }
 
     // MARK: - Preferences panes (K13)
@@ -133,7 +135,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
     func testSidebarAgentTabOrderIsFrozen() {
         XCTAssertEqual(PreferencesTab.sidebarAgentTabs,
                        [.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI,
-                        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermesCLI, .openClawCLI, .fx])
+                        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermesCLI, .openClawCLI, .fx, .cline])
     }
 
     /// Every pane a source maps to must have a non-empty title and icon: the sidebar rows

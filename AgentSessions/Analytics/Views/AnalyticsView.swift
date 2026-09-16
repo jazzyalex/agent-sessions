@@ -21,6 +21,7 @@ struct AnalyticsView: View {
     @AppStorage(QwenPreferencesKey.enabled) private var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @AppStorage(DevinPreferencesKey.enabled) private var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @AppStorage(FxPreferencesKey.enabled) private var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
+    @AppStorage(ClinePreferencesKey.enabled) private var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
     // OpenClaw and Cursor keep the literal defaults PreferencesView and
     // UnifiedSessionsView already use for these keys. The default only applies
     // before `seedIfNeeded` writes an explicit value, and two views disagreeing
@@ -60,6 +61,7 @@ struct AnalyticsView: View {
         case .qwen:        return qwenAgentEnabled
         case .devin:       return devinAgentEnabled
         case .fx:          return fxAgentEnabled
+        case .cline:       return clineAgentEnabled
         }
     }
 

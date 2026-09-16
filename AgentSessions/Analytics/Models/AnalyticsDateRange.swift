@@ -76,6 +76,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
     case qwenOnly = "Qwen Only"
     case devinOnly = "Devin Only"
     case fxOnly = "fx Only"
+    case clineOnly = "Cline Only"
 
     var id: String { rawValue }
 
@@ -97,6 +98,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
         case .qwenOnly: return "Qwen Only"
         case .devinOnly: return "Devin Only"
         case .fxOnly: return "fx Only"
+        case .clineOnly: return "Cline Only"
         }
     }
 
@@ -148,6 +150,8 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
             return source == .devin
         case .fxOnly:
             return source == .fx
+        case .clineOnly:
+            return source == .cline
         }
     }
 }

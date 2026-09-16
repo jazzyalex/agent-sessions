@@ -66,9 +66,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             inactiveOnBattery: 60
         )
     ]
-    private struct FileSignature: Equatable {
+    /// Focused-monitor freshness token. Internal (not private) so the provider-neutral
+    /// logical-signature helper below is unit-testable per source.
+    struct FileSignature: Equatable {
         let path: String
         let modifiedAt: Date
+        let size: Int64
     }
 
     private struct FocusedSessionContext: Equatable {
@@ -269,7 +272,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Which providers were switched on at the instant an aggregation pass was assembled.
     ///
     /// Keyed by source rather than twelve named `Bool`s: the aggregation pipeline reads
-    /// enablement as a dictionary now, so a thirteenth source needs no field here at all.
+    /// enablement as a dictionary now, so a new source needs no field here at all.
     /// An absent key reads as disabled, which is also what the empty snapshot means.
     struct AgentEnablementSnapshot {
         let enabled: [SessionSource: Bool]
@@ -501,6 +504,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeFx: Bool = UnifiedSessionIndexer.storedInclude(.fx) {
         didSet { applyInclude(.fx, includeFx) }
     }
+    @Published var includeCline: Bool = UnifiedSessionIndexer.storedInclude(.cline) {
+        didSet { applyInclude(.cline, includeCline) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -524,6 +530,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @Published private(set) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @Published private(set) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
+    @Published private(set) var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -557,7 +564,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     /// Every source's type-erased pipeline surface, from the catalog this indexer was built
     /// with. This replaces the twelve concrete indexer properties: nothing below names a
-    /// provider class any more, so a thirteenth source adds no line to this file.
+    /// provider class any more, so a new source adds no line to this file.
     private let handles: [SessionSource: ProviderHandle]
 
     /// Registry order — the order every array fold below emits in, the order
@@ -1021,6 +1028,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.qwen) != qwenAgentEnabled { qwenAgentEnabled = value(.qwen) }
         if value(.devin) != devinAgentEnabled { devinAgentEnabled = value(.devin) }
         if value(.fx) != fxAgentEnabled { fxAgentEnabled = value(.fx) }
+        if value(.cline) != clineAgentEnabled { clineAgentEnabled = value(.cline) }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -1325,9 +1333,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         return DirectorySignatureSnapshot.from(allSignatures)
     }
 
-    private func fileSignature(atPath path: String) -> FileSignature? {
+    private static func fileSignature(atPath path: String) -> FileSignature? {
         let url = URL(fileURLWithPath: path)
-        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey])
         guard values?.isRegularFile == true else { return nil }
         var modifiedAt = values?.contentModificationDate ?? .distantPast
         // SQLite in WAL mode (OpenCode, Hermes, Cursor) appends to `-wal` and only touches
@@ -1342,7 +1350,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
             }
         }
-        return FileSignature(path: path, modifiedAt: modifiedAt)
+        let size = Int64(values?.fileSize ?? 0)
+        return FileSignature(path: path, modifiedAt: modifiedAt, size: size)
     }
 
     private func detectLatestClaudeSignature() -> FileSignature? {
@@ -1425,7 +1434,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func mostRecentSignature(in directories: [URL], fileLimitPerDirectory: Int) -> FileSignature? {
         let fm = FileManager.default
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
         let scanCap = fileLimitPerDirectory * 10
         var newest: FileSignature? = nil
 
@@ -1450,7 +1459,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                 matched += 1
                 if matched > fileLimitPerDirectory { break }
                 let modifiedAt = values?.contentModificationDate ?? .distantPast
-                let signature = FileSignature(path: file.path, modifiedAt: modifiedAt)
+                let signature = FileSignature(path: file.path,
+                                              modifiedAt: modifiedAt,
+                                              size: Int64(values?.fileSize ?? 0))
                 if newest == nil || signature.modifiedAt > newest!.modifiedAt {
                     newest = signature
                 }
@@ -1468,16 +1479,18 @@ final class UnifiedSessionIndexer: ObservableObject {
             return nil
         }
         guard let items = try? fm.contentsOfDirectory(at: folder,
-                                                      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                                                      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey],
                                                       options: [.skipsHiddenFiles]) else {
             return nil
         }
 
         var newest: FileSignature? = nil
         for file in items where predicate(file) {
-            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey])
             guard values?.isRegularFile == true else { continue }
-            let signature = FileSignature(path: file.path, modifiedAt: values?.contentModificationDate ?? .distantPast)
+            let signature = FileSignature(path: file.path,
+                                          modifiedAt: values?.contentModificationDate ?? .distantPast,
+                                          size: Int64(values?.fileSize ?? 0))
             if newest == nil || signature.modifiedAt > newest!.modifiedAt {
                 newest = signature
             }
@@ -1756,27 +1769,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                                                 service: SearchIngestService,
                                                 providerHandle: ProviderHandle) async {
         let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?) in
-            let files = providerHandle.currentSessions().compactMap { session -> SearchIngestService.FileRef? in
-                // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
-                // transcript) have no content for CursorSessionParser.parseFileFull to
-                // read: JSONLReader silently yields zero events on a non-JSONL file, so
-                // the parser returns an empty-but-non-nil Session that would otherwise get
-                // upserted as search-ready and never revisited. Skip them here, same
-                // detection idiom as CursorSessionIndexer.isDBOnlySession.
-                if CursorSessionIndexer.isDBOnlySession(session) { return nil }
-                let url = URL(fileURLWithPath: session.filePath)
-                guard let stat = SessionFileStat.from(url) else { return nil }
-                let descriptor = session.source.descriptor
-                let usesIdentity = descriptor.parseFullByIdentity != nil
-                    && descriptor.searchUsesIdentityAtURL?(url) == true
-                return SearchIngestService.FileRef(path: session.filePath,
-                                                   mtime: stat.mtime,
-                                                   size: stat.size,
-                                                   sessionID: usesIdentity ? session.id : nil,
-                                                   contentRevision: usesIdentity
-                                                       ? SearchIngestService.contentRevision(for: session)
-                                                       : nil)
-            }
+            let files = searchFileRefs(for: providerHandle.currentSessions())
             return (files, providerHandle.searchIdentitySnapshots.current())
         }
         let files = input.0
@@ -1939,7 +1932,51 @@ final class UnifiedSessionIndexer: ObservableObject {
               let path = sourceAwareFocusedSignaturePath(for: context) else {
             return nil
         }
+        return Self.logicalFocusedSignature(source: context.source, path: path)
+    }
+
+    /// Provider-neutral focused-monitor signature. Most sources stat the primary file;
+    /// a source declaring `descriptor.logicalFileStat` (Cline's manifest+messages pair)
+    /// contributes its logical unit stat instead, so companion-only writes change the
+    /// signature and trip a reload. Internal so messages-only freshness is testable.
+    static func logicalFocusedSignature(source: SessionSource, path: String) -> FileSignature? {
+        let url = URL(fileURLWithPath: path)
+        if let logical = SessionSourceRegistry.descriptor(for: source).logicalFileStat?(url) {
+            return FileSignature(path: path,
+                                 modifiedAt: Date(timeIntervalSince1970: TimeInterval(logical.mtime)),
+                                 size: logical.size)
+        }
         return fileSignature(atPath: path)
+    }
+
+    /// Provider-neutral search FileRefs for a session list — the same construction the
+    /// ingest kick uses. A source declaring `descriptor.logicalFileStat` contributes its
+    /// logical unit stat, so companion-only writes re-ingest and stay FTS-current.
+    /// Internal so the messages-only re-ingest path is testable without a live kick.
+    static func searchFileRefs(for sessions: [Session]) -> [SearchIngestService.FileRef] {
+        sessions.compactMap { session -> SearchIngestService.FileRef? in
+            // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
+            // transcript) have no content for CursorSessionParser.parseFileFull to
+            // read: JSONLReader silently yields zero events on a non-JSONL file, so
+            // the parser returns an empty-but-non-nil Session that would otherwise get
+            // upserted as search-ready and never revisited. Skip them here, same
+            // detection idiom as CursorSessionIndexer.isDBOnlySession.
+            if CursorSessionIndexer.isDBOnlySession(session) { return nil }
+            let url = URL(fileURLWithPath: session.filePath)
+            let descriptor = session.source.descriptor
+            guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
+                return nil
+            }
+            let usesIdentity = descriptor.parseFullByIdentity != nil
+                && descriptor.searchUsesIdentityAtURL?(url) == true
+            return SearchIngestService.FileRef(path: session.filePath,
+                                               mtime: stat.mtime,
+                                               size: stat.size,
+                                               sessionID: usesIdentity ? session.id : nil,
+                                               contentRevision: usesIdentity
+                                                ? SearchIngestService.contentRevision(for: session)
+                                                : nil)
+        }
     }
 
     @MainActor
@@ -2327,7 +2364,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// `lightweightCommands` (fx only sets it on a full parse).
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .cline:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.

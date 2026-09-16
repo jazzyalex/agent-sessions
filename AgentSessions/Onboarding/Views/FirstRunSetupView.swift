@@ -36,6 +36,7 @@ struct FirstRunSetupView: View {
     @AppStorage(QwenPreferencesKey.enabled) private var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @AppStorage(DevinPreferencesKey.enabled) private var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @AppStorage(FxPreferencesKey.enabled) private var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
+    @AppStorage(ClinePreferencesKey.enabled) private var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -391,6 +392,7 @@ struct FirstRunSetupView: View {
         case .qwen: return qwenAgentEnabled
         case .devin: return devinAgentEnabled
         case .fx: return fxAgentEnabled
+        case .cline: return clineAgentEnabled
         }
     }
 

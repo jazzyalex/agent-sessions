@@ -17,6 +17,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case qwen = "qwen"
     case devin = "devin"
     case fx = "fx"
+    case cline = "cline"
 
     public var displayName: String {
         switch self {
@@ -35,6 +36,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .qwen: return "Qwen Code"
         case .devin: return "Devin CLI"
         case .fx: return "fx"
+        case .cline: return "Cline"
         }
     }
 
@@ -55,6 +57,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .qwen: return "q.circle"
         case .devin: return "cpu"
         case .fx: return "f.circle"
+        case .cline: return "c.circle"
         }
     }
 
@@ -74,6 +77,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .qwen:             return "5.0"
         case .devin:            return "5.1"
         case .fx:               return "5.1"
+        case .cline:            return "5.4"
         }
     }
 
@@ -94,6 +98,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .qwen:     return "Browse your Qwen Code sessions"
         case .devin:    return "Browse your Devin CLI sessions"
         case .fx:       return "Browse your fx coding agent sessions"
+        case .cline:    return "Browse your Cline CLI and Desktop sessions"
         }
     }
 }

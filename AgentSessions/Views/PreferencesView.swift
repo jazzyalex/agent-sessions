@@ -23,6 +23,7 @@ struct PreferencesView: View {
     @ObservedObject var qwenSettings = QwenSettings.shared
     @ObservedObject var devinSettings = DevinSettings.shared
     @ObservedObject var fxSettings = FxSettings.shared
+    @ObservedObject var clineSettings = ClineSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -73,6 +74,7 @@ struct PreferencesView: View {
     @AppStorage(QwenPreferencesKey.cliAvailable) var qwenCLIAvailable: Bool = true
     @AppStorage(DevinPreferencesKey.cliAvailable) var devinCLIAvailable: Bool = true
     @AppStorage(FxPreferencesKey.cliAvailable) var fxCLIAvailable: Bool = true
+    @AppStorage(ClinePreferencesKey.cliAvailable) var clineCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
@@ -89,6 +91,7 @@ struct PreferencesView: View {
     @AppStorage(QwenPreferencesKey.enabled) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @AppStorage(DevinPreferencesKey.enabled) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @AppStorage(FxPreferencesKey.enabled) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
+    @AppStorage(ClinePreferencesKey.enabled) var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -267,6 +270,11 @@ struct PreferencesView: View {
     @State var devinResolvedPath: String? = nil
     @State var devinProbeDebounce: DispatchWorkItem? = nil
     @State var devinActiveProbeRequest: DevinProbeRequest? = nil
+    @State var clineProbeState: ProbeState = .idle
+    @State var clineVersionString: String? = nil
+    @State var clineResolvedPath: String? = nil
+    @State var clineProbeDebounce: DispatchWorkItem? = nil
+    @State var clineActiveProbeRequest: ClineProbeRequest? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -318,6 +326,9 @@ struct PreferencesView: View {
     @AppStorage(DevinPreferencesKey.sessionsRootOverride) var devinSessionsPath: String = ""
     @State var devinSessionsPathValid: Bool = true
     @State var devinSessionsPathDebounce: DispatchWorkItem? = nil
+    @State var clineSessionsPath: String = UserDefaults.standard.string(forKey: ClinePreferencesKey.sessionsRootOverride) ?? ""
+    @State var clineSessionsPathValid: Bool = true
+    @State var clineSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -474,6 +485,8 @@ struct PreferencesView: View {
                 devinTab
             case .fx:
                 fxTab
+            case .cline:
+                clineTab
             case .about:
                 aboutTab
             }
@@ -799,6 +812,7 @@ struct PreferencesView: View {
         devinSettings.clearResolvedBinary()
         fxSettings.setBinaryPath("")
         fxSettings.clearResolvedBinary()
+        clineSettings.setBinaryPath("")
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -814,6 +828,8 @@ struct PreferencesView: View {
         qwenSessionsPath = ""
         devinSessionsPath = ""
         fxSessionsPath = ""
+        clineSessionsPath = ""
+        UserDefaults.standard.removeObject(forKey: ClinePreferencesKey.sessionsRootOverride)
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
@@ -823,6 +839,7 @@ struct PreferencesView: View {
         validateQwenSessionsPath()
         validateDevinSessionsPath()
         validateFxSessionsPath()
+        validateClineSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -848,6 +865,7 @@ struct PreferencesView: View {
         scheduleQwenProbe()
         scheduleDevinProbe()
         scheduleFxProbe()
+        scheduleClineProbe()
     }
 
     func closeWindow() {
@@ -974,6 +992,7 @@ struct PreferencesView: View {
         case .qwen: scheduleQwenProbe()
         case .devin: scheduleDevinProbe()
         case .fx: scheduleFxProbe()
+        case .cline: scheduleClineProbe()
         }
     }
 
@@ -1009,6 +1028,8 @@ struct PreferencesView: View {
             return devinResolvedPath
         case .fx:
             return fxResolvedPath
+        case .cline:
+            return clineResolvedPath
         }
     }
 
@@ -1058,6 +1079,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .fx:
             let value = fxSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .cline:
+            let value = clineSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1198,6 +1222,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case qwen
     case devin
     case fx
+    case cline
     case about
 
     var id: String { rawValue }
@@ -1227,6 +1252,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .qwen: return "Qwen Code"
         case .devin: return "Devin CLI"
         case .fx: return "fx"
+        case .cline: return "Cline"
         case .about: return "About"
         }
     }
@@ -1256,6 +1282,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .qwen: return "q.circle"
         case .devin: return "cpu"
         case .fx: return "f.circle"
+        case .cline: return "c.circle"
         case .about: return "info.circle"
         }
     }
@@ -1270,7 +1297,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 // Both switches are already exhaustive over `PreferencesTab`, so neither can grow a silent
 // hole; what was missing — and is added here — is the link from a *source* to its pane.
 extension PreferencesTab {
-    /// The settings pane that configures `source`. One exhaustive switch: a thirteenth
+    /// The settings pane that configures `source`. One exhaustive switch: a new
     /// source has to declare its pane here rather than silently having none.
     init(source: SessionSource) {
         switch source {
@@ -1289,6 +1316,7 @@ extension PreferencesTab {
         case .qwen:        self = .qwen
         case .devin:       self = .devin
         case .fx:          self = .fx
+        case .cline:       self = .cline
         }
     }
 
@@ -1315,6 +1343,7 @@ extension PreferencesTab {
         case .qwen:            return .qwen
         case .devin:           return .devin
         case .fx:              return .fx
+        case .cline:           return .cline
         }
     }
 
@@ -1330,7 +1359,7 @@ extension PreferencesTab {
     /// that forgets its row fails there instead of vanishing from Settings.
     static let sidebarAgentSources: [SessionSource] = [
         .codex, .claude, .opencode, .antigravity, .copilot,
-        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw, .fx
+        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw, .fx, .cline
     ]
 
     static var sidebarAgentTabs: [PreferencesTab] {
@@ -1455,6 +1484,47 @@ extension PreferencesView {
                     self.droidResolvedPath = nil
                     self.droidProbeState = .failure
                     self.droidCLIAvailable = false
+                }
+            }
+        }
+    }
+
+    func probeCline() {
+        guard clineActiveProbeRequest == nil else { return }
+        startClineProbe(clineSettings.currentProbeRequest(), resetPresentation: true)
+    }
+
+    private func startClineProbe(_ request: ClineProbeRequest, resetPresentation: Bool) {
+        clineActiveProbeRequest = request
+        if resetPresentation {
+            clineProbeState = .probing
+            clineVersionString = nil
+            clineResolvedPath = nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = ClineCLIEnvironment()
+            let result = env.probe(customPath: request.binaryOverride)
+            DispatchQueue.main.async {
+                guard self.clineActiveProbeRequest == request else { return }
+                switch self.clineSettings.acceptProbeCompletion(result, for: request) {
+                case .stale(let currentRequest):
+                    self.startClineProbe(currentRequest, resetPresentation: false)
+                    return
+                case .accepted:
+                    self.clineActiveProbeRequest = nil
+                }
+
+                switch result {
+                case .success(let res):
+                    self.clineVersionString = res.versionString
+                    self.clineResolvedPath = res.binaryURL.path
+                    self.clineProbeState = .success
+                    self.clineCLIAvailable = true
+                case .failure:
+                    self.clineVersionString = nil
+                    self.clineResolvedPath = nil
+                    self.clineProbeState = .failure
+                    self.clineCLIAvailable = false
                 }
             }
         }
@@ -1780,6 +1850,8 @@ extension PreferencesView {
             if devinVersionString == nil && devinProbeState != .probing { probeDevin() }
         case .fx:
             if fxVersionString == nil && fxProbeState != .probing { probeFx() }
+        case .cline:
+            if clineVersionString == nil && clineProbeState != .probing { probeCline() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1866,6 +1938,13 @@ extension PreferencesView {
         fxProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeFx() }
         fxProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleClineProbe() {
+        clineProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeCline() }
+        clineProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

@@ -5,7 +5,7 @@ import Combine
 /// SPEC §10.7 + K16. Two obligations:
 ///
 /// 1. **Completeness** — the catalog builds a correctly typed runtime for every `SessionSource`,
-///    so a thirteenth source that forgets its adapter fails here rather than crashing at
+///    so a new source that forgets its adapter fails here rather than crashing at
 ///    the first `catalog[.newSource]`.
 /// 2. **Silence (K16)** — the catalog publishes nothing that changes after init. Every
 ///    catalog consumer would otherwise re-render on every index tick, which is strictly
@@ -46,6 +46,7 @@ final class SessionProviderCatalogTests: XCTestCase {
         assertIndexer(catalog, source: .qwen, is: QwenSessionIndexer.self)
         assertIndexer(catalog, source: .devin, is: DevinSessionIndexer.self)
         assertIndexer(catalog, source: .fx, is: FxSessionIndexer.self)
+        assertIndexer(catalog, source: .cline, is: ClineSessionIndexer.self)
     }
 
     /// Registry order must mirror `SessionSource.allCases` order (SPEC §10.1) — the catalog

@@ -9,6 +9,17 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.4-unreleased"
+    as_of_date_utc: "2026-09-15"
+    as_of_commit: "00dd21de+working-tree"
+    note: "Added shared local transcript support for Cline CLI and Cline Desktop; entry remains unreleased and uncommitted."
+    verified:
+      cline:
+        sessions:
+          max_verified_version: "CLI 3.0.62 / Desktop 0.0.28"
+          scope: "local manifest/messages discovery, browsing, search, Preferences, saved-session backfill, and analytics source filtering"
+          evidence: ["Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.json", "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.messages.json", "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.json", "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.messages.json", "AgentSessionsTests/ClineSessionParserTests.swift", "AgentSessionsTests/ClineSessionDiscoveryTests.swift", "AgentSessionsTests/ClineIntegrationTests.swift"]
+          notes: "Verified from 13 existing local sessions (12 CLI, 1 Desktop) without creating a new account-backed run. Weekly agent_watch monitoring fingerprints the manifest/transcript pair and enforces the adjacent companion contract. Resume, live status, image extraction, usage/quota telemetry, and subagent hierarchy are not claimed."
   - agent_sessions_version: "5.2"
     as_of_date_utc: "2026-09-10"
     as_of_commit: "cb723ae"

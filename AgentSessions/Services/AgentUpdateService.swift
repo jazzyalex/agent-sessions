@@ -468,6 +468,11 @@ private extension AgentUpdateService {
             // fx ships its own `fx upgrade` release-channel command; mapping it
             // onto a package manager would offer the wrong upgrade path.
             return nil
+        case .cline:
+            // Cline installs through the VS Code marketplace / its own
+            // distribution; no stable package-manager mapping was verified,
+            // so no update channel is claimed.
+            return nil
         }
     }
 

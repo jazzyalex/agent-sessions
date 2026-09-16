@@ -1199,7 +1199,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         case .codex, .claude, .opencode, .antigravity, .copilot, .openclaw,
              .grok, .kimi, .pi, .hermes, .cursor:
             break
-        case .droid, .qwen, .devin, .fx:
+        case .droid, .qwen, .devin, .fx, .cline:
             richHasInlineImages = false
             richInlineImagesByBlockIndex = [:]
             return

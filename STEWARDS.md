@@ -95,6 +95,7 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
+| Cline CLI and Desktop | steward wanted | 2026-09-15 · CLI 3.0.62 / Desktop 0.0.28 | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),

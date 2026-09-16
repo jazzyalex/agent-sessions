@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "sessionId": "cline-cli-tool",
+  "updated_at": "2026-09-15T21:22:44.000Z",
+  "origin": {
+    "source": "cli",
+    "mode": "user",
+    "sessionId": "cline-cli-tool",
+    "version": "3.0.62"
+  },
+  "system_prompt": "You are a coding assistant working in a disposable fixture project.",
+  "agent": null,
+  "messages": [
+    {
+      "role": "user",
+      "ts": 1789507317131,
+      "id": "cline-cli-user-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "Inspect fixture.txt and report its first line."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "ts": 1789507319000,
+      "id": "cline-cli-assistant-1",
+      "modelInfo": {
+        "id": "poolside/laguna-s-2.1:free",
+        "provider": "cline",
+        "family": "laguna-s"
+      },
+      "metrics": {
+        "inputTokens": 5930,
+        "outputTokens": 3757,
+        "cacheReadTokens": 192,
+        "cacheWriteTokens": 0
+      },
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "I should read the requested fixture file."
+        },
+        {
+          "type": "text",
+          "text": "I will inspect the file."
+        },
+        {
+          "type": "tool_use",
+          "id": "cline-tool-1",
+          "name": "run_commands",
+          "input": {
+            "commands": [
+              "sed -n '1p' fixture.txt"
+            ],
+            "description": "Read the first line of the fixture file"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "ts": 1789507321000,
+      "id": "cline-cli-tool-result-1",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "cline-tool-1",
+          "name": "run_commands",
+          "content": "fixture line one",
+          "is_error": true
+        }
+      ]
+    }
+  ]
+}

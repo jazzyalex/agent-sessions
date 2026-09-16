@@ -778,10 +778,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             }
             return !meaningfulUser
         case .antigravity, .opencode, .hermes, .copilot, .droid,
-             .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx:
+             .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline:
             // Old `default: return false`: only Codex and Claude write the preamble /
             // local-command shapes this classifier recognizes, so no other provider has
-            // ever been marked housekeeping. Written out per source so a thirteenth one
+            // ever been marked housekeeping. Written out per source so a new one
             // has to decide whether that is true of its format too, rather than inheriting
             // "never housekeeping" silently.
             //
@@ -876,7 +876,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     private var storesAuthoritativeLightweightCwd: Bool {
         switch source {
         case .antigravity, .opencode, .copilot, .openclaw, .hermes,
-             .pi, .kimi, .grok, .qwen, .devin, .cursor, .claude, .droid, .fx:
+             .pi, .kimi, .grok, .qwen, .devin, .cursor, .claude, .droid, .fx, .cline:
             return true
         case .codex:
             return false
@@ -898,9 +898,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     /// not authoritative — several were never examined for this.
     private var storesAuthoritativeLightweightTitle: Bool {
         switch source {
-        case .grok, .devin, .fx:
+        case .grok, .devin, .fx, .cline:
             // fx's display.json title is the CLI's own session name; the first
             // user prompt is only the fallback when display metadata is absent.
+            // Cline's metadata.title is likewise the CLI/Desktop session name.
             return true
         case .codex, .claude, .antigravity, .opencode, .hermes,
              .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .qwen:

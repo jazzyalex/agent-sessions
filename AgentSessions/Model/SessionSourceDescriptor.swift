@@ -76,6 +76,16 @@ struct PillSpec {
 
 // MARK: - ArchiveCapability
 
+/// The filesystem unit an archive snapshots for one session: the root to copy and the
+/// primary file to parse back. Single-file sources snapshot the file itself; paired
+/// sources (Cline: manifest plus an adjacent messages file) snapshot the session
+/// directory so the companion survives alongside the primary.
+struct ArchiveUnit {
+    let root: URL
+    let isDirectory: Bool
+    let primaryRelativePath: String
+}
+
 /// A source's participation in pin/archive backfill. Optional on the descriptor because a
 /// DB-backed source can decline it outright (SPEC §4) — every currently registered source
 /// supplies one.
@@ -87,6 +97,18 @@ struct ArchiveCapability {
     /// `SessionArchiveManager.resolveSessionForBackfill(source:sessionID:upstreamURL:)`.
     /// Sources whose parser accepts a forced ID keep passing it.
     let sessionForBackfill: (String, URL) -> Session?
+    /// The archive unit for a primary file URL. nil (the default) snapshots the primary
+    /// file itself; a paired source returns its session directory with the primary's
+    /// filename so the copy carries the companion files the full parse needs.
+    let archiveUnit: ((URL) -> ArchiveUnit?)?
+
+    init(backfillURLs: @escaping (UserDefaults) -> [String: URL],
+         sessionForBackfill: @escaping (String, URL) -> Session?,
+         archiveUnit: ((URL) -> ArchiveUnit?)? = nil) {
+        self.backfillURLs = backfillURLs
+        self.sessionForBackfill = sessionForBackfill
+        self.archiveUnit = archiveUnit
+    }
 }
 
 // MARK: - AvailabilityContext
@@ -202,7 +224,7 @@ struct SessionSourceDescriptor {
     let source: SessionSource
 
     /// What telemetry this source can produce. Non-optional on purpose: the
-    /// compiler makes every one of the 15 sources state a verdict.
+    /// compiler makes every source state a verdict.
     let telemetry: TelemetryCapabilities
 
     // MARK: Labels
@@ -268,6 +290,15 @@ struct SessionSourceDescriptor {
     /// a shared SQLite database.
     let searchUsesIdentityAtURL: ((URL) -> Bool)?
 
+    // MARK: Pair-aware freshness
+
+    /// Logical freshness stat for a session's primary file URL. nil (the default) stats
+    /// the primary file itself. A paired source (Cline: manifest plus an adjacent
+    /// messages file) combines the pair so companion-only writes still trip the
+    /// focused-session monitor and search re-ingest/currency, both of which only see
+    /// the primary path.
+    let logicalFileStat: ((URL) -> SessionFileStat?)?
+
     // MARK: Archive
 
     /// nil = archiving unsupported for this source (SPEC §4).
@@ -284,6 +315,54 @@ struct SessionSourceDescriptor {
 
     /// nil for codex/claude (fixed segmented pills).
     let otherAgentPill: PillSpec?
+
+    init(source: SessionSource,
+         telemetry: TelemetryCapabilities,
+         shortLabel: String,
+         badgeInitials: String,
+         brandHue: BrandHue,
+         monochromeWhite: Double,
+         onboardingAccent: @escaping (OnboardingPalette) -> Color,
+         enablementKey: String,
+         cliAvailableKey: String?,
+         rootOverrideKeys: [String],
+         includeKey: String,
+         binaryNames: [String],
+         isBinaryInstalled: @escaping (AvailabilityContext) -> Bool,
+         isAvailable: @escaping (AvailabilityContext) -> Bool,
+         defaultEnabled: EnablementDefault,
+         parseFullByPath: ((URL) -> Session?)?,
+         parseFullByIdentity: ((URL, String) -> Session?)?,
+         searchUsesIdentityAtURL: ((URL) -> Bool)?,
+         logicalFileStat: ((URL) -> SessionFileStat?)? = nil,
+         archive: ArchiveCapability?,
+         supportsResume: Bool,
+         resumeAgentLabel: String?,
+         otherAgentPill: PillSpec?) {
+        self.source = source
+        self.telemetry = telemetry
+        self.shortLabel = shortLabel
+        self.badgeInitials = badgeInitials
+        self.brandHue = brandHue
+        self.monochromeWhite = monochromeWhite
+        self.onboardingAccent = onboardingAccent
+        self.enablementKey = enablementKey
+        self.cliAvailableKey = cliAvailableKey
+        self.rootOverrideKeys = rootOverrideKeys
+        self.includeKey = includeKey
+        self.binaryNames = binaryNames
+        self.isBinaryInstalled = isBinaryInstalled
+        self.isAvailable = isAvailable
+        self.defaultEnabled = defaultEnabled
+        self.parseFullByPath = parseFullByPath
+        self.parseFullByIdentity = parseFullByIdentity
+        self.searchUsesIdentityAtURL = searchUsesIdentityAtURL
+        self.logicalFileStat = logicalFileStat
+        self.archive = archive
+        self.supportsResume = supportsResume
+        self.resumeAgentLabel = resumeAgentLabel
+        self.otherAgentPill = otherAgentPill
+    }
 }
 
 // MARK: - Archive backfill helpers

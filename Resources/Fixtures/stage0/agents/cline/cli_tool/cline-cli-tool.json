@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "session_id": "cline-cli-tool",
+  "source": "cli",
+  "pid": 4242,
+  "started_at": "2026-09-15T21:21:57.131Z",
+  "ended_at": "2026-09-15T21:22:44.000Z",
+  "exit_code": 130,
+  "status": "cancelled",
+  "interactive": false,
+  "provider": "cline",
+  "model": "poolside/laguna-s-2.1:free",
+  "cwd": "/tmp/as-agent-fixture/project",
+  "workspace_root": "/tmp/as-agent-fixture/project",
+  "team_name": null,
+  "enable_tools": true,
+  "enable_spawn": true,
+  "enable_teams": true,
+  "prompt": "Inspect the fixture file and report its first line.",
+  "metadata": {
+    "sessionHistoryOrigin": {
+      "mode": "user",
+      "version": "3.0.62"
+    },
+    "source": "cli",
+    "provider": "cline",
+    "model": "poolside/laguna-s-2.1:free",
+    "enableTools": true,
+    "enableSpawn": true,
+    "enableTeams": true,
+    "prompt": "Inspect the fixture file and report its first line.",
+    "interactive": false,
+    "mode": "act",
+    "systemPrompt": "You are a coding assistant working in a disposable fixture project.",
+    "checkpointEnabled": true,
+    "autoApproveTools": false,
+    "git": {
+      "url": "https://example.invalid/fixture.git",
+      "branch": "main"
+    },
+    "checkpoint": {
+      "latest": {
+        "ref": "fixture-checkpoint",
+        "createdAt": 1789507317000,
+        "runCount": 1,
+        "kind": "task"
+      },
+      "history": [
+        {
+          "ref": "fixture-checkpoint",
+          "createdAt": 1789507317000,
+          "runCount": 1,
+          "kind": "task"
+        }
+      ]
+    },
+    "title": "Inspect the fixture file",
+    "totalCost": 0,
+    "aggregatedAgentsCost": 0,
+    "usage": {
+      "inputTokens": 5930,
+      "outputTokens": 3757,
+      "cacheReadTokens": 192,
+      "cacheWriteTokens": 0,
+      "totalCost": 0
+    },
+    "aggregateUsage": {
+      "inputTokens": 5930,
+      "outputTokens": 3757,
+      "cacheReadTokens": 192,
+      "cacheWriteTokens": 0,
+      "totalCost": 0
+    }
+  },
+  "messages_path": "/tmp/as-agent-fixture/cline/cli_tool/cline-cli-tool.messages.json"
+}

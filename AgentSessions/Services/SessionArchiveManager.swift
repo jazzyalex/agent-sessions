@@ -111,6 +111,24 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         archivesRoot() ?? fallbackArchivesRootURL()
     }
 
+    /// Provider-neutral archive unit for a session: the filesystem root to snapshot
+    /// and the primary file to parse back. Single-file sources snapshot the file
+    /// itself; a source declaring `archive.archiveUnit` (Cline's manifest+messages
+    /// pair) snapshots the session directory so the companion survives.
+    static func archiveUnit(for session: Session) -> (root: URL, isDirectory: Bool, primaryRelativePath: String) {
+        let primaryURL = URL(fileURLWithPath: session.filePath)
+        if let unit = SessionSourceRegistry.descriptor(for: session.source).archive?.archiveUnit?(primaryURL) {
+            return (unit.root, unit.isDirectory, unit.primaryRelativePath)
+        }
+        return (primaryURL, isDirectoryStatic(path: session.filePath), primaryURL.lastPathComponent)
+    }
+
+    private static func isDirectoryStatic(path: String) -> Bool {
+        var isDir: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+        return isDir.boolValue
+    }
+
     func pin(session: Session) {
         // A source that declines archiving (`archive == nil`, SPEC §4) has nothing
         // per-session to copy out, so there is nothing to pin. This gate is not
@@ -123,12 +141,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
         let k = key(source: session.source, id: session.id)
         // Update UI immediately, but move all file IO/logging off the main thread.
+        let unit = Self.archiveUnit(for: session)
         let placeholder = SessionArchiveInfo(
             sessionID: session.id,
             source: session.source,
-            upstreamPath: session.filePath,
-            upstreamIsDirectory: false,
-            primaryRelativePath: URL(fileURLWithPath: session.filePath).lastPathComponent,
+            upstreamPath: unit.root.path,
+            upstreamIsDirectory: unit.isDirectory,
+            primaryRelativePath: unit.primaryRelativePath,
             pinnedAt: Date(),
             lastSyncAt: nil,
             lastUpstreamChangeAt: nil,
@@ -187,6 +206,17 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             self.reloadCache()
         }
     }
+
+#if DEBUG
+    /// Synchronous seam for archive contract tests. Production pin/sync remains queued.
+    func syncSessionForTesting(_ session: Session) {
+        ensureArchiveExistsAndSync(session: session, reason: "test")
+    }
+
+    func archiveInfoForTesting(source: SessionSource, id: String) -> SessionArchiveInfo? {
+        loadInfoIfExists(source: source, id: id)
+    }
+#endif
 
     /// Merge archive-only placeholders for pinned sessions that are missing upstream.
     /// Must be called off the main thread.
@@ -411,12 +441,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func ensureArchiveExistsAndSync(session: Session, reason: String) {
+        let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
             source: session.source,
-            upstreamPath: session.filePath,
-            upstreamIsDirectory: isDirectory(path: session.filePath),
-            primaryRelativePath: URL(fileURLWithPath: session.filePath).lastPathComponent,
+            upstreamPath: unit.root.path,
+            upstreamIsDirectory: unit.isDirectory,
+            primaryRelativePath: unit.primaryRelativePath,
             pinnedAt: Date(),
             lastSyncAt: nil,
             lastUpstreamChangeAt: nil,
@@ -450,12 +481,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func writePinPlaceholder(session: Session, key: String) {
+        let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
             source: session.source,
-            upstreamPath: session.filePath,
-            upstreamIsDirectory: isDirectory(path: session.filePath),
-            primaryRelativePath: URL(fileURLWithPath: session.filePath).lastPathComponent,
+            upstreamPath: unit.root.path,
+            upstreamIsDirectory: unit.isDirectory,
+            primaryRelativePath: unit.primaryRelativePath,
             pinnedAt: Date(),
             lastSyncAt: nil,
             lastUpstreamChangeAt: nil,
@@ -740,11 +772,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         if isDir.boolValue {
             let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
             let enumerator = fm.enumerator(at: upstream, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
+            let rootComponents = upstream.resolvingSymlinksInPath().standardizedFileURL.pathComponents
             var entries: [SessionArchiveManifest.Entry] = []
             while let url = enumerator?.nextObject() as? URL {
                 let rv = try url.resourceValues(forKeys: Set(keys))
                 guard rv.isRegularFile == true else { continue }
-                let rel = url.path.replacingOccurrences(of: upstream.path + "/", with: "")
+                let fileComponents = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+                guard fileComponents.starts(with: rootComponents),
+                      fileComponents.count > rootComponents.count else { continue }
+                let rel = fileComponents.dropFirst(rootComponents.count).joined(separator: "/")
                 let size = Int64(rv.fileSize ?? 0)
                 let mtime = (rv.contentModificationDate ?? Date.distantPast).timeIntervalSince1970
                 entries.append(.init(relativePath: rel, sizeBytes: size, mtimeSeconds: mtime, sha256: hashIfSmall(url: url, sizeBytes: size)))
