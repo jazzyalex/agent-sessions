@@ -2265,6 +2265,11 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
             cloudHUDRows: [cloudRow(.active)],
             includeIdle: false
         )
+        let activeCloudOnly = appendingClaudeCloudRows(
+            to: nil,
+            cloudHUDRows: [cloudRow(.active)],
+            includeIdle: false
+        )
 
         guard case .estimate(let estimate) = QuotaMeterWeeklyHeaderResolver.status(
             isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
@@ -2279,6 +2284,14 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
                 suspect: false, remainingPercent: 89, snapshot: activeIncluded
             ),
             .unavailable
+        )
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                suspect: false, remainingPercent: 89, snapshot: activeCloudOnly
+            ),
+            .unavailable,
+            "cloud-only burn is unknowable, not a rate that is still measuring"
         )
     }
 

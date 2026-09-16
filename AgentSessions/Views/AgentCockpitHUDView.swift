@@ -3041,10 +3041,16 @@ enum QuotaMeterWeeklyHeaderResolver {
         guard !weekStale else { return .unavailable }
         guard remainingPercent > 0 else { return .exhausted }
         guard let snapshot else { return .quiet }
+        // A cloud-only snapshot uses a synthetic non-weekly carrier because it has
+        // no local quota-derived runway. Cloud burn is permanently unknowable, not
+        // a unit transition that will eventually finish measuring.
+        if snapshot.rows.contains(where: { $0.confidence == .cloud }) {
+            return .unavailable
+        }
         guard snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return .measuring }
 
         let hasUnavailableRate = snapshot.rows.contains {
-            $0.confidence == .unsupported || $0.confidence == .cloud
+            $0.confidence == .unsupported
         } || snapshot.burstSummary?.containsUnavailableActiveRate == true
         let hasWaitingRate = snapshot.rows.contains { $0.confidence == .waiting }
             || snapshot.burstSummary?.containsWaitingActiveRate == true
