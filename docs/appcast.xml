@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.3</title>
-            <pubDate>Mon, 14 Sep 2026 19:21:45 -0700</pubDate>
+            <title>5.4</title>
+            <pubDate>Wed, 16 Sep 2026 13:49:01 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,32 +27,26 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.3</h2>
-<h3 class="hl">Highlights</h3>
-<ul class="highlights">
-<li><strong>Session Info: what a Codex or Claude session contained, beside its transcript.</strong> Press Shift-Command-I or the gauge button to see what the session would cost at published API rates, its tokens split into cached, fresh, and output, the request count, the model and thinking effort, and how turns divided between you, the agent, and tools. Model and effort changes appear as markers in the transcript and as a history that jumps to each one. The price is an estimate, not your plan bill.</li>
-</ul>
-<h3>Improvements</h3>
+<h2>What&#x27;s New in 5.4</h2>
+<h3>Features</h3>
 <ul>
-<li><strong>A calmer main toolbar.</strong> Source filters, search, Quota Meter, Resume, Image Browser, and the transcript and Session Info controls stay in view. Analytics, Reveal in Finder, layout, Reindex, appearance, and Settings moved into the ⋯ menu, and Saved and Archived are now chips inside the search field.</li>
-<li><strong>The transcript toolbar is one row.</strong> Role filters lead: click one to show only that role, click it again to show everything. The Errors chip shows a count, and view mode moved to the ⋯ menu; Shift-Command-T still cycles modes.</li>
-<li><strong>Search Sessions also opens with Shift-Command-F</strong>, alongside Option-Command-F.</li>
-<li><strong>Large and active transcripts stay responsive.</strong> Simple searches inside a large open transcript no longer process the whole file, and a running Codex session reads only its newly added records.</li>
-<li><strong>The window footer shows a count only while a filter is active</strong>, such as &quot;3,625 of 3,775 shown&quot;. Click it to clear the filters.</li>
-<li><strong>Quota Meter dollar estimates cover more pricing cases:</strong> Claude US-only inference, the original Claude Opus 4 rate, and GPT-5.5 and GPT-5.4 long-context requests.</li>
+<li><strong>Cline CLI and Desktop sessions now appear in Agent Sessions.</strong> The app discovers their shared local history, labels the originating surface, searches prompts, responses, thinking, and tool activity, and offers Cline-specific Settings controls. Custom roots are validated before they replace a working location, and partial companion files do not erase an open transcript. Resume, live status, image extraction, hierarchy, and usage tracking are not yet supported.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Opening a Codex parent session no longer breaks up its subagent tree.</strong> Subagent counts, row order, selection, and scroll position stay in place while the transcript loads.</li>
-<li><strong>The Quota Meter weekly burn tooltip is translated in Simplified Chinese.</strong></li>
+<li><strong>Session retrieval now stays exact and current.</strong> Project filtering distinguishes same-named clones while grouping real Git worktrees with their checkout, active searches refresh when sessions are added or removed without flashing blank, displayed titles are searchable even when the full-text index is stale, Codex fallback titles omit injected context wrappers, and Antigravity cache hydration reconciles confirmed changes and deletions without dropping data when a source root is temporarily unavailable.</li>
+<li><strong>OpenCode sessions are recognizable before you open them.</strong> Timestamp-only default names now fall back to the session&#x27;s first user prompt in both current SQLite and legacy JSON storage, while real names and subagent labels keep their existing precedence.</li>
+<li><strong>Droid session names survive transcript loading and search prewarming.</strong> Full parsing now retains the explicit title already shown by the lightweight list instead of replacing it with the first prompt.</li>
+<li><strong>OpenClaw source-aware titles stay stable after full parsing.</strong> Telegram origin-plus-prompt labels and tool-name fallbacks no longer regress to raw message envelopes or generic text after search prewarming.</li>
+<li><strong>Claude prompt titles stay clean after transcript loading.</strong> Full parsing and search prewarming now preserve the same title as the session list instead of exposing local-command Caveat wrappers.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.3</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.4</a></p>
 </div>
             ]]></description>
-            <sparkle:version>74</sparkle:version>
-            <sparkle:shortVersionString>5.3</sparkle:shortVersionString>
+            <sparkle:version>75</sparkle:version>
+            <sparkle:shortVersionString>5.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.3/AgentSessions-5.3.dmg" length="25618915" type="application/octet-stream" sparkle:edSignature="2SjlsrKbYegIuOeQmqoBxswOMt0ff+ksTASv4tfjd31WMHlmN3MSpkH5odzla+0NEu1QdhUhIo4WMQNFS4J1Cw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.4/AgentSessions-5.4.dmg" length="25988846" type="application/octet-stream" sparkle:edSignature="d0SghkyTIRqAZL2iptIJwNdkiIc8+hHkSmA2ex5/guEfHGX/GejY7eHiZ2FJG0SqEDLD5ZoCPw4qdQQSmJu8DQ=="/>
         </item>
     </channel>
 </rss>
