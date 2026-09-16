@@ -250,6 +250,12 @@ final class WhatsNewCatalogTests: XCTestCase {
         XCTAssertNil(WhatsNewCatalog.teaser(for: "99.9"))
     }
 
+    func testRelease54HasClineProviderHighlightAndTeaser() {
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.4"))
+        let items = WhatsNewCatalog.assemble(for: "5.4")
+        XCTAssertEqual(items.map { String(localized: $0.title) }, ["New: Cline"])
+    }
+
     func testRelease53HasLocalizedAuthoredHighlightsAndSupport() {
         let items = WhatsNewCatalog.assemble(for: "5.3")
         XCTAssertEqual(items.map { String(localized: $0.title) }, [

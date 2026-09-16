@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1401
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1402
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "ecff25438464b84c4424fcece630a9528a2dd73fdfc35de63641210469fd2651"
+    "fe79d5f9a017defb8362ce363f4d67ad3af76fe9592206f14d5b44ca9984c173"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -55,6 +55,8 @@ PRESERVED_TERMS = (
     "Kimi Code",
     "Grok CLI",
     "Devin CLI",
+    "Cline CLI",
+    "Cline Desktop",
     "OpenCode",
     "OpenClaw",
     "iTerm2",

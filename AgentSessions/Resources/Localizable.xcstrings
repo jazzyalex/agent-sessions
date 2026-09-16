@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place.": {
+      "comment": "One-line teaser for the Agent Sessions 5.4 What's New card. Keep Cline CLI and Cline Desktop as product names.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline CLI 和 Cline Desktop 加入支持阵容，你现在可以在一个地方浏览和搜索它们的本地会话。"
+          }
+        }
+      }
+    },
     "A calmer toolbar": {
       "comment": "Title for the Agent Sessions 5.3 What's New toolbar highlight.",
       "localizations": {

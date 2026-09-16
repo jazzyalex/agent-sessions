@@ -112,7 +112,8 @@ enum WhatsNewCatalog {
         "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe.",
         "5.1": "Two more agents join the lineup: Devin CLI and fx.",
         "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.",
-        "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach."
+        "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach.",
+        "5.4": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
