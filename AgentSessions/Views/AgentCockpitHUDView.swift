@@ -2870,15 +2870,21 @@ func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?,
 ///
 /// So they are injected here instead, *after* all rate maths, ranking and overflow
 /// folding are final. Appended rows carry `displayRate: 0`, which cannot perturb
-/// `maxDisplayRate` (floored at 1), reordering, or the "+N sessions" summary.
+/// `maxDisplayRate` (floored at 1), reordering, or the "+N sessions" summary. The
+/// drawer includes idle cloud rows; aggregate callers may exclude them because an
+/// idle session is not active unknown burn.
 ///
 /// Runs at render time rather than in the loader for two reasons: the loader body
 /// executes off the main actor while `ClaudeCloudLiveModel` is main-actor isolated,
 /// and the loader only re-runs on a 5s bucket — so cloud rows would lag, and would
 /// vanish entirely whenever the quota request is nil.
 func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
-                              cloudHUDRows: [HUDRow]) -> CodexRunwaySnapshot? {
-    let cloud = cloudHUDRows.filter { $0.id.hasPrefix(ClaudeCloudHUDRowMapper.rowIDPrefix) }
+                              cloudHUDRows: [HUDRow],
+                              includeIdle: Bool = true) -> CodexRunwaySnapshot? {
+    let cloud = cloudHUDRows.filter {
+        $0.id.hasPrefix(ClaudeCloudHUDRowMapper.rowIDPrefix)
+            && (includeIdle || $0.liveState == .active)
+    }
     guard !cloud.isEmpty else { return snapshot }
 
     // Working sessions first, then alphabetical — a stable order, so rows do not
@@ -3028,34 +3034,32 @@ enum QuotaMeterWeeklyHeaderResolver {
                        weekStale: Bool,
                        fiveHourAbsent: Bool,
                        suspect: Bool,
+                       remainingPercent: Double,
                        snapshot: CodexRunwaySnapshot?) -> QuotaMeterWeeklyHeaderStatus? {
         guard isWeeklyLens else { return nil }
         guard !(fiveHourAbsent && suspect) else { return nil }
         guard !weekStale else { return .unavailable }
+        guard remainingPercent > 0 else { return .exhausted }
         guard let snapshot else { return .quiet }
         guard snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return .measuring }
 
-        for row in snapshot.rows {
-            switch row.confidence {
-            case .waiting:
-                return .measuring
-            case .unsupported, .cloud:
-                return .unavailable
-            case .direct, .mixed, .idle:
-                continue
-            }
-        }
-        if snapshot.burstSummary?.containsUnknownActiveRate == true {
+        let hasUnavailableRate = snapshot.rows.contains {
+            $0.confidence == .unsupported || $0.confidence == .cloud
+        } || snapshot.burstSummary?.containsUnavailableActiveRate == true
+        let hasWaitingRate = snapshot.rows.contains { $0.confidence == .waiting }
+            || snapshot.burstSummary?.containsWaitingActiveRate == true
+        if hasUnavailableRate {
             return .unavailable
         }
-        if snapshot.baseline.remainingPercent <= 0 {
-            return .exhausted
+        if hasWaitingRate {
+            return .measuring
         }
         if let header = header(
             isWeeklyLens: true,
             weekStale: false,
             fiveHourAbsent: fiveHourAbsent,
             suspect: suspect,
+            remainingPercent: remainingPercent,
             snapshot: snapshot
         ) {
             return .estimate(header)
@@ -3071,12 +3075,15 @@ enum QuotaMeterWeeklyHeaderResolver {
     ///     compared against a reset we do not have.
     ///   - fiveHourAbsent / suspect: an absent 5h window may only read "∞" when the
     ///     provider genuinely dropped it. "can't verify" must stay "can't verify".
-    ///   - snapshot: the same visible snapshot the Session Runway drawer renders,
-    ///     so header and drawer can never disagree about who is burning.
+    ///   - remainingPercent: the provider's authoritative current weekly remainder;
+    ///     it wins over a missing or stale runway snapshot for exhaustion and ETA.
+    ///   - snapshot: the runway snapshot used for aggregation. It retains every
+    ///     active drawer row but may omit idle cloud rows, which are not burning.
     static func header(isWeeklyLens: Bool,
                        weekStale: Bool,
                        fiveHourAbsent: Bool,
                        suspect: Bool,
+                       remainingPercent: Double? = nil,
                        snapshot: CodexRunwaySnapshot?) -> QuotaMeterWeeklyHeader? {
         guard isWeeklyLens, !weekStale else { return nil }
         guard !(fiveHourAbsent && suspect) else { return nil }
@@ -3103,12 +3110,13 @@ enum QuotaMeterWeeklyHeaderResolver {
         // rows it has no space for into "+N sessions", and their rates are summed
         // there with the same per-row rule.
         if let burstSummary = snapshot.burstSummary {
-            guard !burstSummary.containsUnknownActiveRate else { return nil }
+            guard !burstSummary.containsWaitingActiveRate,
+                  !burstSummary.containsUnavailableActiveRate else { return nil }
             total += burstSummary.displayRate
         }
 
         guard total.isFinite, total > 0 else { return nil }
-        let remaining = snapshot.baseline.remainingPercent
+        let remaining = remainingPercent ?? snapshot.baseline.remainingPercent
         guard remaining.isFinite, remaining > 0 else { return nil }
         return QuotaMeterWeeklyHeader(
             aggregatePercentPerHour: total,
@@ -3762,6 +3770,17 @@ private struct HUDLimitsRowsPanel: View {
         return snapshot
     }
 
+    /// Idle cloud sessions stay visible in the drawer, but they are not active
+    /// unknown burn and therefore must not suppress an otherwise complete header.
+    private func weeklyHeaderSnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
+        guard source == .claude else { return codexRunwaySnapshot }
+        return appendingClaudeCloudRows(
+            to: claudeRunwaySnapshot,
+            cloudHUDRows: ClaudeCloudLiveModel.shared.rows,
+            includeIdle: false
+        )
+    }
+
     private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
         quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot(for: source), visibility: runwayVisibility)
     }
@@ -3769,9 +3788,6 @@ private struct HUDLimitsRowsPanel: View {
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
         if providerShown(.codex) {
-            // Resolved once: this runs on every HUD body evaluation, and the
-            // adaptive header reads the same snapshot the drawer renders.
-            let snapshot = runwaySnapshot(for: .codex)
             out.append(HUDLimitsProviderEntry(
                 provider: .codex,
                 source: .codex,
@@ -3796,7 +3812,8 @@ private struct HUDLimitsRowsPanel: View {
                     weekStale: isResetInfoUnavailable(raw: codexUsageModel.weekResetText),
                     fiveHourAbsent: !codexUsageModel.hasFiveHourRateLimit,
                     suspect: codexUsageModel.usageFormatSuspect,
-                    snapshot: snapshot
+                    remainingPercent: Double(codexUsageModel.weekRemainingPercent),
+                    snapshot: weeklyHeaderSnapshot(for: .codex)
                 ),
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
@@ -3805,7 +3822,6 @@ private struct HUDLimitsRowsPanel: View {
             ))
         }
         if providerShown(.claude) {
-            let snapshot = runwaySnapshot(for: .claude)
             out.append(HUDLimitsProviderEntry(
                 provider: .claude,
                 source: .claude,
@@ -3824,7 +3840,8 @@ private struct HUDLimitsRowsPanel: View {
                     weekStale: isResetInfoUnavailable(raw: claudeUsageModel.weekAllModelsResetText),
                     fiveHourAbsent: false,
                     suspect: false,
-                    snapshot: snapshot
+                    remainingPercent: Double(claudeUsageModel.weekAllModelsRemainingPercent),
+                    snapshot: weeklyHeaderSnapshot(for: .claude)
                 ),
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
@@ -5337,7 +5354,7 @@ private struct HUDLimitsProviderText: View {
             Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: true))")
         } else {
             Text(verbatim: "5h:∞")
-                .accessibilityLabel(Text(verbatim: "no five-hour limit"))
+                .accessibilityLabel(Text(verbatim: "5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: false))"))
         }
     }
 

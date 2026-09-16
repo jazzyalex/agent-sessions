@@ -101,17 +101,6 @@ enum RunwayAttributionConfidence: Equatable, Sendable {
     /// deliberately NOT `.idle`, which would short-circuit to the calm dash and lose
     /// the distinction between "finished its turn" and "rate is unknowable".
     case cloud
-
-    /// True when this state represents active work whose rate cannot be included
-    /// in an aggregate without understating the burn.
-    var hasUnknownActiveRate: Bool {
-        switch self {
-        case .waiting, .unsupported, .cloud:
-            return true
-        case .direct, .mixed, .idle:
-            return false
-        }
-    }
 }
 
 enum RunwayDeadline: Equatable, Sendable {
@@ -438,10 +427,11 @@ struct RunwayShortBurstSummary: Equatable, Sendable {
     let deadline: RunwayDeadline
     let gainedSeconds: TimeInterval
     let displayRate: Double
-    /// Overflow rows are not individually visible. Preserve whether any active
-    /// hidden row has an unknown rate so callers cannot mistake the visible sum
-    /// for a complete aggregate.
-    var containsUnknownActiveRate: Bool = false
+    /// Overflow rows are not individually visible. Preserve why any active hidden
+    /// rate is unknown so callers do not change "measuring" into "unavailable"
+    /// merely because the row crossed the visible-row boundary.
+    var containsWaitingActiveRate: Bool = false
+    var containsUnavailableActiveRate: Bool = false
 }
 
 struct CodexRunwaySnapshot: Equatable, Sendable {
@@ -975,8 +965,10 @@ enum RunwaySnapshotAssembly {
                 deadline: .unavailable,
                 gainedSeconds: 0,
                 displayRate: overflow.reduce(existing.burstSummary?.displayRate ?? 0) { $0 + $1.displayRate },
-                containsUnknownActiveRate: (existing.burstSummary?.containsUnknownActiveRate ?? false)
-                    || overflow.contains { $0.confidence.hasUnknownActiveRate }
+                containsWaitingActiveRate: (existing.burstSummary?.containsWaitingActiveRate ?? false)
+                    || overflow.contains { $0.confidence == .waiting },
+                containsUnavailableActiveRate: (existing.burstSummary?.containsUnavailableActiveRate ?? false)
+                    || overflow.contains { $0.confidence == .unsupported || $0.confidence == .cloud }
             )
         return CodexRunwaySnapshot(baseline: existing.baseline, rows: Array(visible), burstSummary: burstSummary)
     }
@@ -1012,13 +1004,21 @@ enum RunwaySnapshotAssembly {
                     deadline: burnSummary.deadline,
                     gainedSeconds: burnSummary.gainedSeconds,
                     displayRate: burnSummary.displayRate,
-                    containsUnknownActiveRate: burnSummary.containsUnknownActiveRate
+                    containsWaitingActiveRate: burnSummary.containsWaitingActiveRate
                         || pendingIdentities.contains { identity in
                             guard !identity.isIdle else { return false }
                             let confidence: RunwayAttributionConfidence = waitingIDs.contains(identity.id)
                                 ? .waiting
                                 : pendingConfidence
-                            return confidence.hasUnknownActiveRate
+                            return confidence == .waiting
+                        },
+                    containsUnavailableActiveRate: burnSummary.containsUnavailableActiveRate
+                        || pendingIdentities.contains { identity in
+                            guard !identity.isIdle else { return false }
+                            let confidence: RunwayAttributionConfidence = waitingIDs.contains(identity.id)
+                                ? .waiting
+                                : pendingConfidence
+                            return confidence == .unsupported || confidence == .cloud
                         }
                 )
             )
@@ -1047,7 +1047,10 @@ enum RunwaySnapshotAssembly {
                 deadline: overflow.first?.deadline ?? .unavailable,
                 gainedSeconds: 0,
                 displayRate: overflow.reduce(0) { $0 + $1.displayRate },
-                containsUnknownActiveRate: overflow.contains { $0.confidence.hasUnknownActiveRate }
+                containsWaitingActiveRate: overflow.contains { $0.confidence == .waiting },
+                containsUnavailableActiveRate: overflow.contains {
+                    $0.confidence == .unsupported || $0.confidence == .cloud
+                }
             )
 
         return CodexRunwaySnapshot(

@@ -2047,7 +2047,8 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
 
     private func snapshot(rows: [RunwayPauseImpactRow],
                           overflowRate: Double? = nil,
-                          overflowContainsUnknownRate: Bool = false,
+                          overflowContainsWaitingRate: Bool = false,
+                          overflowContainsUnavailableRate: Bool = false,
                           remainingPercent: Double = 89,
                           resetAt: Date? = nil,
                           rateUnit: RunwayRateUnit = .weeklyPercentPerHour) -> CodexRunwaySnapshot {
@@ -2067,7 +2068,8 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
             burstSummary: overflowRate.map {
                 RunwayShortBurstSummary(count: 2, deadline: .unavailable,
                                         gainedSeconds: 0, displayRate: $0,
-                                        containsUnknownActiveRate: overflowContainsUnknownRate)
+                                        containsWaitingActiveRate: overflowContainsWaitingRate,
+                                        containsUnavailableActiveRate: overflowContainsUnavailableRate)
             }
         )
     }
@@ -2129,7 +2131,7 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
         let hiddenUnknown = snapshot(
             rows: [row("a", rate: 2.0, .direct)],
             overflowRate: 1.0,
-            overflowContainsUnknownRate: true
+            overflowContainsUnavailableRate: true
         )
 
         XCTAssertNil(
@@ -2150,14 +2152,14 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
-                suspect: false, snapshot: waiting
+                suspect: false, remainingPercent: 89, snapshot: waiting
             ),
             .measuring
         )
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
-                suspect: false, snapshot: unsupported
+                suspect: false, remainingPercent: 89, snapshot: unsupported
             ),
             .unavailable
         )
@@ -2167,23 +2169,116 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: false, fiveHourAbsent: true,
-                suspect: false, snapshot: nil
+                suspect: false, remainingPercent: 89, snapshot: nil
             ),
             .quiet
         )
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: true, fiveHourAbsent: true,
-                suspect: false, snapshot: nil
+                suspect: false, remainingPercent: 89, snapshot: nil
             ),
             .unavailable
         )
         XCTAssertNil(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: false, weekStale: false, fiveHourAbsent: true,
-                suspect: false, snapshot: nil
+                suspect: false, remainingPercent: 89, snapshot: nil
             ),
             "5h, tk and dollar lenses keep their existing header"
+        )
+    }
+
+    func testExhaustedPrecedesTransientSnapshotStates() {
+        let snapshots: [CodexRunwaySnapshot?] = [
+            nil,
+            snapshot(rows: [row("waiting", rate: 0, .waiting)], remainingPercent: 0),
+            snapshot(rows: [row("unsupported", rate: 0, .unsupported)], remainingPercent: 0),
+        ]
+
+        for candidate in snapshots {
+            XCTAssertEqual(
+                QuotaMeterWeeklyHeaderResolver.status(
+                    isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                    suspect: false, remainingPercent: 0, snapshot: candidate
+                ),
+                .exhausted
+            )
+        }
+    }
+
+    func testUnknownStatusIsStableAcrossRowOrderAndOverflow() {
+        for rows in [
+            [row("waiting", rate: 0, .waiting), row("cloud", rate: 0, .cloud)],
+            [row("cloud", rate: 0, .cloud), row("waiting", rate: 0, .waiting)],
+        ] {
+            XCTAssertEqual(
+                QuotaMeterWeeklyHeaderResolver.status(
+                    isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                    suspect: false, remainingPercent: 89, snapshot: snapshot(rows: rows)
+                ),
+                .unavailable
+            )
+        }
+
+        let hiddenWaiting = snapshot(
+            rows: [row("measured", rate: 2, .direct)],
+            overflowRate: 0,
+            overflowContainsWaitingRate: true
+        )
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                suspect: false, remainingPercent: 89, snapshot: hiddenWaiting
+            ),
+            .measuring
+        )
+    }
+
+    func testIdleClaudeCloudDoesNotBlockAggregateButActiveCloudDoes() throws {
+        func cloudRow(_ state: HUDLiveState) -> HUDRow {
+            HUDRow(
+                id: "\(ClaudeCloudHUDRowMapper.rowIDPrefix)cloud-1",
+                source: .claude,
+                agentType: .claude,
+                projectName: ClaudeCloudHUDRowMapper.projectLabel,
+                displayName: "Cloud task",
+                liveState: state,
+                preview: "",
+                elapsed: "",
+                lastSeenAt: nil,
+                itermSessionId: nil,
+                revealURL: nil,
+                tty: nil,
+                termProgram: nil
+            )
+        }
+
+        let local = snapshot(rows: [row("local", rate: 2, .direct)])
+        let idleFiltered = appendingClaudeCloudRows(
+            to: local,
+            cloudHUDRows: [cloudRow(.idle)],
+            includeIdle: false
+        )
+        let activeIncluded = appendingClaudeCloudRows(
+            to: local,
+            cloudHUDRows: [cloudRow(.active)],
+            includeIdle: false
+        )
+
+        guard case .estimate(let estimate) = QuotaMeterWeeklyHeaderResolver.status(
+            isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+            suspect: false, remainingPercent: 89, snapshot: idleFiltered
+        ) else {
+            return XCTFail("an idle cloud row must not block the local aggregate")
+        }
+        XCTAssertEqual(estimate.aggregatePercentPerHour, 2, accuracy: 0.001)
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                suspect: false, remainingPercent: 89, snapshot: activeIncluded
+            ),
+            .unavailable
         )
     }
 

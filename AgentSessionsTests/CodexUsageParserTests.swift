@@ -3351,7 +3351,8 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two"])
         XCTAssertEqual(snapshot?.burstSummary?.count, 2)
-        XCTAssertEqual(snapshot?.burstSummary?.containsUnknownActiveRate, true)
+        XCTAssertEqual(snapshot?.burstSummary?.containsWaitingActiveRate, true)
+        XCTAssertEqual(snapshot?.burstSummary?.containsUnavailableActiveRate, false)
     }
 
     func testRunwayPendingOverflowMergesWithBurnSummaryCount() {
@@ -3395,7 +3396,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two"])
         XCTAssertEqual(snapshot?.burstSummary?.count, 5)
         XCTAssertEqual(snapshot?.burstSummary?.displayRate ?? 0, 7, accuracy: 0.001)
-        XCTAssertEqual(snapshot?.burstSummary?.containsUnknownActiveRate, true)
+        XCTAssertEqual(snapshot?.burstSummary?.containsWaitingActiveRate, true)
+        XCTAssertEqual(snapshot?.burstSummary?.containsUnavailableActiveRate, false)
     }
 
     func testCodexRunwayLoaderUniqueIdentitiesMergePartialHudRowIntoCorrectedParent() {
