@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.4] - 2026-09-16
+
 ### Features
 - **Cline CLI and Desktop sessions now appear in Agent Sessions.** The app discovers their shared local history, labels the originating surface, searches prompts, responses, thinking, and tool activity, and offers Cline-specific Settings controls. Resume, live status, image extraction, hierarchy, and usage tracking are not yet supported.
 
