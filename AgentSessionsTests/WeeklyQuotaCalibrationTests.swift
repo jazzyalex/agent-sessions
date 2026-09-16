@@ -2021,3 +2021,260 @@ final class CodexCalibrationAccountScopeTests: XCTestCase {
         XCTAssertEqual(CodexCalibrationAccountScope.accountId(authURL: authURL), "account-b")
     }
 }
+
+/// The adaptive Quota Meter weekly header. These pin the three ways it can be
+/// wrong: a total that silently drops an unmeasurable row, a run-out that is not
+/// `remaining ÷ aggregate`, and a column budget that would resize the pinned
+/// Quota Meter window when the lens changes.
+final class QuotaMeterWeeklyHeaderTests: XCTestCase {
+
+    private let now = Date(timeIntervalSince1970: 2_000_000)
+    private var resetIn20Hours: Date { now.addingTimeInterval(20 * 3600) }
+
+    private func row(_ id: String,
+                     rate: Double,
+                     _ confidence: RunwayAttributionConfidence) -> RunwayPauseImpactRow {
+        RunwayPauseImpactRow(
+            id: id,
+            displayName: id,
+            isGoal: false,
+            deadline: .unavailable,
+            gainedSeconds: 0,
+            displayRate: rate,
+            confidence: confidence
+        )
+    }
+
+    private func snapshot(rows: [RunwayPauseImpactRow],
+                          overflowRate: Double? = nil,
+                          overflowContainsUnknownRate: Bool = false,
+                          remainingPercent: Double = 89,
+                          resetAt: Date? = nil,
+                          rateUnit: RunwayRateUnit = .weeklyPercentPerHour) -> CodexRunwaySnapshot {
+        let reset = resetAt ?? resetIn20Hours
+        return CodexRunwaySnapshot(
+            baseline: RunwayProviderBaseline(
+                source: .codex,
+                remainingPercent: remainingPercent,
+                resetAt: reset,
+                currentRunoutAt: reset,
+                observedAt: now,
+                hasProjectedRunout: false,
+                windowMinutes: 10080,
+                rateUnit: rateUnit
+            ),
+            rows: rows,
+            burstSummary: overflowRate.map {
+                RunwayShortBurstSummary(count: 2, deadline: .unavailable,
+                                        gainedSeconds: 0, displayRate: $0,
+                                        containsUnknownActiveRate: overflowContainsUnknownRate)
+            }
+        )
+    }
+
+    private func header(rows: [RunwayPauseImpactRow],
+                        overflowRate: Double? = nil,
+                        remainingPercent: Double = 89,
+                        resetAt: Date? = nil,
+                        isWeeklyLens: Bool = true,
+                        weekStale: Bool = false,
+                        fiveHourAbsent: Bool = false,
+                        suspect: Bool = false,
+                        rateUnit: RunwayRateUnit = .weeklyPercentPerHour) -> QuotaMeterWeeklyHeader? {
+        QuotaMeterWeeklyHeaderResolver.header(
+            isWeeklyLens: isWeeklyLens,
+            weekStale: weekStale,
+            fiveHourAbsent: fiveHourAbsent,
+            suspect: suspect,
+            snapshot: snapshot(rows: rows,
+                               overflowRate: overflowRate,
+                               remainingPercent: remainingPercent,
+                               resetAt: resetAt,
+                               rateUnit: rateUnit)
+        )
+    }
+
+    /// Every visible measured row plus the `+N sessions` overflow. An idle row is
+    /// not burn, so it contributes nothing rather than blocking the total.
+    func testAggregatesDirectAndMixedRowsPlusOverflowAndSkipsIdle() throws {
+        let resolved = try XCTUnwrap(header(
+            rows: [
+                row("a", rate: 1.5, .direct),
+                row("b", rate: 0.9, .mixed),
+                row("c", rate: 0, .idle),
+            ],
+            overflowRate: 2.0
+        ))
+        XCTAssertEqual(resolved.aggregatePercentPerHour, 4.4, accuracy: 0.0001)
+        XCTAssertEqual(resolved.aggregateText, "4.4%/h")
+        XCTAssertEqual(resolved.remainingPercent, 89)
+    }
+
+    /// An active row with no measured rate makes the sum incomplete — the drawer
+    /// is showing it as a clock, "n/a" or "Cloud". The header must not publish a
+    /// total that quietly omits it, because the projection built on it would be
+    /// too long.
+    func testFailsClosedWhenAnyActiveRowHasNoMeasuredRate() {
+        for confidence in [RunwayAttributionConfidence.waiting, .unsupported, .cloud] {
+            XCTAssertNil(
+                header(rows: [row("a", rate: 2.0, .direct), row("b", rate: 0, confidence)]),
+                "\(confidence) must suppress the aggregate, not be summed as zero"
+            )
+        }
+        XCTAssertNil(header(rows: [row("a", rate: 0, .idle)]),
+                     "an idle-only snapshot has no burn to report")
+    }
+
+    func testFailsClosedWhenUnknownActiveRateIsHiddenInOverflow() {
+        let hiddenUnknown = snapshot(
+            rows: [row("a", rate: 2.0, .direct)],
+            overflowRate: 1.0,
+            overflowContainsUnknownRate: true
+        )
+
+        XCTAssertNil(
+            QuotaMeterWeeklyHeaderResolver.header(
+                isWeeklyLens: true,
+                weekStale: false,
+                fiveHourAbsent: false,
+                suspect: false,
+                snapshot: hiddenUnknown
+            )
+        )
+    }
+
+    func testWeeklyHeaderStatusExplainsTransientAndUnavailableRates() {
+        let waiting = snapshot(rows: [row("a", rate: 0, .waiting)])
+        let unsupported = snapshot(rows: [row("a", rate: 0, .unsupported)])
+
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                suspect: false, snapshot: waiting
+            ),
+            .measuring
+        )
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+                suspect: false, snapshot: unsupported
+            ),
+            .unavailable
+        )
+    }
+
+    func testWeeklyHeaderStatusDoesNotDisappearWhenEstimateDropsOut() {
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: false, fiveHourAbsent: true,
+                suspect: false, snapshot: nil
+            ),
+            .quiet
+        )
+        XCTAssertEqual(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: true, weekStale: true, fiveHourAbsent: true,
+                suspect: false, snapshot: nil
+            ),
+            .unavailable
+        )
+        XCTAssertNil(
+            QuotaMeterWeeklyHeaderResolver.status(
+                isWeeklyLens: false, weekStale: false, fiveHourAbsent: true,
+                suspect: false, snapshot: nil
+            ),
+            "5h, tk and dollar lenses keep their existing header"
+        )
+    }
+
+    /// The projection is true remaining ÷ aggregate: 1% left at 4.4%/h is ~14 min.
+    func testOnePercentAtFourPointFourPercentPerHourProjectsAboutFourteenMinutes() throws {
+        let resolved = try XCTUnwrap(header(rows: [row("a", rate: 4.4, .direct)],
+                                            remainingPercent: 1))
+        XCTAssertEqual(resolved.secondsToExhaustion() ?? 0, 1 / 4.4 * 3600, accuracy: 0.01)
+        XCTAssertEqual(resolved.runoutText(now: now), "▸14m")
+        XCTAssertFalse(resolved.isOnTrack(now: now))
+    }
+
+    /// A run-out at or after the reset is not a run-out, so the header keeps the
+    /// existing on-track signal in that slot instead of a time.
+    func testShowsOnTrackInsteadWhenTheAggregateOutlastsTheReset() throws {
+        let slowed = try XCTUnwrap(header(rows: [row("a", rate: 0.5, .direct)],
+                                          remainingPercent: 50,
+                                          resetAt: now.addingTimeInterval(20 * 3600)))
+        XCTAssertTrue(slowed.isOnTrack(now: now))
+        XCTAssertNil(slowed.runoutText(now: now))
+
+        // Exactly at the reset still counts as on track.
+        let boundary = try XCTUnwrap(header(rows: [row("a", rate: 2.0, .direct)],
+                                            remainingPercent: 40,
+                                            resetAt: now.addingTimeInterval(20 * 3600)))
+        XCTAssertTrue(boundary.isOnTrack(now: now))
+        XCTAssertNil(boundary.runoutText(now: now))
+
+        // Same row, reset pushed out: now it is a real run-out again.
+        let running = try XCTUnwrap(header(rows: [row("a", rate: 2.0, .direct)],
+                                           remainingPercent: 40,
+                                           resetAt: now.addingTimeInterval(30 * 3600)))
+        XCTAssertFalse(running.isOnTrack(now: now))
+        XCTAssertEqual(running.runoutText(now: now), "▸20h")
+    }
+
+    /// `<1m`, `Xm` under an hour, compact `XhYm` above.
+    func testCompactDurationFormat() {
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 30), "<1m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 840), "14m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 59 * 60), "59m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 90 * 60), "1h30m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 2 * 3600), "2h")
+    }
+
+    /// The aggregate reads as a number at any magnitude, but never as a
+    /// fabricated zero.
+    func testAggregateTextNeverFabricatesAZero() {
+        func header(_ rate: Double) -> QuotaMeterWeeklyHeader {
+            QuotaMeterWeeklyHeader(aggregatePercentPerHour: rate,
+                                   remainingPercent: 50,
+                                   resetAt: resetIn20Hours)
+        }
+        XCTAssertEqual(header(4.4).aggregateText, "4.4%/h")
+        XCTAssertEqual(header(0.02).aggregateText, "<0.1%/h")
+        XCTAssertEqual(header(12.4).aggregateText, "12%/h")
+        XCTAssertEqual(header(100).aggregateText, "100%/h")
+    }
+
+    /// `Wk` detail belongs to the `Wk` lens only. Every other lens, a stale weekly
+    /// reset, and an absent 5h window we cannot verify all keep the existing header.
+    func testHeaderOnlyUnderACompleteWeeklyLens() {
+        let burning = [row("a", rate: 2.0, .direct)]
+        XCTAssertNil(header(rows: burning, isWeeklyLens: false), "5h/tk/$ keep their header")
+        XCTAssertNil(header(rows: burning, weekStale: true),
+                     "a run-out cannot be compared against a reset we do not have")
+        XCTAssertNil(header(rows: burning, fiveHourAbsent: true, suspect: true),
+                     "\"can't verify\" must not become \"5h:∞\"")
+        XCTAssertNil(header(rows: burning, rateUnit: .tokensPerHour),
+                     "a snapshot left over from another unit must not be summed as %/h")
+        XCTAssertNotNil(header(rows: burning, fiveHourAbsent: true),
+                        "a genuinely dropped 5h window still aggregates")
+    }
+
+    /// The contract that keeps the pinned Quota Meter from resizing: the weekly
+    /// header spends the same column budget as the 5h header, so its width equals
+    /// `compactContentWidth` for Standard and Enlarged alike.
+    func testWeeklyLensSpendsTheSameColumnBudgetAsTheFiveHourHeader() {
+        XCTAssertEqual(HUDLimitsColumnLayout.WeeklyLens.columnsTotal,
+                       HUDLimitsColumnLayout.compactColumnsTotal)
+        for enlarged in [false, true] {
+            XCTAssertEqual(
+                HUDLimitsColumnLayout.weeklyLensContentWidth(enlarged: enlarged),
+                HUDLimitsColumnLayout.compactContentWidth(enlarged: enlarged),
+                accuracy: 0.0001,
+                "enlarged=\(enlarged): the lens must not resize the window"
+            )
+        }
+        // Pin both outer widths, including the six-point gaps that keep adjacent
+        // percentages and burn rates from reading as one token.
+        XCTAssertEqual(HUDLimitsColumnLayout.compactContentWidth(enlarged: false), 417, accuracy: 0.0001)
+        XCTAssertEqual(HUDLimitsColumnLayout.compactContentWidth(enlarged: true), 447.417, accuracy: 0.001)
+    }
+}

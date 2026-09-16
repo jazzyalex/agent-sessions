@@ -2805,6 +2805,11 @@ private struct HUDLimitsProviderEntry {
     /// signal in place of a fictitious run-out. Read by every HUD limits surface
     /// (bar, rows panel, detail panel) so they stay consistent.
     var aggregateTokensPerHour: Double? = nil
+    /// Adaptive weekly header payload, resolved from this provider's visible
+    /// weekly snapshot by `QuotaMeterWeeklyHeaderResolver`. nil keeps the existing
+    /// header. Carried on the entry because the resolver needs the snapshot, which
+    /// only the rows panel has.
+    var weeklyHeader: QuotaMeterWeeklyHeaderStatus? = nil
     /// CLI auth status for this provider; when alarming, HUDLimitsBar swaps the
     /// meter text for an AuthRemediationBanner. Left nil by callers (e.g. the
     /// rows panel) that don't render the banner.
@@ -2937,6 +2942,180 @@ func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
     )
     merged.aggregateTokensPerHour = snapshot.aggregateTokensPerHour
     return merged
+}
+
+/// The aggregate weekly burn the adaptive Quota Meter header reports while the
+/// `Wk` lens is the one the Session Runway is reporting.
+///
+/// It is the same figure the drawer is already ranking, summed: every measured
+/// row's `%/h` plus the `+N sessions` overflow. Pure, and internal rather than
+/// folded into the view, because the two rules that matter are invisible in a
+/// rendered row — which rows may contribute, and when the total is too incomplete
+/// to show at all.
+struct QuotaMeterWeeklyHeader: Equatable {
+    /// Summed weekly percent-per-hour across the contributing rows.
+    let aggregatePercentPerHour: Double
+    /// True remaining share of the weekly window (not the display-mode reading).
+    /// This is the numerator of the projection.
+    let remainingPercent: Double
+    let resetAt: Date
+
+    /// "4.4%/h". Always a number, so the header's shape never depends on how small
+    /// the burn is — but never a fabricated zero either: a total that would round
+    /// to "0.0" reads "<0.1%/h".
+    var aggregateText: String {
+        if aggregatePercentPerHour >= 10 {
+            // NOT String(format: "%.0f"): printf rounds half to EVEN, so a .5
+            // boundary could print a value one lower than the true one.
+            return "\(Int(aggregatePercentPerHour.rounded()))%/h"
+        }
+        let oneDecimal = String(format: "%.1f", aggregatePercentPerHour)
+        return oneDecimal == "0.0" ? "<0.1%/h" : "\(oneDecimal)%/h"
+    }
+
+    /// `remaining ÷ aggregate`, in seconds: how long the current burn takes to
+    /// exhaust what is left of the week. nil when nothing is left to burn.
+    func secondsToExhaustion() -> Double? {
+        guard aggregatePercentPerHour > 0, remainingPercent > 0 else { return nil }
+        return remainingPercent / aggregatePercentPerHour * 3600
+    }
+
+    /// The aggregate never reaches the weekly reset, so the header shows the
+    /// existing on-track signal instead of a run-out that cannot happen.
+    func isOnTrack(now: Date) -> Bool {
+        guard let seconds = secondsToExhaustion() else { return true }
+        return now.addingTimeInterval(seconds) >= resetAt
+    }
+
+    /// "▸14m" / "▸1h30m" / "▸<1m", or nil when the header shows on-track instead.
+    /// No day unit on purpose: an on-track week never reaches this branch, and the
+    /// run-out column is 60pt wide.
+    func runoutText(now: Date) -> String? {
+        guard !isOnTrack(now: now), let seconds = secondsToExhaustion() else { return nil }
+        return "▸" + Self.compactDuration(seconds: seconds)
+    }
+
+    /// `<1m`, `Xm` under an hour, `XhYm` above — compact because it shares a fixed
+    /// column with the percent beside it.
+    static func compactDuration(seconds: Double) -> String {
+        if seconds < 60 { return "<1m" }
+        // Round up so the approximation never tells the user they have less time
+        // than the projection supports.
+        let minutes = max(1, Int(ceil(seconds / 60)))
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0 ? "\(hours)h" : "\(hours)h\(remainder)m"
+    }
+}
+
+/// What the weekly header can honestly say right now. Keeping these states in
+/// the weekly layout prevents a transient scan from making the rate and ETA
+/// silently disappear and reverting to a different-looking header.
+enum QuotaMeterWeeklyHeaderStatus: Equatable {
+    case estimate(QuotaMeterWeeklyHeader)
+    case measuring
+    case unavailable
+    case quiet
+    case exhausted
+}
+
+/// Resolves the adaptive weekly header, failing closed wherever the aggregate
+/// could be confidently wrong. nil is not an error: it means the row keeps the
+/// header it has always had.
+enum QuotaMeterWeeklyHeaderResolver {
+    static func status(isWeeklyLens: Bool,
+                       weekStale: Bool,
+                       fiveHourAbsent: Bool,
+                       suspect: Bool,
+                       snapshot: CodexRunwaySnapshot?) -> QuotaMeterWeeklyHeaderStatus? {
+        guard isWeeklyLens else { return nil }
+        guard !(fiveHourAbsent && suspect) else { return nil }
+        guard !weekStale else { return .unavailable }
+        guard let snapshot else { return .quiet }
+        guard snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return .measuring }
+
+        for row in snapshot.rows {
+            switch row.confidence {
+            case .waiting:
+                return .measuring
+            case .unsupported, .cloud:
+                return .unavailable
+            case .direct, .mixed, .idle:
+                continue
+            }
+        }
+        if snapshot.burstSummary?.containsUnknownActiveRate == true {
+            return .unavailable
+        }
+        if snapshot.baseline.remainingPercent <= 0 {
+            return .exhausted
+        }
+        if let header = header(
+            isWeeklyLens: true,
+            weekStale: false,
+            fiveHourAbsent: fiveHourAbsent,
+            suspect: suspect,
+            snapshot: snapshot
+        ) {
+            return .estimate(header)
+        }
+        return .quiet
+    }
+
+    /// - Parameters:
+    ///   - isWeeklyLens: `RunwayPresentation` is `.weekly` *and* the weekly window
+    ///     is present. 5h, tk and `$` all resolve to false and keep their existing
+    ///     header.
+    ///   - weekStale: the weekly reset copy is unavailable, so a run-out cannot be
+    ///     compared against a reset we do not have.
+    ///   - fiveHourAbsent / suspect: an absent 5h window may only read "∞" when the
+    ///     provider genuinely dropped it. "can't verify" must stay "can't verify".
+    ///   - snapshot: the same visible snapshot the Session Runway drawer renders,
+    ///     so header and drawer can never disagree about who is burning.
+    static func header(isWeeklyLens: Bool,
+                       weekStale: Bool,
+                       fiveHourAbsent: Bool,
+                       suspect: Bool,
+                       snapshot: CodexRunwaySnapshot?) -> QuotaMeterWeeklyHeader? {
+        guard isWeeklyLens, !weekStale else { return nil }
+        guard !(fiveHourAbsent && suspect) else { return nil }
+        // Only a snapshot actually computed in weekly %/h can be summed as one. A
+        // placeholder left over from a lens switch still carries the old unit.
+        guard let snapshot, snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return nil }
+
+        var total = 0.0
+        for row in snapshot.rows {
+            switch row.confidence {
+            case .direct, .mixed:
+                total += row.displayRate
+            case .idle:
+                continue
+            case .waiting, .unsupported, .cloud:
+                // An active row whose rate is unknown. The drawer shows it as a
+                // clock, "n/a" or "Cloud"; summing only the measurable rows would
+                // understate the burn and project a run-out that is too long, which
+                // is the one way this header can lie. Show nothing instead.
+                return nil
+            }
+        }
+        // The overflow summary is part of the same total: the drawer folds the
+        // rows it has no space for into "+N sessions", and their rates are summed
+        // there with the same per-row rule.
+        if let burstSummary = snapshot.burstSummary {
+            guard !burstSummary.containsUnknownActiveRate else { return nil }
+            total += burstSummary.displayRate
+        }
+
+        guard total.isFinite, total > 0 else { return nil }
+        let remaining = snapshot.baseline.remainingPercent
+        guard remaining.isFinite, remaining > 0 else { return nil }
+        return QuotaMeterWeeklyHeader(
+            aggregatePercentPerHour: total,
+            remainingPercent: remaining,
+            resetAt: snapshot.baseline.resetAt
+        )
+    }
 }
 
 private struct LimitsContentHeightKey: PreferenceKey {
@@ -3558,7 +3737,19 @@ private struct HUDLimitsRowsPanel: View {
         QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
     }
 
-    private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
+    /// True while the `Wk` lens is the one the runway is actually reporting:
+    /// selected, and the weekly window is present. Shares `activeRunwayLensWindow`
+    /// with the header's underline, so the label marker and the adaptive header
+    /// cannot drift apart.
+    private func isWeeklyRunwayLens(fiveAbsent: Bool, weekAbsent: Bool) -> Bool {
+        activeRunwayLensWindow(
+            rawPresentation: runwayPresentationRaw,
+            fiveAbsent: fiveAbsent,
+            weekAbsent: weekAbsent
+        ) == .week
+    }
+
+    private func runwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
         var snapshot = source == .claude ? claudeRunwaySnapshot : codexRunwaySnapshot
         if source == .claude {
             // Read during body evaluation on purpose: `ClaudeCloudLiveModel` is
@@ -3568,12 +3759,19 @@ private struct HUDLimitsRowsPanel: View {
             snapshot = appendingClaudeCloudRows(to: snapshot,
                                                 cloudHUDRows: ClaudeCloudLiveModel.shared.rows)
         }
-        return quotaMeterVisibleRunwaySnapshot(from: snapshot, visibility: runwayVisibility)
+        return snapshot
+    }
+
+    private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
+        quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot(for: source), visibility: runwayVisibility)
     }
 
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
         if providerShown(.codex) {
+            // Resolved once: this runs on every HUD body evaluation, and the
+            // adaptive header reads the same snapshot the drawer renders.
+            let snapshot = runwaySnapshot(for: .codex)
             out.append(HUDLimitsProviderEntry(
                 provider: .codex,
                 source: .codex,
@@ -3590,6 +3788,16 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
+                weeklyHeader: QuotaMeterWeeklyHeaderResolver.status(
+                    isWeeklyLens: isWeeklyRunwayLens(
+                        fiveAbsent: !codexUsageModel.hasFiveHourRateLimit,
+                        weekAbsent: !codexUsageModel.hasWeekRateLimit
+                    ),
+                    weekStale: isResetInfoUnavailable(raw: codexUsageModel.weekResetText),
+                    fiveHourAbsent: !codexUsageModel.hasFiveHourRateLimit,
+                    suspect: codexUsageModel.usageFormatSuspect,
+                    snapshot: snapshot
+                ),
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
                 reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption,
@@ -3597,6 +3805,7 @@ private struct HUDLimitsRowsPanel: View {
             ))
         }
         if providerShown(.claude) {
+            let snapshot = runwaySnapshot(for: .claude)
             out.append(HUDLimitsProviderEntry(
                 provider: .claude,
                 source: .claude,
@@ -3610,6 +3819,13 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
+                weeklyHeader: QuotaMeterWeeklyHeaderResolver.status(
+                    isWeeklyLens: isWeeklyRunwayLens(fiveAbsent: false, weekAbsent: false),
+                    weekStale: isResetInfoUnavailable(raw: claudeUsageModel.weekAllModelsResetText),
+                    fiveHourAbsent: false,
+                    suspect: false,
+                    snapshot: snapshot
+                ),
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
                 reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption,
@@ -4695,8 +4911,16 @@ private enum QuotaMeterTextMetrics {
     static func columnScale(enlarged: Bool) -> CGFloat { enlarged ? 13.0 / 12.0 : 1.0 }
 }
 
-private enum HUDLimitsColumnLayout {
-    static let compactSpacing: CGFloat = 3
+/// Internal rather than file-private so the two header layouts' shared width
+/// budget is pinned by a test: the pinned Quota Meter is fixed-size
+/// (`minSize == maxSize`), so a column change that moved this number would
+/// silently resize the window.
+enum HUDLimitsColumnLayout {
+    // Keep adjacent quota values visually distinct. Three points made the weekly
+    // percentage and aggregate burn read as one token ("95%4.9%/h") at the
+    // standard type size; six points preserves the compact row while giving each
+    // fixed-width value a clear boundary.
+    static let compactSpacing: CGFloat = 6
     // Base widths are sized for the Standard provider font (12pt) and scaled up for
     // Enlarged via QuotaMeterTextMetrics.columnScale, so Standard stays compact and
     // Enlarged grows ~8%. Each fits its worst-case normal content without shrinking:
@@ -4711,19 +4935,68 @@ private enum HUDLimitsColumnLayout {
     static let compactWeekPercentWidth: CGFloat = 53
     static let compactWeekResetWidth: CGFloat = 104
 
+    /// Columns in the compact header, and the gaps between them. Both header
+    /// layouts spend this same column count, which is what keeps their widths
+    /// equal by construction rather than by coincidence.
+    static let compactColumnCount = 6
+    static let compactInterColumnGapCount = compactColumnCount - 1
+
+    /// Fixed chrome around the columns: the provider icon, the icon→columns
+    /// spacing, and the row's 14pt horizontal padding on both sides.
+    static let compactChromeWidth: CGFloat = 14 + 8 + (14 * 2)
+    /// Added to the computed width so the fixed-size window never compresses the
+    /// row against its rounded edge.
+    static let compactWidthEpsilon: CGFloat = 2
+
+    /// Sum of the compact header's fixed columns, before gaps and font scaling.
+    static var compactColumnsTotal: CGFloat {
+        compactFiveHourPercentWidth + compactFiveHourProjectionWidth
+            + compactFiveHourResetWidth + compactSeparatorWidth
+            + compactWeekPercentWidth + compactWeekResetWidth
+    }
+
     /// Natural width of the compact limits row (icon + scaled columns + padding),
     /// used to size the Quota Meter window so it hugs its content. The icon and
     /// padding are fixed; only the columns and inter-column gaps scale with the font.
     /// Chrome constants mirror HUDLimitsProviderText (14pt icon, 8pt icon→columns
     /// spacing) and the row's 14pt horizontal padding.
     static func compactContentWidth(enlarged: Bool) -> CGFloat {
+        contentWidth(columns: compactColumnsTotal, enlarged: enlarged)
+    }
+
+    private static func contentWidth(columns: CGFloat, enlarged: Bool) -> CGFloat {
         let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
-        let columns = compactFiveHourPercentWidth + compactFiveHourProjectionWidth
-            + compactFiveHourResetWidth + compactSeparatorWidth
-            + compactWeekPercentWidth + compactWeekResetWidth
-        let interColumnGaps = compactSpacing * 5 // six columns → five gaps
-        let chrome: CGFloat = 14 + 8 + (14 * 2)
-        return (columns + interColumnGaps) * scale + chrome + 2 // +2 epsilon to avoid edge compression
+        let interColumnGaps = compactSpacing * CGFloat(compactInterColumnGapCount)
+        return (columns + interColumnGaps) * scale + compactChromeWidth + compactWidthEpsilon
+    }
+
+    /// Column mapping for the adaptive weekly header (the `Wk` lens is active and
+    /// the weekly snapshot's aggregate is complete).
+    ///
+    /// It spends the *same* total column budget as the 5h header, reallocated: the
+    /// 5h window keeps only its percent column, and the two columns that held the
+    /// 5h projection and reset now carry the weekly aggregate rate and its run-out.
+    /// Equal totals plus an equal column count means `weeklyLensContentWidth`
+    /// equals `compactContentWidth` at both type sizes — so the lens can change
+    /// without the pinned window moving.
+    enum WeeklyLens {
+        static let fiveHourWidth = HUDLimitsColumnLayout.compactFiveHourPercentWidth
+        static let separatorWidth = HUDLimitsColumnLayout.compactSeparatorWidth
+        static let weekPercentWidth = HUDLimitsColumnLayout.compactWeekPercentWidth
+        static let aggregateWidth = HUDLimitsColumnLayout.compactFiveHourProjectionWidth
+        static let runoutWidth = HUDLimitsColumnLayout.compactFiveHourResetWidth
+        static let weekResetWidth = HUDLimitsColumnLayout.compactWeekResetWidth
+
+        static var columnsTotal: CGFloat {
+            fiveHourWidth + separatorWidth + weekPercentWidth
+                + aggregateWidth + runoutWidth + weekResetWidth
+        }
+    }
+
+    /// Width the weekly header occupies. The contract a test pins: identical to
+    /// `compactContentWidth` for Standard and Enlarged alike.
+    static func weeklyLensContentWidth(enlarged: Bool) -> CGFloat {
+        contentWidth(columns: WeeklyLens.columnsTotal, enlarged: enlarged)
     }
 
     static let detailFiveHourPercentWidth: CGFloat = 58
@@ -4985,7 +5258,7 @@ private struct HUDLimitsProviderIcon: View {
 
 /// Which quota window (if any) the Session Runway drawer is currently reporting,
 /// so the matching `5h`/`Wk` label in the agent row can be underlined. A picked-
-/// but-unmeasurable window (e.g. `5h: no limit`, where the runway silently falls
+/// but-unmeasurable window (e.g. `5h:∞`, where the runway silently falls
 /// back to tokens) and the token/$ lenses resolve to `nil` — the underline only
 /// ever marks the lens the drawer is actually using.
 private enum RunwayLensWindow { case fiveHour, week }
@@ -5046,7 +5319,7 @@ private struct HUDLimitsProviderText: View {
         guard entry.hasWeekRateLimit else { return true }
         return entry.fiveHourLeft <= entry.weekLeft
     }
-    // Three distinct states per window: present, a dropped window → calm "no limit"
+    // Three distinct states per window: present, a dropped window → calm "∞"
     // ("can't verify" when suspect), and a present-but-stale reset → "--"/unavailable.
     // A dropped window is excluded from the bottleneck (see `bottleneckIs5h`).
     private var suspect: Bool { entry.usageFormatSuspect }
@@ -5054,6 +5327,19 @@ private struct HUDLimitsProviderText: View {
     private var weekAbsent: Bool { !entry.hasWeekRateLimit }
     private var fiveStale: Bool { !fiveAbsent && isResetInfoUnavailable(raw: entry.fiveHourResetText) }
     private var weekStale: Bool { !weekAbsent && isResetInfoUnavailable(raw: entry.weekResetText) }
+
+    /// A verified missing 5h window always uses the same compact infinity mark,
+    /// regardless of which runway lens is selected. Suspect format data remains
+    /// explicit rather than being promoted to a confident infinity state.
+    @ViewBuilder
+    private var fiveHourAbsentLabel: some View {
+        if suspect {
+            Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: true))")
+        } else {
+            Text(verbatim: "5h:∞")
+                .accessibilityLabel(Text(verbatim: "no five-hour limit"))
+        }
+    }
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
     private func percentText(left: Int, absent: Bool, stale: Bool) -> String {
@@ -5097,7 +5383,7 @@ private struct HUDLimitsProviderText: View {
     }
 
     // Reset labels carry their own "↻ " prefix so the calm absent states can
-    // drop it ("no limit" / "can't verify" read wrong with a reset glyph).
+    // drop it ("∞" / "can't verify" read wrong with a reset glyph).
     private func fiveHourResetLabel() -> String? {
         if fiveAbsent { return UsageLimitAbsenceCopy.localizedLabel(suspect: suspect) }
         if isResetInfoUnavailable(raw: entry.fiveHourResetText) { return "↻ \(UsageStaleThresholds.localizedUnavailableCopy)" }
@@ -5151,11 +5437,11 @@ private struct HUDLimitsProviderText: View {
                 + HUDLimitsColumnLayout.compactSpacing
         HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
             if fiveAbsent {
-                // Dropped 5h window: one spanning unit "5h: no limit  30K tk/h"
+                // Dropped 5h window: one spanning unit "5h:∞  30K tk/h"
                 // (state first), sized to the combined 5h region so the variable-
-                // width burn chip has room instead of colliding with "no limit".
+                // width burn chip has room instead of colliding with "∞".
                 HStack(spacing: 6 * scale) {
-                    Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: suspect))")
+                    fiveHourAbsentLabel
                         .foregroundStyle(.secondary)
                     if let chip = fiveHourBurnChip {
                         Text(chip).foregroundStyle(hudProjectionColor(colorScheme))
@@ -5197,6 +5483,115 @@ private struct HUDLimitsProviderText: View {
         }
     }
 
+    /// The adaptive weekly header: `5h:89%` — or `5h:∞` when the provider dropped
+    /// that window — then `| Wk:89%  4.4%/h ▸14m ↻ Wed 12:00 PM`.
+    ///
+    /// Rendered whenever the `Wk` lens is effective. A complete aggregate shows
+    /// its rate and ETA; incomplete states remain in this same layout with an
+    /// explicit measuring, unavailable, quiet, or exhausted label.
+    ///
+    /// The columns are the same six the 5h header uses, reallocated (see
+    /// `HUDLimitsColumnLayout.WeeklyLens`), so this row occupies the identical
+    /// width and the pinned window never moves when the lens changes.
+    private func weeklyStatusHelp(_ status: QuotaMeterWeeklyHeaderStatus) -> String {
+        switch status {
+        case .estimate:
+            return "Combined weekly burn across every measurable active session, with time left at that pace."
+        case .measuring:
+            return "Measuring an active session before the combined weekly burn and ETA can be calculated."
+        case .unavailable:
+            return "Combined weekly burn is unavailable while an active session has no measurable local rate."
+        case .quiet:
+            return "No measurable weekly burn is active right now."
+        case .exhausted:
+            return "The weekly quota has no remaining capacity to project."
+        }
+    }
+
+    private func weeklyLensContent(_ status: QuotaMeterWeeklyHeaderStatus) -> some View {
+        let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
+        return HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
+            if fiveAbsent {
+                // The 5h window is gone, so a percent would be a lie. "∞" is the
+                // honest read and takes the column the percent would have used.
+                //
+                // `verbatim`: both strings are deliberate non-catalog keys, because
+                // adding a localizable key means editing the reviewed catalog and
+                // the validator's pinned key count/SHA (see
+                // `scripts/validate_localization_catalogs.py`).
+                fiveHourAbsentLabel
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.fiveHourWidth * scale, alignment: .leading)
+            } else {
+                HStack(spacing: 0) {
+                    runwayLensLabel("5h: ", active: false)
+                    Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                        .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                }
+                .frame(width: HUDLimitsColumnLayout.WeeklyLens.fiveHourWidth * scale, alignment: .leading)
+            }
+
+            Text("|")
+                .foregroundStyle(Color.primary.opacity(0.25))
+                .frame(width: HUDLimitsColumnLayout.WeeklyLens.separatorWidth * scale, alignment: .center)
+
+            HStack(spacing: 0) {
+                runwayLensLabel("Wk: ", active: true)
+                Text(percentText(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
+                    .foregroundStyle(percentColor(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
+            }
+            .frame(width: HUDLimitsColumnLayout.WeeklyLens.weekPercentWidth * scale, alignment: .leading)
+
+            switch status {
+            case .estimate(let header):
+                // The drawer's own total, in the same unit, so the header answers
+                // "how fast is the week going" with one number instead of four rows.
+                Text(header.aggregateText)
+                    .foregroundStyle(hudProjectionColor(colorScheme))
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
+
+                // Nil when the aggregate outlasts the reset; the token then draws
+                // the existing on-track signal in this same slot.
+                HUDLimitsProjectionToken(projection: header.runoutText(now: now), idleMarker: true, onTrack: true)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+            case .measuring:
+                Text(verbatim: "measuring")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
+                Text(verbatim: "ETA …")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+            case .unavailable:
+                Text(verbatim: "rate n/a")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
+                Text(verbatim: "ETA n/a")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+            case .quiet:
+                Text(verbatim: "quiet")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
+                Text(verbatim: "ETA —")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+            case .exhausted:
+                Text(verbatim: "0 left")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
+                Text(verbatim: "exhausted")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+            }
+
+            if showResets, let r = weekResetLabel() {
+                Text(r)
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.weekResetWidth * scale, alignment: .leading)
+            }
+        }
+        .help(weeklyStatusHelp(status))
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Provider icon — matches CockpitFooterView ProviderIcon exactly
@@ -5219,7 +5614,12 @@ private struct HUDLimitsProviderText: View {
                 HUDLimitsLoadingSpinner()
                     .transition(.opacity)
             } else {
-                if alignColumns && !onlyBottleneck {
+                if let weeklyHeader = entry.weeklyHeader {
+                    weeklyLensContent(weeklyHeader)
+                        .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.primary)
+                        .transition(.opacity)
+                } else if alignColumns && !onlyBottleneck {
                     alignedContent
                         .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                         .foregroundStyle(Color.primary)
@@ -5230,9 +5630,9 @@ private struct HUDLimitsProviderText: View {
                             HStack(spacing: 4) {
                                 if fiveAbsent {
                                     // Dropped 5h window: state first, then the burn
-                                    // chip — "5h: no limit  30K tk/h" — never the
-                                    // jumbled "— 30K tk/h no limit".
-                                    Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: suspect))")
+                                    // chip — "5h:∞  30K tk/h" — never the
+                                    // jumbled "— 30K tk/h no limit" ordering.
+                                    fiveHourAbsentLabel
                                         .foregroundStyle(.secondary)
                                     if let chip = fiveHourBurnChip {
                                         Text(chip)
