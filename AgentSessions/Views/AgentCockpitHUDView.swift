@@ -2993,7 +2993,7 @@ struct QuotaMeterWeeklyHeader: Equatable {
         return now.addingTimeInterval(seconds) >= resetAt
     }
 
-    /// "▸14m" / "▸1h30m" / "▸<1m", or nil when the header shows on-track instead.
+    /// "▸14m" / "▸1h 30m" / "▸<1m", or nil when the header shows on-track instead.
     /// No day unit on purpose: an on-track week never reaches this branch, and the
     /// run-out column is 60pt wide.
     func runoutText(now: Date) -> String? {
@@ -3001,17 +3001,22 @@ struct QuotaMeterWeeklyHeader: Equatable {
         return "▸" + Self.compactDuration(seconds: seconds)
     }
 
-    /// `<1m`, `Xm` under an hour, `XhYm` above — compact because it shares a fixed
-    /// column with the percent beside it.
+    /// `<1m`, `Xm` under an hour, `Xh Ym` through one day, then a whole-hour lower
+    /// bound such as `>57h`. Long projections do not benefit from minute precision.
     static func compactDuration(seconds: Double) -> String {
         if seconds < 60 { return "<1m" }
+        if seconds > 24 * 3600 {
+            return ">\(Int(floor(seconds / 3600)))h"
+        }
         // Round up so the approximation never tells the user they have less time
         // than the projection supports.
         let minutes = max(1, Int(ceil(seconds / 60)))
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         let remainder = minutes % 60
-        return remainder == 0 ? "\(hours)h" : "\(hours)h\(remainder)m"
+        // A narrow no-break space separates the units without spending a full
+        // monospaced character or allowing the compact duration to wrap.
+        return remainder == 0 ? "\(hours)h" : "\(hours)h\u{202F}\(remainder)m"
     }
 }
 
@@ -3035,11 +3040,13 @@ enum QuotaMeterWeeklyHeaderResolver {
                        fiveHourAbsent: Bool,
                        suspect: Bool,
                        remainingPercent: Double,
+                       hasActiveSession: Bool = true,
                        snapshot: CodexRunwaySnapshot?) -> QuotaMeterWeeklyHeaderStatus? {
         guard isWeeklyLens else { return nil }
         guard !(fiveHourAbsent && suspect) else { return nil }
         guard !weekStale else { return .unavailable }
         guard remainingPercent > 0 else { return .exhausted }
+        guard hasActiveSession else { return .quiet }
         guard let snapshot else { return .quiet }
         // A cloud-only snapshot uses a synthetic non-weekly carrier because it has
         // no local quota-derived runway. Cloud burn is permanently unknowable, not
@@ -3791,6 +3798,22 @@ private struct HUDLimitsRowsPanel: View {
         quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot(for: source), visibility: runwayVisibility)
     }
 
+    /// The scanner retains a short trailing sample after a session stops so its
+    /// detailed runway row can decay smoothly. The compact weekly header should
+    /// not turn that history into a current ETA once there is nothing running.
+    private func hasActiveRunwaySession(for source: UsageTrackingSource) -> Bool {
+        switch source {
+        case .codex:
+            return activeRows.contains { $0.source == .codex && $0.liveState == .active }
+        case .claude:
+            return activeRows.contains { $0.source == .claude && $0.liveState == .active }
+                || ClaudeCloudLiveModel.shared.rows.contains {
+                    $0.id.hasPrefix(ClaudeCloudHUDRowMapper.rowIDPrefix)
+                        && $0.liveState == .active
+                }
+        }
+    }
+
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
         if providerShown(.codex) {
@@ -3819,6 +3842,7 @@ private struct HUDLimitsRowsPanel: View {
                     fiveHourAbsent: !codexUsageModel.hasFiveHourRateLimit,
                     suspect: codexUsageModel.usageFormatSuspect,
                     remainingPercent: Double(codexUsageModel.weekRemainingPercent),
+                    hasActiveSession: hasActiveRunwaySession(for: .codex),
                     snapshot: weeklyHeaderSnapshot(for: .codex)
                 ),
                 authStatus: codexUsageModel.authStatus,
@@ -3847,6 +3871,7 @@ private struct HUDLimitsRowsPanel: View {
                     fiveHourAbsent: false,
                     suspect: false,
                     remainingPercent: Double(claudeUsageModel.weekAllModelsRemainingPercent),
+                    hasActiveSession: hasActiveRunwaySession(for: .claude),
                     snapshot: weeklyHeaderSnapshot(for: .claude)
                 ),
                 authStatus: claudeUsageModel.authStatus,
@@ -5510,8 +5535,9 @@ private struct HUDLimitsProviderText: View {
     /// that window — then `| Wk:89%  4.4%/h ▸14m ↻ Wed 12:00 PM`.
     ///
     /// Rendered whenever the `Wk` lens is effective. A complete aggregate shows
-    /// its rate and ETA; incomplete states remain in this same layout with an
-    /// explicit measuring, unavailable, quiet, or exhausted label.
+    /// its rate and ETA; incomplete active states remain in this same layout
+    /// with an explicit measuring, unavailable, or exhausted label. With no
+    /// active session, those columns stay empty.
     ///
     /// The columns are the same six the 5h header uses, reallocated (see
     /// `HUDLimitsColumnLayout.WeeklyLens`), so this row occupies the identical
@@ -5592,12 +5618,10 @@ private struct HUDLimitsProviderText: View {
                     .foregroundStyle(.secondary)
                     .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
             case .quiet:
-                Text(verbatim: "quiet")
-                    .foregroundStyle(.secondary)
-                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
-                Text(verbatim: "ETA —")
-                    .foregroundStyle(.secondary)
-                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+                Color.clear
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, height: 1)
+                Color.clear
+                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, height: 1)
             case .exhausted:
                 Text(verbatim: "0 left")
                     .foregroundStyle(.secondary)

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Improvements
-- **Quota Meter's weekly lens now shows the combined burn rate and time left at that pace.** The compact header keeps the weekly reset visible and uses `∞` consistently when Codex has no five-hour limit. If a rate is still measuring, unavailable, quiet, or exhausted, the header now names that state instead of making a previously visible ETA silently disappear.
+- **Quota Meter's weekly lens now shows the combined burn rate and time left at that pace.** The compact header keeps the weekly reset visible, separates hour and minute units for readability, summarizes projections longer than one day as a whole-hour lower bound, and uses `∞` consistently when Codex has no five-hour limit. Active rates still report measuring, unavailable, or exhausted states; when no session is active, the rate and ETA area stays empty instead of showing a meaningless placeholder.
 - **Quota Meter values have more breathing room.** The compact header now clearly separates the remaining weekly percentage from its adjacent burn rate instead of letting values such as `95%` and `4.9%/h` run together.
 
 ## [5.4] - 2026-09-16

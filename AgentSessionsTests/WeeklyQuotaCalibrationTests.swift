@@ -2165,25 +2165,31 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
         )
     }
 
-    func testWeeklyHeaderStatusDoesNotDisappearWhenEstimateDropsOut() {
+    func testWeeklyHeaderHidesTrailingEstimateWhenNoSessionIsActive() {
+        let trailingEstimate = snapshot(rows: [row("recent", rate: 4.4, .direct)])
+
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: false, fiveHourAbsent: true,
-                suspect: false, remainingPercent: 89, snapshot: nil
+                suspect: false, remainingPercent: 89, hasActiveSession: false,
+                snapshot: trailingEstimate
             ),
-            .quiet
+            .quiet,
+            "a retained scanner sample must not render as a current ETA"
         )
         XCTAssertEqual(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: true, weekStale: true, fiveHourAbsent: true,
-                suspect: false, remainingPercent: 89, snapshot: nil
+                suspect: false, remainingPercent: 89, hasActiveSession: false,
+                snapshot: trailingEstimate
             ),
             .unavailable
         )
         XCTAssertNil(
             QuotaMeterWeeklyHeaderResolver.status(
                 isWeeklyLens: false, weekStale: false, fiveHourAbsent: true,
-                suspect: false, remainingPercent: 89, snapshot: nil
+                suspect: false, remainingPercent: 89, hasActiveSession: false,
+                snapshot: trailingEstimate
             ),
             "5h, tk and dollar lenses keep their existing header"
         )
@@ -2333,8 +2339,12 @@ final class QuotaMeterWeeklyHeaderTests: XCTestCase {
         XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 30), "<1m")
         XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 840), "14m")
         XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 59 * 60), "59m")
-        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 90 * 60), "1h30m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 90 * 60), "1h\u{202F}30m")
         XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 2 * 3600), "2h")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 23 * 3600 + 59 * 60), "23h\u{202F}59m")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 24 * 3600), "24h")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 24 * 3600 + 30 * 60), ">24h")
+        XCTAssertEqual(QuotaMeterWeeklyHeader.compactDuration(seconds: 57 * 3600 + 46 * 60), ">57h")
     }
 
     /// The aggregate reads as a number at any magnitude, but never as a
