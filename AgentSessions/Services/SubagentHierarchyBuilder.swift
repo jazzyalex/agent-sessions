@@ -1,7 +1,7 @@
 import Foundation
 
 /// Row metadata for hierarchical session display.
-struct SubagentRowMeta {
+struct SubagentRowMeta: Equatable {
     let depth: Int            // 0 = top-level, 1 = subagent child, 2+ = nested subagent
     let hasChildren: Bool     // true if this session has resolved subagent children
     let childCount: Int       // number of resolved subagent children (0 for non-parents)

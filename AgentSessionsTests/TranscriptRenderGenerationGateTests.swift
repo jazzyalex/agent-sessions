@@ -150,6 +150,39 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
         )
     }
 
+    func testIndexingCompletionReconcilesMissingSelection() {
+        XCTAssertTrue(
+            UnifiedTableSelectionPolicy.shouldReconcileIndexingCompletion(
+                selectionID: "session-1",
+                visibleRowIDs: ["session-2"],
+                sourceSessionsEmpty: false,
+                cachedRowsEmpty: false
+            )
+        )
+    }
+
+    func testIndexingCompletionReconcilesHeldEmptyRows() {
+        XCTAssertTrue(
+            UnifiedTableSelectionPolicy.shouldReconcileIndexingCompletion(
+                selectionID: nil,
+                visibleRowIDs: [],
+                sourceSessionsEmpty: true,
+                cachedRowsEmpty: false
+            )
+        )
+    }
+
+    func testIndexingCompletionSkipsRebuildWhenRowsAreCurrent() {
+        XCTAssertFalse(
+            UnifiedTableSelectionPolicy.shouldReconcileIndexingCompletion(
+                selectionID: "session-1",
+                visibleRowIDs: ["session-1", "session-2"],
+                sourceSessionsEmpty: false,
+                cachedRowsEmpty: false
+            )
+        )
+    }
+
     func testExposesTableSelectionWhenIDPresentInCurrentRowsEvenIfBusy() {
         // Even mid-churn/indexing/search, if the id is genuinely still in the
         // row set, the Table must keep showing the highlight — busy state

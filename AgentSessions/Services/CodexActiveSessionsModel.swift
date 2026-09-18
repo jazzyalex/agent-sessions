@@ -312,8 +312,15 @@ final class CodexActiveSessionsModel {
         var runtimeSessionIDs: [String]
         var lastAccessTick: UInt64
     }
-    private static let sessionLookupCacheHardLimit = 500
-    private static let sessionLookupCacheTargetSize = 400
+    // `UnifiedSessionsView` and the cockpit both ask for direct live-presence
+    // joins by walking every Claude/OpenCode session during a row rebuild. The
+    // old 500-entry LRU was smaller than one real library pass, so a 2k-row
+    // rebuild continually evicted and re-sorted its own lookup cache on the
+    // main actor. Keep the cache bounded, but large enough to retain one
+    // large-library pass (the current real-library profile is ~5.8k indexed
+    // sessions) before eviction becomes necessary.
+    private static let sessionLookupCacheHardLimit = 8_192
+    private static let sessionLookupCacheTargetSize = 6_144
     // `@Observable` tracks all non-ignored stored properties — internal state
     // must be explicitly ignored or view bodies that call facade lookups
     // track (and mutate) it during render. Both of these are mutated inside

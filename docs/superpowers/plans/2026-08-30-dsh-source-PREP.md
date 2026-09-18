@@ -1,176 +1,290 @@
 # DeepSeek Harness session source — preparation
 
-Status: **preparation only.** No Swift written, no `SessionSource` case, no pbxproj edit.
-Target release: **5.2** (`versionIntroduced = "5.2"`), i.e. the release after 5.1
+Status: **preparation only.** No Swift written, no `SessionSource` case, and no
+pbxproj edit.
+
+Target release: **5.2** (`versionIntroduced = "5.2"`), the release after 5.1
 (Devin + fx). Owner decision 2026-08-30.
 
-Everything below is verified against `dsh-v0.1.2-alpha.2` unless a line says otherwise.
-DSH ships every few days, so **re-verify before implementing** (see §7).
+## Refresh status
 
----
+This document was refreshed 2026-09-18 against the local checkout
+`/Users/alexm/Repository/deepseek-harness` at `ddefc45fbc`.
+
+The original document was verified against `dsh-v0.1.2-alpha.2` and is retained
+as planning history only. The current writer is format **v3**. Muse performed a
+read-only source audit; no `~/.dsh` contents, credentials, `.env` files, or
+Agent Sessions source were read or changed.
+
+Current authority:
+
+- `packages/core/session/src/types.ts:66-88` — format-version contract and
+  `SESSION_FORMAT_VERSION = 3`.
+- `docs/session-format-status.md:21-35` — latest released version 3 and
+  evidence tag `dsh-v0.1.5-alpha.1`.
+- `docs/persistence-changes/historical-formats/README.md:31-34` — v0 through
+  v3 history.
+- `packages/session/session-format-catalog/src/generated.ts:14-18` — current
+  catalog and adjacent migrations.
+
+The installed global CLI is `dsh 0.1.5-rc.2`; do not treat that binary as the
+source-of-truth for the checkout-backed implementation plan.
 
 ## 1. Why this source is worth the work
 
-`deepseek-ai/deepseek-harness` launched 2026-08-13 and passed **191,500 stars in 17 days**
-— the largest coding-agent audience in existence, and no session browser supports it yet.
-Outreach thread: https://github.com/deepseek-ai/deepseek-harness/discussions/4425
+`deepseek-ai/deepseek-harness` has a large coding-agent audience and no Agent
+Sessions session browser support yet. The original outreach context is
+`https://github.com/deepseek-ai/deepseek-harness/discussions/4425`.
 
-## 2. On-disk layout
+The implementation must be source-grounded and version-aware. A reader written
+from the original PREP alone would silently misread current sessions.
 
+## 2. Discovery and on-disk layout
+
+### 2.1 Home and persistence root
+
+- `packages/util/home-paths/src/index.ts:12,18,61,87-100,121` — explicit
+  configured path wins, then non-blank `$DSH_HOME`, then `~/.dsh`.
+- `packages/boot/app-boot/src/index.ts:216` — launcher root uses
+  `resolveDshHome()`.
+- `packages/session/session-persistence-jsonl/src/index.ts:96` — the backend
+  requires a `root`; it does not itself default to `~/.dsh/sessions`.
+- `packages/bundle/base/cordis.patch.yml:117-120` — the base composition sets
+  the root to `dshHomePath('sessions')`.
+- `packages/bundle/sdk-minimal/cordis.patch.yml:154-158` — SDK-minimal uses
+  the same root but plaintext compression and a different row id.
+
+Therefore `$DSH_HOME/sessions` is the normal composed root, not a universal
+backend invariant.
+
+### 2.2 Directories and generation files
+
+- `packages/session/session-persistence-jsonl/README.md:59-72` — the layout is
+  `<root>/<projectDir>/<encodedSessionId>/session.*`; no-cwd sessions use
+  `_no-cwd/`.
+- `packages/session/session-persistence-jsonl/src/format.ts:198-212` —
+  `encodeSegment` handles `.`, `..`, `~`, unsafe characters, UTF-16 units, and
+  lone surrogates. The old `~007E` description was only one special case.
+- `format.ts:224-255` — `projectKey(cwd)` is lossy and `projectDir` selects
+  `_no-cwd` when `cwd` is absent.
+- `format.ts:266` — the encoded session id selects the session directory.
+- `packages/session/session-format/src/filename.ts:5,14-17` — canonical names
+  are `session.jsonl` for v0 and `session.vN.jsonl` for later generations.
+- `packages/session/session-persistence-jsonl/src/format.ts:41-76` — `.zstd`
+  and plaintext variants are selected by compression; current readers must
+  expect `session.vN.jsonl[.zstd]` siblings.
+- `index.ts:1394,1529-1541,1585-1591` — opposite encodings are an
+  `encodingMismatch`, not a fallback.
+- `index.ts:1518,1524,1554,1593` — legacy flat artifacts are rejected as
+  `legacyLayout`.
+- `index.ts:1368-1403` — the highest canonical generation is selected; a
+  historical generation can be read before a successor is published.
+
+The original relative `./.sessions` TUI-default claim was not found in the
+current source. Treat it as a historical probe hint, not a discovery rule.
+
+## 3. Header and event model
+
+### 3.1 Header
+
+Logical `SessionHeader` is defined in
+`packages/core/session/src/types.ts:93-130`:
+
+```text
+version: 3
+id: SessionId
+createdAt: non-negative safe-integer Unix milliseconds
+cwd?: absolute path
+parentSession?: SessionId
+isSeeded: boolean
+origin?: "subagent"
+delegationDepth?: number
+agentPreset?: string
 ```
-~/.dsh/sessions/                      # dshHomePath('sessions'); DSH_HOME → ~/.dsh
-  --<normalized-cwd>--/               # projectKey(cwd), lossy: separators → '-', truncated
-    <encodeSegment(sessionId)>/       # '~' → '~007E', no traversal, no collision
-      session.jsonl.zstd              # default
-      session.jsonl                   # only when compression: 'none'
-```
 
-- **One encoding per root.** An opposite suffix in the same root is a hard error upstream,
-  not a fallback. Discovery must not mix them.
-- Legacy flat `<project>/<id>.jsonl*` artifacts are **rejected** by DSH, not ignored.
-- The cwd grouping is lossy: different cwds can share a project directory. The **session id
-  selects the session**, never the directory name.
-- ⚠️ Installs predating 2026-07-28 may have a *relative* `./.sessions` root per launch
-  directory (the TUI's old default). Worth probing for; do not assume `~/.dsh/sessions` is
-  the only place sessions exist.
+The physical first JSONL record is validated in
+`packages/session/session-persistence-jsonl/src/format.ts:82-185`.
+`delegationDepth` is required physically and defaults to zero only during
+encoding. `seedLength`, `sandboxMode`, and `approvalPolicy` are not current
+fields; stale forms are rejected or migrated.
 
-## 3. Logical format
+The first JSONL record is in the first frame. It is not an external metadata
+sidecar, although header-only reads avoid loading event rows.
 
-First logical line is the out-of-log header, in **its own zstd frame** so listing is
-metadata-only:
+### 3.2 Current v3 rows
 
-```json
-{"type":"session","version":0,"id":"…","createdAt":1700000000000,
- "cwd":"/path","delegationDepth":0,"agentPreset":"standard"}
-```
+- `packages/core/session/src/types.ts:470-493` — event envelope contains
+  `type`, `seq`, `time`, `data`, and optional `ignorable`.
+- `types.ts:417-468` — surface events and `sourceEventSeqs` contracts.
+- `packages/session/session-persistence-jsonl/src/format.ts:306-323` — current
+  serialization writes one physical JSON row per event.
+- `packages/session/session-format-v1-to-v2/src/codec.ts:86-119` — sequence
+  continuity remains a required invariant.
 
-`parentSession` / `seedLength` / `origin` appear on sub-agent and seeded sessions
-(`delegationDepth > 0`). `createdAt` is integer Unix ms.
+Current v3 does **not** use packed `text-chunks`, `reasoning-chunks`, or
+`tool-call-chunks` rows. Those are historical v0/v1 forms handled by
+`packages/session/session-format-v0-to-v1/src/codec.ts:23-33,203-294`.
 
-Every later line is either a verbatim `SessionEvent {type, seq, time, data}` or a **packed
-chunk row**. Packed row tags are bare and slash-less so they can't collide with event types:
-`text-chunks`, `reasoning-chunks`, `tool-call-chunks`. Verified example:
+Current assistant events use embedded streams:
 
-```json
-{"type":"text-chunks","seq0":3,"time0":1700000000003,
- "data":{"turn":1,"step":1,"index":0,"dt":[1,1,1],"texts":["Hel","lo"," ","world."]}}
-```
+- `packages/core/session/src/types.ts:321-335` — `assistant/message` and
+  `assistant/attempt` carry stream records.
+- `packages/session/session-persistence-jsonl/src/generation.ts:550-573` —
+  stream replay and block assembly.
 
-N items with N−1 `dt` gaps, expanding to N `assistant/chunk` events at `seq0 … seq0+N−1`.
-The whole decoded log must satisfy **`events[i].seq === i`**.
+### 3.3 `sourceEventSeqs`
 
-## 4. Traps — each of these silently loses data
+- `packages/core/session/src/seq-ranges.ts:18-67` — lossless range encoding,
+  expansion, ordering, bounds, and safe-integer validation.
+- `packages/session/session-format-v2-to-v3/src/payload.ts:265-312` — v3
+  storage admission and surface provenance validation.
 
-**4.1 One-shot zstd decompress returns only the header.** The artifact is a *concatenation
-of independent frames*. Node's `zstdDecompressSync` **and** `createZstdDecompress` both stop
-after frame 1. Measured on the healthy fixture: whole-buffer decode → **1 line**; correct
-per-frame decode → **8 lines / 10 events**. A Swift reader calling a one-shot zstd API gets a
-valid-looking session with zero events and no error. This is the single most dangerous trap
-here — budget a test for it.
+The original claim that the header remained at version 0 while this field was
+new is obsolete. Version bumps and frozen codecs now signal v2/v3 semantics.
 
-**4.2 `dt` and the item array live inside `data`,** not at the record's top level. A parser
-reading `record.dt` finds nothing and silently emits one event where there were four.
+## 4. Zstandard frames, migration, and recovery
 
-**4.3 `sourceEventSeqs` range-encoding (new in 0.1.2-alpha.x).** Storage records gained a
-provenance field encoded at the storage boundary: runs of ≥3 consecutive seqs collapse to
-`[start, end]` pairs. Expand via `decodeSeqRanges(record.sourceEventSeqs, record.seq)`.
-**`SESSION_FORMAT_VERSION` is still `0`**, so the header cannot signal this — a reader written
-against rc.6/rc.8 mis-reads without any version mismatch to catch it.
+### 4.1 Concatenated frames
 
-**4.4 Frame splitting by magic bytes is a prep shortcut, not an implementation.** The scan in
-§6 splits on `28 b5 2f fd`, which can occur inside compressed payload. A real reader parses
-frame headers, block headers, payload sizes, and the checksum trailer, per DSH's own
-`2026-07-19-zstandard-jsonl-session-logs.md`.
+- `packages/session/session-persistence-jsonl/src/zstd.ts:1-6,48-104` — the
+  file is a concatenation of independent Zstandard frames; scanning parses
+  frame/block boundaries and checksums.
+- `index.ts:1206-1227` — writes a header frame followed by batch frames.
+- `index.ts:890-973` — reads each complete frame and detects torn tails.
+- `zstd-public-decoder.ts:15-34` — per-frame public fallback decoder.
 
-**4.5 A tolerant parser is required, not a strict one.** DSH's own loader rejects a whole file
-over one bad record. Agent Sessions must not — a partly-readable session is still worth
-showing. Accept unknown event types and unknown row tags rather than failing the session.
+One-shot decompression is unsafe: it can return only the header. A Swift
+reader must use structural frame scanning, not compressed-magic byte splitting.
 
-## 5. Capabilities for the descriptor
+### 4.2 Migrations
 
-| Capability | Decision | Basis |
+The supported chain is v0 → v1 → v2 → v3:
+
+- `packages/session/session-format-catalog/src/generated.ts:14-18` — catalog.
+- `packages/session/session-format-v0-to-v1/` — historical event and field
+  normalization.
+- `packages/session/session-format-v1-to-v2/` — packed-chunk folding,
+  embedded streams, and seeded-cut changes.
+- `packages/session/session-format-v2-to-v3/` — system heads, `ptc` naming,
+  surface operation canonicalization, and validation changes.
+
+The source generation is immutable. Read-only migration is in memory; writing
+publishes a version-named successor beside the source without overwriting or
+deleting the source. See `packages/session/session-persistence-jsonl/README.md:82`
+and `packages/session/session-persistence-jsonl/src/index.ts:336-387,495-665`.
+
+### 4.3 Recovery
+
+Production persistence uses recoverable-prefix behavior while verification uses
+strict validation:
+
+- `packages/session/session-persistence-jsonl/src/index.ts:272-283` — runtime
+  recovery/validation configuration.
+- `packages/session/session-format/src/catalog.ts:139-157,231-251` — recovery
+  and validation modes.
+- `packages/session/session-persistence-jsonl/src/index.ts:730-740,836-844,889-965`
+  — torn-tail handling and recovery.
+- `packages/core/session/src/repair.ts:21-134` — crash repair and interrupted
+  turn closure.
+
+A third-party browser may expose a readable prefix, but must not present a
+truncated prefix as complete. A committed `turn/end` remains a fatal semantic
+boundary when its prior rows cannot be validated.
+
+## 5. IDs, subagents, archive, and resume
+
+- Session ids are opaque branded values; minting and collision rules are in
+  `packages/core/session/src/index.ts:1003-1009`.
+- Lineage uses `parentSession`, `origin: 'subagent'`, and durable
+  `delegationDepth`; see `packages/subagent/subagent/src/depth.ts:28-35` and
+  `child-agent.ts:42-51,139-156`.
+- Forks create a new id and copy only a completed-turn prefix; see
+  `packages/core/session/src/index.ts:1236-1312`.
+- Archive ids live in the workspace domain global state, not beside the session
+  log: `packages/workspace/workspace/src/spec.ts:46-75` and
+  `packages/workspace/workspace/src/index.ts:226-290`.
+- `unarchiveSession` exists; the original claim that there was no unarchive
+  surface is stale.
+
+Resume is surface-specific and there is no shipped `tui` profile:
+
+| Surface | Mechanism | Important eligibility rule |
 |---|---|---|
-| Browse / search / filter | yes | format fully readable, proven in §6 |
-| Analytics | yes | `assistant/message` carries provider + model |
-| Resume | **undecided** — upstream shows `dsh --profile tui --resume <id>` | `apps/cli/README.md`, where it is an example "assuming the tui profile is installed", not a flag reference. Verify against the target tag and the installed profile before promising a command |
-| Archived history | **yes — investigate as a supported surface** | DSH archives rather than deletes: `workspace.archiveSession({sessionId})` writes `workspaceDomainState.archivedSessionIds`, and "the session log and its workspace accounting stay untouched; the session merely disappears from every grouping surface". Source: `.agents/notes/implemented/feature/2026-07-31-session-archive-global-set.md` |
-| Image extraction | **out of scope for v1** | images are content-addressed *outside* the log in a separate attachment backend — matches the Qwen / Devin / fx precedent |
+| Headless | `--session-id` | exact cwd; no-cwd, live, subagent, preset, and fork cases can be rejected |
+| Web/API | adopt/observe then `agents.resume` | cwd must match; subagent-owned sessions are rejected |
+| SDK | reuse the same session id | server creates/reuses session with cwd metadata |
+| ACP | `session/resume` | same-directory cwd and active/subagent checks |
+| Agent loop | `resumeSessionId` | write lease and interrupted-turn repair are applied |
+| Fork | new id with completed-turn seed prefix | child inherits source cwd |
 
-Resume caveat: a session whose header has **no `cwd`** cannot be resumed by DSH itself
-("session has no recorded workspace"). Mark those ineligible rather than emitting a command
-that will fail.
+Relevant sources are `apps/cli/src/args.ts:4-16,144-152`,
+`packages/bundle/headless/src/startup.ts:44-51`,
+`packages/api/session-controller/src/agent.ts:272-274,421-476`,
+`packages/acp/acp/src/index.ts:239-290`, and
+`packages/core/agent-loop/src/index.ts:859-914`.
 
-## 6. Proven reader (reference, Node — algorithm to port)
+## 6. Surface and attachment boundaries
 
-Verified against both MIT fixtures from `xiaoshenming/dsh-session-surgeon`:
-`healthy-packed` → 10 events, seq 0..9, contiguous. `lone-surrogate` → 6 events, contiguous.
+- Supported launch profiles are web, headless, sdk, sdk-minimal, and acp;
+  `tui` is only an out-of-tree/custom-profile example.
+- Desktop owns a reserved `$DSH_HOME/profiles/desktop` area and is not a CLI
+  session profile; see `apps/desktop/README.md:5,36-69`.
+- SDK and ACP are separate protocol surfaces, not alternate file formats.
+- Web follow combines a gap-free event journal with live assistant-stream data;
+  see `docs/architecture.md:109` and
+  `packages/api/session-controller/src/history.ts:42-274`.
+- Attachment bytes are outside the append-only log and referenced by content
+  identity; image extraction is out of scope for the first Agent Sessions
+  integration.
 
-```js
-import { zstdDecompressSync } from 'node:zlib'
-import { readFileSync } from 'node:fs'
-const MAGIC = Buffer.from([0x28,0xb5,0x2f,0xfd])
-const PACKED = { 'text-chunks':'texts', 'reasoning-chunks':'reasonings', 'tool-call-chunks':'toolCalls' }
+## 7. Proposed Agent Sessions scope for planning
 
-function frames(buf){ const s=[]
-  for(let i=0;i+4<=buf.length;i++) if(buf.subarray(i,i+4).equals(MAGIC)) s.push(i)
-  return s.map((o,i)=>buf.subarray(o, s[i+1] ?? buf.length)) }        // see trap 4.4
+These are planning inputs, not implementation approval:
 
-function readLog(file){ const buf=readFileSync(file); const out=[]
-  frames(buf).forEach(fr=>{ try{ out.push(...zstdDecompressSync(fr).toString('utf8').split('\n').filter(Boolean)) }
-    catch(e){ /* tolerate: keep prior frames, per trap 4.5 */ } })
-  return out }
+1. Build a read-only DSH source descriptor, discovery/indexer, and parser that
+   understands the composed `$DSH_HOME/sessions` root, `_no-cwd`, generation
+   selection, encoding mismatch, and legacy-layout errors.
+2. Read v3 directly and retain v0/v1/v2 compatibility through a bounded
+   migration/normalization layer or an explicitly documented historical parser.
+3. Decode concatenated Zstandard frames structurally, tolerate torn tails with
+   an explicit incomplete state, and preserve sequence/turn semantics.
+4. Map current embedded assistant streams, attempts, tool results, subagent
+   lineage, seeded prefixes, archive state, and surface-specific resume
+   eligibility into Agent Sessions’ existing model.
+5. Add synthetic fixtures for each supported generation and corruption state;
+   do not use private `~/.dsh` data as a fixture.
+6. Keep image/attachment extraction and provider-specific live follow outside
+   the first read-only history scope unless the implementation plan proves a
+   minimal safe contract.
 
-function expand(rec){ const key=PACKED[rec.type]; if(!key) return [rec]
-  const d=rec.data, items=d[key]??[], dt=d.dt??[]                      // trap 4.2
-  const evs=[]; let seq=rec.seq0, time=rec.time0
-  items.forEach((item,i)=>{ if(i>0){ seq+=1; time+=dt[i-1] }
-    evs.push({type:'assistant/chunk', seq, time, data:{...d,[key]:undefined,item}}) })
-  return evs }
-```
+Required Agent Sessions integration obligations remain those listed in
+`docs/adding-a-session-source.md`: source settings/environment/descriptor,
+parser/discovery/indexer, resume surface, fixtures, registry and semantic
+switch arms, target membership, and user-facing documentation.
 
-Fetch the fixtures (MIT, synthetic, contain nobody's real sessions):
+## 8. Remaining evidence gaps
 
-```bash
-gh api "repos/xiaoshenming/dsh-session-surgeon/contents/fixtures/synthetic/healthy-packed.session.jsonl.zstd" --jq '.content' | base64 -d > healthy-packed.session.jsonl.zstd
-```
+Before implementation, a planning session must distinguish source-confirmed
+facts from steward-dependent evidence:
 
-Also carries `lone-surrogate`, `orphan-tmp`, and a `build.mjs` generator for more.
-**Attribution owed** in the fixture directory and release notes if these ship.
-Note they are rc.6-era: none carries `sourceEventSeqs`, so they do **not** cover trap 4.3.
+- real non-private directory shapes and cwd normalization examples;
+- representative v0/v1/v2/v3 synthetic fixtures, including torn frames and
+  migration boundaries;
+- real subagent/fork/archive examples without inspecting private user sessions;
+- exact archive storage discovery through the storage hub;
+- whether Agent Sessions should offer read-only resume affordances per surface;
+- whether search is supported by the configured persistence/query composition or
+  must remain metadata browsing in v1.
 
-## 7. Before writing any Swift
+Do not probe `~/.dsh`, credentials, or `.env` files to close these gaps. Use
+source, published/synthetic fixtures, and an explicitly authorized steward.
 
-1. **Re-verify the format against the then-current tag.** It moved once in six days with the
-   version field pinned at `0`. Diff `packages/session/session-persistence-jsonl/src/format.ts`
-   against `dsh-v0.1.2-alpha.2` and read the delta.
-2. **Pin the parser to a recorded tag** and add a drift test, or this rots silently.
-3. **Get a steward.** Synthetic fixtures prove the codec; they cannot prove discovery, real
-   cwd shapes, sub-agent sessions, or resume. Outstanding ask in discussion #4425.
+## 9. Planning handoff
 
-## 8. Obligations (from `docs/adding-a-session-source.md`)
+The separate planning-session prompt is
+`docs/superpowers/plans/2026-09-18-dsh-source-implementation-plan-PROMPT.md`.
+It asks a fresh session to re-verify this document against the current source,
+resolve the remaining scope decisions, and write an implementation plan only.
 
-Source folder `AgentSessions/DSH/` (Settings, CLIEnvironment, SourceDescriptor) ·
-`Services/DSHSession{Parser,Discovery,Indexer}.swift` · `DSHResume/` ·
-`Views/Preferences/PreferencesView+DSH.swift` · fixtures under
-`Resources/Fixtures/stage0/agents/dsh/` · the `SessionSource` case and its four metadata arms ·
-one line in `SessionSourceRegistry.ordered` · one `scripts/xcode_add_file.rb` run per new file ·
-the §6 semantic switch arms · user-facing docs per §6.D · `versionIntroduced = "5.2"`.
-
-Watch the K15 boundary: `SessionSource.swift`, `Session.swift`, `FilterEngine.swift` and the
-parsers compile into `AgentSessionsLogicTests` and must not gain app-target dependencies.
-
-## 9. Open questions for a steward
-
-- Does a real `~/.dsh/sessions` match §2, including the `--<cwd>--` spelling?
-- Do sub-agent sessions (`delegationDepth > 0`) appear as siblings, and should Agent Sessions
-  nest them under the parent the way it nests Codex sub-agents?
-- Does resume work from outside the TUI, and is `--profile tui` required? Upstream's CLI
-  README shows `dsh --profile tui --resume <id>`, but labels it an example assuming that
-  profile is installed. The capability table must stay `undecided` until this is run against
-  the target tag.
-- Where does `archivedSessionIds` land on disk, and is it readable without the host running?
-  The archive set lives on the workspace domain's global singleton (schema version 2, additive
-  field), and DSH ships **no unarchive or viewing surface** — its own note records that as a
-  known limitation. That is precisely the gap Agent Sessions fills for Codex Desktop today, so
-  this is a feature to scope, not a capability to write off.
-- Do real logs carry `sourceEventSeqs` yet, and in what shape?
+No Swift implementation, branch, commit, push, or release claim is authorized
+by this preparation document.

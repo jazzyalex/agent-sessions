@@ -34,6 +34,18 @@ enum UnifiedTableSelectionPolicy {
         selectionPresentInRows
     }
 
+    static func shouldReconcileIndexingCompletion(
+        selectionID: String?,
+        visibleRowIDs: Set<String>,
+        sourceSessionsEmpty: Bool,
+        cachedRowsEmpty: Bool
+    ) -> Bool {
+        if let selectionID, !visibleRowIDs.contains(selectionID) {
+            return true
+        }
+        return sourceSessionsEmpty && !cachedRowsEmpty
+    }
+
     static func shouldReplaceMissingSelection(
         hierarchyBrowsing: Bool,
         refreshBusy: Bool,
@@ -333,9 +345,9 @@ struct UnifiedSessionsView: View {
     /// through it; nothing about this view's observation changed except that eleven of the
     /// twelve indexers were never observed here to begin with (they were plain `let`s).
     let catalog: SessionProviderCatalog
-    /// Antigravity stays an explicit `@ObservedObject`: `body` reads its
-    /// `unreadableSessionIDs` / `isPreviewStale` published state, so this view must keep
-    /// invalidating on it. Assigned from the catalog in `init`.
+    /// Antigravity stays an explicit `@ObservedObject` because the transcript
+    /// overlay reads its unreadable-session state. Row-level preview staleness
+    /// is observed only by the Antigravity refresh child in SessionTitleCell.
     @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
     private var codexIndexer: SessionIndexer { catalog.indexer(.codex, as: SessionIndexer.self) }
     private var claudeIndexer: ClaudeSessionIndexer { catalog.indexer(.claude, as: ClaudeSessionIndexer.self) }
@@ -378,6 +390,7 @@ struct UnifiedSessionsView: View {
     // `selection`, so key-repeat scrubbing never re-renders/rebuilds the pane.
     // Row highlighting stays bound to `selection` directly (instant).
     @State private var settledSelection: String?
+    @State private var settledSelectionSource: SessionSource?
     @State private var selectionSource: SessionSource? = nil
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
@@ -563,7 +576,10 @@ struct UnifiedSessionsView: View {
                                     loadPersistedCollapsedParentsIfNeeded()
 				                    updateCachedRows()
 				                    ensureDefaultSelectionIfNeeded()
-				                    if settledSelection == nil, let selection { settledSelection = selection }
+				                    if settledSelection == nil, let selection {
+                                        settledSelection = selection
+                                        settledSelectionSource = cachedRowByID[selection]?.source ?? selectionSource
+                                    }
 				                    unified.setAppActive(NSApp.isActive)
 			                    updateFocusedSessionIfNeeded(selectedSession)
 			                    refreshSelectionSourceFromCachedRows()
@@ -1056,6 +1072,7 @@ struct UnifiedSessionsView: View {
                             }
                         }
                     )
+                    .equatable()
 	                    .contentShape(Rectangle())
 	                    .onTapGesture {
 	                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
@@ -1286,10 +1303,28 @@ struct UnifiedSessionsView: View {
 				}
 #endif
 				.onChange(of: unified.isIndexing) { wasIndexing, isIndexing in
-					// When indexing finishes, reconcile selection in case a deferred
-					// clear was skipped (the guard in updateCachedRows).
+					// The unified.sessions handler owns the row rebuild and applies its
+					// generation-checked result. Indexing completion is only a state
+					// transition; rebuilding the same large table here duplicated that
+					// work and blocked the main actor after every refresh. Keep the
+					// correctness-only reconciliation for a held-empty result or a
+					// selection that disappeared while indexing was in flight.
 					if wasIndexing, !isIndexing {
-						updateCachedRows()
+						let needsReconciliation = UnifiedTableSelectionPolicy.shouldReconcileIndexingCompletion(
+							selectionID: selection,
+							visibleRowIDs: cachedVisibleRowIDs,
+							sourceSessionsEmpty: unified.sessions.isEmpty,
+							cachedRowsEmpty: cachedRows.isEmpty
+						)
+						#if DEBUG
+						Perf.event(
+							needsReconciliation ? "indexingEndedRowsRebuild" : "indexingEndedRowsRebuildSkipped",
+							"rows=\(cachedRows.count)"
+						)
+						#endif
+						if needsReconciliation {
+							updateCachedRows()
+						}
 						ensureDefaultSelectionIfNeeded()
 						refreshSelectionSourceFromCachedRows()
 					}
@@ -1768,10 +1803,12 @@ struct UnifiedSessionsView: View {
         }
     }
 
-	    private var transcriptPane: some View {
-	        ZStack {
+    private var transcriptPane: some View {
+		        return ZStack {
 	            // Base host is always mounted to keep a stable split subview identity
-	            TranscriptHostView(kind: selectionSource ?? lastSelectedSource,
+	            TranscriptHostView(kind: settledSelectedSession?.source
+                                   ?? settledSelectionSource
+                                   ?? lastSelectedSource,
 	                               selection: settledSelection,
 	                               catalog: catalog)
                 .environmentObject(focusCoordinator)
@@ -1781,7 +1818,7 @@ struct UnifiedSessionsView: View {
 
             if shouldShowLaunchOverlay {
                 launchBlockingTranscriptOverlay()
-            } else if let s = selectedSession {
+            } else if let s = settledSelectedSession {
                 if !s.isSideChat && !FileManager.default.fileExists(atPath: s.filePath) {
                     let providerName: String = s.source.descriptor.shortLabel
                     let accent: Color = sourceAccent(s)
@@ -1793,7 +1830,7 @@ struct UnifiedSessionsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         HStack(spacing: 12) {
-                            Button("Remove") { if let id = selection { unified.removeSession(id: id) } }
+                            Button("Remove") { if let id = settledSelection { unified.removeSession(id: id) } }
                                 .buttonStyle(.borderedProminent)
                             Button("Re-scan") { unified.refresh() }
                                 .buttonStyle(.bordered)
@@ -1821,7 +1858,7 @@ struct UnifiedSessionsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
                 }
-            } else if selection == nil {
+            } else if settledSelection == nil {
                 Text("Select a session to view transcript")
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2167,6 +2204,9 @@ struct UnifiedSessionsView: View {
     }
 
             private var selectedSession: Session? { selection.flatMap { id in cachedRowByID[id] } }
+            private var settledSelectedSession: Session? {
+                settledSelection.flatMap { id in cachedRowByID[id] }
+            }
 
             static func sideChatParentContexts(for rows: [Session],
                                                        allSessions: [Session]) -> [String: String] {
@@ -2263,10 +2303,10 @@ struct UnifiedSessionsView: View {
                     }
 	                return id
 	            },
-	            set: { newID in
-	                if let newID {
-	                    let source = cachedRows.first(where: { $0.id == newID })?.source
-	                    selectionTrace("table set newID=\(newID) source=\(source?.rawValue ?? "nil")")
+	                    set: { newID in
+						if let newID {
+							let source = cachedRowByID[newID]?.source
+							selectionTrace("table set newID=\(newID) source=\(source?.rawValue ?? "nil")")
 	                    setActiveSelection(newID, source: source, userInitiated: true)
 	                    autoSelectEnabled = false
 	                    NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
@@ -2298,7 +2338,7 @@ struct UnifiedSessionsView: View {
 
 	    @MainActor
 	    private func setActiveSelection(_ id: String?, source: SessionSource? = nil, userInitiated: Bool) {
-	        selectionTrace("setActiveSelection id=\(id ?? "nil") source=\(source?.rawValue ?? "nil") userInitiated=\(userInitiated)")
+		        selectionTrace("setActiveSelection id=\(id ?? "nil") source=\(source?.rawValue ?? "nil") userInitiated=\(userInitiated)")
 	        if userInitiated {
 	            hasUserManuallySelected = true
 	        }
@@ -2396,14 +2436,15 @@ struct UnifiedSessionsView: View {
     }
 
 	    private func handleSelectionChange(_ id: String?) {
-	        guard let id, let s = cachedRowByID[id] else {
+		        guard let id, let s = cachedRowByID[id] else {
 	            cancelAutoJump()
 	            selectionPropagationTask?.cancel()
 	            selectionPropagationTask = nil
 	            settledSelection = nil
+	            settledSelectionSource = nil
 	            updateFocusedSessionIfNeeded(nil)
-	            return
-	        }
+		            return
+		        }
 	        ListScrubSignal.shared.noteSelectionChange()
         // Only the cheap, selection-visual-relevant work runs synchronously in
         // this SwiftUI update turn: the row lookup and presence-probe deferral.
@@ -2446,6 +2487,7 @@ struct UnifiedSessionsView: View {
             guard !Task.isCancelled, selection == id else { return }
             Perf.event("selectionPropagate", "id=\(id.prefix(8))")
             settledSelection = id
+            settledSelectionSource = s.source
             // Count a session-open for the feedback-ask trigger (debounced settle
             // fires once per rested selection, not per key-repeat scrub).
             onboardingCoordinator.noteSessionOpened(id: id)
@@ -2466,7 +2508,7 @@ struct UnifiedSessionsView: View {
             // Lazy load full session per source. Parse + model build run off-main and the
             // windowed build paints only the tail window, so hydration always proceeds
             // immediately on selection (no manual "Show full transcript" gate).
-            let requestedSelectionReload = reloadSessionForSource(s)
+		            let requestedSelectionReload = reloadSessionForSource(s)
             searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
             updateFocusedSessionIfNeeded(s)
         }
@@ -2792,10 +2834,10 @@ struct UnifiedSessionsView: View {
                 if output.isLargeReorder {
                     tableReorderGeneration &+= 1
 #if DEBUG
-                    Perf.event("reorderRebuild", "rows=\(output.cachedRows.count) gen=\(tableReorderGeneration)")
+	                    Perf.event("reorderRebuild", "rows=\(output.cachedRows.count) gen=\(tableReorderGeneration)")
 #endif
-                }
-                cachedRows = output.cachedRows
+	                }
+	                cachedRows = output.cachedRows
                 hierarchyRowMeta = output.hierarchyRowMeta
                 sideChatParentContextByID = output.sideChatParentContextByID
                 cachedRowIDs = output.cachedRowIDs
@@ -2972,8 +3014,8 @@ struct UnifiedSessionsView: View {
     }
 
 	    private func refreshColumnLayout() {
-	        columnLayoutID = UUID()
-	        updateCachedRows()
+		        columnLayoutID = UUID()
+		        updateCachedRows()
 	        ensureDefaultSelectionIfNeeded()
 	        refreshSelectionSourceFromCachedRows()
 	    }
@@ -3794,7 +3836,11 @@ struct UnifiedSessionsView: View {
     /// helper) so this file and `AgentCockpitHUDView` don't each keep their
     /// own copy of the same source-filter loop.
     private func directJoinFallbackKeys(for sessions: [Session]) -> Set<String> {
-        SessionRowsBuilder.directJoinFallbackKeys(for: sessions) { session in
+#if DEBUG
+        let _span = Perf.begin("directJoinFallbackKeys", thresholdMs: 4, "sessions=\(sessions.count)")
+        defer { Perf.end(_span) }
+#endif
+        return SessionRowsBuilder.directJoinFallbackKeys(for: sessions) { session in
             activeCodexSessions.presence(for: session)
         }
     }
@@ -4230,15 +4276,31 @@ struct TranscriptHostView: View {
 }
 
 // Session title cell with inline Antigravity refresh affordance (hover-only)
-private struct SessionTitleCell: View {
+private struct SessionTitleCell: View, Equatable {
     let session: Session
     let displayTitleOverride: String?
-    @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
+    let antigravityIndexer: AntigravitySessionIndexer
     let rowMeta: SubagentRowMeta?
     let sideChatParentContext: String?
     let isExpanded: Bool
     let onToggleExpand: ((String) -> Void)?
     @State private var hover: Bool = false
+
+    static func == (lhs: SessionTitleCell, rhs: SessionTitleCell) -> Bool {
+        lhs.session.id == rhs.session.id
+            && lhs.session.source == rhs.session.source
+            && lhs.session.listTitle == rhs.session.listTitle
+            && lhs.session.isSubagent == rhs.session.isSubagent
+            && lhs.session.isSideChat == rhs.session.isSideChat
+            && lhs.session.isDeleted == rhs.session.isDeleted
+            && lhs.session.subagentType == rhs.session.subagentType
+            && lhs.session.model == rhs.session.model
+            && lhs.session.reasoningEffort == rhs.session.reasoningEffort
+            && lhs.displayTitleOverride == rhs.displayTitleOverride
+            && lhs.rowMeta == rhs.rowMeta
+            && lhs.sideChatParentContext == rhs.sideChatParentContext
+            && lhs.isExpanded == rhs.isExpanded
+    }
 
     var body: some View {
         let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
@@ -4348,15 +4410,12 @@ private struct SessionTitleCell: View {
             .background(Color.clear)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if session.source == .antigravity, antigravityIndexer.isPreviewStale(id: session.id) {
-                Button(action: { antigravityIndexer.refreshPreview(id: session.id) }) {
-                    Text("Refresh")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                }
-                .buttonStyle(.bordered)
-                .tint(.teal)
-                .opacity(hover ? 1 : 0)
-                .help("Update this session's preview to reflect the latest file contents")
+            if session.source == .antigravity {
+                AntigravityPreviewRefreshButton(
+                    indexer: antigravityIndexer,
+                    sessionID: session.id,
+                    isHovered: hover
+                )
             }
         }
         .onHover { hover = $0 }
@@ -4368,6 +4427,25 @@ private struct SessionTitleCell: View {
             return "Subagent"
         }
         return "Subagent\nReasoning effort: \(effort)"
+    }
+}
+
+private struct AntigravityPreviewRefreshButton: View {
+    @ObservedObject var indexer: AntigravitySessionIndexer
+    let sessionID: String
+    let isHovered: Bool
+
+    var body: some View {
+        if indexer.isPreviewStale(id: sessionID) {
+            Button(action: { indexer.refreshPreview(id: sessionID) }) {
+                Text("Refresh")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+            }
+            .buttonStyle(.bordered)
+            .tint(.teal)
+            .opacity(isHovered ? 1 : 0)
+            .help("Update this session's preview to reflect the latest file contents")
+        }
     }
 }
 
