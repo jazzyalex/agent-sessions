@@ -43,9 +43,9 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
 
         for projectDirectory in directChildren(of: root) where isDirectory(projectDirectory) && !isSymlink(projectDirectory) {
             for child in directChildren(of: projectDirectory) {
-                if isRegularFile(child), let parsed = Self.parseGenerationFilename(child.lastPathComponent) {
+                if isRegularFile(child), let compression = Self.parseLegacyFlatFilename(child.lastPathComponent) {
                     issues.append(.legacyLayout(child))
-                    encodings.insert(parsed.compression)
+                    encodings.insert(compression)
                     continue
                 }
                 guard isDirectory(child), !isSymlink(child) else { continue }
@@ -91,7 +91,12 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
                                                               id: header.id,
                                                               version: header.version,
                                                               compression: selected.compression)
-                guard canonical.standardizedFileURL == selected.url.standardizedFileURL else {
+                let canonicalPath = canonical.standardizedFileURL
+                let selectedPath = selected.url.standardizedFileURL
+                let sameSpelling = canonicalPath == selectedPath
+                let samePhysicalPath = canonicalPath.resolvingSymlinksInPath()
+                    == selectedPath.resolvingSymlinksInPath()
+                guard sameSpelling || samePhysicalPath else {
                     throw DeepSeekHarnessFormatError.canonicalPathMismatch
                 }
                 let siblingURLs = sorted
@@ -150,6 +155,22 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
         return (generation, compression)
     }
 
+    /// Released pre-directory DSH layouts stored `<encoded-id>.jsonl[.zstd]`
+    /// directly below a project key. They are compatibility errors, not
+    /// generation zero candidates, and still participate in root-wide encoding
+    /// consistency checks.
+    private static func parseLegacyFlatFilename(_ filename: String) -> DeepSeekHarnessCompression? {
+        if filename.hasSuffix(".jsonl.zstd") {
+            let stem = filename.dropLast(".jsonl.zstd".count)
+            return stem.isEmpty ? nil : .zstd
+        }
+        if filename.hasSuffix(".jsonl") {
+            let stem = filename.dropLast(".jsonl".count)
+            return stem.isEmpty ? nil : .plain
+        }
+        return nil
+    }
+
     static func encodeSegment(_ raw: String) -> String {
         precondition(!raw.isEmpty, "DSH path segments must not be empty")
         if raw == "." { return "~002E" }
@@ -196,6 +217,42 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
         return root.appendingPathComponent(project, isDirectory: true)
             .appendingPathComponent(session, isDirectory: true)
             .appendingPathComponent(basename + (compression == .zstd ? ".zstd" : ""), isDirectory: false)
+    }
+
+    /// Generic directory-artifact revision resolver backing
+    /// `SessionSourceDescriptor.artifactRevision`.
+    ///
+    /// Derives the logical sessions root from a previously selected canonical
+    /// generation URL (`<root>/<project>/<session>/<generation>`), rescans it, and
+    /// returns the same session candidate's currently selected generation. Fail-closed:
+    /// nil for non-canonical URLs, session directories that do not look like
+    /// generation containers, root problems, ambiguity, or an unreadable selected
+    /// file. The root always derives from the given URL — resolution never falls back
+    /// to the default root, so a failure here can never redirect a scan at `~/.dsh`.
+    static func resolveArtifactRevision(forSelectedURL url: URL) -> SessionArtifactRevision? {
+        guard parseGenerationFilename(url.lastPathComponent) != nil else { return nil }
+        let sessionDirectory = url.deletingLastPathComponent()
+        let fileManager = FileManager.default
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: sessionDirectory.path, isDirectory: &isDir),
+              isDir.boolValue else { return nil }
+        // The session directory must itself contain a generation file; otherwise a
+        // non-canonical ancestry would derive a bogus root and scan an unrelated tree.
+        let members = (try? fileManager.contentsOfDirectory(at: sessionDirectory,
+                                                            includingPropertiesForKeys: nil,
+                                                            options: [])) ?? []
+        guard members.contains(where: { parseGenerationFilename($0.lastPathComponent) != nil }) else {
+            return nil
+        }
+        let root = sessionDirectory.deletingLastPathComponent().deletingLastPathComponent()
+        let candidates = DeepSeekHarnessDiscovery(customRoot: root.path).discover().candidates
+        guard let candidate = candidates.first(where: {
+            $0.sessionDirectory.standardizedFileURL == sessionDirectory.standardizedFileURL
+        }) else { return nil }
+        guard let stat = SessionFileStat.from(candidate.selectedURL) else { return nil }
+        return SessionArtifactRevision(selectedURL: candidate.selectedURL,
+                                       manifestRevision: candidate.manifestRevision,
+                                       physicalStat: stat)
     }
 
     private func directChildren(of directory: URL) -> [URL] {

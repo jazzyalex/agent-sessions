@@ -1,0 +1,256 @@
+import Foundation
+import XCTest
+@testable import AgentSessions
+
+final class DeepSeekHarnessDiscoveryTests: XCTestCase {
+    private let fileManager = FileManager.default
+
+    private func temporarySessionsRoot() throws -> URL {
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("DeepSeekHarnessDiscoveryTests-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { [fileManager] in
+            try? fileManager.removeItem(at: root)
+        }
+        return root
+    }
+
+    private func headerObject(version: Int, id: String, cwd: String? = "/tmp/dsh-project") -> [String: Any] {
+        var object: [String: Any] = [
+            "type": "session",
+            "version": version,
+            "id": id,
+            "createdAt": 1_700_000_000_000,
+            "delegationDepth": 0,
+        ]
+        if version >= 2 { object["isSeeded"] = false }
+        if let cwd { object["cwd"] = cwd }
+        return object
+    }
+
+    @discardableResult
+    private func writeJSONLine(_ object: [String: Any], at url: URL) throws -> URL {
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        var data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        data.append(0x0A)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    @discardableResult
+    private func writeGeneration(
+        root: URL,
+        cwd: String?,
+        id: String,
+        version: Int
+    ) throws -> URL {
+        let url = DeepSeekHarnessDiscovery.canonicalGenerationURL(
+            root: root,
+            cwd: cwd,
+            id: id,
+            version: version,
+            compression: .plain
+        )
+        return try writeJSONLine(headerObject(version: version, id: id, cwd: cwd), at: url)
+    }
+
+    private func discover(at root: URL) -> DeepSeekHarnessDiscoveryResult {
+        DeepSeekHarnessDiscovery(customRoot: root.path).discover()
+    }
+
+    func testRecognizesOnlyExactCanonicalGenerationFilenames() {
+        let accepted: [(String, Int, DeepSeekHarnessCompression)] = [
+            ("session.jsonl", 0, .plain),
+            ("session.jsonl.zstd", 0, .zstd),
+            ("session.v1.jsonl", 1, .plain),
+            ("session.v1.jsonl.zstd", 1, .zstd),
+            ("session.v999.jsonl", 999, .plain),
+        ]
+        for (filename, generation, compression) in accepted {
+            let parsed = DeepSeekHarnessDiscovery.parseGenerationFilename(filename)
+            XCTAssertEqual(parsed?.generation, generation, filename)
+            XCTAssertEqual(parsed?.compression, compression, filename)
+        }
+
+        let rejected = [
+            "session.v0.jsonl",
+            "session.v00.jsonl",
+            "session.v01.jsonl",
+            "session.v-1.jsonl",
+            "session.v1.JSONL",
+            "session.v1.jsonl.zst",
+            "session.v1.jsonl.tmp",
+            "session.jsonl.tmp",
+        ]
+        for filename in rejected {
+            XCTAssertNil(
+                DeepSeekHarnessDiscovery.parseGenerationFilename(filename),
+                "non-canonical filename must not be selected: \(filename)"
+            )
+        }
+    }
+
+    func testHighestGenerationWinsAndGenerationZeroHasNoExplicitV0Name() throws {
+        let root = try temporarySessionsRoot()
+        let id = "generation-selection"
+        let cwd = "/tmp/dsh-generation-selection"
+        let generationZero = try writeGeneration(root: root, cwd: cwd, id: id, version: 0)
+        let generationTwo = try writeGeneration(root: root, cwd: cwd, id: id, version: 2)
+
+        let result = discover(at: root)
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.id, id)
+        XCTAssertEqual(candidate.generation, 2)
+        XCTAssertEqual(candidate.selectedURL.standardizedFileURL, generationTwo.standardizedFileURL)
+        XCTAssertTrue(candidate.siblings.contains {
+            $0.standardizedFileURL == generationZero.standardizedFileURL
+        })
+        XCTAssertFalse(candidate.siblings.contains {
+            $0.lastPathComponent == "session.v0.jsonl"
+        })
+
+        XCTAssertNil(DeepSeekHarnessDiscovery.parseGenerationFilename("session.v0.jsonl"))
+    }
+
+    func testSameRootPlainAndZstandardArtifactsAreRejectedAsEncodingMismatch() throws {
+        let root = try temporarySessionsRoot()
+        _ = try writeGeneration(root: root, cwd: "/tmp/plain", id: "plain", version: 0)
+
+        let zstdURL = DeepSeekHarnessDiscovery.canonicalGenerationURL(
+            root: root,
+            cwd: "/tmp/compressed",
+            id: "compressed",
+            version: 0,
+            compression: .zstd
+        )
+        try fileManager.createDirectory(
+            at: zstdURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data([0x28, 0xB5, 0x2F, 0xFD]).write(to: zstdURL)
+
+        let result = discover(at: root)
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertEqual(result.encoding, nil)
+        XCTAssertEqual(result.issues, [.encodingMismatch])
+    }
+
+    func testFlatLegacyArtifactIsRefusedWithAnExplicitIssue() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-flat-legacy"
+        let project = root.appendingPathComponent(DeepSeekHarnessDiscovery.projectKey(cwd), isDirectory: true)
+        let legacyURL = project.appendingPathComponent(
+            DeepSeekHarnessDiscovery.encodeSegment("legacy-session") + ".jsonl",
+            isDirectory: false
+        )
+        try writeJSONLine(headerObject(version: 0, id: "legacy-session", cwd: cwd), at: legacyURL)
+
+        let result = discover(at: root)
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertTrue(
+            result.issues.contains { error in
+                guard case .legacyLayout(let url) = error else { return false }
+                return url.standardizedFileURL == legacyURL.standardizedFileURL
+            },
+            "flat legacy layout must be reported, not silently ignored"
+        )
+    }
+
+    func testHeaderIdentityMustMatchCanonicalPath() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-identity"
+        let url = DeepSeekHarnessDiscovery.canonicalGenerationURL(
+            root: root,
+            cwd: cwd,
+            id: "path-id",
+            version: 0,
+            compression: .plain
+        )
+        try writeJSONLine(headerObject(version: 0, id: "header-id", cwd: cwd), at: url)
+
+        let result = discover(at: root)
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertTrue(result.issues.contains(.canonicalPathMismatch))
+    }
+
+    func testDuplicateOpaqueIDAcrossProjectsIsAmbiguous() throws {
+        let root = try temporarySessionsRoot()
+        let id = "same-opaque-id"
+        _ = try writeGeneration(root: root, cwd: "/tmp/dsh-project-a", id: id, version: 0)
+        _ = try writeGeneration(root: root, cwd: "/tmp/dsh-project-b", id: id, version: 0)
+
+        let result = discover(at: root)
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertTrue(result.issues.contains(.ambiguousSession(id)))
+    }
+
+    func testSymlinkDirectoriesSymlinkFilesAndNonregularArtifactsAreRejected() throws {
+        let root = try temporarySessionsRoot()
+
+        let outside = root.deletingLastPathComponent()
+            .appendingPathComponent("DeepSeekHarnessDiscoveryOutside-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: outside, withIntermediateDirectories: true)
+        addTeardownBlock { [fileManager] in
+            try? fileManager.removeItem(at: outside)
+        }
+        let outsideProject = outside.appendingPathComponent("outside-project", isDirectory: true)
+        let outsideSession = outsideProject.appendingPathComponent("outside-session", isDirectory: true)
+        let outsideArtifact = outsideSession.appendingPathComponent("session.jsonl", isDirectory: false)
+        _ = try writeJSONLine(
+            headerObject(version: 0, id: "outside-session", cwd: "/tmp/outside"),
+            at: outsideArtifact
+        )
+
+        let linkedProject = root.appendingPathComponent("linked-project", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkedProject, withDestinationURL: outsideProject)
+
+        let project = root.appendingPathComponent("real-project", isDirectory: true)
+        try fileManager.createDirectory(at: project, withIntermediateDirectories: true)
+        let linkedSession = project.appendingPathComponent("linked-session", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkedSession, withDestinationURL: outsideSession)
+
+        let nonregularSession = project.appendingPathComponent("nonregular-session", isDirectory: true)
+        try fileManager.createDirectory(at: nonregularSession, withIntermediateDirectories: true)
+        let directoryArtifact = nonregularSession.appendingPathComponent("session.jsonl", isDirectory: true)
+        try fileManager.createDirectory(at: directoryArtifact, withIntermediateDirectories: true)
+
+        let symlinkArtifactSession = project.appendingPathComponent("symlink-artifact-session", isDirectory: true)
+        try fileManager.createDirectory(at: symlinkArtifactSession, withIntermediateDirectories: true)
+        let symlinkArtifact = symlinkArtifactSession.appendingPathComponent("session.jsonl", isDirectory: false)
+        try fileManager.createSymbolicLink(at: symlinkArtifact, withDestinationURL: outsideArtifact)
+
+        let result = discover(at: root)
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertTrue(result.issues.isEmpty)
+    }
+
+    func testManifestRevisionIsDeterministicAndChangesForSiblingAndSuccessor() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-revisions"
+        let id = "revision-session"
+        let generationZero = try writeGeneration(root: root, cwd: cwd, id: id, version: 0)
+        let generationOne = try writeGeneration(root: root, cwd: cwd, id: id, version: 1)
+
+        let first = try XCTUnwrap(discover(at: root).candidates.first)
+        let repeatResult = try XCTUnwrap(discover(at: root).candidates.first)
+        XCTAssertEqual(first.manifestRevision, repeatResult.manifestRevision)
+        XCTAssertEqual(first.selectedURL.standardizedFileURL, generationOne.standardizedFileURL)
+
+        var changedSibling = try Data(contentsOf: generationZero)
+        changedSibling.append(contentsOf: Data("\n".utf8))
+        try changedSibling.write(to: generationZero, options: .atomic)
+
+        let afterSiblingChange = try XCTUnwrap(discover(at: root).candidates.first)
+        XCTAssertNotEqual(first.manifestRevision, afterSiblingChange.manifestRevision)
+        XCTAssertEqual(afterSiblingChange.selectedURL.standardizedFileURL, generationOne.standardizedFileURL)
+
+        let generationTwo = try writeGeneration(root: root, cwd: cwd, id: id, version: 2)
+        let afterSuccessor = try XCTUnwrap(discover(at: root).candidates.first)
+        XCTAssertEqual(afterSuccessor.generation, 2)
+        XCTAssertEqual(afterSuccessor.selectedURL.standardizedFileURL, generationTwo.standardizedFileURL)
+        XCTAssertNotEqual(afterSiblingChange.manifestRevision, afterSuccessor.manifestRevision)
+    }
+}

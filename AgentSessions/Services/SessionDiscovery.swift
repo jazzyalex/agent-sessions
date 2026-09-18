@@ -9,7 +9,7 @@ protocol SessionDiscovery {
     func discoverSessionFiles() -> [URL]
 }
 
-struct SessionFileStat: Equatable {
+struct SessionFileStat: Equatable, Sendable {
     let mtime: Int64
     let size: Int64
 }

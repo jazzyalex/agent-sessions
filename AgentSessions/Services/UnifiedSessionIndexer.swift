@@ -72,6 +72,21 @@ final class UnifiedSessionIndexer: ObservableObject {
         let path: String
         let modifiedAt: Date
         let size: Int64
+        /// Directory-artifact manifest revision (see
+        /// `SessionSourceDescriptor.artifactRevision`). nil for ordinary file stats —
+        /// the default keeps every existing construction site unchanged while the
+        /// revision participates in `Equatable` state wherever it is set.
+        let manifestRevision: String?
+
+        init(path: String,
+             modifiedAt: Date,
+             size: Int64,
+             manifestRevision: String? = nil) {
+            self.path = path
+            self.modifiedAt = modifiedAt
+            self.size = size
+            self.manifestRevision = manifestRevision
+        }
     }
 
     private struct FocusedSessionContext: Equatable {
@@ -1942,13 +1957,26 @@ final class UnifiedSessionIndexer: ObservableObject {
         return Self.logicalFocusedSignature(source: context.source, path: path)
     }
 
-    /// Provider-neutral focused-monitor signature. Most sources stat the primary file;
-    /// a source declaring `descriptor.logicalFileStat` (Cline's manifest+messages pair)
-    /// contributes its logical unit stat instead, so companion-only writes change the
-    /// signature and trip a reload. Internal so messages-only freshness is testable.
+    /// Provider-neutral focused-monitor signature. A source declaring
+    /// `descriptor.artifactRevision` (a directory artifact whose selected generation can
+    /// move) resolves the currently selected path/stat/revision, so a successor or a
+    /// sibling-only write changes the signature and trips a reload; an unresolvable
+    /// artifact yields nil rather than a stat of a superseded file. Most sources stat
+    /// the primary file; a source declaring `descriptor.logicalFileStat` (Cline's
+    /// manifest+messages pair) contributes its logical unit stat instead, so
+    /// companion-only writes change the signature and trip a reload. Internal so
+    /// messages-only freshness is testable.
     static func logicalFocusedSignature(source: SessionSource, path: String) -> FileSignature? {
         let url = URL(fileURLWithPath: path)
-        if let logical = SessionSourceRegistry.descriptor(for: source).logicalFileStat?(url) {
+        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        if let resolveArtifact = descriptor.artifactRevision {
+            guard let revision = resolveArtifact(url) else { return nil }
+            return FileSignature(path: revision.selectedURL.path,
+                                 modifiedAt: Date(timeIntervalSince1970: TimeInterval(revision.physicalStat.mtime)),
+                                 size: revision.physicalStat.size,
+                                 manifestRevision: revision.manifestRevision)
+        }
+        if let logical = descriptor.logicalFileStat?(url) {
             return FileSignature(path: path,
                                  modifiedAt: Date(timeIntervalSince1970: TimeInterval(logical.mtime)),
                                  size: logical.size)
@@ -1957,8 +1985,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// Provider-neutral search FileRefs for a session list — the same construction the
-    /// ingest kick uses. A source declaring `descriptor.logicalFileStat` contributes its
-    /// logical unit stat, so companion-only writes re-ingest and stay FTS-current.
+    /// ingest kick uses. A source declaring `descriptor.artifactRevision` anchors the
+    /// FileRef to the currently selected revision (path/mtime/size) and carries the
+    /// manifest revision; it never keeps an obsolete `Session.filePath` anchor, and an
+    /// unresolvable artifact emits nothing. A source declaring
+    /// `descriptor.logicalFileStat` contributes its logical unit stat, so
+    /// companion-only writes re-ingest and stay FTS-current.
     /// Internal so the messages-only re-ingest path is testable without a live kick.
     static func searchFileRefs(for sessions: [Session]) -> [SearchIngestService.FileRef] {
         sessions.compactMap { session -> SearchIngestService.FileRef? in
@@ -1971,6 +2003,13 @@ final class UnifiedSessionIndexer: ObservableObject {
             if CursorSessionIndexer.isDBOnlySession(session) { return nil }
             let url = URL(fileURLWithPath: session.filePath)
             let descriptor = session.source.descriptor
+            if let resolveArtifact = descriptor.artifactRevision {
+                guard let revision = resolveArtifact(url) else { return nil }
+                return SearchIngestService.FileRef(path: revision.selectedURL.path,
+                                                   mtime: revision.physicalStat.mtime,
+                                                   size: revision.physicalStat.size,
+                                                   manifestRevision: revision.manifestRevision)
+            }
             guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
                 return nil
             }

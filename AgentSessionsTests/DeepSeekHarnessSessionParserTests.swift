@@ -180,8 +180,8 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
             envelope("todo/write", 14, data: ["todos": []]),
             envelope("session/title", 15, data: [
                 "title": "LLM TITLE MUST NOT WIN",
-                "messageSeqs": [] as [Int],
-                "source": "llm",
+                "messageSeqs": [4],
+                "source": ["kind": "fallback"] as [String: Any],
             ]),
         ]
     }
@@ -334,13 +334,16 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         let url = try writeSession(filename: "session.v2.jsonl", rows: [
             header(id: "dsh-subagent-1", version: 2, parentSessionID: "dsh-parent-1",
                    origin: "subagent", preset: "code"),
-            envelope("step/start", 0, data: ["turn": 1, "step": 1]),
-            envelope("request/header", 1, data: [
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("request/header", 2, data: [
                 "header": ["config": ["provider": "deepseek", "model": "deepseek-chat"] as [String: Any]] as [String: Any],
                 "reason": "initial",
             ]),
-            envelope("step/end", 2, data: ["turn": 1, "step": 1]),
-            envelope("turn/end", 3, data: ["turn": 1]),
+            envelope("step/end", 3, data: ["turn": 1, "step": 1]),
+            envelope("turn/end", 4, data: [
+                "turn": 1, "reason": ["kind": "completed"] as [String: Any]
+            ]),
         ])
         guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {
             return XCTFail("full parse returned nil")

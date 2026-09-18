@@ -62,16 +62,37 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
         DispatchQueue.global(qos: executionProfile.deferNonCriticalWork ? .utility : .userInitiated).async { [weak self] in
             guard let self else { return }
             let result = sourceDiscovery.discover()
-            var parsed: [Session] = []
+            var parsedByID: [String: (candidate: DeepSeekHarnessSessionCandidate, session: Session)] = [:]
             var parseFailure = false
             for candidate in result.candidates {
                 if let session = DeepSeekHarnessSessionParser.parseFile(at: candidate.selectedURL) {
-                    parsed.append(session)
+                    parsedByID[candidate.id] = (candidate, session)
                 } else {
                     parseFailure = true
                 }
             }
-            let errorText = result.issues.first?.localizedDescription
+
+            // Generations are immutable, so parsing the selected file alone is
+            // insufficient: a successor can become authoritative without
+            // changing that file. Re-resolve the logical directory after all
+            // parsing and publish only candidates whose selected URL and full
+            // sibling-manifest revision are unchanged.
+            let postParseResult = sourceDiscovery.discover()
+            let postParseCandidates = Dictionary(
+                uniqueKeysWithValues: postParseResult.candidates.map { ($0.id, $0) }
+            )
+            var parsed: [Session] = []
+            for (id, value) in parsedByID {
+                guard let current = postParseCandidates[id],
+                      current.manifestRevision == value.candidate.manifestRevision,
+                      current.selectedURL.standardizedFileURL == value.candidate.selectedURL.standardizedFileURL else {
+                    parseFailure = true
+                    continue
+                }
+                parsed.append(value.session)
+            }
+            let allIssues = result.issues + postParseResult.issues
+            let errorText = allIssues.first?.localizedDescription
                 ?? (parseFailure ? "DeepSeek Harness session could not be parsed." : nil)
             DispatchQueue.main.async {
                 guard self.refreshToken == token else { return }
@@ -79,7 +100,7 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                 self.filesProcessed = parsed.count
                 self.hasEmptyDirectory = result.candidates.isEmpty && result.issues.isEmpty
                 self.launchPhase = .scanning
-                let refreshFailed = !result.issues.isEmpty || parseFailure
+                let refreshFailed = !allIssues.isEmpty || parseFailure
                 if refreshFailed && !self.allSessions.isEmpty {
                     self.indexingError = errorText
                     // A failed refresh is not permission to replace a healthy
@@ -87,9 +108,8 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     // still advance, while any previously healthy candidate
                     // that failed this pass remains visible until a clean
                     // refresh confirms its removal.
-                    var merged = self.lastHealthy
-                    for session in parsed { merged[session.id] = session }
-                    self.allSessions = Array(merged.values).sorted {
+                    for session in parsed { self.lastHealthy[session.id] = session }
+                    self.allSessions = Array(self.lastHealthy.values).sorted {
                         ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast)
                     }
                     self.finishRefresh(token: token, preserve: false)
@@ -149,6 +169,8 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
         guard reloadingIDs.insert(id).inserted else { reloadLock.unlock(); return }
         reloadLock.unlock()
         let old = allSessions.first(where: { $0.id == id })
+        let sourceDiscovery = discovery
+        let sourceRoot = sourceDiscovery.sessionsRoot()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             defer {
@@ -160,15 +182,16 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     }
                 }
             }
-            guard let old, let candidate = self.discovery.discover().candidates.first(where: { $0.id == id }) else { return }
+            guard let old, let candidate = sourceDiscovery.discover().candidates.first(where: { $0.id == id }) else { return }
             guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: candidate.selectedURL) else { return }
             // Generation selection belongs to the directory, not only the selected
             // file. Recheck after the parse so a successor published concurrently
             // cannot let an older generation overwrite the healthy projection.
-            guard let current = self.discovery.discover().candidates.first(where: { $0.id == id }),
+            guard let current = sourceDiscovery.discover().candidates.first(where: { $0.id == id }),
                   current.manifestRevision == candidate.manifestRevision,
-                  current.selectedURL == candidate.selectedURL else { return }
+                  current.selectedURL.standardizedFileURL == candidate.selectedURL.standardizedFileURL else { return }
             DispatchQueue.main.async {
+                guard self.discovery.sessionsRoot() == sourceRoot else { return }
                 guard let index = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
                 self.allSessions[index] = full
                 self.lastHealthy[id] = full

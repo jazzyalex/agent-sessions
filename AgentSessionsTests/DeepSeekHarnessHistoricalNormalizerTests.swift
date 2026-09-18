@@ -98,7 +98,8 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
             "message": [
                 "id": "assistant-message-1",
                 "role": "assistant",
-                "content": [["type": "text", "text": "done"]]
+                "content": [["type": "text", "text": "done"]],
+                "source": ["kind": "model", "provider": "test", "model": "test"]
             ] as [String: Any]
         ]
         var rows: [DeepSeekHarnessPhysicalRow] = [
@@ -121,17 +122,28 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
 
     private func v2Rows() -> [DeepSeekHarnessPhysicalRow] {
         [
-            .event(envelope("step/start", 0, data: ["turn": 1, "step": 1])),
-            .event(envelope("request/header", 1, data: [
+            .event(envelope("turn/start", 0, data: ["turn": 1])),
+            .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+            .event(envelope("request/header", 2, data: [
                 "header": [
                     "system": "Use the PTC tools.",
-                    "model": "dsh-test-model"
-                ] as [String: Any]
+                    "config": ["provider": "test", "model": "dsh-test-model"] as [String: Any]
+                ] as [String: Any],
+                "reason": "initial"
             ])),
-            .event(envelope("tool/code-dispatch-start", 2, data: ["turn": 1, "step": 1])),
-            .event(envelope("tool/code-dispatch", 3, data: ["turn": 1, "step": 1])),
-            .event(envelope("step/end", 4, data: ["turn": 1, "step": 1])),
-            .event(envelope("turn/end", 5, data: ["turn": 1]))
+            .event(envelope("tool/code-dispatch-start", 3, data: [
+                "rootCallId": "root", "parentCallId": "root", "subCallId": "sub",
+                "name": "read", "arguments": ["path": "fixture"]
+            ])),
+            .event(envelope("tool/code-dispatch", 4, data: [
+                "rootCallId": "root", "parentCallId": "root", "subCallId": "sub",
+                "name": "read", "arguments": ["path": "fixture"], "isError": false,
+                "content": [["type": "text", "text": "done"]]
+            ])),
+            .event(envelope("step/end", 5, data: ["turn": 1, "step": 1])),
+            .event(envelope("turn/end", 6, data: [
+                "turn": 1, "reason": ["kind": "completed"] as [String: Any]
+            ]))
         ]
     }
 
@@ -146,21 +158,48 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
             .event(envelope("system/message", 2, data: [
                 "turn": 1,
                 "step": 1,
-                "message": ["id": "system-1", "role": "system"] as [String: Any]
+                "message": [
+                    "id": "system-1", "role": "system",
+                    "source": ["kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt"],
+                    "content": []
+                ] as [String: Any]
             ], surfaceOp: .append)),
             .event(envelope("user/message", 3, data: [
-                "id": "user-1", "role": "user", "text": "hello"
+                "id": "user-1", "role": "user",
+                "content": [["type": "text", "text": "hello"]],
+                "source": ["kind": "user"]
             ], surfaceOp: .append)),
             .event(envelope("assistant/message", 4, data: [
-                "message": ["id": "assistant-1", "role": "assistant"] as [String: Any],
-                "stream": [["kind": "text", "text": "hello"]]
+                "turn": 1, "step": 1,
+                "message": [
+                    "id": "assistant-1", "role": "assistant",
+                    "content": [
+                        ["type": "text", "text": "hello"],
+                        ["type": "tool-call", "id": "call-1", "name": "shell",
+                         "arguments": "{}"]
+                    ],
+                    "source": ["kind": "model", "provider": "test", "model": "test"]
+                ] as [String: Any],
+                "stream": []
             ], surfaceOp: .append)),
-            .event(envelope("tool/call", 5, data: ["callId": "call-1", "tool": "shell"])),
+            .event(envelope("tool/call", 5, data: [
+                "turn": 1, "step": 1, "callId": "call-1", "name": "shell", "arguments": "{}"
+            ])),
             .event(envelope("tool/result", 6, data: [
-                "message": ["id": "result-1", "role": "tool"] as [String: Any]
+                "turn": 1, "step": 1,
+                "message": [
+                    "id": "result-1", "role": "user",
+                    "content": [[
+                        "type": "tool-result", "toolCallId": "call-1",
+                        "content": [["type": "text", "text": "done"]], "isError": false
+                    ]],
+                    "source": ["kind": "tool", "callId": "call-1"]
+                ] as [String: Any]
             ], surfaceOp: .append)),
             .event(envelope("step/end", 7, data: ["turn": 1, "step": 1])),
-            .event(envelope("turn/end", 8, data: ["turn": 1]))
+            .event(envelope("turn/end", 8, data: [
+                "turn": 1, "reason": ["kind": "completed"] as [String: Any]
+            ]))
         ]
 
         let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(
@@ -213,8 +252,8 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
         let systems = normalized.filter { $0.canonicalType == "system/message" }
         XCTAssertEqual(systems.count, 2)
         XCTAssertEqual(systems[0].envelope.surfaceOp, .append)
-        XCTAssertEqual(systems[1].envelope.surfaceOp, .replaceV3(startSeq: 1, endSeq: 1))
-        XCTAssertEqual(systems[1].envelope.sourceEventSeqs, [1])
+        XCTAssertEqual(systems[1].envelope.surfaceOp, .replaceV3(startSeq: 2, endSeq: 2))
+        XCTAssertEqual(systems[1].envelope.sourceEventSeqs, [2])
         XCTAssertTrue(normalized.contains { $0.canonicalType == "tool/ptc-dispatch-start" })
         XCTAssertTrue(normalized.contains { $0.canonicalType == "tool/ptc-dispatch" })
         XCTAssertFalse(normalized.contains { $0.canonicalType == "tool/code-dispatch" })

@@ -53,13 +53,22 @@ enum DeepSeekHarnessHistoricalNormalizer {
         }
 
         if version == 2 {
+            // Strict v2 admission runs before migration so a v2-invalid
+            // payload cannot become accepted merely because migration
+            // drops or transforms the offending field.
+            for event in events {
+                try DeepSeekHarnessPayloadValidator.assertV2EventPreMigration(event)
+            }
             events = try migrateV2ToV3(events, header: result.header,
                                        inheritedEventCount: result.inheritedEventCount)
             version = 3
         }
         guard version == 3 else { throw DeepSeekHarnessFormatError.unsupportedVersion(version) }
 
-        try validateV3(events, header: normalizedHeader(result.header))
+        let v3Header = normalizedHeader(result.header)
+        try validateV3(events, header: v3Header)
+        try DeepSeekHarnessRelationshipValidator.assertPublishableRelationships(
+            events, header: v3Header)
         return events.map { event in
             let unknownIgnorable = !DeepSeekHarnessVocabulary.v3Known.contains(event.type) && event.ignorable
             return DeepSeekHarnessNormalizedEvent(
@@ -321,15 +330,159 @@ enum DeepSeekHarnessHistoricalNormalizer {
 
     // MARK: v1 -> v2
 
-    private struct Attempt {
+    /// Compact assistant-stream accumulator ported from staged
+    /// `llm/assistant-stream.ts` (`AssistantStreamAccumulator`).
+    ///
+    /// Raw v1 `assistant/chunk` payloads fold into packed `text-chunks`,
+    /// `reasoning-chunks`, and `tool-call-chunks` runs with the exact
+    /// upstream coalescing rules (same record type, same index, safe time
+    /// gap; tool-call runs additionally require the same call id and the
+    /// same name presence/value). Empty tool-call identities, block
+    /// boundaries, usage, and finish payloads stay raw `chunk` records.
+    private struct AssistantStreamAccumulator {
+        private struct Record {
+            var type: String
+            var time0: Int64
+            var index: Int
+            var dt: [Int]
+            var texts: [String]
+            var id: String?
+            var name: String?
+            var hasName: Bool
+            var chunk: [String: Any]?
+            var lastTime: Int64
+        }
+
+        private var records: [Record] = []
+
+        mutating func push(time: Int64, chunk: [String: Any]) throws {
+            guard let chunkType = chunk["type"] as? String else {
+                throw DeepSeekHarnessFormatError.invalidPayload("assistant stream chunk lacks a type")
+            }
+            switch chunkType {
+            case "text-delta", "reasoning-delta":
+                guard let index = DeepSeekHarnessJSON.count(chunk["index"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(chunkType) index must be a non-negative safe integer")
+                }
+                guard let text = chunk["text"] as? String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(chunkType) text must be a string")
+                }
+                let type = chunkType == "text-delta" ? "text-chunks" : "reasoning-chunks"
+                let previous = records.last
+                let gap = previous.flatMap {
+                    $0.type == type ? safeStreamGap($0.lastTime, time) : nil
+                }
+                if let previous, previous.type == type, previous.index == index, let gap {
+                    records[records.count - 1].dt.append(gap)
+                    records[records.count - 1].texts.append(text)
+                    records[records.count - 1].lastTime = time
+                } else {
+                    records.append(Record(type: type, time0: time, index: index, dt: [],
+                                          texts: [text], id: nil, name: nil, hasName: false,
+                                          chunk: nil, lastTime: time))
+                }
+            case "tool-call-delta":
+                guard let index = DeepSeekHarnessJSON.count(chunk["index"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "tool-call-delta index must be a non-negative safe integer")
+                }
+                guard let id = chunk["id"] as? String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("tool-call-delta id must be a string")
+                }
+                if chunk.keys.contains("name"), chunk["name"] as? String == nil {
+                    throw DeepSeekHarnessFormatError.invalidPayload("tool-call-delta name must be a string")
+                }
+                guard let delta = chunk["argumentsDelta"] as? String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "tool-call-delta argumentsDelta must be a string")
+                }
+                let hasName = chunk.keys.contains("name")
+                let name = chunk["name"] as? String
+                if id.isEmpty || (hasName && name?.isEmpty != false) {
+                    records.append(Record(type: "chunk", time0: time, index: 0, dt: [],
+                                          texts: [], id: nil, name: nil, hasName: false,
+                                          chunk: chunk, lastTime: time))
+                    return
+                }
+                let previous = records.last
+                let gap = previous.flatMap {
+                    $0.type == "tool-call-chunks" ? safeStreamGap($0.lastTime, time) : nil
+                }
+                let previousName: String? = previous?.name ?? nil
+                let sameName = previous?.type == "tool-call-chunks"
+                    && previous?.hasName == hasName && previousName == name
+                if let previous, previous.type == "tool-call-chunks",
+                   previous.index == index, previous.id == id, sameName, let gap {
+                    records[records.count - 1].dt.append(gap)
+                    records[records.count - 1].texts.append(delta)
+                    records[records.count - 1].lastTime = time
+                } else {
+                    records.append(Record(type: "tool-call-chunks", time0: time, index: index,
+                                          dt: [], texts: [delta], id: id, name: name,
+                                          hasName: hasName, chunk: nil, lastTime: time))
+                }
+            case "block-start", "block-end", "usage", "finish":
+                records.append(Record(type: "chunk", time0: time, index: 0, dt: [],
+                                      texts: [], id: nil, name: nil, hasName: false,
+                                      chunk: chunk, lastTime: time))
+            default:
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "unsupported assistant stream chunk type \(chunkType)")
+            }
+        }
+
+        func snapshot() -> [[String: Any]] {
+            records.map { record in
+                switch record.type {
+                case "chunk":
+                    return ["type": "chunk", "time": record.time0, "chunk": record.chunk ?? [:]]
+                case "tool-call-chunks":
+                    var result: [String: Any] = ["type": record.type, "time0": record.time0,
+                                                 "index": record.index, "dt": record.dt,
+                                                 "id": record.id ?? "", "args": record.texts]
+                    if record.hasName, let name = record.name { result["name"] = name }
+                    return result
+                default:
+                    return ["type": record.type, "time0": record.time0, "index": record.index,
+                            "dt": record.dt, "texts": record.texts]
+                }
+            }
+        }
+    }
+
+    private struct StreamEntry {
+        var record: [String: Any]
+        var lastTime: Int64
+    }
+
+    /// One in-progress assistant attempt: coalesced packed stream records
+    /// plus the chunk spans they cover. Ported from staged
+    /// `v1-to-v2/migration.ts` (`AttemptGroup`).
+    private struct AttemptGroup {
         let turn: Int
         let step: Int
-        var sourceSequences: [Int] = []
-        var stream: [[String: Any]] = []
-        var buffered: [DeepSeekHarnessEnvelope] = []
-        var lastSequence: Int
-        var lastTime: Int64
+        var spans: [(firstSeq: Int, eventCount: Int)] = []
+        var stream: [StreamEntry] = []
+        var accumulator: AssistantStreamAccumulator?
+        var chunkCount = 0
+        var lastChunkSeq: Int?
+        var lastChunkTime: Int64?
         var terminal = false
+    }
+
+    private struct StreamingAttempt {
+        var group: AttemptGroup
+        var afterLastChunk: [DeepSeekHarnessEnvelope] = []
+    }
+
+    /// Legacy v1 turn/step lifecycle observed while migrating. Ported from
+    /// staged `v1-to-v2/migration.ts` (`LegacyTurnState`).
+    private struct LegacyTurnState {
+        var openTurn: Int?
+        var openStep: Int?
+        var previousType: String?
+        var previousData: [String: Any]?
     }
 
     private struct V1State {
@@ -337,7 +490,8 @@ enum DeepSeekHarnessHistoricalNormalizer {
         let sourceCut: Int
         var mapping: [Int: Int] = [:]
         var output: [DeepSeekHarnessEnvelope] = []
-        var pending: Attempt?
+        var pending: StreamingAttempt?
+        var legacyTurns = LegacyTurnState()
         var targetCut: Int?
         var lastTime: Int64
     }
@@ -374,48 +528,57 @@ enum DeepSeekHarnessHistoricalNormalizer {
         _ run: DeepSeekHarnessPackedRun,
         state: inout V1State
     ) throws {
-        try prepareAttempt(turn: run.turn, step: run.step, firstSequence: run.firstSeq,
-                           lastSequence: run.lastSeq, state: &state)
-        guard var attempt = state.pending else { return }
-        attempt.stream.append(run.streamRecord)
-        attempt.sourceSequences.append(contentsOf: run.firstSeq...run.lastSeq)
-        attempt.lastSequence = run.lastSeq
-        attempt.lastTime = Int64(run.lastTime)
+        // Packed runs never participate in the legacy turn pattern: like
+        // upstream, a run clears the previous-event witness.
+        state.legacyTurns.previousType = nil
+        state.legacyTurns.previousData = nil
         state.lastTime = Int64(run.lastTime)
-        state.pending = attempt
+        try rotateAttemptIfNeeded(turn: run.turn, step: run.step, state: &state)
+        if state.pending == nil {
+            state.pending = StreamingAttempt(group: attemptGroup(turn: run.turn, step: run.step))
+        }
+        guard var pending = state.pending else { return }
+        if (run.firstSeq < state.sourceCut) != (run.lastSeq < state.sourceCut) {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "inherited cut \(state.sourceCut) splits one Assistant attempt")
+        }
+        flushAccumulator(&pending.group)
+        appendStreamRecord(&pending.group, source: run.streamRecord, lastTime: Int64(run.lastTime))
+        recordChunkSpan(&pending.group, firstSeq: run.firstSeq,
+                        eventCount: run.eventCount, lastTime: Int64(run.lastTime))
+        state.pending = pending
     }
 
     private static func consumeV1(
         _ event: DeepSeekHarnessEnvelope,
         state: inout V1State
     ) throws {
-        state.lastTime = event.timeMilliseconds
+        // Released v1 refuses every event absent from the released v1
+        // inventory, even when marked ignorable. Unknown-ignorable
+        // retention exists only for native/current v3, where the released
+        // catalog permits it.
         guard DeepSeekHarnessVocabulary.v0Events.contains(event.type) else {
-            if event.ignorable { return }
-            throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "format v1 contains unknown event type \"\(event.type)\" at seq \(event.sequence)")
+        }
+        let interrupted = legacyInterruptedTurn(state.legacyTurns, event)
+        if event.type == "turn/start", state.legacyTurns.openTurn != nil, interrupted == nil {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "turn/start \(jsonDebug(event.data["turn"])) does not close the prior turn")
+        }
+        try assertSourceDeliveryMarker(event, state: state)
+        observeLegacyTurn(&state.legacyTurns, event)
+        state.lastTime = event.timeMilliseconds
+        if let interrupted {
+            try finishAttempt(state: &state)
+            try emitGenerated(interrupted, origin: event.sequence, state: &state)
         }
         if event.type == "assistant/chunk" {
-            guard let turn = positiveCoordinate(event.data["turn"]),
-                  let step = positiveCoordinate(event.data["step"]),
-                  let chunk = event.data["chunk"] as? [String: Any] else {
-                throw DeepSeekHarnessFormatError.invalidPayload(
-                    "assistant/chunk \(event.sequence) is malformed")
-            }
-            try prepareAttempt(turn: turn, step: step, firstSequence: event.sequence,
-                               lastSequence: event.sequence, state: &state)
-            guard var attempt = state.pending else { return }
-            attempt.stream.append([
-                "type": "chunk", "time": event.timeMilliseconds, "chunk": chunk
-            ])
-            attempt.sourceSequences.append(event.sequence)
-            attempt.lastSequence = event.sequence
-            attempt.lastTime = event.timeMilliseconds
-            attempt.terminal = chunk["type"] as? String == "finish"
-            state.pending = attempt
+            try transformChunk(event, state: &state)
             return
         }
         if event.type == "assistant/message" {
-            try consumeV1Message(event, state: &state)
+            try transformMessage(event, state: &state)
             return
         }
         if event.type == "user/message",
@@ -433,38 +596,60 @@ enum DeepSeekHarnessHistoricalNormalizer {
             return
         }
         if closesAttempt(event.type) { try finishAttempt(state: &state) }
-        if var pending = state.pending {
-            pending.buffered.append(event)
-            state.pending = pending
+        if state.pending != nil {
+            state.pending?.afterLastChunk.append(event)
             return
         }
         try emitSource(event, state: &state)
     }
 
-    private static func prepareAttempt(
+    /// Settles or flushes the pending attempt when a new turn/step member
+    /// arrives. Ported from the turnover prelude shared by staged
+    /// `transformChunk` and `transformReleasedRun`.
+    private static func rotateAttemptIfNeeded(
         turn: Int,
         step: Int,
-        firstSequence: Int,
-        lastSequence: Int,
         state: inout V1State
     ) throws {
-        if let pending = state.pending,
-           pending.terminal || pending.turn != turn || pending.step != step {
+        guard state.pending != nil else { return }
+        if state.pending?.group.terminal == true
+            || state.pending?.group.turn != turn || state.pending?.group.step != step {
             try finishAttempt(state: &state)
-        } else if state.pending != nil {
+        } else {
             try flushBuffered(state: &state)
-        }
-        if state.pending == nil {
-            state.pending = Attempt(turn: turn, step: step,
-                                    lastSequence: lastSequence, lastTime: state.lastTime)
-        }
-        if (firstSequence < state.sourceCut) != (lastSequence < state.sourceCut) {
-            throw DeepSeekHarnessFormatError.unsupportedMigration(
-                "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
     }
 
-    private static func consumeV1Message(
+    private static func transformChunk(
+        _ event: DeepSeekHarnessEnvelope,
+        state: inout V1State
+    ) throws {
+        guard let turn = positiveCoordinate(event.data["turn"]),
+              let step = positiveCoordinate(event.data["step"]),
+              let chunk = event.data["chunk"] as? [String: Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "assistant/chunk \(event.sequence) is malformed")
+        }
+        try rotateAttemptIfNeeded(turn: turn, step: step, state: &state)
+        if state.pending == nil {
+            state.pending = StreamingAttempt(group: attemptGroup(turn: turn, step: step))
+        }
+        guard var pending = state.pending else { return }
+        let first = pending.group.spans.first?.firstSeq ?? event.sequence
+        if (first < state.sourceCut) != (event.sequence < state.sourceCut) {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "inherited cut \(state.sourceCut) splits one Assistant attempt")
+        }
+        var accumulator = pending.group.accumulator ?? AssistantStreamAccumulator()
+        try accumulator.push(time: event.timeMilliseconds, chunk: chunk)
+        pending.group.accumulator = accumulator
+        recordChunkSpan(&pending.group, firstSeq: event.sequence,
+                        eventCount: 1, lastTime: event.timeMilliseconds)
+        if chunk["type"] as? String == "finish" { pending.group.terminal = true }
+        state.pending = pending
+    }
+
+    private static func transformMessage(
         _ event: DeepSeekHarnessEnvelope,
         state: inout V1State
     ) throws {
@@ -474,17 +659,22 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 "assistant/message \(event.sequence) lacks positive turn/step")
         }
         if let pending = state.pending,
-           pending.turn != turn || pending.step != step {
+           pending.group.turn != turn || pending.group.step != step {
+            // A message from another attempt settles the pending one and is
+            // emitted with an empty embedded stream; the complete target
+            // validation then refuses its turn/step mismatch.
             try finishAttempt(state: &state)
+            var fresh = attemptGroup(turn: turn, step: step)
+            try emitSource(messageEvent(event, group: &fresh), state: &state)
+            return
         }
         guard var pending = state.pending else {
             if let cited = event.sourceEventSeqs, !cited.isEmpty {
                 throw DeepSeekHarnessFormatError.unsupportedMigration(
-                    "assistant/message \(event.sequence) cites chunks without one complete ordered attempt")
+                    "assistant/message \(event.sequence) chunk references are not one complete ordered attempt")
             }
-            var data = event.data
-            data["stream"] = []
-            try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+            var fresh = attemptGroup(turn: turn, step: step)
+            try emitSource(messageEvent(event, group: &fresh), state: &state)
             return
         }
         guard let cited = event.sourceEventSeqs else {
@@ -493,44 +683,257 @@ enum DeepSeekHarnessHistoricalNormalizer {
         }
         if cited.isEmpty {
             try finishAttempt(state: &state)
-            var data = event.data
-            data["stream"] = []
-            try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+            var fresh = attemptGroup(turn: turn, step: step)
+            try emitSource(messageEvent(event, group: &fresh), state: &state)
             return
         }
-        guard cited == pending.sourceSequences else {
+        guard matchesChunkSources(pending.group, cited) else {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "assistant/message \(event.sequence) chunk references are not one complete ordered attempt")
         }
-        if (pending.sourceSequences.first! < state.sourceCut) != (event.sequence < state.sourceCut) {
+        let first = pending.group.spans.first?.firstSeq ?? event.sequence
+        if (first < state.sourceCut) != (event.sequence < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
-        pending.terminal = true
+        pending.group.terminal = true
         state.pending = pending
         try flushBuffered(state: &state)
-        var data = event.data
-        data["stream"] = pending.stream
-        try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+        guard var flushed = state.pending else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "assistant/message \(event.sequence) lost its chunk attempt")
+        }
+        let message = messageEvent(event, group: &flushed.group)
+        try emitSource(message, state: &state)
         state.pending = nil
+    }
+
+    /// Synthesizes the canonical interrupted `turn/end` only for the
+    /// released resume pattern: an unclosed turn, no open step, a next-turn
+    /// `turn/start` for exactly the following turn, and a preceding
+    /// `agent/inbox/spliced` targeting `next-turn` with a non-empty insert.
+    /// Ported from staged `legacyInterruptedTurn`.
+    private static func legacyInterruptedTurn(
+        _ turns: LegacyTurnState,
+        _ event: DeepSeekHarnessEnvelope
+    ) -> DeepSeekHarnessEnvelope? {
+        guard event.type == "turn/start",
+              let openTurn = turns.openTurn,
+              turns.openStep == nil,
+              DeepSeekHarnessJSON.count(event.data["turn"]) == openTurn + 1,
+              turns.previousType == "agent/inbox/spliced",
+              let splice = turns.previousData,
+              splice["target"] as? String == "next-turn",
+              let inserted = splice["inserted"] as? [Any], !inserted.isEmpty else {
+            return nil
+        }
+        return DeepSeekHarnessEnvelope(
+            type: "turn/end", sequence: event.sequence,
+            timeMilliseconds: event.timeMilliseconds,
+            data: ["turn": openTurn, "reason": ["kind": "interrupted"] as [String: Any]]
+        )
+    }
+
+    private static func observeLegacyTurn(_ turns: inout LegacyTurnState, _ event: DeepSeekHarnessEnvelope) {
+        switch event.type {
+        case "turn/start":
+            turns.openTurn = DeepSeekHarnessJSON.count(event.data["turn"])
+            turns.openStep = nil
+        case "turn/end":
+            turns.openTurn = nil
+            turns.openStep = nil
+        case "step/start":
+            turns.openStep = DeepSeekHarnessJSON.count(event.data["step"])
+        case "step/end":
+            turns.openStep = nil
+        default:
+            break
+        }
+        turns.previousType = event.type
+        turns.previousData = event.data
+    }
+
+    private static func assertSourceDeliveryMarker(
+        _ event: DeepSeekHarnessEnvelope,
+        state: V1State
+    ) throws {
+        guard event.type == "session-log-deepseek/delivery-accepted" else { return }
+        let inherited = state.header.parentSessionID != nil && event.sequence < state.sourceCut
+        let accepted = DeepSeekHarnessJSON.safeInt(event.data["sessionFormatVersion"])
+        if accepted == 1, !inherited, event.data["sessionId"] as? String != state.header.id {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "current-generation delivery marker names the wrong Session")
+        }
+    }
+
+    private static func attemptGroup(turn: Int, step: Int) -> AttemptGroup {
+        AttemptGroup(turn: turn, step: step)
+    }
+
+    private static func recordChunkSpan(
+        _ group: inout AttemptGroup,
+        firstSeq: Int,
+        eventCount: Int,
+        lastTime: Int64
+    ) {
+        if let last = group.spans.last,
+           last.firstSeq + last.eventCount == firstSeq {
+            group.spans[group.spans.count - 1].eventCount += eventCount
+        } else {
+            group.spans.append((firstSeq: firstSeq, eventCount: eventCount))
+        }
+        group.chunkCount += eventCount
+        group.lastChunkSeq = firstSeq + eventCount - 1
+        group.lastChunkTime = lastTime
+    }
+
+    private static func matchesChunkSources(_ group: AttemptGroup, _ sources: [Int]) -> Bool {
+        guard sources.count == group.chunkCount else { return false }
+        var index = 0
+        for span in group.spans {
+            for offset in 0..<span.eventCount {
+                guard index < sources.count, sources[index] == span.firstSeq + offset else {
+                    return false
+                }
+                index += 1
+            }
+        }
+        return true
+    }
+
+    /// Appends one packed stream record with the exact upstream coalescing
+    /// rules: a raw `chunk` never merges, and packed runs merge only with
+    /// the same record type, same index, a safe time gap, and (for
+    /// tool-call runs) the same call identity and name presence/value.
+    /// Swift value semantics give each group its own copy, matching the
+    /// upstream detached-copy flush of accumulator records behind an owned
+    /// packed prefix. Ported from staged `appendStreamRecord`.
+    private static func appendStreamRecord(
+        _ group: inout AttemptGroup,
+        source: [String: Any],
+        lastTime: Int64
+    ) {
+        let sourceType = source["type"] as? String
+        if group.stream.isEmpty || sourceType == "chunk"
+            || group.stream[group.stream.count - 1].record["type"] as? String != sourceType {
+            group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+            return
+        }
+        var previous = group.stream[group.stream.count - 1]
+        guard let previousIndex = DeepSeekHarnessJSON.count(previous.record["index"]),
+              let sourceIndex = DeepSeekHarnessJSON.count(source["index"]),
+              previousIndex == sourceIndex,
+              let sourceTime = DeepSeekHarnessJSON.safeInt(source["time0"]),
+              let gap = safeStreamGap(previous.lastTime, Int64(sourceTime)) else {
+            group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+            return
+        }
+        if sourceType == "tool-call-chunks" {
+            let previousHasName = previous.record.keys.contains("name")
+            let sourceHasName = source.keys.contains("name")
+            guard (previous.record["id"] as? String) == (source["id"] as? String),
+                  previousHasName == sourceHasName,
+                  (previous.record["name"] as? String) == (source["name"] as? String) else {
+                group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+                return
+            }
+            var dt = (previous.record["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) }
+            dt.append(gap)
+            dt.append(contentsOf: (source["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) })
+            var args = (previous.record["args"] as? [Any] ?? []).compactMap { $0 as? String }
+            args.append(contentsOf: (source["args"] as? [Any] ?? []).compactMap { $0 as? String })
+            previous.record["dt"] = dt
+            previous.record["args"] = args
+        } else {
+            var dt = (previous.record["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) }
+            dt.append(gap)
+            dt.append(contentsOf: (source["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) })
+            var texts = (previous.record["texts"] as? [Any] ?? []).compactMap { $0 as? String }
+            texts.append(contentsOf: (source["texts"] as? [Any] ?? []).compactMap { $0 as? String })
+            previous.record["dt"] = dt
+            previous.record["texts"] = texts
+        }
+        previous.lastTime = lastTime
+        group.stream[group.stream.count - 1] = previous
+    }
+
+    private static func flushAccumulator(_ group: inout AttemptGroup) {
+        guard let accumulator = group.accumulator else { return }
+        for record in accumulator.snapshot() {
+            appendStreamRecord(&group, source: record, lastTime: recordLastTime(record))
+        }
+        group.accumulator = nil
+    }
+
+    private static func streamOf(_ group: inout AttemptGroup) -> [[String: Any]] {
+        flushAccumulator(&group)
+        return group.stream.map(\.record)
+    }
+
+    private static func messageEvent(
+        _ source: DeepSeekHarnessEnvelope,
+        group: inout AttemptGroup
+    ) -> DeepSeekHarnessEnvelope {
+        var data = source.data
+        data["stream"] = streamOf(&group)
+        return replacing(source, data: data, dropSourceEventSeqs: true)
+    }
+
+    private static func attemptEvent(_ group: inout AttemptGroup) -> DeepSeekHarnessEnvelope {
+        guard let lastChunkSeq = group.lastChunkSeq, let lastChunkTime = group.lastChunkTime else {
+            // Unreachable: a pending group always covers at least one chunk.
+            return DeepSeekHarnessEnvelope(
+                type: "assistant/attempt", sequence: 0, timeMilliseconds: 0,
+                data: ["turn": group.turn, "step": group.step, "stream": streamOf(&group)])
+        }
+        return DeepSeekHarnessEnvelope(
+            type: "assistant/attempt", sequence: lastChunkSeq,
+            timeMilliseconds: lastChunkTime,
+            data: ["turn": group.turn, "step": group.step, "stream": streamOf(&group)]
+        )
+    }
+
+    private static func recordLastTime(_ record: [String: Any]) -> Int64 {
+        guard (record["type"] as? String) != "chunk" else {
+            return Int64(DeepSeekHarnessJSON.safeInt(record["time"]) ?? 0)
+        }
+        var time = Int64(DeepSeekHarnessJSON.safeInt(record["time0"]) ?? 0)
+        for gap in (record["dt"] as? [Any] ?? []).compactMap({ DeepSeekHarnessJSON.safeInt($0) }) {
+            time = time &+ Int64(gap)
+        }
+        return time
+    }
+
+    private static func safeStreamGap(_ previous: Int64, _ next: Int64) -> Int? {
+        let (gap, overflow) = next.subtractingReportingOverflow(previous)
+        guard !overflow, gap >= Int64(-DeepSeekHarnessJSON.maxSafeInteger),
+              gap <= Int64(DeepSeekHarnessJSON.maxSafeInteger) else { return nil }
+        return Int(gap)
+    }
+
+    private static func jsonDebug(_ value: Any?) -> String {
+        guard let value, let rendered = DeepSeekHarnessJSON.canonicalString(value) else {
+            return "undefined"
+        }
+        return rendered
     }
 
     private static func finishAttempt(state: inout V1State) throws {
         guard let pending = state.pending else { return }
-        let attempt = DeepSeekHarnessEnvelope(
-            type: "assistant/attempt", sequence: pending.lastSequence,
-            timeMilliseconds: pending.lastTime,
-            data: ["turn": pending.turn, "step": pending.step, "stream": pending.stream]
-        )
-        try emitGenerated(attempt, origin: pending.lastSequence, state: &state)
+        var group = pending.group
+        guard let origin = group.lastChunkSeq else {
+            throw DeepSeekHarnessFormatError.invalidPayload("assistant attempt covers no chunks")
+        }
+        let attempt = attemptEvent(&group)
+        try emitGenerated(attempt, origin: origin, state: &state)
         try flushBuffered(state: &state)
         state.pending = nil
     }
 
     private static func flushBuffered(state: inout V1State) throws {
         guard var pending = state.pending else { return }
-        let buffered = pending.buffered
-        pending.buffered.removeAll(keepingCapacity: true)
+        let buffered = pending.afterLastChunk
+        pending.afterLastChunk.removeAll(keepingCapacity: true)
         state.pending = pending
         for event in buffered { try emitSource(event, state: &state) }
     }
@@ -884,6 +1287,10 @@ enum DeepSeekHarnessHistoricalNormalizer {
             guard event.sequence == index else {
                 throw DeepSeekHarnessFormatError.sequence(expected: index, actual: event.sequence)
             }
+            // Canonical v3 admission runs after migration: envelope keys,
+            // surface/source shapes, system/header structure, and canonical
+            // omissions. Unknown ignorable events pass as diagnostic-only.
+            try DeepSeekHarnessPayloadValidator.assertV3EventPostMigration(event)
             if !DeepSeekHarnessVocabulary.v3Known.contains(event.type) {
                 if event.ignorable { continue }
                 throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
