@@ -1,0 +1,13 @@
+{"type":"session","version":3,"id":"dsh-synth-v3-0001","createdAt":1700000000000,"cwd":"/tmp/synthetic-dsh-demo","isSeeded":false,"delegationDepth":0,"agentPreset":"ptc"}
+{"type":"turn/start","seq":0,"time":1700000000001,"data":{"turn":1}}
+{"type":"step/start","seq":1,"time":1700000000002,"data":{"turn":1,"step":1}}
+{"type":"system/message","seq":2,"time":1700000000002,"data":{"turn":1,"step":1,"message":{"id":"v2-to-v3-system-491c2958acbcfe10950d56a4c7a2f791a4d3a523eccb6860a94e11e62c21ad12","role":"system","source":{"kind":"plugin","plugin":"@deepseek-ai/dsh-system-prompt"},"content":[]}},"surfaceOp":"append"}
+{"type":"user/message","seq":3,"time":1700000000003,"data":{"id":"user-dsh-synth-v3-0001","role":"user","content":[{"type":"text","text":"SYNTHETIC fixture direct user message"}],"source":{"kind":"user"}},"surfaceOp":"append"}
+{"type":"system/message","seq":4,"time":1700000000004,"data":{"turn":1,"step":1,"message":{"id":"v2-to-v3-system-33dabc57ccd1153985d4931502d7dc4b682e73ce7f869e0dae77590b8f7b6960","role":"system","source":{"kind":"plugin","plugin":"@deepseek-ai/dsh-system-prompt"},"content":[{"type":"text","text":"SYNTHETIC system context"}]}},"surfaceOp":{"op":"replace","startSeq":2,"endSeq":2},"sourceEventSeqs":[2]}
+{"type":"request/header","seq":5,"time":1700000000004,"data":{"header":{"config":{"provider":"synthetic-provider","model":"synthetic-model"}},"reason":"initial"}}
+{"type":"tool/ptc-dispatch-start","seq":6,"time":1700000000005,"data":{"rootCallId":"call-synth-root","parentCallId":"call-synth-root","subCallId":"call-synth-sub","name":"read","arguments":{"path":"SYNTHETIC"}}}
+{"type":"tool/ptc-dispatch","seq":7,"time":1700000000006,"data":{"rootCallId":"call-synth-root","parentCallId":"call-synth-root","subCallId":"call-synth-sub","name":"read","arguments":{"path":"SYNTHETIC"},"isError":false,"content":[{"type":"text","text":"SYNTHETIC tool output"}]}}
+{"type":"assistant/message","seq":8,"time":1700000000007,"data":{"turn":1,"step":1,"message":{"id":"assistant-dsh-synth-v3-0001","role":"assistant","content":[{"type":"text","text":"SYNTHETIC fixture assistant reply"}],"source":{"kind":"model","provider":"synthetic-provider","model":"synthetic-model"}},"stream":[]},"surfaceOp":"append"}
+{"type":"step/end","seq":9,"time":1700000000008,"data":{"turn":1,"step":1}}
+{"type":"turn/end","seq":10,"time":1700000000009,"data":{"turn":1,"reason":{"kind":"completed"}}}
+{"type":"x-synth/unknown-ignorable","seq":11,"time":1700000000010,"data":{"detail":"SYNTHETIC unknown extension payload"},"ignorable":true}

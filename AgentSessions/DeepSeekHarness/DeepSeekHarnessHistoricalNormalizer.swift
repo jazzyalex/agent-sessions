@@ -1,0 +1,1022 @@
+import Foundation
+
+struct DeepSeekHarnessNormalizedEvent {
+    let envelope: DeepSeekHarnessEnvelope
+    let canonicalType: String
+    let diagnosticOnly: Bool
+
+    var data: [String: Any] { envelope.data }
+}
+
+/// Ordered, in-memory-only normalization of released DSH formats. Physical
+/// v0/v1 packed rows survive until the v1-to-v2 edge so they are folded once
+/// into the embedded Assistant streams used by v2 and v3.
+enum DeepSeekHarnessHistoricalNormalizer {
+    static func normalizedHeader(_ header: DeepSeekHarnessHeader) -> DeepSeekHarnessHeader {
+        guard header.version < 3 else { return header }
+        return DeepSeekHarnessHeader(
+            version: 3,
+            id: header.id,
+            createdAtMilliseconds: header.createdAtMilliseconds,
+            cwd: header.cwd,
+            parentSessionID: header.parentSessionID,
+            isSeeded: header.isSeeded,
+            origin: header.origin,
+            delegationDepth: header.delegationDepth,
+            agentPreset: header.agentPreset == "code" ? "ptc" : header.agentPreset
+        )
+    }
+
+    static func normalize(_ result: DeepSeekHarnessParseResult) throws -> [DeepSeekHarnessNormalizedEvent] {
+        var rows = result.rows
+        var version = result.header.version
+
+        if version == 0 {
+            rows = try migrateV0ToV1(rows, header: result.header,
+                                     inheritedEventCount: result.inheritedEventCount)
+            version = 1
+        }
+
+        var events: [DeepSeekHarnessEnvelope]
+        if version == 1 {
+            events = try migrateV1ToV2(rows, header: result.header,
+                                       inheritedEventCount: result.inheritedEventCount)
+            version = 2
+        } else {
+            events = try rows.map { row in
+                guard case .event(let event) = row else {
+                    throw DeepSeekHarnessFormatError.unsupportedMigration(
+                        "format v\(version) cannot contain released packed Assistant rows")
+                }
+                return event
+            }
+        }
+
+        if version == 2 {
+            events = try migrateV2ToV3(events, header: result.header,
+                                       inheritedEventCount: result.inheritedEventCount)
+            version = 3
+        }
+        guard version == 3 else { throw DeepSeekHarnessFormatError.unsupportedVersion(version) }
+
+        try validateV3(events, header: normalizedHeader(result.header))
+        return events.map { event in
+            let unknownIgnorable = !DeepSeekHarnessVocabulary.v3Known.contains(event.type) && event.ignorable
+            return DeepSeekHarnessNormalizedEvent(
+                envelope: event,
+                canonicalType: event.type,
+                diagnosticOnly: event.type == "assistant/attempt" || unknownIgnorable
+            )
+        }
+    }
+
+    // MARK: v0 -> v1
+
+    private struct V0State {
+        var messageIDs: [Int: String] = [:]
+        var retryIDs: [String: String] = [:]
+        var compactionID: String?
+    }
+
+    private static func migrateV0ToV1(
+        _ rows: [DeepSeekHarnessPhysicalRow],
+        header: DeepSeekHarnessHeader,
+        inheritedEventCount: Int
+    ) throws -> [DeepSeekHarnessPhysicalRow] {
+        var state = V0State()
+        return try rows.map { row in
+            guard case .event(let source) = row else { return row }
+            var event = source
+            switch event.type {
+            case "compact/start": event = replacing(event, type: "compaction/start")
+            case "compact/summary": event = replacing(event, type: "compaction/summary")
+            case "compact/end": event = replacing(event, type: "compaction/end")
+            case "compact/prune": event = replacing(event, type: "compaction/prune")
+            default: break
+            }
+
+            if event.type == "request/header-delta" || event.type == "mode/set" {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "format v0 contains unsupported legacy \(event.type) at seq \(event.sequence)")
+            }
+            if event.type == "request/header", event.data["reason"] as? String == "fallback" {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "format v0 contains unsupported request/header fallback at seq \(event.sequence)")
+            }
+
+            event = try normalizeV0Turn(event, sessionID: header.id)
+            event = try normalizeV0Header(event)
+            event = try normalizeV0Steering(event, sessionID: header.id)
+            event = try normalizeV0Retry(event, sessionID: header.id, state: &state)
+            event = try normalizeV0Compaction(event, sessionID: header.id, state: &state)
+            event = try normalizeV0Message(event, sessionID: header.id, messageIDs: state.messageIDs)
+
+            if event.type == "session-log-deepseek/delivery-accepted" {
+                let acceptedVersion = DeepSeekHarnessJSON.safeInt(event.data["sessionFormatVersion"]) ?? 0
+                let inherited = header.parentSessionID != nil && event.sequence < inheritedEventCount
+                if acceptedVersion == 0 && !inherited && event.data["sessionId"] as? String != header.id {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "current-generation delivery marker names the wrong session")
+                }
+            }
+            if let id = messageID(in: event) { state.messageIDs[event.sequence] = id }
+            return .event(event)
+        }
+    }
+
+    private static func normalizeV0Turn(
+        _ event: DeepSeekHarnessEnvelope,
+        sessionID: String
+    ) throws -> DeepSeekHarnessEnvelope {
+        if event.type == "turn/start", event.data["trigger"] != nil {
+            guard let turn = positiveCoordinate(event.data["turn"]) else {
+                throw malformedLegacy(sessionID, event)
+            }
+            return replacing(event, data: ["turn": turn])
+        }
+        guard event.type == "turn/end" else { return event }
+        guard let turn = positiveCoordinate(event.data["turn"]),
+              let reason = event.data["reason"] as? [String: Any],
+              let kind = reason["kind"] as? String else {
+            throw malformedLegacy(sessionID, event)
+        }
+        var normalized = reason
+        switch kind {
+        case "aborted" where reason["reason"] == nil:
+            normalized = ["kind": "aborted", "reason": ["kind": "legacy"]]
+        case "disposed":
+            normalized = ["kind": "aborted", "reason": ["kind": "disposed"]]
+        case "error" where reason["error"] == nil:
+            guard reason["step"] != nil else { throw malformedLegacy(sessionID, event) }
+            if let failure = reason["failure"] as? [String: Any],
+               failure["message"] is String, failure["code"] is String {
+                normalized = ["kind": "error", "error": failure]
+            } else if let message = reason["message"] as? String {
+                normalized = [
+                    "kind": "error",
+                    "error": ["message": message, "code": reason["code"] as? String ?? "UNKNOWN"]
+                ]
+            } else {
+                throw malformedLegacy(sessionID, event)
+            }
+        default: break
+        }
+        var data = event.data
+        data["turn"] = turn
+        data["reason"] = normalized
+        return replacing(event, data: data)
+    }
+
+    private static func normalizeV0Header(_ event: DeepSeekHarnessEnvelope) throws -> DeepSeekHarnessEnvelope {
+        guard event.type == "request/header",
+              var header = event.data["header"] as? [String: Any],
+              header["messagePrefix"] != nil else { return event }
+        guard header["messagePrefix"] is [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "request/header \(event.sequence) messagePrefix must be an array")
+        }
+        header.removeValue(forKey: "messagePrefix")
+        var data = event.data
+        data["header"] = header
+        return replacing(event, data: data)
+    }
+
+    private static func normalizeV0Steering(
+        _ event: DeepSeekHarnessEnvelope,
+        sessionID: String
+    ) throws -> DeepSeekHarnessEnvelope {
+        guard event.type == "steering/message" else { return event }
+        if let wrapped = event.data["message"] as? [String: Any] {
+            return replacing(event, type: "user/message", data: wrapped)
+        }
+        guard event.data["turn"] != nil,
+              event.data["content"] != nil, event.data["source"] != nil else {
+            throw malformedLegacy(sessionID, event)
+        }
+        var message = event.data
+        message.removeValue(forKey: "turn")
+        message["id"] = "legacy-message:\(sessionID):\(event.sequence)"
+        message["role"] = "user"
+        return replacing(event, type: "user/message", data: message)
+    }
+
+    private static func normalizeV0Retry(
+        _ event: DeepSeekHarnessEnvelope,
+        sessionID: String,
+        state: inout V0State
+    ) throws -> DeepSeekHarnessEnvelope {
+        guard event.type == "llm/retry" else { return event }
+        let values = ["turn", "step", "provider", "policyKey"].map { event.data[$0] ?? NSNull() }
+        guard let chain = DeepSeekHarnessJSON.canonicalString(values) else {
+            throw DeepSeekHarnessFormatError.invalidPayload("llm/retry chain is not JSON")
+        }
+        if let existing = event.data["retryId"] as? String, !existing.isEmpty {
+            state.retryIDs[chain] = existing
+            return event
+        }
+        if event.data.keys.contains("retryId") { return event }
+        let id = state.retryIDs[chain] ?? "legacy-retry:\(sessionID):\(event.sequence)"
+        state.retryIDs[chain] = id
+        var data = event.data
+        data["retryId"] = id
+        return replacing(event, data: data)
+    }
+
+    private static func normalizeV0Compaction(
+        _ event: DeepSeekHarnessEnvelope,
+        sessionID: String,
+        state: inout V0State
+    ) throws -> DeepSeekHarnessEnvelope {
+        if event.type == "session/end-seed" {
+            state.compactionID = nil
+            return event
+        }
+        if event.type == "compaction/start" {
+            if let id = event.data["compactionId"] as? String, !id.isEmpty {
+                state.compactionID = id
+                return event
+            }
+            if event.data.keys.contains("compactionId") { return event }
+            let id = "legacy-compaction:\(sessionID):\(event.sequence)"
+            state.compactionID = id
+            var data = event.data
+            data["compactionId"] = id
+            return replacing(event, data: data)
+        }
+        guard let id = state.compactionID else { return event }
+        if event.type == "compaction/summary" || event.type == "compaction/end" {
+            var data = event.data
+            if data["compactionId"] == nil { data["compactionId"] = id }
+            if event.type == "compaction/end" { state.compactionID = nil }
+            return replacing(event, data: data)
+        }
+        guard event.type == "user/message",
+              var source = event.data["source"] as? [String: Any],
+              source["kind"] as? String == "plugin",
+              source["plugin"] as? String == "compact",
+              source["compactionId"] == nil else { return event }
+        source["compactionId"] = id
+        var data = event.data
+        data["source"] = source
+        return replacing(event, data: data)
+    }
+
+    private static func normalizeV0Message(
+        _ event: DeepSeekHarnessEnvelope,
+        sessionID: String,
+        messageIDs: [Int: String]
+    ) throws -> DeepSeekHarnessEnvelope {
+        switch event.type {
+        case "user/message":
+            guard event.data["id"] == nil, event.data["role"] == nil,
+                  event.data["message"] == nil,
+                  event.data["content"] != nil, event.data["source"] != nil else { return event }
+            var data = event.data
+            data["id"] = "legacy-message:\(sessionID):\(event.sequence)"
+            data["role"] = "user"
+            return replacing(event, data: data)
+        case "assistant/message":
+            guard event.data["message"] == nil,
+                  let content = event.data["content"],
+                  let provenance = event.data["provenance"] as? [String: Any] else { return event }
+            var data = event.data
+            data.removeValue(forKey: "content")
+            data.removeValue(forKey: "provenance")
+            var source = provenance
+            source["kind"] = "model"
+            data["message"] = [
+                "id": "legacy-message:\(sessionID):\(event.sequence)",
+                "role": "assistant", "content": content, "source": source
+            ]
+            return replacing(event, data: data)
+        case "tool/result":
+            guard event.data["message"] == nil,
+                  let callID = event.data["callId"] as? String,
+                  let content = event.data["content"],
+                  let isError = event.data["isError"] as? Bool else { return event }
+            let id: String
+            if let start = event.surfaceOp?.startValue {
+                guard let prior = messageIDs[start] else {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "tool/result replacement cites a message without identity")
+                }
+                id = prior
+            } else {
+                id = "legacy-message:\(sessionID):\(event.sequence)"
+            }
+            var data = event.data
+            data.removeValue(forKey: "callId")
+            data.removeValue(forKey: "content")
+            data.removeValue(forKey: "isError")
+            data["message"] = [
+                "id": id, "role": "user",
+                "content": [["type": "tool-result", "toolCallId": callID,
+                             "content": content, "isError": isError]],
+                "source": ["kind": "tool", "callId": callID]
+            ]
+            return replacing(event, data: data)
+        default: return event
+        }
+    }
+
+    // MARK: v1 -> v2
+
+    private struct Attempt {
+        let turn: Int
+        let step: Int
+        var sourceSequences: [Int] = []
+        var stream: [[String: Any]] = []
+        var buffered: [DeepSeekHarnessEnvelope] = []
+        var lastSequence: Int
+        var lastTime: Int64
+        var terminal = false
+    }
+
+    private struct V1State {
+        let header: DeepSeekHarnessHeader
+        let sourceCut: Int
+        var mapping: [Int: Int] = [:]
+        var output: [DeepSeekHarnessEnvelope] = []
+        var pending: Attempt?
+        var targetCut: Int?
+        var lastTime: Int64
+    }
+
+    private static func migrateV1ToV2(
+        _ rows: [DeepSeekHarnessPhysicalRow],
+        header: DeepSeekHarnessHeader,
+        inheritedEventCount: Int
+    ) throws -> [DeepSeekHarnessEnvelope] {
+        var state = V1State(
+            header: header,
+            sourceCut: inheritedEventCount,
+            targetCut: header.isSeeded ? nil : 0,
+            lastTime: header.createdAtMilliseconds
+        )
+        for row in rows {
+            switch row {
+            case .packed(let run): try appendPackedRun(run, state: &state)
+            case .event(let event): try consumeV1(event, state: &state)
+            }
+        }
+        try finishAttempt(state: &state)
+        if header.isSeeded && state.targetCut == nil {
+            state.targetCut = state.output.count
+            state.output.append(DeepSeekHarnessEnvelope(
+                type: "session/end-seed", sequence: state.output.count,
+                timeMilliseconds: state.lastTime, data: ["inherited": true]
+            ))
+        }
+        return state.output
+    }
+
+    private static func appendPackedRun(
+        _ run: DeepSeekHarnessPackedRun,
+        state: inout V1State
+    ) throws {
+        try prepareAttempt(turn: run.turn, step: run.step, firstSequence: run.firstSeq,
+                           lastSequence: run.lastSeq, state: &state)
+        guard var attempt = state.pending else { return }
+        attempt.stream.append(run.streamRecord)
+        attempt.sourceSequences.append(contentsOf: run.firstSeq...run.lastSeq)
+        attempt.lastSequence = run.lastSeq
+        attempt.lastTime = Int64(run.lastTime)
+        state.lastTime = Int64(run.lastTime)
+        state.pending = attempt
+    }
+
+    private static func consumeV1(
+        _ event: DeepSeekHarnessEnvelope,
+        state: inout V1State
+    ) throws {
+        state.lastTime = event.timeMilliseconds
+        guard DeepSeekHarnessVocabulary.v0Events.contains(event.type) else {
+            if event.ignorable { return }
+            throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
+        }
+        if event.type == "assistant/chunk" {
+            guard let turn = positiveCoordinate(event.data["turn"]),
+                  let step = positiveCoordinate(event.data["step"]),
+                  let chunk = event.data["chunk"] as? [String: Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "assistant/chunk \(event.sequence) is malformed")
+            }
+            try prepareAttempt(turn: turn, step: step, firstSequence: event.sequence,
+                               lastSequence: event.sequence, state: &state)
+            guard var attempt = state.pending else { return }
+            attempt.stream.append([
+                "type": "chunk", "time": event.timeMilliseconds, "chunk": chunk
+            ])
+            attempt.sourceSequences.append(event.sequence)
+            attempt.lastSequence = event.sequence
+            attempt.lastTime = event.timeMilliseconds
+            attempt.terminal = chunk["type"] as? String == "finish"
+            state.pending = attempt
+            return
+        }
+        if event.type == "assistant/message" {
+            try consumeV1Message(event, state: &state)
+            return
+        }
+        if event.type == "user/message",
+           let source = event.data["source"] as? [String: Any],
+           source["kind"] as? String == "goal",
+           let change = source["change"] as? [String: Any] {
+            try emitGenerated(
+                DeepSeekHarnessEnvelope(type: "goal/change", sequence: event.sequence,
+                                        timeMilliseconds: event.timeMilliseconds, data: change),
+                origin: event.sequence, state: &state
+            )
+            var messageData = event.data
+            messageData["source"] = ["kind": "plugin", "plugin": "goal"]
+            try emitSource(replacing(event, data: messageData), state: &state)
+            return
+        }
+        if closesAttempt(event.type) { try finishAttempt(state: &state) }
+        if var pending = state.pending {
+            pending.buffered.append(event)
+            state.pending = pending
+            return
+        }
+        try emitSource(event, state: &state)
+    }
+
+    private static func prepareAttempt(
+        turn: Int,
+        step: Int,
+        firstSequence: Int,
+        lastSequence: Int,
+        state: inout V1State
+    ) throws {
+        if let pending = state.pending,
+           pending.terminal || pending.turn != turn || pending.step != step {
+            try finishAttempt(state: &state)
+        } else if state.pending != nil {
+            try flushBuffered(state: &state)
+        }
+        if state.pending == nil {
+            state.pending = Attempt(turn: turn, step: step,
+                                    lastSequence: lastSequence, lastTime: state.lastTime)
+        }
+        if (firstSequence < state.sourceCut) != (lastSequence < state.sourceCut) {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "inherited cut \(state.sourceCut) splits one Assistant attempt")
+        }
+    }
+
+    private static func consumeV1Message(
+        _ event: DeepSeekHarnessEnvelope,
+        state: inout V1State
+    ) throws {
+        guard let turn = positiveCoordinate(event.data["turn"]),
+              let step = positiveCoordinate(event.data["step"]) else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "assistant/message \(event.sequence) lacks positive turn/step")
+        }
+        if let pending = state.pending,
+           pending.turn != turn || pending.step != step {
+            try finishAttempt(state: &state)
+        }
+        guard var pending = state.pending else {
+            if let cited = event.sourceEventSeqs, !cited.isEmpty {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "assistant/message \(event.sequence) cites chunks without one complete ordered attempt")
+            }
+            var data = event.data
+            data["stream"] = []
+            try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+            return
+        }
+        guard let cited = event.sourceEventSeqs else {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "assistant/message \(event.sequence) does not cite its complete v1 chunk attempt")
+        }
+        if cited.isEmpty {
+            try finishAttempt(state: &state)
+            var data = event.data
+            data["stream"] = []
+            try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+            return
+        }
+        guard cited == pending.sourceSequences else {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "assistant/message \(event.sequence) chunk references are not one complete ordered attempt")
+        }
+        if (pending.sourceSequences.first! < state.sourceCut) != (event.sequence < state.sourceCut) {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "inherited cut \(state.sourceCut) splits one Assistant attempt")
+        }
+        pending.terminal = true
+        state.pending = pending
+        try flushBuffered(state: &state)
+        var data = event.data
+        data["stream"] = pending.stream
+        try emitSource(replacing(event, data: data, dropSourceEventSeqs: true), state: &state)
+        state.pending = nil
+    }
+
+    private static func finishAttempt(state: inout V1State) throws {
+        guard let pending = state.pending else { return }
+        let attempt = DeepSeekHarnessEnvelope(
+            type: "assistant/attempt", sequence: pending.lastSequence,
+            timeMilliseconds: pending.lastTime,
+            data: ["turn": pending.turn, "step": pending.step, "stream": pending.stream]
+        )
+        try emitGenerated(attempt, origin: pending.lastSequence, state: &state)
+        try flushBuffered(state: &state)
+        state.pending = nil
+    }
+
+    private static func flushBuffered(state: inout V1State) throws {
+        guard var pending = state.pending else { return }
+        let buffered = pending.buffered
+        pending.buffered.removeAll(keepingCapacity: true)
+        state.pending = pending
+        for event in buffered { try emitSource(event, state: &state) }
+    }
+
+    private static func emitSource(
+        _ source: DeepSeekHarnessEnvelope,
+        state: inout V1State
+    ) throws {
+        var event = source
+        if state.header.isSeeded,
+           source.sequence == state.sourceCut,
+           source.type == "session/end-seed" {
+            var data = source.data
+            data["inherited"] = true
+            event = replacing(source, data: data)
+        }
+        try ensureTargetCut(origin: source.sequence, time: source.timeMilliseconds,
+                            type: source.type, state: &state)
+        state.mapping[source.sequence] = state.output.count
+        state.output.append(try remap(event, targetSequence: state.output.count,
+                                      mapping: state.mapping, surfaceVersion: 2))
+    }
+
+    private static func emitGenerated(
+        _ event: DeepSeekHarnessEnvelope,
+        origin: Int,
+        state: inout V1State
+    ) throws {
+        try ensureTargetCut(origin: origin, time: event.timeMilliseconds,
+                            type: event.type, state: &state)
+        state.output.append(try remap(event, targetSequence: state.output.count,
+                                      mapping: state.mapping, surfaceVersion: 2))
+    }
+
+    private static func ensureTargetCut(
+        origin: Int,
+        time: Int64,
+        type: String,
+        state: inout V1State
+    ) throws {
+        guard state.header.isSeeded, state.targetCut == nil, origin >= state.sourceCut else { return }
+        state.targetCut = state.output.count
+        if origin == state.sourceCut && type == "session/end-seed" { return }
+        state.output.append(DeepSeekHarnessEnvelope(
+            type: "session/end-seed", sequence: state.output.count,
+            timeMilliseconds: time, data: ["inherited": true]
+        ))
+    }
+
+    // MARK: v2 -> v3
+
+    private struct V2State {
+        let header: DeepSeekHarnessHeader
+        var mapping: [Int: Int] = [:]
+        var output: [DeepSeekHarnessEnvelope] = []
+        var sourceCut: Int?
+        var targetCut: Int?
+        var lastForeignDeliverySequence: Int?
+        var openStep: (turn: Int, step: Int)?
+        var systemHead: Int?
+        var prompt = ""
+        var originalMessageIDs: Set<String> = []
+        var generatedMessageIDs: Set<String> = []
+    }
+
+    private static func migrateV2ToV3(
+        _ events: [DeepSeekHarnessEnvelope],
+        header: DeepSeekHarnessHeader,
+        inheritedEventCount: Int
+    ) throws -> [DeepSeekHarnessEnvelope] {
+        var state = V2State(
+            header: header,
+            sourceCut: header.isSeeded ? nil : 0,
+            targetCut: header.isSeeded ? nil : 0
+        )
+        for event in events {
+            guard event.sequence == state.mapping.count else {
+                throw DeepSeekHarnessFormatError.sequence(
+                    expected: state.mapping.count, actual: event.sequence)
+            }
+            guard DeepSeekHarnessVocabulary.v0Events.contains(event.type) ||
+                    event.type == "assistant/attempt" ||
+                    event.type == "feedback/message-put" ||
+                    event.type == "feedback/message-delete" else {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "format v2 to v3 cannot safely transform unclassified event \(event.type)")
+            }
+            try observeMessageIDs(event, state: &state)
+            var source = event
+
+            if event.type == "request/header" {
+                guard var requestHeader = event.data["header"] as? [String: Any] else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "request/header \(event.sequence) header must be an object")
+                }
+                let prompt = requestHeader.removeValue(forKey: "system") as? String ?? ""
+                if prompt != state.prompt { try emitSystem(prompt: prompt, anchor: event, state: &state) }
+                if let tools = requestHeader["tools"] as? [Any], tools.isEmpty {
+                    requestHeader.removeValue(forKey: "tools")
+                }
+                if let defaults = requestHeader["adapterDefaults"] as? [String: Any], defaults.isEmpty {
+                    requestHeader.removeValue(forKey: "adapterDefaults")
+                }
+                var data = event.data
+                data["header"] = requestHeader
+                source = replacing(event, data: data)
+            }
+
+            if DeepSeekHarnessVocabulary.surfaceV0.contains(event.type), state.systemHead == nil {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "format v2 surface before first step cannot acquire a system head without changing chronology")
+            }
+            if event.type == "session/end-seed", event.data["inherited"] as? Bool == true {
+                guard header.isSeeded else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "unseeded format v2 session contains an inherited end-seed marker")
+                }
+                state.sourceCut = event.sequence
+                state.targetCut = state.output.count
+            }
+            if event.type == "session-log-deepseek/delivery-accepted" {
+                let accepted = DeepSeekHarnessJSON.safeInt(event.data["sessionFormatVersion"])
+                if accepted == 3 {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "format v2 delivery marker claims target format v3")
+                }
+                if accepted == 2, event.data["sessionId"] as? String != header.id {
+                    state.lastForeignDeliverySequence = event.sequence
+                }
+            }
+
+            source = renamePTC(source)
+            state.mapping[event.sequence] = state.output.count
+            state.output.append(try remap(source, targetSequence: state.output.count,
+                                          mapping: state.mapping, surfaceVersion: 3))
+
+            if event.type == "step/start" {
+                guard let turn = positiveCoordinate(event.data["turn"]),
+                      let step = positiveCoordinate(event.data["step"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "step/start \(event.sequence) lacks positive turn/step")
+                }
+                state.openStep = (turn, step)
+                if state.systemHead == nil { try emitSystem(prompt: "", anchor: event, state: &state) }
+            } else if event.type == "step/end" || event.type == "turn/end" {
+                state.openStep = nil
+            }
+        }
+
+        guard let sourceCut = state.sourceCut else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "seeded format v2 session lacks an inherited end-seed marker")
+        }
+        guard sourceCut == inheritedEventCount else {
+            throw DeepSeekHarnessFormatError.invalidReference(
+                "format v2 inherited marker disagrees with its source cut")
+        }
+        if let foreign = state.lastForeignDeliverySequence,
+           header.parentSessionID == nil || foreign >= sourceCut {
+            throw DeepSeekHarnessFormatError.invalidReference(
+                "current-generation delivery marker names the wrong session")
+        }
+        return state.output
+    }
+
+    private static func emitSystem(
+        prompt: String,
+        anchor: DeepSeekHarnessEnvelope,
+        state: inout V2State
+    ) throws {
+        guard let step = state.openStep else {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "format v2 changed request prompt outside an open step")
+        }
+        let identity = DeepSeekHarnessJSON.canonicalString([
+            "session-format-v2-to-v3", state.header.id, anchor.sequence, anchor.type
+        ]) ?? ""
+        let id = "v2-to-v3-system-" + DeepSeekHarnessJSON.sha256Hex(identity)
+        guard !state.originalMessageIDs.contains(id), !state.generatedMessageIDs.contains(id) else {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "generated system message id collides with an existing message id")
+        }
+        state.generatedMessageIDs.insert(id)
+        let sequence = state.output.count
+        let operation: DeepSeekHarnessSurfaceOp
+        var sources: [Int]?
+        if let head = state.systemHead {
+            operation = .replaceV3(startSeq: head, endSeq: head)
+            sources = [head]
+        } else {
+            operation = .append
+        }
+        state.output.append(DeepSeekHarnessEnvelope(
+            type: "system/message", sequence: sequence,
+            timeMilliseconds: anchor.timeMilliseconds,
+            data: [
+                "turn": step.turn, "step": step.step,
+                "message": [
+                    "id": id, "role": "system",
+                    "source": ["kind": "plugin", "plugin": "@deepseek-ai/dsh-system-prompt"],
+                    "content": prompt.isEmpty ? [] : [["type": "text", "text": prompt]]
+                ]
+            ],
+            sourceEventSeqs: sources,
+            surfaceOp: operation
+        ))
+        state.systemHead = sequence
+        state.prompt = prompt
+    }
+
+    private static func observeMessageIDs(
+        _ event: DeepSeekHarnessEnvelope,
+        state: inout V2State
+    ) throws {
+        var messages: [[String: Any]] = []
+        if event.type == "user/message" {
+            messages = [event.data]
+        } else if event.type == "assistant/message" || event.type == "tool/result" {
+            if let message = event.data["message"] as? [String: Any] { messages = [message] }
+        } else if event.type == "agent/inbox/spliced" {
+            messages = event.data["inserted"] as? [[String: Any]] ?? []
+        } else if event.type == "session/title-llm-request" {
+            messages = event.data["messages"] as? [[String: Any]] ?? []
+        }
+        for message in messages {
+            guard let id = message["id"] as? String, !id.isEmpty else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(event.type) \(event.sequence) contains a message without identity")
+            }
+            if state.generatedMessageIDs.contains(id) {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "source message id collides with a generated system message id")
+            }
+            state.originalMessageIDs.insert(id)
+        }
+    }
+
+    private static func renamePTC(_ event: DeepSeekHarnessEnvelope) -> DeepSeekHarnessEnvelope {
+        switch event.type {
+        case "agent-preset/selected":
+            guard event.data["agentPreset"] as? String == "code" else { return event }
+            var data = event.data
+            data["agentPreset"] = "ptc"
+            return replacing(event, data: data)
+        case "tool/code-dispatch-start": return replacing(event, type: "tool/ptc-dispatch-start")
+        case "tool/code-dispatch": return replacing(event, type: "tool/ptc-dispatch")
+        case "user/message": return replacing(event, data: renameMessageSource(event.data))
+        case "agent/inbox/spliced", "session/title-llm-request":
+            let key = event.type == "agent/inbox/spliced" ? "inserted" : "messages"
+            guard let messages = event.data[key] as? [[String: Any]] else { return event }
+            var data = event.data
+            data[key] = messages.map(renameMessageSource)
+            return replacing(event, data: data)
+        default: return event
+        }
+    }
+
+    private static func renameMessageSource(_ message: [String: Any]) -> [String: Any] {
+        guard var source = message["source"] as? [String: Any],
+              source["kind"] as? String == "plugin",
+              source["plugin"] as? String == "tools-code-mode" else { return message }
+        source["plugin"] = "tools-ptc"
+        var result = message
+        result["source"] = source
+        return result
+    }
+
+    // MARK: Shared reference remapping and v3 validation
+
+    private static func remap(
+        _ source: DeepSeekHarnessEnvelope,
+        targetSequence: Int,
+        mapping: [Int: Int],
+        surfaceVersion: Int
+    ) throws -> DeepSeekHarnessEnvelope {
+        func one(_ value: Int, _ label: String) throws -> Int {
+            guard value < source.sequence, let target = mapping[value] else {
+                throw DeepSeekHarnessFormatError.invalidReference(
+                    "\(label) targets consumed or non-earlier event \(value)")
+            }
+            return target
+        }
+
+        var sources: [Int]?
+        if let values = source.sourceEventSeqs {
+            sources = try values.map {
+                try one($0, "\(source.type) \(source.sequence) sourceEventSeqs")
+            }
+        }
+        var operation = source.surfaceOp
+        if let start = operation?.startValue, let end = operation?.endValue {
+            let mappedStart = try one(start, "\(source.type) \(source.sequence) surface start")
+            let mappedEnd = try one(end, "\(source.type) \(source.sequence) surface end")
+            operation = surfaceVersion == 3
+                ? .replaceV3(startSeq: mappedStart, endSeq: mappedEnd)
+                : .replace(start: mappedStart, end: mappedEnd)
+        }
+
+        var data = source.data
+        if source.type == "command/done", let value = DeepSeekHarnessJSON.count(data["sourceEventSeq"]) {
+            data["sourceEventSeq"] = try one(value, "command/done sourceEventSeq")
+        }
+        if source.type == "compaction/prune" || source.type == "compaction/summary" {
+            guard let range = data["shadowedRange"] as? [String: Any],
+                  let start = DeepSeekHarnessJSON.count(range["start"]),
+                  let end = DeepSeekHarnessJSON.count(range["end"]),
+                  let seqs = data["shadowedSeqs"] as? [Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(source.type) \(source.sequence) has malformed shadow references")
+            }
+            data["shadowedRange"] = [
+                "start": try one(start, "\(source.type) shadowedRange start"),
+                "end": try one(end, "\(source.type) shadowedRange end")
+            ]
+            data["shadowedSeqs"] = try seqs.map { value in
+                guard let seq = DeepSeekHarnessJSON.count(value) else {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "\(source.type) shadowedSeqs contains a non-sequence")
+                }
+                return try one(seq, "\(source.type) shadowedSeqs")
+            }
+        }
+        if source.type == "session/title" || source.type == "session/title-llm-request" {
+            guard let seqs = data["messageSeqs"] as? [Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(source.type) \(source.sequence) messageSeqs must be an array")
+            }
+            data["messageSeqs"] = try seqs.map { value in
+                guard let seq = DeepSeekHarnessJSON.count(value) else {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "\(source.type) messageSeqs contains a non-sequence")
+                }
+                return try one(seq, "\(source.type) messageSeqs")
+            }
+        }
+        return DeepSeekHarnessEnvelope(
+            type: source.type, sequence: targetSequence,
+            timeMilliseconds: source.timeMilliseconds, data: data,
+            ignorable: source.ignorable, sourceEventSeqs: sources, surfaceOp: operation
+        )
+    }
+
+    private static func validateV3(
+        _ events: [DeepSeekHarnessEnvelope],
+        header: DeepSeekHarnessHeader
+    ) throws {
+        var openStep: (turn: Int, step: Int)?
+        var systemHead: Int?
+        var hasSurface = false
+        for (index, event) in events.enumerated() {
+            guard event.sequence == index else {
+                throw DeepSeekHarnessFormatError.sequence(expected: index, actual: event.sequence)
+            }
+            if !DeepSeekHarnessVocabulary.v3Known.contains(event.type) {
+                if event.ignorable { continue }
+                throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
+            }
+            if (event.type == "tool/code-dispatch" || event.type == "tool/code-dispatch-start"),
+               !event.ignorable {
+                throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
+            }
+            try validateEarlierReferences(event)
+            if event.type == "request/header",
+               let requestHeader = event.data["header"] as? [String: Any],
+               requestHeader.keys.contains("system") {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "format v3 request/header rejects retired header.system")
+            }
+            if event.type == "step/start" {
+                guard let turn = positiveCoordinate(event.data["turn"]),
+                      let step = positiveCoordinate(event.data["step"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "step/start \(event.sequence) lacks positive turn/step")
+                }
+                openStep = (turn, step)
+            } else if event.type == "step/end" || event.type == "turn/end" {
+                openStep = nil
+            }
+
+            if event.type == "system/message" {
+                guard let step = openStep,
+                      DeepSeekHarnessJSON.safeInt(event.data["turn"]) == step.turn,
+                      DeepSeekHarnessJSON.safeInt(event.data["step"]) == step.step else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "system/message \(event.sequence) does not match an open step")
+                }
+                if hasSurface && systemHead == nil {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "system/message requires a protected first surface head")
+                }
+                switch event.surfaceOp {
+                case .append:
+                    if !hasSurface { systemHead = event.sequence }
+                case .replaceV3(let start, let end):
+                    if start == systemHead || end == systemHead {
+                        guard start == systemHead, end == systemHead else {
+                            throw DeepSeekHarnessFormatError.invalidReference(
+                                "system/message must replace exactly the current system head")
+                        }
+                        systemHead = event.sequence
+                    }
+                default:
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "system/message requires canonical v3 surface metadata")
+                }
+            } else if DeepSeekHarnessVocabulary.surfaceV3.contains(event.type) {
+                guard let operation = event.surfaceOp else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(event.type) \(event.sequence) requires surfaceOp")
+                }
+                if !operation.isAppend,
+                   operation.startValue == systemHead || operation.endValue == systemHead {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "surface replacement cannot shadow the protected system head")
+                }
+                if event.type == "assistant/message", event.sourceEventSeqs != nil {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "assistant/message embeds its stream and cannot carry sourceEventSeqs")
+                }
+            }
+            if event.type == "compaction/prune" || event.type == "compaction/summary",
+               let head = systemHead,
+               let seqs = event.data["shadowedSeqs"] as? [Int], seqs.contains(head) {
+                throw DeepSeekHarnessFormatError.invalidReference(
+                    "compaction cannot shadow the protected system head")
+            }
+            if DeepSeekHarnessVocabulary.surfaceV3.contains(event.type) { hasSurface = true }
+        }
+        if header.origin == "subagent", header.parentSessionID == nil {
+            throw DeepSeekHarnessFormatError.invalidHeader
+        }
+    }
+
+    private static func validateEarlierReferences(_ event: DeepSeekHarnessEnvelope) throws {
+        if let sources = event.sourceEventSeqs {
+            guard !sources.isEmpty, Set(sources).count == sources.count,
+                  sources.allSatisfy({ $0 >= 0 && $0 < event.sequence }) else {
+                throw DeepSeekHarnessFormatError.invalidReference(
+                    "\(event.type) \(event.sequence) sourceEventSeqs must be unique earlier events")
+            }
+        }
+        if let start = event.surfaceOp?.startValue, let end = event.surfaceOp?.endValue {
+            guard start <= end, start >= 0, end < event.sequence else {
+                throw DeepSeekHarnessFormatError.invalidReference(
+                    "\(event.type) \(event.sequence) replacement endpoints must be earlier events")
+            }
+        }
+    }
+
+    // MARK: Small value helpers
+
+    private static func replacing(
+        _ event: DeepSeekHarnessEnvelope,
+        type: String? = nil,
+        data: [String: Any]? = nil,
+        dropSourceEventSeqs: Bool = false
+    ) -> DeepSeekHarnessEnvelope {
+        DeepSeekHarnessEnvelope(
+            type: type ?? event.type, sequence: event.sequence,
+            timeMilliseconds: event.timeMilliseconds, data: data ?? event.data,
+            ignorable: event.ignorable,
+            sourceEventSeqs: dropSourceEventSeqs ? nil : event.sourceEventSeqs,
+            surfaceOp: event.surfaceOp
+        )
+    }
+
+    private static func positiveCoordinate(_ value: Any?) -> Int? {
+        guard let value = DeepSeekHarnessJSON.count(value), value > 0 else { return nil }
+        return value
+    }
+
+    private static func closesAttempt(_ type: String) -> Bool {
+        type == "turn/end" || type == "step/end" ||
+            type == "llm/retry" || type == "llm/retry-started"
+    }
+
+    private static func messageID(in event: DeepSeekHarnessEnvelope) -> String? {
+        if event.type == "user/message" { return event.data["id"] as? String }
+        return (event.data["message"] as? [String: Any])?["id"] as? String
+    }
+
+    private static func malformedLegacy(
+        _ sessionID: String,
+        _ event: DeepSeekHarnessEnvelope
+    ) -> DeepSeekHarnessFormatError {
+        .invalidPayload(
+            "session \(sessionID) contains malformed legacy \(event.type) at seq \(event.sequence)")
+    }
+}

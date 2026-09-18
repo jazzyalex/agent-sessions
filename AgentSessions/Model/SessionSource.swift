@@ -18,6 +18,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case devin = "devin"
     case fx = "fx"
     case cline = "cline"
+    case deepseekHarness = "deepseek-harness"
 
     public var displayName: String {
         switch self {
@@ -37,6 +38,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin: return "Devin CLI"
         case .fx: return "fx"
         case .cline: return "Cline"
+        case .deepseekHarness: return "DeepSeek Harness"
         }
     }
 
@@ -58,6 +60,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin: return "cpu"
         case .fx: return "f.circle"
         case .cline: return "c.circle"
+        case .deepseekHarness: return "d.circle"
         }
     }
 
@@ -78,6 +81,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin:            return "5.1"
         case .fx:               return "5.1"
         case .cline:            return "5.4"
+        case .deepseekHarness:  return "5.5"
         }
     }
 
@@ -99,6 +103,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin:    return "Browse your Devin CLI sessions"
         case .fx:       return "Browse your fx coding agent sessions"
         case .cline:    return "Browse your Cline CLI and Desktop sessions"
+        case .deepseekHarness: return "Browse your DeepSeek Harness sessions"
         }
     }
 }

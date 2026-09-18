@@ -507,6 +507,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeCline: Bool = UnifiedSessionIndexer.storedInclude(.cline) {
         didSet { applyInclude(.cline, includeCline) }
     }
+    @Published var includeDeepSeekHarness: Bool = UnifiedSessionIndexer.storedInclude(.deepseekHarness) {
+        didSet { applyInclude(.deepseekHarness, includeDeepSeekHarness) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -531,6 +534,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @Published private(set) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
     @Published private(set) var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
+    @Published private(set) var deepSeekHarnessAgentEnabled: Bool = AgentEnablement.isEnabled(.deepseekHarness)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -1029,6 +1033,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.devin) != devinAgentEnabled { devinAgentEnabled = value(.devin) }
         if value(.fx) != fxAgentEnabled { fxAgentEnabled = value(.fx) }
         if value(.cline) != clineAgentEnabled { clineAgentEnabled = value(.cline) }
+        if value(.deepseekHarness) != deepSeekHarnessAgentEnabled {
+            deepSeekHarnessAgentEnabled = value(.deepseekHarness)
+        }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -2364,7 +2371,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// `lightweightCommands` (fx only sets it on a full parse).
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .cline:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .cline, .deepseekHarness:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.

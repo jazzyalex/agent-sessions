@@ -252,7 +252,7 @@ enum SessionInlineImageMapper {
                 return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: shouldCancel)
             case .antigravity:
                 return AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionFileURL, shouldCancel: shouldCancel)
-            case .droid, .qwen, .devin, .fx, .cline:
+            case .droid, .qwen, .devin, .fx, .cline, .deepseekHarness:
                 // fx references images as files under the session directory
                 // (user.images[].snapshot_path resolves to images/<basename>),
                 // so there is no inline payload for the generic scanner to
@@ -316,7 +316,7 @@ enum SessionInlineImageMapper {
                         .scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                         .map { InlineScanResult(payload: .file(fileURL: $0.fileURL, mediaType: $0.mediaType, fileSizeBytes: $0.fileSizeBytes),
                                                 lineIndex: $0.lineIndex) }
-                case .droid, .qwen, .devin, .fx, .cline:
+                case .droid, .qwen, .devin, .fx, .cline, .deepseekHarness:
                     return []
                 }
             } catch {
@@ -333,7 +333,7 @@ enum SessionInlineImageMapper {
                 }
             case .claude, .opencode, .copilot, .openclaw, .antigravity, .grok:
                 return located
-            case .droid, .qwen, .devin, .fx, .cline:
+            case .droid, .qwen, .devin, .fx, .cline, .deepseekHarness:
                 return []
             }
         }()

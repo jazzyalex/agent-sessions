@@ -1,0 +1,247 @@
+import Foundation
+import CryptoKit
+
+/// Bounded filesystem discovery for the DSH session persistence layout.
+final class DeepSeekHarnessDiscovery: SessionDiscovery {
+    private let customRoot: String?
+    private let homeDirectory: URL
+    private let environment: [String: String]
+    private let fileManager: FileManager
+
+    init(customRoot: String? = nil,
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+         environment: [String: String] = ProcessInfo.processInfo.environment,
+         fileManager: FileManager = .default) {
+        self.customRoot = Self.normalized(customRoot)
+        self.homeDirectory = homeDirectory
+        self.environment = environment
+        self.fileManager = fileManager
+    }
+
+    func sessionsRoot() -> URL {
+        if let customRoot {
+            let expanded = Self.expand(customRoot, homeDirectory: homeDirectory)
+            // The preference names a sessions root, matching the other file-backed sources.
+            return URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL
+        }
+        return DeepSeekHarnessSettings.sessionsRoot(homeDirectory: homeDirectory, environment: environment)
+    }
+
+    func discoverSessionFiles() -> [URL] {
+        discover().candidates.map(\.selectedURL)
+    }
+
+    func discover() -> DeepSeekHarnessDiscoveryResult {
+        let root = sessionsRoot()
+        guard isDirectory(root), !isSymlink(root) else {
+            return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+        }
+
+        var issues: [DeepSeekHarnessFormatError] = []
+        var artifacts: [(url: URL, project: URL, session: URL, generation: Int, compression: DeepSeekHarnessCompression)] = []
+        var encodings = Set<DeepSeekHarnessCompression>()
+
+        for projectDirectory in directChildren(of: root) where isDirectory(projectDirectory) && !isSymlink(projectDirectory) {
+            for child in directChildren(of: projectDirectory) {
+                if isRegularFile(child), let parsed = Self.parseGenerationFilename(child.lastPathComponent) {
+                    issues.append(.legacyLayout(child))
+                    encodings.insert(parsed.compression)
+                    continue
+                }
+                guard isDirectory(child), !isSymlink(child) else { continue }
+                for artifact in directChildren(of: child) where isRegularFile(artifact) {
+                    guard let parsed = Self.parseGenerationFilename(artifact.lastPathComponent) else { continue }
+                    artifacts.append((artifact, projectDirectory, child, parsed.generation, parsed.compression))
+                    encodings.insert(parsed.compression)
+                }
+            }
+        }
+
+        guard encodings.count <= 1 else {
+            issues.append(.encodingMismatch)
+            return DeepSeekHarnessDiscoveryResult(candidates: [], issues: issues, encoding: nil)
+        }
+        let encoding = encodings.first
+        var grouped: [URL: [(url: URL, project: URL, session: URL, generation: Int, compression: DeepSeekHarnessCompression)]] = [:]
+        for artifact in artifacts {
+            grouped[artifact.session, default: []].append(artifact)
+        }
+
+        var candidates: [DeepSeekHarnessSessionCandidate] = []
+        for (sessionDirectory, members) in grouped {
+            let sorted = members.sorted { lhs, rhs in
+                if lhs.generation != rhs.generation { return lhs.generation > rhs.generation }
+                return lhs.url.path < rhs.url.path
+            }
+            guard let selected = sorted.first else { continue }
+            if sorted.dropFirst().contains(where: { $0.generation == selected.generation }) {
+                issues.append(.ambiguousSession(sessionDirectory.lastPathComponent))
+                continue
+            }
+            do {
+                let header = try DeepSeekHarnessArtifactReader.readHeader(url: selected.url, compression: selected.compression)
+                guard (0...3).contains(header.version) else {
+                    throw DeepSeekHarnessFormatError.unsupportedVersion(header.version)
+                }
+                guard header.version == selected.generation else {
+                    throw DeepSeekHarnessFormatError.canonicalPathMismatch
+                }
+                let canonical = Self.canonicalGenerationURL(root: root,
+                                                              cwd: header.cwd,
+                                                              id: header.id,
+                                                              version: header.version,
+                                                              compression: selected.compression)
+                guard canonical.standardizedFileURL == selected.url.standardizedFileURL else {
+                    throw DeepSeekHarnessFormatError.canonicalPathMismatch
+                }
+                let siblingURLs = sorted
+                    .filter { $0.compression == selected.compression }
+                    .map(\.url)
+                    .sorted { $0.lastPathComponent < $1.lastPathComponent }
+                let revision = try Self.manifestRevision(siblings: siblingURLs)
+                candidates.append(DeepSeekHarnessSessionCandidate(
+                    id: header.id,
+                    projectDirectory: selected.project,
+                    sessionDirectory: selected.session,
+                    selectedURL: selected.url,
+                    generation: selected.generation,
+                    compression: selected.compression,
+                    header: header,
+                    manifestRevision: revision,
+                    siblings: siblingURLs
+                ))
+            } catch let error as DeepSeekHarnessFormatError {
+                issues.append(error)
+            } catch {
+                issues.append(.invalidHeader)
+            }
+        }
+
+        var byID: [String: [DeepSeekHarnessSessionCandidate]] = [:]
+        for candidate in candidates { byID[candidate.id, default: []].append(candidate) }
+        candidates = byID.values.flatMap { group -> [DeepSeekHarnessSessionCandidate] in
+            guard group.count == 1, let only = group.first else {
+                if let id = group.first?.id { issues.append(.ambiguousSession(id)) }
+                return []
+            }
+            return [only]
+        }
+        candidates.sort { $0.id < $1.id }
+        return DeepSeekHarnessDiscoveryResult(candidates: candidates, issues: issues, encoding: encoding)
+    }
+
+    static func parseGenerationFilename(_ filename: String) -> (generation: Int, compression: DeepSeekHarnessCompression)? {
+        let compression: DeepSeekHarnessCompression
+        let raw: String
+        if filename.hasSuffix(".jsonl.zstd") {
+            compression = .zstd
+            raw = String(filename.dropLast(".zstd".count))
+        } else if filename.hasSuffix(".jsonl") {
+            compression = .plain
+            raw = filename
+        } else {
+            return nil
+        }
+        if raw == "session.jsonl" { return (0, compression) }
+        guard raw.hasPrefix("session.v"), raw.hasSuffix(".jsonl") else { return nil }
+        let digits = raw.dropFirst("session.v".count).dropLast(".jsonl".count)
+        guard !digits.isEmpty, digits.first != "0", digits.allSatisfy({ $0 >= "0" && $0 <= "9" }),
+              let generation = Int(digits), generation > 0 else { return nil }
+        return (generation, compression)
+    }
+
+    static func encodeSegment(_ raw: String) -> String {
+        precondition(!raw.isEmpty, "DSH path segments must not be empty")
+        if raw == "." { return "~002E" }
+        if raw == ".." { return "~002E~002E" }
+        var output = ""
+        for unit in raw.utf16 {
+            if !isSafeASCII(unit) {
+                output += "~" + String(format: "%04X", unit)
+            } else {
+                output.append(Character(UnicodeScalar(unit)!))
+            }
+        }
+        return output
+    }
+
+    static func projectKey(_ cwd: String) -> String {
+        precondition(!cwd.isEmpty)
+        var readable = ""
+        var separatorRun = false
+        for unit in cwd.utf16 {
+            if unit == 0x2F || unit == 0x5C || unit == 0x3A {
+                if !separatorRun { readable.append("-") }
+                separatorRun = true
+            } else if !isSafeASCII(unit) {
+                readable += "~" + String(format: "%04X", unit)
+                separatorRun = false
+            } else {
+                readable.append(Character(UnicodeScalar(unit)!))
+                separatorRun = false
+            }
+        }
+        let slug = readable.drop(while: { $0 == "-" })
+        return "--\(slug.isEmpty ? "root" : String(slug.prefix(251)))--"
+    }
+
+    static func canonicalGenerationURL(root: URL,
+                                       cwd: String?,
+                                       id: String,
+                                       version: Int,
+                                       compression: DeepSeekHarnessCompression) -> URL {
+        let project = cwd.map(projectKey) ?? "_no-cwd"
+        let session = encodeSegment(id)
+        let basename = version == 0 ? "session.jsonl" : "session.v\(version).jsonl"
+        return root.appendingPathComponent(project, isDirectory: true)
+            .appendingPathComponent(session, isDirectory: true)
+            .appendingPathComponent(basename + (compression == .zstd ? ".zstd" : ""), isDirectory: false)
+    }
+
+    private func directChildren(of directory: URL) -> [URL] {
+        (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [])) ?? []
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    private func isSymlink(_ url: URL) -> Bool {
+        guard let type = try? fileManager.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType else { return false }
+        return type == .typeSymbolicLink
+    }
+
+    private func isRegularFile(_ url: URL) -> Bool {
+        guard let type = try? fileManager.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType else { return false }
+        return type == .typeRegular
+    }
+
+    private static func manifestRevision(siblings: [URL]) throws -> String {
+        let rows = try siblings.map { url -> String in
+            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let mtime = Int64((values.contentModificationDate ?? .distantPast).timeIntervalSince1970)
+            let size = values.fileSize ?? 0
+            return "\(url.lastPathComponent)\u{0}\(mtime)\u{0}\(size)"
+        }.joined(separator: "\n")
+        return SHA256.hash(data: Data(rows.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func isSafeASCII(_ unit: UInt16) -> Bool {
+        unit == 0x2D || unit == 0x2E || unit == 0x5F ||
+            (unit >= 0x30 && unit <= 0x39) ||
+            (unit >= 0x41 && unit <= 0x5A) ||
+            (unit >= 0x61 && unit <= 0x7A)
+    }
+
+    private static func expand(_ path: String, homeDirectory: URL) -> String {
+        if path == "~" { return homeDirectory.path }
+        if path.hasPrefix("~/") { return homeDirectory.appendingPathComponent(String(path.dropFirst(2))).path }
+        return path
+    }
+}

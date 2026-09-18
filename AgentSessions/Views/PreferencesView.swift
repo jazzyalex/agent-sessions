@@ -75,6 +75,7 @@ struct PreferencesView: View {
     @AppStorage(DevinPreferencesKey.cliAvailable) var devinCLIAvailable: Bool = true
     @AppStorage(FxPreferencesKey.cliAvailable) var fxCLIAvailable: Bool = true
     @AppStorage(ClinePreferencesKey.cliAvailable) var clineCLIAvailable: Bool = true
+    @AppStorage(DeepSeekHarnessSettings.Keys.cliAvailable) var deepSeekHarnessCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
@@ -92,6 +93,7 @@ struct PreferencesView: View {
     @AppStorage(DevinPreferencesKey.enabled) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @AppStorage(FxPreferencesKey.enabled) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
     @AppStorage(ClinePreferencesKey.enabled) var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
+    @AppStorage(DeepSeekHarnessSettings.Keys.enabled) var deepSeekHarnessAgentEnabled: Bool = AgentEnablement.isEnabled(.deepseekHarness)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -327,6 +329,7 @@ struct PreferencesView: View {
     @State var devinSessionsPathValid: Bool = true
     @State var devinSessionsPathDebounce: DispatchWorkItem? = nil
     @State var clineSessionsPath: String = UserDefaults.standard.string(forKey: ClinePreferencesKey.sessionsRootOverride) ?? ""
+    @State var deepSeekHarnessSessionsPath: String = UserDefaults.standard.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? ""
     @State var clineSessionsPathValid: Bool = true
     @State var clineSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
@@ -487,6 +490,10 @@ struct PreferencesView: View {
                 fxTab
             case .cline:
                 clineTab
+            case .deepseekHarness:
+                // DSH's source controls are not part of this bounded core slice;
+                // keep the tab selectable until its dedicated pane is integrated.
+                generalTab
             case .about:
                 aboutTab
             }
@@ -993,6 +1000,7 @@ struct PreferencesView: View {
         case .devin: scheduleDevinProbe()
         case .fx: scheduleFxProbe()
         case .cline: scheduleClineProbe()
+        case .deepseekHarness: break
         }
     }
 
@@ -1030,6 +1038,8 @@ struct PreferencesView: View {
             return fxResolvedPath
         case .cline:
             return clineResolvedPath
+        case .deepseekHarness:
+            return nil
         }
     }
 
@@ -1083,6 +1093,8 @@ struct PreferencesView: View {
         case .cline:
             let value = clineSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .deepseekHarness:
+            return nil
         }
     }
 
@@ -1223,6 +1235,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case devin
     case fx
     case cline
+    case deepseekHarness
     case about
 
     var id: String { rawValue }
@@ -1253,6 +1266,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .devin: return "Devin CLI"
         case .fx: return "fx"
         case .cline: return "Cline"
+        case .deepseekHarness: return "DeepSeek Harness"
         case .about: return "About"
         }
     }
@@ -1283,6 +1297,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .devin: return "cpu"
         case .fx: return "f.circle"
         case .cline: return "c.circle"
+        case .deepseekHarness: return "d.circle"
         case .about: return "info.circle"
         }
     }
@@ -1317,6 +1332,7 @@ extension PreferencesTab {
         case .devin:       self = .devin
         case .fx:          self = .fx
         case .cline:       self = .cline
+        case .deepseekHarness: self = .deepseekHarness
         }
     }
 
@@ -1344,6 +1360,7 @@ extension PreferencesTab {
         case .devin:           return .devin
         case .fx:              return .fx
         case .cline:           return .cline
+        case .deepseekHarness: return .deepseekHarness
         }
     }
 
@@ -1359,7 +1376,7 @@ extension PreferencesTab {
     /// that forgets its row fails there instead of vanishing from Settings.
     static let sidebarAgentSources: [SessionSource] = [
         .codex, .claude, .opencode, .antigravity, .copilot,
-        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw, .fx, .cline
+        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw, .fx, .cline, .deepseekHarness
     ]
 
     static var sidebarAgentTabs: [PreferencesTab] {
@@ -1852,6 +1869,8 @@ extension PreferencesView {
             if fxVersionString == nil && fxProbeState != .probing { probeFx() }
         case .cline:
             if clineVersionString == nil && clineProbeState != .probing { probeCline() }
+        case .deepseekHarness:
+            break
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
