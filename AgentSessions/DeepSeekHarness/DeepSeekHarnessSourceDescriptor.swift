@@ -45,13 +45,9 @@ extension SessionSourceDescriptor {
             artifactRevision: { DeepSeekHarnessDiscovery.resolveArtifactRevision(forSelectedURL: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
-                    var map: [String: URL] = [:]
                     let custom = defaults.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride)
                     let discovery = DeepSeekHarnessDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-                    for candidate in discovery.discover().candidates {
-                        map[candidate.id] = candidate.selectedURL
-                    }
-                    return map
+                    return DeepSeekHarnessArchiveBackfill.authoritativeURLs(from: discovery.discover())
                 },
                 sessionForBackfill: { sessionID, upstreamURL in
                     // Restore points at the archived primary (the selected
@@ -75,6 +71,15 @@ extension SessionSourceDescriptor {
             )
         )
     }()
+}
+
+enum DeepSeekHarnessArchiveBackfill {
+    static func authoritativeURLs(from result: DeepSeekHarnessDiscoveryResult) -> [String: URL] {
+        // A partial scan can select v2 only because v3 failed stat/read. It may
+        // preserve UI rows, but cannot choose the primary for a Saved snapshot.
+        guard result.issues.isEmpty else { return [:] }
+        return Dictionary(uniqueKeysWithValues: result.candidates.map { ($0.id, $0.selectedURL) })
+    }
 }
 
 // MARK: - DSH archive filter

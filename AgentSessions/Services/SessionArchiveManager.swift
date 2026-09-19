@@ -239,6 +239,10 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         ensureArchiveExistsAndSync(session: session, reason: "test")
     }
 
+    func syncPinnedSessionsForTesting() {
+        syncPinnedSessions(reason: "test")
+    }
+
     func archiveInfoForTesting(source: SessionSource, id: String) -> SessionArchiveInfo? {
         loadInfoIfExists(source: source, id: id)
     }
@@ -422,11 +426,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                         }
                         if let url = fallbackURLs?[id],
                            let session = DeepSeekHarnessSessionParser.parseFile(at: url),
-                           session.id == id {
+                           session.id == id,
+                           Self.dshGeneration(of: session.filePath) >= Self.dshGeneration(
+                            of: info.primaryRelativePath
+                           ) {
                             ensureArchiveExistsAndSync(session: session, reason: reason)
-                        } else {
-                            // An unreadable or absent upstream is not authority
-                            // to replace the healthy Saved copy.
+                        } else if !FileManager.default.fileExists(atPath: info.upstreamPath) {
+                            // A removed upstream can be marked missing. An
+                            // existing but unreadable/partial directory is not
+                            // authority to resnapshot or downgrade a healthy copy.
                             ensureArchiveExistsAndSync(info: &info, reason: reason)
                         }
                     } else {
@@ -476,6 +484,11 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     /// as an unhandled source would have.
     private func resolveBackfillURLsFromFilesystem(source: SessionSource) -> [String: URL] {
         SessionSourceRegistry.descriptor(for: source).archive?.backfillURLs(.standard) ?? [:]
+    }
+
+    private static func dshGeneration(of path: String) -> Int {
+        DeepSeekHarnessDiscovery.parseGenerationFilename(URL(fileURLWithPath: path).lastPathComponent)?
+            .generation ?? Int.max
     }
 
     /// Best-effort session for a `(sessionID, upstreamURL)` pair the filesystem sweep found.

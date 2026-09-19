@@ -303,18 +303,22 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         let archivedV3 = appSupport.appendingPathComponent(
             "AgentSessions/Archives/deepseek-harness/\(id)/data/session.v3.jsonl"
         )
-        manager.syncPinnedSessionsNow()
-        waitUntil("periodic Saved sync should advance DSH primary") {
-            manager.archiveInfoForTesting(source: .deepseekHarness, id: id)?.primaryRelativePath
-                == "session.v3.jsonl"
-                && DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id == id
-        }
+        manager.syncPinnedSessionsForTesting()
         let advanced = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
 
         XCTAssertEqual(advanced.pinnedAt, first.pinnedAt)
         XCTAssertEqual(URL(fileURLWithPath: advanced.upstreamPath).lastPathComponent,
                        v3.deletingLastPathComponent().lastPathComponent)
         XCTAssertEqual(advanced.primaryRelativePath, "session.v3.jsonl")
+        XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
+
+        // A later clean scan sees only v2 after v3 disappears. Saved is
+        // monotonic: it must retain the already copied v3, never resnapshot
+        // the older generation over it.
+        try fileManager.removeItem(at: v3)
+        manager.syncPinnedSessionsForTesting()
+        XCTAssertEqual(manager.archiveInfoForTesting(source: .deepseekHarness, id: id)?.primaryRelativePath,
+                       "session.v3.jsonl")
         XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
     }
 

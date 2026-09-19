@@ -104,6 +104,26 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         XCTAssertEqual(URL(fileURLWithPath: failedPath).lastPathComponent, project.lastPathComponent)
     }
 
+    func testPartialDiscoveryCannotChooseOlderSavedPrimary() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-partial-archive"
+        _ = try writeGeneration(root: root, cwd: cwd, id: "partial", version: 2)
+        let v3 = try writeGeneration(root: root, cwd: cwd, id: "partial", version: 3)
+        let discovery = DeepSeekHarnessDiscovery(
+            customRoot: root.path,
+            itemAttributes: { path in
+                if URL(fileURLWithPath: path).lastPathComponent == v3.lastPathComponent {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                return try self.fileManager.attributesOfItem(atPath: path)
+            }
+        )
+        let result = discovery.discover()
+        XCTAssertEqual(result.candidates.first?.generation, 2)
+        XCTAssertFalse(result.issues.isEmpty)
+        XCTAssertTrue(DeepSeekHarnessArchiveBackfill.authoritativeURLs(from: result).isEmpty)
+    }
+
     func testRecognizesOnlyExactCanonicalGenerationFilenames() {
         let accepted: [(String, Int, DeepSeekHarnessCompression)] = [
             ("session.jsonl", 0, .plain),
