@@ -50,11 +50,11 @@
 
 **Files:**
 - Modify: `AgentSessions/Model/Session.swift`
-- Test: `AgentSessionsTests/SessionParserTests.swift` or a focused new `AgentSessionsTests/SessionRelationshipTests.swift`
+- Test: Create `AgentSessionsTests/SessionRelationshipTests.swift`
 
 - [ ] **Step 1: Write the failing copy-preservation test**
 
-  Construct a Cursor session populated with events, model, project metadata, titles, surface/originator fields, lightweight counts, favorite/runtime flags, and existing relationship metadata. Assert the relationship-copy helper changes only `parentSessionID`, `subagentType`, and `relationshipKind` while preserving every other field.
+  Construct a Cursor session populated with `id`, `source`, start/end dates, model, file path/size, event count/events, project metadata, titles, surface/originator fields, lightweight counts, favorite/runtime flags, deleted state, and existing relationship metadata. Assert the relationship-copy helper changes only `parentSessionID`, `subagentType`, and `relationshipKind` while preserving every enumerated field.
 
   Run: `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/SessionRelationshipTests test CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
 
@@ -62,7 +62,7 @@
 
 - [ ] **Step 2: Implement a dedicated relationship-copy helper**
 
-  Add an internal/publicly testable helper on `Session` that returns a copy with relationship fields changed and all immutable metadata/events plus runtime state preserved: `isHousekeeping`, `hasToolCallEvent`, lightweight cwd/repo/title/commands, custom title, Codex IDs/origin/source/surface, origin/source/surface, reasoning effort, deleted state, `isFavorite`, and `isPartiallyHydrated` must all survive. Do not reconstruct sessions at call sites with partial initializers.
+  Add an internal/publicly testable helper on `Session` that returns a copy with relationship fields changed and all immutable metadata/events plus runtime state preserved: `id`, `source`, start/end dates, model, file path/size, event count/events, `isHousekeeping`, `hasToolCallEvent`, lightweight cwd/repo/title/commands, custom title, Codex IDs/origin/source/surface, origin/source/surface, reasoning effort, deleted state, `isFavorite`, and `isPartiallyHydrated` must all survive. Do not reconstruct sessions at call sites with partial initializers.
 
 - [ ] **Step 3: Run the focused test**
 
@@ -81,7 +81,7 @@
 - Create: `AgentSessions/Services/CursorACPSubagentAssociation.swift` (pure path lookup, conflict resolution, and relationship application)
 - Modify: `AgentSessions/Services/CursorSessionIndexer.swift`
 - Modify: `AgentSessions/Cursor/CursorSourceDescriptor.swift` (route full ACP parsing through the result API where required)
-- Modify: `AgentSessions/Services/SessionIndexer.swift` only if the shared hydration result needs an explicit cache-preserving seam
+- Do not modify: `AgentSessions/Services/SessionIndexer.swift`; the association resolver consumes the existing `hydrateOrScan` result without changing shared hydration behavior. If implementation proves a shared seam is unavoidable, stop and revise this plan before editing that file.
 - Test: `AgentSessionsTests/CursorACPSubagentAssociationTests.swift`, `AgentSessionsTests/CursorSessionParserTests.swift`, and/or `AgentSessionsTests/SessionParserTests.swift`
 
 - [ ] **Step 1: Add failing association tests**
@@ -125,11 +125,11 @@
 **Files:**
 - Modify: `AgentSessions/Services/SessionRowsBuilder.swift` if surface-pill logic needs the ACP child relationship
 - Modify: `AgentSessions/Views/UnifiedSessionsView.swift` (`WorkflowSubagentBadge.displayLabel` and nested-row accessibility/help rendering)
-- Test: `AgentSessionsTests/SessionRowDisplayTests.swift` and `AgentSessionsTests/SessionRowsBuilderTests.swift`
+- Test: `AgentSessionsTests/SessionRowDisplayTests.swift`, `AgentSessionsTests/SessionRowsBuilderTests.swift`, and a direct `WorkflowSubagentBadge.displayLabel` assertion in the appropriate existing UI test file
 
 - [ ] **Step 1: Add failing UI/pill tests**
 
-  Assert the ACP parent retains the `acp` surface pill. Assert a linked child gets the generic `sub` marker and localized/accessibility text indicating an ACP subagent, while the internal value `cursor-acp-subagent` is never rendered literally. Assert hierarchy indentation and child count use the existing builder metadata.
+  Assert `WorkflowSubagentBadge.displayLabel(for: "cursor-acp-subagent")` returns the generic user-facing `sub` label. Assert the ACP parent retains the `acp` surface pill. Assert a linked child gets the generic `sub` marker and localized/accessibility text indicating an ACP subagent, while the internal value is never rendered literally. Assert hierarchy indentation and child count use the existing builder metadata.
 
 - [ ] **Step 2: Implement the smallest rendering change**
 
@@ -159,19 +159,22 @@
 - [ ] **Step 2: Run full build and test**
 
   ```bash
-  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS' -derivedDataPath .deriveddata-acp-subagents CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -destination 'platform=macOS' -derivedDataPath .deriveddata-acp-subagents -only-testing:AgentSessionsTests test CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build
+  ./scripts/xcode_test_stable.sh
+  xcrun xcresulttool get test-results summary --path .deriveddata-tests/Logs/Test/Run-*.xcresult
   ```
+
+  Review the result-bundle test count against the pre-change revision and explain any delta. The stable wrapper enforces macOS arm64, relative `.deriveddata-tests`, and disabled parallel testing.
 
 - [ ] **Step 3: Run repository checks**
 
-  Run `git diff --check` and the localization validation commands required by the current CI baseline.
+  Run `git diff --check`, `python3 -m unittest scripts.tests.test_validate_localization_catalogs`, and the repository localization validator commands required by the current CI baseline.
 
 - [ ] **Step 4: Review the resulting UI with a real ACP store**
 
   Use a read-only local Cursor fixture or the existing local ACP store to verify one parent row, its ACP pill, expandable child count, and nested child rows. Do not commit real transcripts or databases.
 
-- [ ] **Step 5: Commit documentation if needed**
+- [ ] **Step 5: Commit documentation**
 
   ```bash
   git add docs/guides/cursor-agent-local-history.html
