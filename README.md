@@ -48,7 +48,7 @@ Agent Sessions 5.4 reads 15 active agent formats plus legacy Droid sessions. Cap
 |---|---:|---:|
 | Codex | Yes | Supported sessions |
 | Claude Code | Yes | Supported sessions |
-| Cursor | Yes | Supported sessions |
+| Cursor | Yes | JSONL sessions supported; ACP persisted sessions are browse-only |
 | GitHub Copilot CLI | Yes | Supported sessions |
 | OpenCode | Yes | Supported sessions |
 | Antigravity | Yes | Supported sessions |

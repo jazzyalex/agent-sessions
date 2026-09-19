@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Where Cursor's Agents Window and CLI Store Session History on macOS</title>
-  <meta name="description" content="Cursor's Agents Window and CLI write agent-transcripts JSONL on macOS. Learn where they live, what store.db holds, and which Cursor chats Agent Sessions supports.">
+  <meta name="description" content="Cursor's Agents Window and CLI write agent-transcripts JSONL and ACP store.db sessions on macOS. Learn which records Agent Sessions can read and resume.">
   <meta name="keywords" content="Cursor Agent history, Cursor agent transcripts, Cursor local history, Cursor Desktop sessions, Cursor agent-transcripts, Cursor store.db, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html">
   <link rel="icon" href="../assets/app-icon-32.png">
@@ -26,7 +26,7 @@
         "@id": "https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html#article",
         "headline": "Cursor Agent Local History",
         "name": "Cursor Agent Local History",
-        "description": "Cursor's Agents Window and CLI write agent-transcripts JSONL on macOS. Learn where they live, what store.db holds, and which Cursor chats Agent Sessions supports.",
+        "description": "Cursor's Agents Window and CLI write agent-transcripts JSONL and ACP store.db sessions on macOS. Learn which records Agent Sessions can read and resume.",
         "url": "https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html",
         "mainEntityOfPage": {
           "@type": "WebPage",
@@ -101,7 +101,7 @@
     <p class="eyebrow">Local History Guide / Cursor Agent</p>
     <h1>Cursor Agents Window and CLI History on macOS</h1>
     <p class="lede">Sessions from Cursor's Agents Window and Agent CLI can contain the prompt, tool call, command output, or file path that explains a change. Agent Sessions makes that local Cursor Agent history searchable beside Codex, Claude, OpenCode, Hermes, OpenClaw, Gemini, Copilot, and Pi.</p>
-    <p class="boundary">Agent Sessions supports chats created in Cursor's Agents Window and by Cursor Agent CLI. It does not decode IDE sidepane chats that exist only as message blobs in Cursor's database.</p>
+    <p class="boundary">Agent Sessions supports chats created in Cursor's Agents Window and by Cursor Agent CLI, including the persisted Cursor ACP store described below. It does not decode IDE sidepane chats that exist only as message blobs in Cursor's database.</p>
     <div class="button-row">
       <a class="btn primary" href="https://jazzyalex.github.io/agent-sessions/?campaign=guide&amp;ref=cursor-agent-local-history">Download Agent Sessions</a>
       <a class="btn secondary" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
@@ -113,6 +113,7 @@
     <section class="meta-grid" aria-label="Cursor support summary">
       <div class="meta-card"><strong>Primary storage</strong><code>~/.cursor/projects/.../agent-transcripts</code></div>
       <div class="meta-card"><strong>Metadata storage</strong><code>~/.cursor/chats/.../store.db</code></div>
+      <div class="meta-card"><strong>ACP storage</strong><code>~/.cursor/acp-sessions/&lt;UUID&gt;/store.db</code></div>
       <div class="meta-card"><strong>Surface</strong>Cursor Agents Window and Agent CLI sessions.</div>
     </section>
 
@@ -123,12 +124,20 @@
     <pre><code>~/.cursor/chats/&lt;workspace-hash&gt;/&lt;session-id&gt;/store.db</code></pre>
     <p>Agent Sessions uses the JSONL transcript as the primary source for readable events and uses <code>store.db</code> metadata for names, model hints, timestamps, and workspace context when available.</p>
 
+    <h2>Cursor ACP Persisted Sessions</h2>
+    <p>Cursor CLI sessions created through the Agent Client Protocol (ACP) are persisted separately:</p>
+    <pre><code>~/.cursor/acp-sessions/&lt;UUID&gt;/store.db
+~/.cursor/acp-sessions/&lt;UUID&gt;/meta.json</code></pre>
+    <p>Agent Sessions reads these files without writing to them. The reader accepts the observed <code>schemaVersion: 1</code> layout, follows the root-to-turn graph, and indexes only user and assistant text. ACP rows are labeled separately so they cannot be confused with JSONL sessions or assigned the incompatible Cursor CLI <code>--resume</code> action.</p>
+    <p><strong>Verified:</strong> discovery, stable UUID identity, schema/table guards, complete turn-graph validation, read-only text indexing, and malformed/unknown-schema rejection are covered by synthetic SQLite fixtures in the test suite.</p>
+
     <h2>What Agent Sessions Does</h2>
     <ul>
       <li>Lists Cursor Agent sessions beside other local coding-agent sessions.</li>
       <li>Full-text searches transcript text, command output, tool calls, tool results, errors, and file paths.</li>
       <li>Shows prompts, assistant responses, tool calls, and tool results from JSONL transcripts.</li>
       <li>Enriches sessions with Cursor chat metadata from <code>store.db</code>.</li>
+      <li>Reads user and assistant text from persisted Cursor ACP <code>store.db</code> sessions.</li>
       <li>Builds Cursor resume commands when the installed Cursor Agent command supports resume flags.</li>
     </ul>
     <p>Cursor Agent support has been verified against Cursor 3.5.38 using the app-bundled CLI at <code>/Applications/Cursor.app/Contents/Resources/app/bin/cursor</code>.</p>
@@ -137,6 +146,8 @@
     <ul>
       <li>Parse IDE sidepane chats from <code>store.db</code> when no Agent transcript exists.</li>
       <li>Decode Cursor's protobuf message blobs from DB-only chat history.</li>
+      <li>Index ACP tool arguments, tool results, reasoning, attachments, images, or encrypted blobs.</li>
+      <li>Resume ACP sessions. ACP restoration requires protocol-level <code>session/load</code>; the app intentionally does not call Cursor CLI <code>--resume</code> for ACP rows.</li>
       <li>Upload Cursor transcripts to a hosted search service.</li>
       <li>Write into Cursor's local databases.</li>
     </ul>
@@ -152,6 +163,7 @@
     <ul class="sources">
       <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionDiscovery.swift">Cursor discovery</a></li>
       <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionParser.swift">Cursor transcript parser</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessionsTests/CursorSessionParserTests.swift">Cursor ACP format fixtures and guards</a></li>
       <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Cursor/CursorChatMetaReader.swift">Cursor chat metadata reader</a></li>
       <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionIndexer.swift">Cursor indexer</a></li>
     </ul>
