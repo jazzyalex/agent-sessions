@@ -2064,23 +2064,6 @@
         }
       }
     },
-    "API-equivalent estimate at published rates: %@ USD. Not a subscription charge.": {
-      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API-equivalent estimate at published rates: %@ USD. Not a subscription charge."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "按已公布费率估算的 API 等值费用：%@ 美元。并非订阅费用。"
-          }
-        }
-      }
-    },
     "Abort resetting preferences": {
       "localizations": {
         "en": {
@@ -19342,23 +19325,6 @@
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
     },
-    "Span": {
-      "comment": "Session info row label for the wall-clock time between the first and last request.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Span"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "跨度"
-          }
-        }
-      }
-    },
     "Spawned a workflow": {
       "localizations": {
         "en": {
@@ -20638,23 +20604,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "此对话记录中带时间戳的请求少于两次。"
-          }
-        }
-      }
-    },
-    "This transcript records no model or effort setting.": {
-      "comment": "User-visible Session info copy.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This transcript records no model or effort setting."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此会话记录未包含模型或思考强度设置。"
           }
         }
       }
@@ -22566,23 +22515,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "每周消耗速度采用实测值，而非平均值"
-          }
-        }
-      }
-    },
-    "Weekly quota": {
-      "comment": "User-visible Session info copy.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weekly quota"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每周额度"
           }
         }
       }
