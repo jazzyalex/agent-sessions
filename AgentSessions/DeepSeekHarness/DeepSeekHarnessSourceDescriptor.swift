@@ -152,6 +152,7 @@ extension SessionSourceAdapter {
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
                     searchIdentitySnapshots: .notApplicable,
+                    searchLivePathSnapshots: .provider { indexer.searchLivePathSnapshot },
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },

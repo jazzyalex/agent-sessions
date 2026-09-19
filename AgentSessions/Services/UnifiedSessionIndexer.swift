@@ -134,6 +134,22 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
 
+        enum SearchLivePathSnapshots {
+            case notApplicable
+            case provider(@MainActor () -> Set<String>?)
+
+            var isApplicable: Bool {
+                if case .provider = self { return true }
+                return false
+            }
+
+            @MainActor
+            func current() -> Set<String>? {
+                guard case .provider(let snapshot) = self else { return nil }
+                return snapshot()
+            }
+        }
+
         let allSessions: AnyPublisher<[Session], Never>
         let isIndexing: AnyPublisher<Bool, Never>
         let isProcessingTranscripts: AnyPublisher<Bool, Never>
@@ -145,6 +161,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let currentIsIndexing: @MainActor () -> Bool
         let currentLaunchPhase: @MainActor () -> LaunchPhase
         let searchIdentitySnapshots: SearchIdentitySnapshots
+        let searchLivePathSnapshots: SearchLivePathSnapshots
         /// **Contract: this must publish `isIndexing = true` before it returns.**
         ///
         /// `performProviderRefresh` calls it and then immediately polls `currentIsIndexing()`
@@ -178,6 +195,7 @@ final class UnifiedSessionIndexer: ObservableObject {
              currentIsIndexing: @escaping @MainActor () -> Bool,
              currentLaunchPhase: @escaping @MainActor () -> LaunchPhase,
              searchIdentitySnapshots: SearchIdentitySnapshots,
+             searchLivePathSnapshots: SearchLivePathSnapshots = .notApplicable,
              refresh: @escaping @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void,
              reloadFocusedSession: @escaping @MainActor (String, Bool, FocusedReloadTrigger) -> Void) {
             self.allSessions = allSessions
@@ -191,6 +209,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             self.currentIsIndexing = currentIsIndexing
             self.currentLaunchPhase = currentLaunchPhase
             self.searchIdentitySnapshots = searchIdentitySnapshots
+            self.searchLivePathSnapshots = searchLivePathSnapshots
             self.refresh = refresh
             self.reloadFocusedSession = reloadFocusedSession
         }
@@ -1790,15 +1809,29 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static func performSearchIngestOnce(source: SessionSource,
                                                 service: SearchIngestService,
                                                 providerHandle: ProviderHandle) async {
-        let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?) in
+        let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?, SearchIngestService.LivePathAuthority) in
             let files = searchFileRefs(for: providerHandle.currentSessions())
-            return (files, providerHandle.searchIdentitySnapshots.current())
+            let liveAuthority: SearchIngestService.LivePathAuthority
+            if providerHandle.searchLivePathSnapshots.isApplicable {
+                if let snapshot = providerHandle.searchLivePathSnapshots.current() {
+                    liveAuthority = .authoritative(snapshot)
+                } else {
+                    liveAuthority = .unknown
+                }
+            } else {
+                liveAuthority = .notApplicable
+            }
+            return (files, providerHandle.searchIdentitySnapshots.current(), liveAuthority)
         }
         let files = input.0
         let identitySnapshot = input.1
-        // Identity-backed sources must run even with no current sessions so the
-        // ingest service can remove the final archived/deleted database identity.
-        if files.isEmpty, source.descriptor.searchUsesIdentityAtURL == nil { return }
+        let livePathAuthority = input.2
+        // Identity-backed and path-backed sources must run even with no current
+        // sessions so the ingest service can remove the final archived/deleted
+        // database identity or the last live path. Ordinary file sources with no
+        // applicable authority still skip the empty pass.
+        if files.isEmpty, source.descriptor.searchUsesIdentityAtURL == nil,
+           !providerHandle.searchLivePathSnapshots.isApplicable { return }
 
         let toolIOEnabled = recentToolIOIndexEnabled()
         Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? start")
@@ -1806,7 +1839,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             let progress = try await service.ingest(source: source,
                                                     files: files,
                                                     toolIOEnabled: toolIOEnabled,
-                                                    identitySnapshot: identitySnapshot)
+                                                    identitySnapshot: identitySnapshot,
+                                                    livePathAuthority: livePathAuthority)
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) end")
         } catch is CancellationError {
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? cancelled")
@@ -1834,9 +1868,19 @@ final class UnifiedSessionIndexer: ObservableObject {
         let newestEndTime: Date?
         let identityRevisions: [String]
         let identitySnapshot: SearchIngestService.IdentitySnapshot?
+        /// Sorted standardized paths for ordinary/path-backed sessions. Identity-backed
+        /// sessions share one storage URL, so their path carries no per-session signal
+        /// and is covered by `identityRevisions` instead. A v2->v3 selected-generation
+        /// move keeps id/count/size/end identical while changing this.
+        let pathIdentities: [String]
+        /// Authoritative live-path set for path-backed sources. nil covers both
+        /// not-applicable and applicable-but-unknown; an authoritative value (empty
+        /// allowed) compares unequal to nil so unknown->empty recovery kicks ingest.
+        let livePathSnapshot: Set<String>?
 
         init(sessions: [Session],
-             identitySnapshot: SearchIngestService.IdentitySnapshot? = nil) {
+             identitySnapshot: SearchIngestService.IdentitySnapshot? = nil,
+             livePathSnapshot: Set<String>? = nil) {
             count = sessions.count
             totalSizeBytes = sessions.reduce(0) { $0 + ($1.fileSizeBytes ?? 0) }
             newestEndTime = sessions.compactMap(\.endTime).max()
@@ -1849,6 +1893,16 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return "\(session.id):\(revision.updatedMillis):\(revision.extent)"
             }.sorted()
             self.identitySnapshot = identitySnapshot
+            pathIdentities = sessions.compactMap { session in
+                let url = URL(fileURLWithPath: session.filePath)
+                let descriptor = session.source.descriptor
+                guard !(descriptor.parseFullByIdentity != nil
+                        && descriptor.searchUsesIdentityAtURL?(url) == true) else { return nil }
+                return url.standardizedFileURL.path
+            }.sorted()
+            self.livePathSnapshot = livePathSnapshot.map { snapshot in
+                Set(snapshot.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+            }
         }
     }
 
@@ -1856,7 +1910,8 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func currentSearchIngestFingerprint(for source: SessionSource) -> SessionListFingerprint {
         SessionListFingerprint(
             sessions: currentSessions(for: source),
-            identitySnapshot: handle(source).searchIdentitySnapshots.current()
+            identitySnapshot: handle(source).searchIdentitySnapshots.current(),
+            livePathSnapshot: handle(source).searchLivePathSnapshots.current()
         )
     }
 

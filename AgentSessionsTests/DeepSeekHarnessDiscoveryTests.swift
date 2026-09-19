@@ -361,10 +361,14 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         XCTAssertTrue(indexer.isIndexing, "refresh must set isIndexing synchronously")
         waitForIndexerQuiescence(indexer)
         XCTAssertEqual(indexerSessionIDs(indexer), ["session-default"])
+        XCTAssertEqual(indexer.searchLivePathSnapshot, Set(indexer.allSessions.map(\.filePath)),
+                       "a clean stable pass must publish its selected live generation paths")
 
         UserDefaults.standard.set(customRoot.path, forKey: key)
         waitForIndexerQuiescence(indexer)
         XCTAssertEqual(indexerSessionIDs(indexer), ["session-custom"])
+        XCTAssertEqual(indexer.searchLivePathSnapshot, Set(indexer.allSessions.map(\.filePath)),
+                       "a clean root transition must replace live-path authority")
     }
 
     func testCustomRootChangeWithPartialFailurePreservesOnlySameRootRows() throws {
@@ -392,5 +396,29 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         XCTAssertEqual(indexerSessionIDs(indexer), ["session-b"])
         XCTAssertFalse(indexerSessionIDs(indexer).contains("session-a"), "prior-root rows must not survive a root change")
         XCTAssertNotNil(indexer.indexingError, "B's ambiguity issue must still surface")
+        XCTAssertNil(indexer.searchLivePathSnapshot,
+                     "a partial new-root result must remain unknown and cannot authorize search deletion")
+    }
+
+    func testCleanEmptyRootPublishesAuthoritativeEmptyLivePaths() throws {
+        let populatedRoot = try temporarySessionsRoot()
+        _ = try writeFullGeneration(root: populatedRoot, cwd: "/tmp/dsh-populated", id: "session-populated", version: 2)
+        let emptyRoot = try temporarySessionsRoot()
+
+        let key = DeepSeekHarnessSettings.Keys.rootOverride
+        UserDefaults.standard.set(populatedRoot.path, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let indexer = DeepSeekHarnessSessionIndexer()
+        indexer.refresh()
+        waitForIndexerQuiescence(indexer)
+        XCTAssertEqual(indexerSessionIDs(indexer), ["session-populated"])
+        XCTAssertNotNil(indexer.searchLivePathSnapshot)
+
+        UserDefaults.standard.set(emptyRoot.path, forKey: key)
+        waitForIndexerQuiescence(indexer)
+        XCTAssertTrue(indexer.allSessions.isEmpty)
+        XCTAssertEqual(indexer.searchLivePathSnapshot, [],
+                       "a clean empty root must be authoritative so stale live search rows can be removed")
     }
 }

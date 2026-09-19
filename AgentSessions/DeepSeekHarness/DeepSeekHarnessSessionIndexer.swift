@@ -34,6 +34,11 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
     private var discovery: DeepSeekHarnessDiscovery
     private var refreshToken = UUID()
     private var lastHealthy: [String: Session] = [:]
+    /// Authoritative live generation paths from the last completed refresh. nil is
+    /// applicable-but-unknown: any failed or partial discovery/parse pass, a root
+    /// change before its rescan completes, or no completed pass yet. A non-nil value
+    /// (empty allowed) is published only after a clean, stable completed pass.
+    private(set) var searchLivePathSnapshot: Set<String>?
     /// Canonical sessions root the `lastHealthy` projection was built from.
     /// A root change clears the projection before any new-root result is
     /// published or preserved, so rows from a prior root never leak across
@@ -86,6 +91,9 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
             // reuse old-root transcript text.
             lastHealthy.removeAll()
             allSessions = []
+            // A root change invalidates live-path authority before the rescan
+            // completes. Unknown, never empty: the new root may be unreadable.
+            searchLivePathSnapshot = nil
             transcriptCache.clear()
             recomputeNow()
         }
@@ -144,6 +152,10 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                 if self.lastIndexedRoot != currentRoot {
                     self.lastHealthy = [:]
                     self.allSessions = []
+                    // Root-change failure remains unknown, never empty: the new
+                    // root has no completed pass yet. A clean pass below still
+                    // publishes its authoritative set normally.
+                    self.searchLivePathSnapshot = nil
                 }
                 self.lastIndexedRoot = currentRoot
                 self.totalFiles = result.candidates.count
@@ -162,12 +174,21 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     self.allSessions = Array(self.lastHealthy.values).sorted {
                         ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast)
                     }
+                    // Any failed or partial discovery/parse pass publishes nil:
+                    // unknown authority may run ingest but can never delete.
+                    self.searchLivePathSnapshot = nil
                     self.finishRefresh(token: token, preserve: false)
                     return
                 }
                 self.lastHealthy = Dictionary(uniqueKeysWithValues: parsed.map { ($0.id, $0) })
                 self.allSessions = parsed.sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
                 self.indexingError = errorText
+                // Clean stable completed pass (empty allowed): the authoritative
+                // set of selected live generation paths. A failed pass above
+                // stays nil, so root-change failure remains unknown, never empty.
+                self.searchLivePathSnapshot = refreshFailed
+                    ? nil
+                    : Set(parsed.map(\.filePath))
                 self.finishRefresh(token: token, preserve: false)
             }
         }
