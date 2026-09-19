@@ -169,7 +169,7 @@
 - [ ] **Step 2: Run full build and test**
 
   ```bash
-  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build
+  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS' -derivedDataPath .deriveddata-localization CODE_SIGNING_ALLOWED=NO build
   ./scripts/xcode_test_stable.sh
   xcrun xcresulttool get test-results summary --path .deriveddata-tests/Logs/Test/Run-*.xcresult
   ```
