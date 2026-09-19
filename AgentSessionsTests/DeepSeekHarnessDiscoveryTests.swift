@@ -253,4 +253,144 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         XCTAssertEqual(afterSuccessor.selectedURL.standardizedFileURL, generationTwo.standardizedFileURL)
         XCTAssertNotEqual(afterSiblingChange.manifestRevision, afterSuccessor.manifestRevision)
     }
+
+    // MARK: - Sessions-root boundary
+
+    /// Full valid generation: the indexer lightweight-parses candidates, so
+    /// fixtures carry the same header plus turn/step/user lines the archive
+    /// contract test proves parseable. Header fields stay version-aware
+    /// (no `isSeeded` below v2), matching discovery's proven shapes.
+    private func fullGenerationData(version: Int, id: String, cwd: String) throws -> Data {
+        var header: [String: Any] = [
+            "type": "session",
+            "version": version,
+            "id": id,
+            "createdAt": 1_700_000_000_000,
+            "cwd": cwd,
+            "delegationDepth": 0,
+        ]
+        if version >= 2 { header["isSeeded"] = false }
+        var data = try jsonLineForIndexer(header)
+        data.append(try jsonLineForIndexer([
+            "type": "turn/start",
+            "seq": 0,
+            "time": 1_700_000_000_001,
+            "data": ["turn": 1],
+        ]))
+        data.append(try jsonLineForIndexer([
+            "type": "step/start",
+            "seq": 1,
+            "time": 1_700_000_000_002,
+            "data": ["turn": 1, "step": 1],
+        ]))
+        data.append(try jsonLineForIndexer([
+            "type": "user/message",
+            "seq": 2,
+            "time": 1_700_000_000_003,
+            "surfaceOp": "append",
+            "data": [
+                "id": "user-1",
+                "role": "user",
+                "content": [["type": "text", "text": "root boundary"]],
+                "source": ["kind": "user"],
+            ],
+        ]))
+        return data
+    }
+
+    private func jsonLineForIndexer(_ object: [String: Any]) throws -> Data {
+        var data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        data.append(0x0A)
+        return data
+    }
+
+    @discardableResult
+    private func writeFullGeneration(root: URL, cwd: String, id: String, version: Int) throws -> URL {
+        let url = DeepSeekHarnessDiscovery.canonicalGenerationURL(
+            root: root,
+            cwd: cwd,
+            id: id,
+            version: version,
+            compression: .plain
+        )
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try fullGenerationData(version: version, id: id, cwd: cwd).write(to: url, options: .atomic)
+        return url
+    }
+
+    /// Waits until the indexer has been continuously idle long enough that a
+    /// `UserDefaults`-observer-triggered follow-up refresh (same runloop
+    /// neighborhood) cannot still be in flight.
+    private func waitForIndexerQuiescence(_ indexer: DeepSeekHarnessSessionIndexer, timeout: TimeInterval = 15) {
+        let exp = expectation(description: "indexer quiescent")
+        var idleTicks = 0
+        func poll() {
+            if indexer.isIndexing {
+                idleTicks = 0
+            } else {
+                idleTicks += 1
+                if idleTicks >= 10 { exp.fulfill(); return }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: poll)
+        }
+        DispatchQueue.main.async(execute: poll)
+        wait(for: [exp], timeout: timeout)
+    }
+
+    private func indexerSessionIDs(_ indexer: DeepSeekHarnessSessionIndexer) -> Set<String> {
+        Set(indexer.allSessions.map(\.id))
+    }
+
+    func testRootChangeFromDefaultToCustomDropsPriorProjection() throws {
+        // The "default" side is simulated with a temp root: the boundary
+        // under test is root identity, and the real ~/.dsh is never touched.
+        let defaultRoot = try temporarySessionsRoot()
+        _ = try writeFullGeneration(root: defaultRoot, cwd: "/tmp/dsh-root-default", id: "session-default", version: 2)
+        let customRoot = try temporarySessionsRoot()
+        _ = try writeFullGeneration(root: customRoot, cwd: "/tmp/dsh-root-custom", id: "session-custom", version: 2)
+
+        let key = DeepSeekHarnessSettings.Keys.rootOverride
+        UserDefaults.standard.set(defaultRoot.path, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let indexer = DeepSeekHarnessSessionIndexer()
+        indexer.refresh()
+        XCTAssertTrue(indexer.isIndexing, "refresh must set isIndexing synchronously")
+        waitForIndexerQuiescence(indexer)
+        XCTAssertEqual(indexerSessionIDs(indexer), ["session-default"])
+
+        UserDefaults.standard.set(customRoot.path, forKey: key)
+        waitForIndexerQuiescence(indexer)
+        XCTAssertEqual(indexerSessionIDs(indexer), ["session-custom"])
+    }
+
+    func testCustomRootChangeWithPartialFailurePreservesOnlySameRootRows() throws {
+        let rootA = try temporarySessionsRoot()
+        _ = try writeFullGeneration(root: rootA, cwd: "/tmp/dsh-a", id: "session-a", version: 2)
+
+        let rootB = try temporarySessionsRoot()
+        _ = try writeFullGeneration(root: rootB, cwd: "/tmp/dsh-b-keep", id: "session-b", version: 2)
+        // Partial failure in B: the same opaque id under two projects is
+        // ambiguous, so B publishes one issue plus one healthy row.
+        _ = try writeFullGeneration(root: rootB, cwd: "/tmp/dsh-b-dupe-one", id: "dupe", version: 0)
+        _ = try writeFullGeneration(root: rootB, cwd: "/tmp/dsh-b-dupe-two", id: "dupe", version: 0)
+
+        let key = DeepSeekHarnessSettings.Keys.rootOverride
+        UserDefaults.standard.set(rootA.path, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let indexer = DeepSeekHarnessSessionIndexer()
+        indexer.refresh()
+        waitForIndexerQuiescence(indexer)
+        XCTAssertEqual(indexerSessionIDs(indexer), ["session-a"])
+
+        UserDefaults.standard.set(rootB.path, forKey: key)
+        waitForIndexerQuiescence(indexer)
+        XCTAssertEqual(indexerSessionIDs(indexer), ["session-b"])
+        XCTAssertFalse(indexerSessionIDs(indexer).contains("session-a"), "prior-root rows must not survive a root change")
+        XCTAssertNotNil(indexer.indexingError, "B's ambiguity issue must still surface")
+    }
 }

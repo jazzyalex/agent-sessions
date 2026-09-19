@@ -61,7 +61,11 @@ extension SessionSourceDescriptor {
                         ?? SessionArchiveBackfill.minimalSession(source: .deepseekHarness, id: sessionID, url: upstreamURL)
                 },
                 archiveUnit: { DeepSeekHarnessArchiveFilter.archiveUnit(forPrimary: $0) },
-                manifestEntries: { DeepSeekHarnessArchiveFilter.manifestEntries(upstream: $0, primaryRelativePath: $1) }
+                manifestEntries: { DeepSeekHarnessArchiveFilter.manifestEntries(upstream: $0, primaryRelativePath: $1) },
+                // DSH generations churn under a live harness: an unsettled
+                // snapshot across the retry budget fails closed, never commits
+                // a best-effort copy over a healthy archive.
+                requiresStableSnapshot: true
             ),
             supportsResume: false,
             resumeAgentLabel: nil,

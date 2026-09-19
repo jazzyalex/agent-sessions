@@ -4,7 +4,7 @@
 
 ## Find the agent session you need
 
-Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude Code](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), and **12 other coding agents** in one Mac app. Read the transcript, find supported image outputs, and resume supported CLI sessions. For Codex and Claude, see which sessions are burning through your quota.
+Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude Code](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), and **13 other coding agents** in one Mac app. Read the transcript, find supported image outputs, and resume supported CLI sessions. For Codex and Claude, see which sessions are burning through your quota.
 
 Open source. Your session history stays on your Mac. No telemetry.
 
@@ -24,7 +24,7 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
   <img src="https://jazzyalex.github.io/agent-sessions/assets/sessions-main-window-with-current-quota.png" alt="Agent Sessions showing searchable local coding-agent sessions and a floating Codex and Claude Quota Meter" width="100%" style="max-width:960px;border-radius:8px;"/>
 </p>
 
-<p align="center"><em>Search 15 local agent histories, resume supported sessions, and track Codex and Claude quota burn.</em></p>
+<p align="center"><em>Search 16 local agent histories, resume supported sessions, and track Codex and Claude quota burn.</em></p>
 
 ## What it does
 
@@ -40,9 +40,13 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **More reliable session retrieval.** Project filtering distinguishes same-named clones, active searches refresh cleanly, displayed titles remain searchable, and cache hydration preserves confirmed sessions when a source is temporarily unavailable.
 - **Clearer session titles.** Claude, OpenClaw, OpenCode, and Droid keep recognizable source-aware titles after full transcript loading and search prewarming.
 
+## Planned for 5.5 (unreleased)
+
+- **DeepSeek Harness session browsing.** The local, read-only integration discovers immutable session directories, selects the highest supported generation, and browses/searches supported v0-v3 plain JSONL and independently framed, checksum-validated Zstandard histories. Incomplete or corrupt artifacts stay invisible; DSH resume, live activity, telemetry, attachment dereferencing, and DSH archive-state mirroring are not included. The compatibility evidence is limited to checked-in sanitized fixtures and the pinned catalog; private DSH state was not inspected.
+
 ## Supported sources
 
-Agent Sessions 5.4 reads 15 active agent formats plus legacy Droid sessions. Capabilities differ by source and installed CLI version.
+The current source registry contains 16 active agent formats plus legacy Droid sessions. Agent Sessions 5.4 is the latest published release; the DeepSeek Harness row is part of the unreleased 5.5 work. Capabilities differ by source and installed CLI version.
 
 | Source | Browse and search | Resume |
 |---|---:|---:|
@@ -61,7 +65,10 @@ Agent Sessions 5.4 reads 15 active agent formats plus legacy Droid sessions. Cap
 | Devin CLI | Yes | Supported active sessions |
 | fx | Yes | Command plan tested; interactive reopen unverified |
 | Cline CLI and Desktop | Yes | No |
+| DeepSeek Harness (5.5, unreleased) | Yes | No |
 | Droid | Legacy sessions | No active monitoring |
+
+DeepSeek Harness is a source accent/integration, not an official DeepSeek partnership or endorsement. Its checked-in decoder vendors the selected official Zstandard 1.5.7 decompression/common sources under the upstream BSD license; provenance and the archive checksum are recorded in [`ThirdParty/DSHZstd/README.md`](ThirdParty/DSHZstd/README.md).
 
 Format-maintenance owners, verification dates, and tested versions are in [STEWARDS.md](STEWARDS.md). [Session-Bench](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme-bench) compares ten agents across 20 evidence-backed format gates.
 

@@ -108,15 +108,23 @@ struct ArchiveCapability {
     /// exactly that set with no re-scan or widening. A nil return fails closed
     /// (the sync throws and commits nothing).
     let manifestEntries: ((URL, String) -> [String]?)?
+    /// True when the source's upstream snapshot unit churns under concurrent
+    /// writers, so a snapshot that never settles across the retry budget must
+    /// fail closed instead of committing a best-effort copy. Default false
+    /// preserves the legacy fifth best-effort commit byte-for-byte for every
+    /// existing source; only DSH opts in.
+    let requiresStableSnapshot: Bool
 
     init(backfillURLs: @escaping (UserDefaults) -> [String: URL],
          sessionForBackfill: @escaping (String, URL) -> Session?,
          archiveUnit: ((URL) -> ArchiveUnit?)? = nil,
-         manifestEntries: ((URL, String) -> [String]?)? = nil) {
+         manifestEntries: ((URL, String) -> [String]?)? = nil,
+         requiresStableSnapshot: Bool = false) {
         self.backfillURLs = backfillURLs
         self.sessionForBackfill = sessionForBackfill
         self.archiveUnit = archiveUnit
         self.manifestEntries = manifestEntries
+        self.requiresStableSnapshot = requiresStableSnapshot
     }
 }
 

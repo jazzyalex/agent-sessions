@@ -128,6 +128,12 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
         XCTAssertTrue(AgentEnablement.isEnabled(source, defaults: defaults))
     }
 
+    func testArchiveRequiresStableSnapshotWhileOtherSourcesKeepBestEffort() {
+        XCTAssertTrue(source.descriptor.archive?.requiresStableSnapshot == true)
+        XCTAssertFalse(SessionSource.codex.descriptor.archive?.requiresStableSnapshot == true)
+        XCTAssertFalse(SessionSource.claude.descriptor.archive?.requiresStableSnapshot == true)
+    }
+
     func testVersionIntroducedIs55() {
         XCTAssertEqual(source.versionIntroduced, "5.5")
     }

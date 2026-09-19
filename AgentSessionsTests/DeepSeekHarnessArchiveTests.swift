@@ -243,4 +243,86 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         let archivedPrimary = dataRoot.appendingPathComponent(primary.lastPathComponent)
         XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedPrimary)?.id, id)
     }
+
+    func testUnstableUpstreamFailsClosedAndPreservesHealthyArchive() throws {
+        let upstreamRoot = try temporaryRoot("DeepSeekHarnessArchiveUnstableUpstream")
+        let appSupport = try temporaryRoot("DeepSeekHarnessArchiveUnstableSupport")
+        let id = "archive-unstable"
+        let primary = try writeGeneration(
+            root: upstreamRoot,
+            id: id,
+            version: 2,
+            data: try validGenerationData(version: 2, id: id)
+        )
+        _ = try writeGeneration(root: upstreamRoot, id: id, version: 1, data: Data("generation-one\n".utf8))
+
+        let session = Session(
+            id: id,
+            source: .deepseekHarness,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: primary.path,
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: nil
+        )
+
+        let previousProvider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider
+        SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = { appSupport }
+        defer { SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider }
+
+        let manager = SessionArchiveManager.shared
+        manager.syncSessionForTesting(session)
+        let healthy = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+        XCTAssertNil(healthy.lastError, healthy.lastError ?? "")
+        XCTAssertNotEqual(healthy.status, .error)
+
+        let sessionDir = appSupport
+            .appendingPathComponent("AgentSessions/Archives/deepseek-harness/\(id)", isDirectory: true)
+        let manifestURL = sessionDir.appendingPathComponent("manifest.json")
+        let dataRoot = sessionDir.appendingPathComponent("data", isDirectory: true)
+        let manifestBefore = try Data(contentsOf: manifestURL)
+        let dataBefore = try regularFileBytes(in: dataRoot)
+
+        // Break the sync noop gate so the retry loop actually runs: one
+        // upstream write before the sync, then a hook mutation after every
+        // attempt copy so no stability check can ever pass.
+        try appendLine("pre-sync-churn\n", to: primary)
+        var postCopyCount = 0
+        SessionArchiveManagerTestHooks.postCopyHook = {
+            postCopyCount += 1
+            try? self.appendLine("churn-\(postCopyCount)\n", to: primary)
+        }
+        defer { SessionArchiveManagerTestHooks.postCopyHook = nil }
+
+        manager.syncSessionForTesting(session)
+
+        XCTAssertEqual(postCopyCount, 4, "exactly the four retry attempts may copy; no fifth best-effort copy")
+        let failed = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+        XCTAssertEqual(failed.status, .error)
+        let lastError = try XCTUnwrap(failed.lastError)
+        XCTAssertTrue(lastError.contains("updating continuously"), lastError)
+        XCTAssertFalse(lastError.contains("best-effort"), lastError)
+
+        // The healthy archive is untouched: same manifest, same data bytes.
+        XCTAssertEqual(try Data(contentsOf: manifestURL), manifestBefore)
+        XCTAssertEqual(try regularFileBytes(in: dataRoot), dataBefore)
+    }
+
+    private func appendLine(_ line: String, to url: URL) throws {
+        var data = try Data(contentsOf: url)
+        data.append(contentsOf: Data(line.utf8))
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func regularFileBytes(in directory: URL) throws -> [String: Data] {
+        var out: [String: Data] = [:]
+        for url in try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: []) {
+            out[url.lastPathComponent] = try Data(contentsOf: url)
+        }
+        return out
+    }
 }

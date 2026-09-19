@@ -34,20 +34,61 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
     private var discovery: DeepSeekHarnessDiscovery
     private var refreshToken = UUID()
     private var lastHealthy: [String: Session] = [:]
+    /// Canonical sessions root the `lastHealthy` projection was built from.
+    /// A root change clears the projection before any new-root result is
+    /// published or preserved, so rows from a prior root never leak across
+    /// the boundary. Nil until the first refresh completes.
+    private var lastIndexedRoot: URL?
     private let reloadLock = NSLock()
     private var reloadingIDs = Set<String>()
+    private var cancellables = Set<AnyCancellable>()
+    /// Key-filtered observer for the sessions-root override: the raw
+    /// `didChangeNotification` fires on every process-wide defaults write
+    /// (incl. AppKit bookkeeping), so narrowing to this one key avoids
+    /// refresh storms on unrelated writes. See
+    /// AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var rootOverrideDefaultsObserver: FilteredDefaultsObserver?
+    private var lastSessionsRootOverride: String
 
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
 
     init() {
         discovery = DeepSeekHarnessDiscovery(customRoot: nil)
+        let initialOverride = UserDefaults.standard.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? ""
+        lastSessionsRootOverride = initialOverride
+        let rootOverrideObserver = FilteredDefaultsObserver(keys: [DeepSeekHarnessSettings.Keys.rootOverride])
+        rootOverrideDefaultsObserver = rootOverrideObserver
+        rootOverrideObserver.mainPublisher
+            .sink { [weak self] in
+                guard let self else { return }
+                let current = UserDefaults.standard.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? ""
+                guard current != self.lastSessionsRootOverride else { return }
+                self.lastSessionsRootOverride = current
+                self.refresh()
+            }
+            .store(in: &cancellables)
     }
 
     func refresh(mode: IndexRefreshMode = .incremental,
                  trigger: IndexRefreshTrigger = .manual,
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
-        let override = DeepSeekHarnessSettings.normalizedOverride(sessionsRootOverride)
+        let storedOverride = UserDefaults.standard.string(
+            forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? sessionsRootOverride
+        let override = DeepSeekHarnessSettings.normalizedOverride(storedOverride)
+        lastSessionsRootOverride = storedOverride
         discovery = DeepSeekHarnessDiscovery(customRoot: override.isEmpty ? nil : override)
+        let sourceDiscovery = discovery
+        let currentRoot = sourceDiscovery.sessionsRoot().standardizedFileURL
+        if let lastIndexedRoot, lastIndexedRoot != currentRoot {
+            // Clear synchronously at the preference boundary: rows and cached
+            // transcripts from the old root must not remain visible while the
+            // new root is being scanned, and matching session ids must not
+            // reuse old-root transcript text.
+            lastHealthy.removeAll()
+            allSessions = []
+            transcriptCache.clear()
+            recomputeNow()
+        }
         let token = UUID()
         refreshToken = token
         isIndexing = true
@@ -57,8 +98,6 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
         hasEmptyDirectory = false
         filesProcessed = 0
         totalFiles = 0
-        let sourceDiscovery = discovery
-
         DispatchQueue.global(qos: executionProfile.deferNonCriticalWork ? .utility : .userInitiated).async { [weak self] in
             guard let self else { return }
             let result = sourceDiscovery.discover()
@@ -96,6 +135,17 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                 ?? (parseFailure ? "DeepSeek Harness session could not be parsed." : nil)
             DispatchQueue.main.async {
                 guard self.refreshToken == token else { return }
+                // Root boundary: the healthy projection belongs to one
+                // canonical sessions root. When the root changed, drop the
+                // prior projection before publishing or preserving anything,
+                // so a partial new-root failure can only preserve same-root
+                // rows. A clean new-root scan still replaces normally below.
+                let currentRoot = sourceDiscovery.sessionsRoot().standardizedFileURL
+                if self.lastIndexedRoot != currentRoot {
+                    self.lastHealthy = [:]
+                    self.allSessions = []
+                }
+                self.lastIndexedRoot = currentRoot
                 self.totalFiles = result.candidates.count
                 self.filesProcessed = parsed.count
                 self.hasEmptyDirectory = result.candidates.isEmpty && result.issues.isEmpty

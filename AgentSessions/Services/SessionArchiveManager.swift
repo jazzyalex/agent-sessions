@@ -5,6 +5,12 @@ import SQLite3
 #if DEBUG
 enum SessionArchiveManagerTestHooks {
     static var applicationSupportDirectoryProvider: (() -> URL?)?
+    /// Deterministic churn seam at the post-copy/pre-resnapshot boundary of
+    /// the archive retry loop. Invoked synchronously after each attempt's
+    /// copy, before the stability re-snapshot, so a test can mutate upstream
+    /// on every attempt and prove fail-closed behavior. Nil in production.
+    /// Tests must reset it in defer.
+    static var postCopyHook: (() -> Void)?
 }
 #endif
 
@@ -83,6 +89,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     private enum ArchiveManifestError: LocalizedError {
         case providerManifestUnavailable(source: String, id: String)
         case filteredEntryInvalid(path: String)
+        case upstreamUnstable(source: String, id: String)
 
         var errorDescription: String? {
             switch self {
@@ -90,6 +97,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 return "Archive manifest unavailable for \(source):\(id)"
             case .filteredEntryInvalid(let path):
                 return "Archive entry invalid: \(path)"
+            case .upstreamUnstable(let source, let id):
+                return "Session was updating continuously; no stable snapshot for \(source):\(id), archive not updated"
             }
         }
     }
@@ -735,6 +744,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             log("sync staging created path=\(stagingSessionRoot.path) exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
             try copySnapshot(snapshot, from: upstreamURL, upstreamIsDirectory: info.upstreamIsDirectory, to: stagingDataRoot)
+#if DEBUG
+            SessionArchiveManagerTestHooks.postCopyHook?()
+#endif
             // Same filtered entry set re-statted (no re-list, no widening);
             // legacy nil-seam path re-enumerates exactly as before.
             let snapshotAfter = try takeSnapshot()
@@ -772,6 +784,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
             // Upstream changed during copy; retry with new snapshot.
             snapshot = snapshotAfter
+        }
+
+        // A source requiring stable snapshots fails closed after the retry
+        // budget: no unchecked fifth copy/commit, so an existing healthy
+        // archive is never replaced by a torn read. The throw propagates
+        // through the existing archive error/status handling (status .error,
+        // lastError surfaced, staged data discarded).
+        if SessionSourceRegistry.descriptor(for: info.source).archive?.requiresStableSnapshot == true {
+            throw ArchiveManifestError.upstreamUnstable(source: info.source.rawValue, id: info.sessionID)
         }
 
         // If upstream is churning, commit a best-effort snapshot and keep syncing.
