@@ -24,6 +24,8 @@ final class AnalyticsIndexerTests: XCTestCase {
         XCTAssertFalse(AnalyticsAgentFilter.deepseekHarnessOnly.matches(.cline))
         XCTAssertFalse(AnalyticsAgentFilter.deepseekHarnessOnly.matches(.codex))
         XCTAssertEqual(AnalyticsAgentFilter.dedicated(for: .deepseekHarness), .deepseekHarnessOnly)
+        XCTAssertEqual(AnalyticsAgentFilter.deepseekHarnessOnly.rawValue, "DeepSeek Harness Only")
+        XCTAssertEqual(String(localized: AnalyticsAgentFilter.deepseekHarnessOnly.displayName), "DeepSeek Only")
     }
 
     /// Analytics rolls up every source, with no exceptions to remember.

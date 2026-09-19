@@ -4279,7 +4279,7 @@ struct TranscriptHostView: View {
                 indexer: deepSeekHarnessIndexer,
                 sessionID: selection,
                 sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
-                sessionIDLabel: "DeepSeek Harness",
+                sessionIDLabel: "DeepSeek",
                 enableCaching: false
             )
             .opacity(kind == .deepseekHarness ? 1 : 0)

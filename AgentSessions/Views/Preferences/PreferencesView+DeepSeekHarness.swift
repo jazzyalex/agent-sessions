@@ -7,7 +7,7 @@ extension PreferencesView {
     /// storage-section shape. The enabled toggle lives in General.
     var deepseekHarnessTab: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("DeepSeek Harness").font(.title2).fontWeight(.semibold)
+            Text("DeepSeek").font(.title2).fontWeight(.semibold)
 
             if !deepSeekHarnessAgentEnabled {
                 PreferenceCallout {
@@ -60,7 +60,7 @@ extension PreferencesView {
                                 }
                             Button("Choose...", action: pickDeepSeekHarnessSessionsFolder)
                                 .buttonStyle(.borderedProminent)
-                                .help("Select a DeepSeek Harness sessions directory")
+                                .help("Select a DeepSeek sessions directory")
                         }
                     }
 
@@ -136,8 +136,8 @@ extension PreferencesView {
 
     func pickDeepSeekHarnessSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = String(localized: "Select DeepSeek Harness Sessions Directory", comment: "Title in a file selection panel.")
-        panel.message = String(localized: "Choose the DeepSeek Harness sessions folder", comment: "Instructions in a file selection panel.")
+        panel.title = String(localized: "Select DeepSeek Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the DeepSeek sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

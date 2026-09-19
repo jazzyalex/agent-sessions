@@ -140,7 +140,7 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
             }
             let allIssues = result.issues + postParseResult.issues
             let errorText = allIssues.first?.localizedDescription
-                ?? (parseFailure ? "DeepSeek Harness session could not be parsed." : nil)
+                ?? (parseFailure ? "DeepSeek session could not be parsed." : nil)
             let livePaths = Set(parsed.map(\.filePath))
             let projected = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(
                 into: parsed,

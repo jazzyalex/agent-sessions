@@ -9,7 +9,7 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
 
     func testSourceIdentityAndRegistryAdapterIdentity() {
         XCTAssertEqual(source.rawValue, "deepseek-harness")
-        XCTAssertEqual(source.displayName, "DeepSeek Harness")
+        XCTAssertEqual(source.displayName, "DeepSeek")
         XCTAssertEqual(source.iconName, "d.circle")
 
         let adapter = SessionSourceRegistry.adapter(for: source)
@@ -22,7 +22,7 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
     func testDescriptorKeysBinaryAndParsingIdentity() {
         let descriptor = source.descriptor
 
-        XCTAssertEqual(descriptor.shortLabel, "DeepSeek Harness")
+        XCTAssertEqual(descriptor.shortLabel, "DeepSeek")
         XCTAssertEqual(descriptor.badgeInitials, "DS")
         XCTAssertEqual(descriptor.enablementKey, "AgentEnabledDeepSeekHarness")
         XCTAssertEqual(descriptor.cliAvailableKey, "DeepSeekHarnessCLIAvailable")
@@ -38,7 +38,7 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
 
     func testTelemetryUsesTheExactUnauditedReason() {
         let telemetry = source.descriptor.telemetry
-        let reason = "DeepSeek Harness telemetry not yet audited"
+        let reason = "DeepSeek telemetry not yet audited"
 
         XCTAssertEqual(telemetry.configuration, .unavailable(reason))
         XCTAssertEqual(telemetry.tokens, .unavailable(reason))

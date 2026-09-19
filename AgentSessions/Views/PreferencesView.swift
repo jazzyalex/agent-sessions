@@ -1269,7 +1269,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .devin: return "Devin CLI"
         case .fx: return "fx"
         case .cline: return "Cline"
-        case .deepseekHarness: return "DeepSeek Harness"
+        case .deepseekHarness: return "DeepSeek"
         case .about: return "About"
         }
     }

@@ -266,7 +266,7 @@ final class ClineIntegrationTests: XCTestCase {
         XCTAssertEqual(derived[derived.count - 2].1, "Cline")
         XCTAssertNil(derived[derived.count - 2].2)
         XCTAssertEqual(derived.last?.0, .deepseekHarness)
-        XCTAssertEqual(derived.last?.1, "DeepSeek Harness")
+        XCTAssertEqual(derived.last?.1, "DeepSeek")
         XCTAssertNil(derived.last?.2)
     }
 

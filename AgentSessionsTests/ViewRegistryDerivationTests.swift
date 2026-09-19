@@ -56,7 +56,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
             (.devin, "Devin CLI", nil),
             (.fx, "fx", nil),
             (.cline, "Cline", nil),
-            (.deepseekHarness, "DeepSeek Harness", nil)
+            (.deepseekHarness, "DeepSeek", nil)
         ]
 
         XCTAssertEqual(derived.count, expected.count)

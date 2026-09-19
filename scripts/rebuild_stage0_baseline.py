@@ -99,7 +99,7 @@ def _baseline_paths(agent: str) -> list[str]:
             if line and not line.startswith("    ") and not line.startswith("      "):
                 break
             stripped = line.strip()
-            if stripped.startswith('- "Resources/'):
+            if stripped.startswith(('- "Resources/', '- "AgentSessionsTests/Resources/')):
                 out.append(stripped[3:].strip('"'))
     return out
 

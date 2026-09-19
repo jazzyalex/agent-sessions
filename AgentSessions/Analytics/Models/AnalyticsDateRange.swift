@@ -77,6 +77,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
     case devinOnly = "Devin Only"
     case fxOnly = "fx Only"
     case clineOnly = "Cline Only"
+    // Persisted picker ID; keep the legacy raw value while the visible label changes.
     case deepseekHarnessOnly = "DeepSeek Harness Only"
 
     var id: String { rawValue }
@@ -100,7 +101,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
         case .devinOnly: return "Devin Only"
         case .fxOnly: return "fx Only"
         case .clineOnly: return "Cline Only"
-        case .deepseekHarnessOnly: return "DeepSeek Harness Only"
+        case .deepseekHarnessOnly: return "DeepSeek Only"
         }
     }
 

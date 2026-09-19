@@ -38,7 +38,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin: return "Devin CLI"
         case .fx: return "fx"
         case .cline: return "Cline"
-        case .deepseekHarness: return "DeepSeek Harness"
+        case .deepseekHarness: return "DeepSeek"
         }
     }
 
@@ -103,7 +103,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .devin:    return "Browse your Devin CLI sessions"
         case .fx:       return "Browse your fx coding agent sessions"
         case .cline:    return "Browse your Cline CLI and Desktop sessions"
-        case .deepseekHarness: return "Browse your DeepSeek Harness sessions"
+        case .deepseekHarness: return "Browse your DeepSeek sessions"
         }
     }
 }

@@ -8,8 +8,8 @@ extension SessionSourceDescriptor {
         let isBinaryInstalled: (AvailabilityContext) -> Bool = { $0.detectBinary("dsh") }
         return SessionSourceDescriptor(
             source: .deepseekHarness,
-            telemetry: .allUnavailable("DeepSeek Harness telemetry not yet audited"),
-            shortLabel: "DeepSeek Harness",
+            telemetry: .allUnavailable("DeepSeek telemetry not yet audited"),
+            shortLabel: "DeepSeek",
             badgeInitials: "DS",
             // DSH true-color brand ink #4D6BFE. The shared calibrated path preserves
             // that light appearance while deriving the app's adaptive dark variant.

@@ -260,11 +260,11 @@ final class WhatsNewCatalogTests: XCTestCase {
         let teaser = WhatsNewCatalog.teaser(for: "5.5")
         XCTAssertNotNil(teaser)
         let teaserText = teaser.map { String(localized: $0) }
-        XCTAssertTrue(teaserText?.contains("DeepSeek Harness") ?? false, "teaser: \(teaserText ?? "nil")")
+        XCTAssertTrue(teaserText?.contains("DeepSeek") ?? false, "teaser: \(teaserText ?? "nil")")
         XCTAssertTrue(teaserText?.contains("v0–v3") ?? false, "teaser: \(teaserText ?? "nil")")
 
         let items = WhatsNewCatalog.assemble(for: "5.5")
-        XCTAssertEqual(items.map { String(localized: $0.title) }, ["New: DeepSeek Harness"])
+        XCTAssertEqual(items.map { String(localized: $0.title) }, ["New: DeepSeek"])
     }
 
     func testRelease53HasLocalizedAuthoredHighlightsAndSupport() {

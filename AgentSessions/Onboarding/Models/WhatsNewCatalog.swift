@@ -114,7 +114,7 @@ enum WhatsNewCatalog {
         "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.",
         "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach.",
         "5.4": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place.",
-        "5.5": "DeepSeek Harness joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories."
+        "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [

@@ -235,7 +235,7 @@ final class SessionSourceRegistryTests: XCTestCase {
         .devin: "Devin CLI",
         .fx: "fx",
         .cline: "Cline",
-        .deepseekHarness: "DeepSeek Harness"
+        .deepseekHarness: "DeepSeek"
     ]
 
     func testBrandAccentMatchesPinnedGoldens() {

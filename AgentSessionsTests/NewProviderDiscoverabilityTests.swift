@@ -34,7 +34,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
     func testDeepSeekHarnessVersionIntroduced() {
         XCTAssertEqual(SessionSource.deepseekHarness.versionIntroduced, "5.5")
         XCTAssertEqual(String(localized: SessionSource.deepseekHarness.featureDescription),
-                       "Browse your DeepSeek Harness sessions")
+                       "Browse your DeepSeek sessions")
     }
 
     func testOriginalProvidersHaveEarlyVersions() {
@@ -228,7 +228,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(items.count, 1)
         let item = items[0]
         XCTAssertEqual(item.kind, .highlight)
-        XCTAssertEqual(String(localized: item.title), "New: DeepSeek Harness")
+        XCTAssertEqual(String(localized: item.title), "New: DeepSeek")
         XCTAssertEqual(item.iconSystemName, SessionSource.deepseekHarness.iconName)
     }
 

@@ -336,7 +336,7 @@ agents:
       - "telemetry, usage, quota, and image extraction"
       - "custom required event extensions outside the pinned 58-event catalog"
     notes:
-      - "Compatibility is proven against the committed sanitized synthetic corpus and the pinned DSH checkout; no private ~/.dsh history was inspected."
+      - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout; an opt-in local UI smoke test opened real sessions, but this is not a representative compatibility corpus."
       - "Weekly monitoring compares upstream releases, fingerprints the checked-in v0-v3 plain fixtures against a non-empty baseline, and verifies every plain/Zstandard fixture hash. It deliberately does not read ~/.dsh without separate owner authorization."
       - "Fork provenance is retained as metadata while forks remain roots; DSH archive flags are ignored; incomplete or corrupt artifacts remain invisible."
     evidence_docs:
