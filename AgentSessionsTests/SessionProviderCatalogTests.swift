@@ -47,6 +47,7 @@ final class SessionProviderCatalogTests: XCTestCase {
         assertIndexer(catalog, source: .devin, is: DevinSessionIndexer.self)
         assertIndexer(catalog, source: .fx, is: FxSessionIndexer.self)
         assertIndexer(catalog, source: .cline, is: ClineSessionIndexer.self)
+        assertIndexer(catalog, source: .deepseekHarness, is: DeepSeekHarnessSessionIndexer.self)
     }
 
     /// Registry order must mirror `SessionSource.allCases` order (SPEC §10.1) — the catalog

@@ -305,6 +305,114 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         XCTAssertEqual(results.first?.toolOutput, "file contents here")
     }
 
+    // MARK: - Tool-call lifecycles
+
+    private func assistantStepData(id: String, text: String, turn: Int, step: Int,
+                                   toolCall: (id: String, name: String, args: String)) -> [String: Any] {
+        let stream: [[String: Any]] = [
+            ["type": "text-chunks", "time0": Int(baseTime), "index": 0,
+             "dt": [], "texts": [text]],
+            ["type": "tool-call-chunks", "time0": Int(baseTime) + 1,
+             "index": 1, "dt": [], "id": toolCall.id,
+             "name": toolCall.name, "args": [toolCall.args]],
+            ["type": "chunk", "time": Int(baseTime) + 2,
+             "chunk": ["type": "finish", "reason": ["kind": "stop"]]],
+        ]
+        return [
+            "turn": turn,
+            "step": step,
+            "message": [
+                "id": id,
+                "role": "assistant",
+                "content": [
+                    ["type": "text", "text": text],
+                    ["type": "tool-call", "id": toolCall.id,
+                     "name": toolCall.name, "arguments": toolCall.args],
+                ],
+                "source": ["kind": "model", "provider": "deepseek", "model": "deepseek-chat"],
+            ] as [String: Any],
+            "stream": stream,
+        ]
+    }
+
+    private func toolResultStepData(messageID: String, callID: String, text: String,
+                                    turn: Int, step: Int) -> [String: Any] {
+        [
+            "turn": turn,
+            "step": step,
+            "message": [
+                "id": messageID,
+                "role": "user",
+                "content": [[
+                    "type": "tool-result",
+                    "toolCallId": callID,
+                    "content": [["type": "text", "text": text]],
+                    "isError": false,
+                ]],
+                "source": ["kind": "tool", "callId": callID],
+            ] as [String: Any],
+        ]
+    }
+
+    /// The same raw call id in two steps with different tools must emit two
+    /// distinct invocations: the first result settles the first lifecycle,
+    /// so the second step's block + log event pair on their own
+    /// name/arguments/result instead of collapsing into the first.
+    func testSameCallIDAcrossStepsEmitsDistinctInvocations() throws {
+        let rows: [[String: Any]] = [
+            header(id: "dsh-parser-reuse"),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("user/message", 2, data: userData(id: "u-1", text: "Do two things"),
+                     surfaceAppend: true),
+            envelope("assistant/message", 3,
+                     data: assistantStepData(id: "a-1", text: "First.", turn: 1, step: 1,
+                                             toolCall: (id: "call-1", name: "read",
+                                                        args: "{\"path\":\"a\"}")),
+                     surfaceAppend: true),
+            envelope("tool/call", 4, data: [
+                "turn": 1, "step": 1, "callId": "call-1", "name": "read",
+                "arguments": "{\"path\":\"a\"}",
+            ]),
+            envelope("tool/result", 5,
+                     data: toolResultStepData(messageID: "r-1", callID: "call-1",
+                                              text: "output A", turn: 1, step: 1),
+                     surfaceAppend: true),
+            envelope("step/end", 6, data: ["turn": 1, "step": 1]),
+            envelope("step/start", 7, data: ["turn": 1, "step": 2]),
+            envelope("assistant/message", 8,
+                     data: assistantStepData(id: "a-2", text: "Second.", turn: 1, step: 2,
+                                             toolCall: (id: "call-1", name: "write",
+                                                        args: "{\"path\":\"b\"}")),
+                     surfaceAppend: true),
+            envelope("tool/call", 9, data: [
+                "turn": 1, "step": 2, "callId": "call-1", "name": "write",
+                "arguments": "{\"path\":\"b\"}",
+            ]),
+            envelope("tool/result", 10,
+                     data: toolResultStepData(messageID: "r-2", callID: "call-1",
+                                              text: "output B", turn: 1, step: 2),
+                     surfaceAppend: true),
+            envelope("step/end", 11, data: ["turn": 1, "step": 2]),
+            envelope("turn/end", 12, data: ["turn": 1, "reason": ["kind": "completed"]]),
+        ]
+        let url = try writeSession(filename: "session.v3.jsonl", rows: rows)
+        guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        let calls = full.events.filter { $0.kind == .tool_call }
+        XCTAssertEqual(calls.count, 2, "each step owns a distinct invocation")
+        XCTAssertEqual(calls.map(\.id), ["dsh-call-call-1", "dsh-call-call-1-2"])
+        XCTAssertEqual(calls.map { $0.toolName }, ["read", "write"])
+        XCTAssertTrue((calls[0].toolInput ?? "").contains("\"a\""))
+        XCTAssertTrue((calls[1].toolInput ?? "").contains("\"b\""))
+        let results = full.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results.map { $0.toolName }, ["read", "write"],
+                       "each result backfills the name of its own lifecycle")
+        XCTAssertEqual(results.map { $0.toolOutput }, ["output A", "output B"])
+    }
+
     // MARK: - Attachments
 
     func testAttachmentPlaceholdersAreMetadataOnly() throws {

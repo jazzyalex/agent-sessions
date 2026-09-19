@@ -52,11 +52,15 @@ import Foundation
 /// - `assistant/attempt` → diagnostic only. The normalizer already flags it and
 ///   this parser skips it, so failed/retried attempts never contribute
 ///   transcript text, titles, counts, or model labels.
-/// - assistant `tool-call` block + `tool/call` event with the same id → exactly
-///   one `.tool_call` event keyed by call id. The block owns model-request
-///   provenance, the log event owns recorded-start metadata; when both exist
-///   the merged raw payload retains both. Unmatched blocks and unmatched log
-///   events are each preserved explicitly, never paired by invention.
+/// - assistant `tool-call` block + `tool/call` event with the same id in
+///   the same turn/step → exactly one `.tool_call` event for that
+///   lifecycle. The block owns model-request provenance, the log event owns
+///   recorded-start metadata; when both exist the merged raw payload retains
+///   both. A `tool/result` settles the lifecycle, so a later reuse of the
+///   same raw call id (another step, or a new advertisement after the
+///   result) emits a distinct invocation with its own name/arguments.
+///   Unmatched blocks and unmatched log events are each preserved
+///   explicitly, never paired by invention across a turn/step boundary.
 /// - `tool/result` → one `.tool_result` event per envelope, paired to its call
 ///   by `toolCallId`; the tool name is backfilled from the matching call
 ///   record when the result itself carries no name. Nested image/file blocks
@@ -112,13 +116,27 @@ enum DeepSeekHarnessSessionParser {
 
     // MARK: - Projection
 
-    private struct ToolCallInfo {
+    /// One tool-call lifecycle: an assistant `tool-call` block and/or its
+    /// `tool/call` log event within a single turn/step scope, settled by
+    /// its `tool/result`. A later reuse of the same raw call id starts a
+    /// distinct invocation with its own name/arguments/result.
+    private struct ToolCallInvocation {
+        let callID: String
+        let turn: Int?
+        let step: Int?
+        /// Per-call-id ordinal. The first invocation keeps the historical
+        /// `dsh-call-<id>` event id; later reuses are suffixed so every
+        /// invocation stays distinct.
+        let occurrence: Int
         var name: String?
         var arguments: String?
         var block: [String: Any]?
         var blockMessageID: String?
         var event: [String: Any]?
         var eventTime: Date?
+        var settled = false
+
+        var scopeKey: String { "\(turn ?? -1):\(step ?? -1):\(callID)" }
     }
 
     private struct Projection {
@@ -176,13 +194,41 @@ enum DeepSeekHarnessSessionParser {
         var fallbackAssistantModel: String?
         var firstDirectUserText: String?
 
-        // Phase A: collect tool-call records from every content block and every
-        // log event so Phase B can emit exactly one invocation per call id
-        // regardless of which representation comes first in the log.
-        var callsByID: [String: ToolCallInfo] = [:]
-        func recordCall(id: String, mutate: (inout ToolCallInfo) -> Void) {
-            if callsByID[id] == nil { callsByID[id] = ToolCallInfo() }
-            mutate(&callsByID[id]!)
+        // Phase A: correlate tool-call records into lifecycle-scoped
+        // invocations in log order. An assistant `tool-call` block and the
+        // `tool/call` log event with the same id in the same turn/step
+        // form one invocation; its `tool/result` settles it so a later
+        // reuse of the same raw call id starts a distinct invocation with
+        // its own name/arguments/result. Turn/step scopes are part of the
+        // correlation key, so a block can never pair across a boundary.
+        var invocations: [ToolCallInvocation] = []
+        var activeByScope: [String: Int] = [:]
+        var occurrencesByCallID: [String: Int] = [:]
+        // Block position (message seq + call id) and log-event position
+        // (event seq) resolve to their invocation in Phase B; result
+        // position resolves for name backfill.
+        var blockOwner: [String: Int] = [:]
+        var eventOwner: [Int: Int] = [:]
+        var resultOwner: [Int: Int] = [:]
+
+        func scopeKey(turn: Int?, step: Int?, callID: String) -> String {
+            "\(turn ?? -1):\(step ?? -1):\(callID)"
+        }
+
+        func takeActive(turn: Int?, step: Int?, callID: String) -> Int? {
+            guard let index = activeByScope[scopeKey(turn: turn, step: step, callID: callID)],
+                  !invocations[index].settled else { return nil }
+            return index
+        }
+
+        func createInvocation(callID: String, turn: Int?, step: Int?) -> Int {
+            let occurrence = occurrencesByCallID[callID, default: 0]
+            occurrencesByCallID[callID] = occurrence + 1
+            invocations.append(ToolCallInvocation(
+                callID: callID, turn: turn, step: step, occurrence: occurrence))
+            let index = invocations.count - 1
+            activeByScope[scopeKey(turn: turn, step: step, callID: callID)] = index
+            return index
         }
 
         for item in events {
@@ -191,43 +237,73 @@ enum DeepSeekHarnessSessionParser {
             let data = item.data
             switch disposition {
             case .assistantRendering:
+                let turn = data["turn"] as? Int
+                let step = data["step"] as? Int
                 if let message = data["message"] as? [String: Any],
                    let blocks = message["content"] as? [[String: Any]] {
                     for block in blocks {
                         guard (block["type"] as? String) == "tool-call",
                               let id = nonEmptyString(block["id"]) else { continue }
-                        recordCall(id: id) { info in
-                            if info.block == nil {
-                                info.block = block
-                                info.blockMessageID = message["id"] as? String
-                            }
-                            if info.name == nil { info.name = nonEmptyString(block["name"]) }
-                            if info.arguments == nil { info.arguments = argumentsString(block["arguments"]) }
+                        let index = takeActive(turn: turn, step: step, callID: id)
+                            ?? createInvocation(callID: id, turn: turn, step: step)
+                        if invocations[index].block == nil {
+                            invocations[index].block = block
+                            invocations[index].blockMessageID = message["id"] as? String
                         }
+                        if invocations[index].name == nil {
+                            invocations[index].name = nonEmptyString(block["name"])
+                        }
+                        if invocations[index].arguments == nil {
+                            invocations[index].arguments = argumentsString(block["arguments"])
+                        }
+                        blockOwner["\(item.envelope.sequence):\(id)"] = index
                     }
                 }
             case .toolCall:
                 if let id = nonEmptyString(data["callId"]) {
-                    recordCall(id: id) { info in
-                        if info.event == nil {
-                            info.event = item.envelope.rawObject
-                            info.eventTime = eventDate(milliseconds: item.envelope.timeMilliseconds)
+                    let turn = data["turn"] as? Int
+                    let step = data["step"] as? Int
+                    let index = takeActive(turn: turn, step: step, callID: id)
+                        ?? createInvocation(callID: id, turn: turn, step: step)
+                    if invocations[index].event == nil {
+                        invocations[index].event = item.envelope.rawObject
+                        invocations[index].eventTime = eventDate(milliseconds: item.envelope.timeMilliseconds)
+                    }
+                    if let name = nonEmptyString(data["name"]) { invocations[index].name = name }
+                    if let args = argumentsString(data["arguments"]) { invocations[index].arguments = args }
+                    eventOwner[item.envelope.sequence] = index
+                }
+            case .toolResult:
+                let turn = data["turn"] as? Int
+                let step = data["step"] as? Int
+                let message = data["message"] as? [String: Any]
+                let callID = (message?["source"] as? [String: Any])?["callId"] as? String
+                    ?? firstToolResultBlock(message?["content"])?.toolCallID
+                if let callID {
+                    // A result belongs only to an active invocation in its
+                    // own turn/step. Falling back by raw call id would pair
+                    // an unmatched result across a lifecycle boundary and
+                    // could settle or backfill the wrong invocation.
+                    let settledIndex = takeActive(turn: turn, step: step, callID: callID)
+                    if let settledIndex {
+                        invocations[settledIndex].settled = true
+                        let key = invocations[settledIndex].scopeKey
+                        if activeByScope[key] == settledIndex {
+                            activeByScope.removeValue(forKey: key)
                         }
-                        if let name = nonEmptyString(data["name"]) { info.name = name }
-                        if let args = argumentsString(data["arguments"]) { info.arguments = args }
+                        resultOwner[item.envelope.sequence] = settledIndex
                     }
                 }
-            case .userMessage, .systemMetadata, .diagnosticAttempt, .toolResult,
-                 .requestHeader, .requestContext, .turnLifecycle, .seedBoundary,
-                 .intentionallyIgnored:
+            case .userMessage, .systemMetadata, .diagnosticAttempt,
+                  .requestHeader, .requestContext, .turnLifecycle, .seedBoundary,
+                  .intentionallyIgnored:
                 break
             }
         }
 
         // Phase B: emit in log order.
         var rows: [SessionEvent] = []
-        var emittedCallIDs = Set<String>()
-        let deferredBlockIDs = Set(callsByID.filter { $0.value.event != nil }.map(\.key))
+        var emittedInvocations = Set<Int>()
 
         for item in events {
             guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
@@ -248,8 +324,8 @@ enum DeepSeekHarnessSessionParser {
             case .assistantRendering:
                 emitAssistantMessage(data: data, sequence: envelope.sequence, timestamp: timestamp,
                                      raw: boundedRaw(envelope.rawObject), rows: &rows,
-                                     deferredBlockIDs: deferredBlockIDs, emittedCallIDs: &emittedCallIDs,
-                                     callsByID: callsByID)
+                                     blockOwner: blockOwner, invocations: invocations,
+                                     emittedInvocations: &emittedInvocations)
                 if fallbackAssistantModel == nil,
                    let message = data["message"] as? [String: Any],
                    let source = message["source"] as? [String: Any],
@@ -257,11 +333,12 @@ enum DeepSeekHarnessSessionParser {
                     fallbackAssistantModel = nonEmptyString(source["model"])
                 }
             case .toolCall:
-                if let id = nonEmptyString(data["callId"]), !emittedCallIDs.contains(id),
-                   let info = callsByID[id] {
-                    rows.append(toolCallEvent(callID: id, info: info, sequence: envelope.sequence,
+                if let index = eventOwner[envelope.sequence],
+                   !emittedInvocations.contains(index) {
+                    rows.append(toolCallEvent(invocation: invocations[index],
+                                              sequence: envelope.sequence,
                                               timestamp: timestamp))
-                    emittedCallIDs.insert(id)
+                    emittedInvocations.insert(index)
                 } else if nonEmptyString(data["callId"]) == nil {
                     // Malformed call record with no correlation id: preserve
                     // the evidence explicitly rather than dropping it.
@@ -273,7 +350,8 @@ enum DeepSeekHarnessSessionParser {
                 }
             case .toolResult:
                 emitToolResult(data: data, sequence: envelope.sequence, timestamp: timestamp,
-                               raw: boundedRaw(envelope.rawObject), rows: &rows, callsByID: callsByID)
+                               raw: boundedRaw(envelope.rawObject), rows: &rows,
+                               resultOwner: resultOwner, invocations: invocations)
             case .requestHeader:
                 if let config = (data["header"] as? [String: Any])?["config"] as? [String: Any] {
                     if let name = nonEmptyString(config["model"]) { model = name }
@@ -349,9 +427,9 @@ enum DeepSeekHarnessSessionParser {
 
     private static func emitAssistantMessage(data: [String: Any], sequence: Int, timestamp: Date?,
                                              raw: String, rows: inout [SessionEvent],
-                                             deferredBlockIDs: Set<String>,
-                                             emittedCallIDs: inout Set<String>,
-                                             callsByID: [String: ToolCallInfo]) {
+                                             blockOwner: [String: Int],
+                                             invocations: [ToolCallInvocation],
+                                             emittedInvocations: inout Set<Int>) {
         guard let message = data["message"] as? [String: Any] else { return }
         let blocks = message["content"] as? [[String: Any]] ?? []
         var text = joinTextBlocks(blocks)
@@ -375,21 +453,27 @@ enum DeepSeekHarnessSessionParser {
         emitAttachmentPlaceholders(blocks: blocks, sequence: sequence, timestamp: timestamp,
                                    messageID: message["id"] as? String, rows: &rows)
         // Tool-call blocks whose invocation never appears as a log event are
-        // preserved here; blocks paired with a `tool/call` event are emitted
-        // at the event position with both provenances retained.
+        // preserved here; blocks paired with a `tool/call` event in the same
+        // lifecycle are emitted at the event position with both provenances
+        // retained. A block whose invocation was settled by its result (or
+        // lives in another turn/step) owns a distinct invocation and emits
+        // separately.
         for block in blocks {
             guard (block["type"] as? String) == "tool-call",
                   let id = nonEmptyString(block["id"]),
-                  !deferredBlockIDs.contains(id), !emittedCallIDs.contains(id),
-                  let info = callsByID[id] else { continue }
-            rows.append(toolCallEvent(callID: id, info: info, sequence: sequence, timestamp: timestamp))
-            emittedCallIDs.insert(id)
+                  let index = blockOwner["\(sequence):\(id)"],
+                  invocations[index].event == nil,
+                  !emittedInvocations.contains(index) else { continue }
+            rows.append(toolCallEvent(invocation: invocations[index],
+                                      sequence: sequence, timestamp: timestamp))
+            emittedInvocations.insert(index)
         }
     }
 
     private static func emitToolResult(data: [String: Any], sequence: Int, timestamp: Date?,
                                        raw: String, rows: inout [SessionEvent],
-                                       callsByID: [String: ToolCallInfo]) {
+                                       resultOwner: [Int: Int],
+                                       invocations: [ToolCallInvocation]) {
         guard let message = data["message"] as? [String: Any] else {
             // Malformed result with no message envelope: preserve explicitly.
             rows.append(makeEvent(id: "dsh-\(sequence)-result", timestamp: timestamp,
@@ -405,21 +489,28 @@ enum DeepSeekHarnessSessionParser {
         let output = capped(joinResultText(nested))
         rows.append(makeEvent(id: "dsh-\(sequence)-result", timestamp: timestamp,
                               kind: .tool_result, role: "tool", text: nil,
-                              toolName: callID.flatMap { callsByID[$0]?.name },
+                              toolName: resultOwner[sequence].flatMap { invocations[$0].name },
                               toolOutput: output, messageID: callID ?? (message["id"] as? String),
                               raw: raw))
     }
 
-    private static func toolCallEvent(callID: String, info: ToolCallInfo, sequence: Int,
+    private static func toolCallEvent(invocation: ToolCallInvocation, sequence: Int,
                                       timestamp: Date?) -> SessionEvent {
         var provenance: [String: Any] = [:]
-        if let block = info.block { provenance["block"] = block }
-        if let event = info.event { provenance["event"] = event }
+        if let block = invocation.block { provenance["block"] = block }
+        if let event = invocation.event { provenance["event"] = event }
         let raw = provenance.isEmpty ? "{}" : boundedRaw(provenance)
-        return makeEvent(id: "dsh-call-\(callID)", timestamp: timestamp ?? info.eventTime,
+        // The first use of a raw call id keeps the historical event id;
+        // later lifecycle-scoped reuses are suffixed so each invocation
+        // stays addressable.
+        let id = invocation.occurrence == 0
+            ? "dsh-call-\(invocation.callID)"
+            : "dsh-call-\(invocation.callID)-\(invocation.occurrence + 1)"
+        return makeEvent(id: id, timestamp: timestamp ?? invocation.eventTime,
                          kind: .tool_call, role: "assistant", text: nil,
-                         toolName: info.name, toolInput: info.arguments.flatMap { capped($0) },
-                         messageID: callID, parentID: info.blockMessageID, raw: raw)
+                         toolName: invocation.name,
+                         toolInput: invocation.arguments.flatMap { capped($0) },
+                         messageID: invocation.callID, parentID: invocation.blockMessageID, raw: raw)
     }
 
     private static func emitAttachmentPlaceholders(blocks: [[String: Any]], sequence: Int,

@@ -113,7 +113,11 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
                             surfaceOp: .append))
         ]
         if includeConsumedReference {
-            rows.append(.event(envelope("command/done", 5, data: ["sourceEventSeq": 2])))
+            rows.append(.event(envelope("command/done", 5, data: [
+                "commandId": "command-1",
+                "kind": "success",
+                "sourceEventSeq": 2,
+            ])))
         } else {
             rows.append(.event(envelope("step/end", 5, data: ["turn": 1, "step": 1])))
         }

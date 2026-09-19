@@ -160,6 +160,129 @@ enum DeepSeekHarnessPayloadValidator {
 
     static let v2SurfaceTypes: Set<String> = ["user/message", "assistant/message", "tool/result"]
 
+    // MARK: - Released v0/v1 disposition inventory
+
+    /// Exact top-level payload-member inventory frozen for released v0/v1,
+    /// ported from `session-format-v0-to-v1/src/dispositions.ts`
+    /// (`RELEASED_V0_EVENT_DISPOSITIONS`). Released v1 shares this table;
+    /// the only v1 delta is the optional `sessionFormatVersion` on the
+    /// delivery marker, applied in `assertReleasedV0EventPayload`.
+    /// Never use `v2Dispositions` for v0/v1 admission: v2 requires the
+    /// embedded `stream` on `assistant/message` and the `throughSeq` marker
+    /// shape, neither of which exists at v0/v1.
+    static let v0Dispositions: [String: Disposition] = [
+        "agent-preset/selected": Disposition(required: ["agentPreset"], optional: [], opaque: []),
+        "agent/inbox/spliced": Disposition(
+            required: ["target", "start", "inserted"],
+            optional: ["removedCount", "outcome"], opaque: []),
+        "approval/asked": Disposition(
+            required: ["id", "toolName"], optional: ["callId", "reason"], opaque: []),
+        "approval/decided": Disposition(required: ["id", "outcome"], optional: [], opaque: []),
+        "approval/policy": Disposition(required: ["policy"], optional: ["source"], opaque: []),
+        "assistant/chunk": Disposition(required: ["turn", "step", "chunk"], optional: [], opaque: []),
+        "assistant/message": Disposition(
+            required: ["turn", "step", "message"],
+            optional: ["usage", "interrupted"], opaque: []),
+        "command/done": Disposition(
+            required: ["commandId", "kind"], optional: ["text", "sourceEventSeq"], opaque: []),
+        "command/run": Disposition(
+            required: ["commandId", "name", "source"], optional: ["args"], opaque: []),
+        "compaction/end": Disposition(
+            required: ["compactionId", "turn"],
+            optional: ["sourceCommandId", "error"], opaque: []),
+        "compaction/prune": Disposition(
+            required: ["shadowedRange", "shadowedSeqs", "shadowedTokenCount"],
+            optional: [], opaque: []),
+        "compaction/start": Disposition(
+            required: ["compactionId", "turn"], optional: ["sourceCommandId"], opaque: []),
+        "compaction/summary": Disposition(
+            required: ["compactionId", "summary", "shadowedRange", "shadowedSeqs",
+                       "shadowedTokenCount", "provider", "model"],
+            optional: ["sourceCommandId", "maxTokens", "usage", "rawOutput", "llmStreamCall"],
+            opaque: []),
+        "feedback/record": Disposition(required: ["text"], optional: [], opaque: []),
+        "goal/change": Disposition(
+            required: ["kind", "version", "operation"],
+            optional: ["goal", "roundsStarted", "createdAt", "updatedAt", "cleared", "clearedAt"],
+            opaque: []),
+        "hook/invoked": Disposition(
+            required: ["turn", "point", "dialect", "handlerId"],
+            optional: ["matcher"], opaque: []),
+        "hook/result": Disposition(
+            required: ["turn", "point", "handlerId", "decision", "durationMs"],
+            optional: ["exitCode", "stderrSummary"], opaque: []),
+        "llm/retry": Disposition(
+            required: ["retryId", "turn", "step", "provider", "mode", "policyKey",
+                       "retry", "delayMs", "failure"],
+            optional: ["maxRetries"], opaque: []),
+        "llm/retry-started": Disposition(
+            required: ["retryId", "turn", "step", "retry"], optional: [], opaque: []),
+        "model/selection": Disposition(
+            required: ["provider", "model"], optional: ["reasoningEffort"], opaque: []),
+        "permission/preset": Disposition(required: ["preset"], optional: [], opaque: []),
+        "plan/mode": Disposition(required: ["active"], optional: [], opaque: []),
+        "request/context": Disposition(
+            required: ["provider", "model"], optional: ["contextWindow"], opaque: []),
+        "request/header": Disposition(
+            required: ["header", "reason"], optional: ["startsSeries"], opaque: []),
+        "sandbox/mode": Disposition(required: ["mode"], optional: ["source"], opaque: []),
+        "schedule/change": Disposition(
+            required: ["version", "operation"],
+            optional: ["schedule", "id", "acceptedAt"], opaque: []),
+        "session-log-deepseek/delivery-accepted": Disposition(
+            required: ["sessionId", "throughSeq"], optional: [], opaque: []),
+        "session/end-seed": Disposition(required: [], optional: [], opaque: []),
+        "session/title": Disposition(
+            required: ["title", "messageSeqs", "source"], optional: [], opaque: []),
+        "session/title-llm-request": Disposition(
+            required: ["titleProvider", "messageSeqs", "route", "system", "messages", "maxTokens"],
+            optional: [], opaque: []),
+        "step/end": Disposition(required: ["turn", "step"], optional: [], opaque: []),
+        "step/start": Disposition(required: ["turn", "step"], optional: [], opaque: []),
+        "subagent/descriptor": Disposition(
+            required: ["mode", "version", "provider"],
+            optional: ["label", "agentProvider", "agentModel", "agentReasoningEffort",
+                       "persona", "toolFilter"],
+            opaque: []),
+        "subagent/model-selection-policy": Disposition(
+            required: ["allowedModels"], optional: [], opaque: []),
+        "team/member": Disposition(
+            required: ["version", "teamId", "member"], optional: [], opaque: []),
+        "team/message/delivered": Disposition(
+            required: ["version", "teamId", "messageId", "targetId"], optional: [], opaque: []),
+        "team/message/queued": Disposition(
+            required: ["version", "teamId", "message"], optional: [], opaque: []),
+        "team/task": Disposition(
+            required: ["version", "teamId", "task"], optional: [], opaque: []),
+        "todo/write": Disposition(required: ["todos"], optional: [], opaque: []),
+        "tool-workflow/agent-end": Disposition(
+            required: ["runId", "seq", "outcome"], optional: [], opaque: []),
+        "tool-workflow/agent-start": Disposition(
+            required: ["runId", "seq", "label", "childId"], optional: ["phase"], opaque: []),
+        "tool-workflow/run-end": Disposition(
+            required: ["runId", "stopReason"], optional: [], opaque: []),
+        "tool-workflow/run-start": Disposition(
+            required: ["runId", "name"], optional: [], opaque: []),
+        "tool/call": Disposition(
+            required: ["turn", "step", "callId", "name", "arguments"], optional: [], opaque: []),
+        "tool/code-dispatch": Disposition(
+            required: ["rootCallId", "parentCallId", "subCallId", "name", "arguments",
+                       "isError", "content"],
+            optional: [], opaque: ["arguments"]),
+        "tool/code-dispatch-start": Disposition(
+            required: ["rootCallId", "parentCallId", "subCallId", "name", "arguments"],
+            optional: [], opaque: ["arguments"]),
+        "tool/result": Disposition(
+            required: ["turn", "step", "message"],
+            optional: ["error", "meta"], opaque: ["meta"]),
+        "turn/end": Disposition(required: ["turn", "reason"], optional: [], opaque: []),
+        "turn/start": Disposition(required: ["turn"], optional: [], opaque: []),
+        "user/message": Disposition(
+            required: ["role", "id", "content", "source"], optional: [], opaque: []),
+        "web/deepseek-search-llm-request": Disposition(
+            required: ["endpoint", "apiVersion", "body"], optional: [], opaque: []),
+    ]
+
     static let v2SourceKinds: Set<String> = [
         "user", "plugin", "model", "tool", "agent-instructions", "session-reference",
         "team-message", "goal", "skill-invocation", "skill-catalog", "coordinator",
@@ -169,6 +292,56 @@ enum DeepSeekHarnessPayloadValidator {
     static let v2ContentKinds: Set<String> = [
         "text", "reasoning", "image", "file", "tool-call", "tool-result",
     ]
+
+    // MARK: - V0/V1 released payload admission
+
+    /// Ports `assertReleasedEventPayload(event, version)` from
+    /// `session-format-v0-to-v1/src/validation.ts`: exact disposition key
+    /// admission, opaque lossless-JSON retention, and nested payload
+    /// semantics for one known event after (v0) or before (v1) legacy
+    /// transformation. `version` is the payload generation (0 or 1).
+    ///
+    /// Callers skip `assistant/chunk`: v0 skips it after legacy
+    /// normalization and v1 skips it before transformation, matching
+    /// upstream (`normalizeReleasedV0Event` and the decoded v1-to-v2
+    /// stage). Unknown types fail closed even when ignorable.
+    static func assertReleasedV0EventPayload(
+        _ event: DeepSeekHarnessEnvelope,
+        version: Int
+    ) throws {
+        guard let admitted = v0Dispositions[event.type] else {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "format v0 contains unknown historical event type \"\(event.type)\"" +
+                " at seq \(event.sequence);" +
+                " migration refuses unknown historical events even when ignorable")
+        }
+        let data = try record(event.data, "\(event.type) \(event.sequence) data")
+        if event.type == "subagent/descriptor", DeepSeekHarnessJSON.count(data["version"]) != 3 {
+            let descriptorVersion = try countValue(
+                data["version"], "\(event.type) \(event.sequence) version")
+            if version == 0 {
+                throw DeepSeekHarnessFormatError.unsupportedMigration(
+                    "\(event.type) \(event.sequence)" +
+                    " uses unsupported descriptor version \(descriptorVersion)")
+            }
+            return
+        }
+        var optional = admitted.optional
+        if version == 1, event.type == "session-log-deepseek/delivery-accepted" {
+            optional += ["sessionFormatVersion"]
+        }
+        try keys(data, required: admitted.required, optional: optional,
+                 label: "\(event.type) \(event.sequence) data")
+        for key in admitted.opaque {
+            if let value = data[key], !isLosslessJSON(value) {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(event.type) \(event.sequence) opaque \(key) is not lossless JSON")
+            }
+        }
+        try assertReleasedPayloadSemantics(
+            event, data: data,
+            subject: "\(event.type) \(event.sequence)", version: version)
+    }
 
     // MARK: - V2 pre-migration admission
 

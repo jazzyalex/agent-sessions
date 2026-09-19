@@ -468,6 +468,39 @@ final class DeepSeekHarnessRelationshipValidatorTests: XCTestCase {
         ], match: "omit a shadowed surface node")
     }
 
+    func testInvertedReplacementSpanOverReorderedSurfacePasses() throws {
+        // Two-stage valid replacement: seq 3 first replaces seq 1 so the
+        // live surface becomes [3, 2]; the later span start=3,end=2 is
+        // numerically inverted but follows live-surface order. Admission
+        // requires both endpoints to be earlier events only; order on the
+        // live surface stays enforced by the relationship validator.
+        let parseHeader = DeepSeekHarnessHeader(
+            version: 3, id: "dsh-rel-reorder", createdAtMilliseconds: baseTime,
+            cwd: "/tmp/dsh-tests", parentSessionID: nil, isSeeded: false,
+            origin: nil, delegationDepth: 0, agentPreset: nil)
+        let rows: [DeepSeekHarnessPhysicalRow] = [
+            .event(envelope("turn/start", 0, data: ["turn": 1])),
+            .event(envelope("user/message", 1, data: userData(), surfaceOp: .append)),
+            .event(envelope("user/message", 2, data: userData(id: "user-2"), surfaceOp: .append)),
+            .event(envelope("user/message", 3, data: userData(id: "user-3"),
+                            sourceEventSeqs: [1],
+                            surfaceOp: .replaceV3(startSeq: 1, endSeq: 1))),
+            .event(envelope("user/message", 4, data: userData(id: "user-4"),
+                            sourceEventSeqs: [3, 2],
+                            surfaceOp: .replaceV3(startSeq: 3, endSeq: 2))),
+            .event(envelope("turn/end", 5, data: ["turn": 1,
+                                                  "reason": ["kind": "completed"] as [String: Any]])),
+        ]
+        let parsed = DeepSeekHarnessParseResult(
+            header: parseHeader, rows: rows, inheritedEventCount: 0,
+            skippedIgnorableTypes: [], incompleteTurn: false)
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(parsed)
+        XCTAssertEqual(normalized.map(\.canonicalType),
+                       ["turn/start", "user/message", "user/message", "user/message",
+                        "user/message", "turn/end"])
+        XCTAssertEqual(normalized.map(\.envelope.sequence), Array(0..<6))
+    }
+
     // MARK: - Title sources
 
     func testTitleSources() throws {

@@ -41,6 +41,29 @@ final class DeepSeekHarnessHistoricalMigrationParityTests: XCTestCase {
             skippedIgnorableTypes: [], incompleteTurn: false)
     }
 
+    private func resultV0(rows: [DeepSeekHarnessPhysicalRow]) -> DeepSeekHarnessParseResult {
+        DeepSeekHarnessParseResult(
+            header: header(version: 0), rows: rows, inheritedEventCount: 0,
+            skippedIgnorableTypes: [], incompleteTurn: false)
+    }
+
+    private func requireInvalidPayload(
+        rows: [DeepSeekHarnessPhysicalRow],
+        version: Int = 1,
+        match: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let parsed = version == 0 ? resultV0(rows: rows) : result(rows: rows)
+        XCTAssertThrowsError(try DeepSeekHarnessHistoricalNormalizer.normalize(parsed),
+                             file: file, line: line) { error in
+            guard case .invalidPayload(let detail) = error as? DeepSeekHarnessFormatError else {
+                return XCTFail("expected invalidPayload, got \(error)", file: file, line: line)
+            }
+            XCTAssertTrue(detail.contains(match), detail, file: file, line: line)
+        }
+    }
+
     private func packedRun(
         type: String,
         sequence: Int,
@@ -399,5 +422,159 @@ final class DeepSeekHarnessHistoricalMigrationParityTests: XCTestCase {
         XCTAssertEqual(messageStream[0]["texts"] as? [String], ["hello"])
         XCTAssertEqual(messageStream[1]["type"] as? String, "chunk")
         XCTAssertEqual(normalized.map(\.envelope.sequence), Array(0..<normalized.count))
+    }
+
+    // MARK: - Released v0 admission (post-normalization)
+
+    func testV0LegacySessionNormalizesEndToEnd() throws {
+        let rows: [DeepSeekHarnessPhysicalRow] = [
+            .event(envelope("turn/start", 0, data: ["turn": 1])),
+            .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+            .event(envelope("user/message", 2,
+                            data: ["content": [["type": "text", "text": "hello"] as [String: Any]],
+                                   "source": ["kind": "user"] as [String: Any]],
+                            surfaceOp: .append)),
+            .event(envelope("step/end", 3, data: ["turn": 1, "step": 1])),
+            .event(envelope("turn/end", 4, data: ["turn": 1,
+                                                  "reason": ["kind": "completed"] as [String: Any]])),
+        ]
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(resultV0(rows: rows))
+        XCTAssertEqual(normalized.map(\.canonicalType),
+                       ["turn/start", "step/start", "system/message", "user/message",
+                        "step/end", "turn/end"])
+        XCTAssertEqual(normalized.map(\.envelope.sequence), Array(0..<6))
+        let user = normalized[3]
+        XCTAssertEqual(user.data["id"] as? String, "legacy-message:dsh-parity-test:2")
+        XCTAssertEqual(user.data["role"] as? String, "user")
+    }
+
+    func testV0TurnStartTriggerSmugglingIsRefused() {
+        // The lossy rewrite drops `trigger`: an empty kind and a smuggled
+        // extra member must both fail before the drop.
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/start", 0,
+                            data: ["turn": 1, "trigger": ["kind": ""] as [String: Any]])),
+        ], version: 0, match: "malformed legacy turn/start")
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/start", 0,
+                            data: ["turn": 1,
+                                   "trigger": ["kind": "user"] as [String: Any],
+                                   "extra": 1])),
+        ], version: 0, match: "has unexpected field extra")
+    }
+
+    func testV0TurnEndReasonSmugglingIsRefused() {
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/end", 0,
+                            data: ["turn": 1,
+                                   "reason": ["kind": "completed", "extra": 1] as [String: Any]])),
+        ], version: 0, match: "has unexpected field extra")
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/end", 0,
+                            data: ["turn": 1,
+                                   "reason": ["kind": "error", "message": "boom"] as [String: Any]])),
+        ], version: 0, match: "malformed legacy turn/end")
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/end", 0,
+                            data: ["turn": 1,
+                                   "reason": ["kind": "disposed", "extra": 1] as [String: Any]])),
+        ], version: 0, match: "has unexpected field extra")
+    }
+
+    func testV0RequestHeaderPrefixSmugglingIsRefused() {
+        requireInvalidPayload(rows: [
+            .event(envelope("request/header", 0,
+                            data: ["header": ["messagePrefix": "not-an-array"] as [String: Any],
+                                   "reason": "initial"])),
+        ], version: 0, match: "messagePrefix must be an array")
+    }
+
+    func testV0SteeringSmugglingIsRefused() {
+        // Wrapped form keeps only `message`: a smuggled extra member must
+        // fail before the drop.
+        requireInvalidPayload(rows: [
+            .event(envelope("steering/message", 0,
+                            data: ["turn": 1,
+                                   "message": userData(),
+                                   "extra": 1])),
+        ], version: 0, match: "has unexpected field extra")
+        // Unwrapped form requires its full shape before the lossy `turn`
+        // drop and id/role synthesis.
+        requireInvalidPayload(rows: [
+            .event(envelope("steering/message", 0,
+                            data: ["turn": 1,
+                                   "content": [["type": "text", "text": "hi"] as [String: Any]]])),
+        ], version: 0, match: "lacks required field source")
+    }
+
+    func testV0RetryShapeIsRefused() {
+        requireInvalidPayload(rows: [
+            .event(envelope("llm/retry", 0,
+                            data: ["retryId": "retry-1", "turn": 1, "step": 1,
+                                   "mode": "normal", "policyKey": "k", "retry": 1,
+                                   "maxRetries": 1, "delayMs": 0,
+                                   "failure": ["message": "boom", "code": "E"] as [String: Any]])),
+        ], version: 0, match: "lacks required field provider")
+    }
+
+    func testV0CompactionIdentityIsRefused() {
+        requireInvalidPayload(rows: [
+            .event(envelope("compaction/start", 0,
+                            data: ["compactionId": 5, "turn": 1])),
+        ], version: 0, match: "must be a non-empty string")
+    }
+
+    func testV0MessageShapesAreRefused() {
+        // A user message that already carries identity skips synthesis and
+        // must still carry the exact released shape.
+        requireInvalidPayload(rows: [
+            .event(envelope("user/message", 0,
+                            data: ["id": "u-1",
+                                   "content": [["type": "text", "text": "hi"] as [String: Any]],
+                                   "source": ["kind": "user"] as [String: Any]])),
+        ], version: 0, match: "lacks required field role")
+        // Assistant content without provenance skips the legacy wrap and
+        // must still carry the released message envelope.
+        requireInvalidPayload(rows: [
+            .event(envelope("assistant/message", 0,
+                            data: ["turn": 1, "step": 1,
+                                   "content": [["type": "text", "text": "hi"] as [String: Any]]])),
+        ], version: 0, match: "has unexpected field content")
+        // A tool result with a wrong-typed flag skips the wrap and must
+        // still carry the released message envelope.
+        requireInvalidPayload(rows: [
+            .event(envelope("tool/result", 0,
+                            data: ["turn": 1, "step": 1, "callId": "call-1",
+                                   "content": [["type": "text", "text": "out"] as [String: Any]],
+                                   "isError": "yes"])),
+        ], version: 0, match: "tool/result 0 data has unexpected field")
+    }
+
+    // MARK: - Released v1 admission (pre-transformation)
+
+    func testV1MalformedKnownEventsAreRefused() {
+        requireInvalidPayload(rows: [
+            .event(envelope("turn/start", 0, data: ["turn": 1, "extra": 1])),
+        ], match: "has unexpected field extra")
+        requireInvalidPayload(rows: [
+            .event(envelope("user/message", 0,
+                            data: ["id": "u-1", "role": "user",
+                                   "content": [["type": "text", "text": "hi"] as [String: Any]]])),
+        ], match: "lacks required field source")
+        requireInvalidPayload(rows: [
+            .event(envelope("tool/call", 0,
+                            data: ["turn": 1, "step": 1, "callId": "call-1",
+                                   "arguments": "{}"])),
+        ], match: "lacks required field name")
+        requireInvalidPayload(rows: [
+            .event(envelope("llm/retry", 0,
+                            data: ["retryId": "retry-1", "turn": 1, "step": 1,
+                                   "provider": "p", "mode": "always", "policyKey": "k",
+                                   "retry": 1, "maxRetries": 1, "delayMs": 0,
+                                   "failure": ["message": "boom", "code": "E"] as [String: Any]])),
+        ], match: "always mode must omit maxRetries")
+        requireInvalidPayload(rows: [
+            .event(envelope("approval/policy", 0, data: ["policy": "sometimes"])),
+        ], match: "must be one of ask, never")
     }
 }

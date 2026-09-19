@@ -120,6 +120,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
             event = try normalizeV0Compaction(event, sessionID: header.id, state: &state)
             event = try normalizeV0Message(event, sessionID: header.id, messageIDs: state.messageIDs)
 
+            // Released v0 admission runs after legacy normalization (except
+            // assistant/chunk), ported from `normalizeReleasedV0Event`:
+            // extra/missing/wrong-typed members fail here before the
+            // normalized shape can flow into the v1 stage.
+            if event.type != "assistant/chunk" {
+                try DeepSeekHarnessPayloadValidator.assertReleasedV0EventPayload(event, version: 0)
+            }
+
             if event.type == "session-log-deepseek/delivery-accepted" {
                 let acceptedVersion = DeepSeekHarnessJSON.safeInt(event.data["sessionFormatVersion"]) ?? 0
                 let inherited = header.parentSessionID != nil && event.sequence < inheritedEventCount
@@ -138,12 +146,22 @@ enum DeepSeekHarnessHistoricalNormalizer {
         sessionID: String
     ) throws -> DeepSeekHarnessEnvelope {
         if event.type == "turn/start", event.data["trigger"] != nil {
-            guard let turn = positiveCoordinate(event.data["turn"]) else {
+            // Exact pre-transform admission: a smuggled extra member must
+            // fail here because the lossy rewrite below drops `trigger`.
+            try DeepSeekHarnessPayloadValidator.keys(
+                event.data, required: ["turn", "trigger"], optional: [],
+                label: "turn/start \(event.sequence) data")
+            guard let turn = positiveCoordinate(event.data["turn"]),
+                  let trigger = event.data["trigger"] as? [String: Any],
+                  let kind = trigger["kind"] as? String, !kind.isEmpty else {
                 throw malformedLegacy(sessionID, event)
             }
             return replacing(event, data: ["turn": turn])
         }
         guard event.type == "turn/end" else { return event }
+        try DeepSeekHarnessPayloadValidator.keys(
+            event.data, required: ["turn", "reason"], optional: [],
+            label: "turn/end \(event.sequence) data")
         guard let turn = positiveCoordinate(event.data["turn"]),
               let reason = event.data["reason"] as? [String: Any],
               let kind = reason["kind"] as? String else {
@@ -151,29 +169,72 @@ enum DeepSeekHarnessHistoricalNormalizer {
         }
         var normalized = reason
         switch kind {
+        case "completed", "blocked", "max-tokens", "interrupted":
+            try DeepSeekHarnessPayloadValidator.keys(
+                reason, required: ["kind"], optional: [],
+                label: "turn/end \(event.sequence) reason")
+            return event
+        case "aborted" where reason["reason"] != nil:
+            return event
         case "aborted" where reason["reason"] == nil:
+            try DeepSeekHarnessPayloadValidator.keys(
+                reason, required: ["kind"], optional: [],
+                label: "turn/end \(event.sequence) reason")
             normalized = ["kind": "aborted", "reason": ["kind": "legacy"]]
         case "disposed":
+            try DeepSeekHarnessPayloadValidator.keys(
+                reason, required: ["kind"], optional: [],
+                label: "turn/end \(event.sequence) reason")
             normalized = ["kind": "aborted", "reason": ["kind": "disposed"]]
+        case "error" where reason["error"] != nil:
+            return event
         case "error" where reason["error"] == nil:
-            guard reason["step"] != nil else { throw malformedLegacy(sessionID, event) }
-            if let failure = reason["failure"] as? [String: Any],
-               failure["message"] is String, failure["code"] is String {
-                normalized = ["kind": "error", "error": failure]
-            } else if let message = reason["message"] as? String {
-                normalized = [
-                    "kind": "error",
-                    "error": ["message": message, "code": reason["code"] as? String ?? "UNKNOWN"]
-                ]
-            } else {
-                throw malformedLegacy(sessionID, event)
-            }
+            normalized = try normalizeV0ErrorReason(reason, event: event, sessionID: sessionID)
         default: break
         }
         var data = event.data
         data["turn"] = turn
         data["reason"] = normalized
         return replacing(event, data: data)
+    }
+
+    /// Ports `normalizeLegacyErrorReason`: exact key admission for both the
+    /// failure and message variants before the lossy `step` drop.
+    private static func normalizeV0ErrorReason(
+        _ reason: [String: Any],
+        event: DeepSeekHarnessEnvelope,
+        sessionID: String
+    ) throws -> [String: Any] {
+        guard DeepSeekHarnessJSON.count(reason["step"]) != nil else {
+            throw malformedLegacy(sessionID, event)
+        }
+        if reason["failure"] != nil {
+            try DeepSeekHarnessPayloadValidator.keys(
+                reason, required: ["kind", "step", "failure"], optional: [],
+                label: "turn/end \(event.sequence) reason")
+            guard let failure = reason["failure"] as? [String: Any] else {
+                throw malformedLegacy(sessionID, event)
+            }
+            try DeepSeekHarnessPayloadValidator.keys(
+                failure, required: ["message", "code"],
+                optional: ["status", "providerRetryAfterMs", "requestId"],
+                label: "turn/end \(event.sequence) failure")
+            guard failure["message"] is String, failure["code"] is String else {
+                throw malformedLegacy(sessionID, event)
+            }
+            return ["kind": "error", "error": failure]
+        }
+        try DeepSeekHarnessPayloadValidator.keys(
+            reason, required: ["kind", "step", "message"], optional: ["code"],
+            label: "turn/end \(event.sequence) reason")
+        guard let message = reason["message"] as? String,
+              reason["code"] == nil || reason["code"] is String else {
+            throw malformedLegacy(sessionID, event)
+        }
+        return [
+            "kind": "error",
+            "error": ["message": message, "code": reason["code"] as? String ?? "UNKNOWN"]
+        ]
     }
 
     private static func normalizeV0Header(_ event: DeepSeekHarnessEnvelope) throws -> DeepSeekHarnessEnvelope {
@@ -195,10 +256,24 @@ enum DeepSeekHarnessHistoricalNormalizer {
         sessionID: String
     ) throws -> DeepSeekHarnessEnvelope {
         guard event.type == "steering/message" else { return event }
-        if let wrapped = event.data["message"] as? [String: Any] {
+        if event.data["message"] != nil {
+            // Exact pre-transform admission: the lossy rewrite keeps only
+            // `message`, so any other member must fail before it is dropped.
+            guard let wrapped = event.data["message"] as? [String: Any] else {
+                throw malformedLegacy(sessionID, event)
+            }
+            try DeepSeekHarnessPayloadValidator.keys(
+                event.data, required: ["turn", "message"], optional: [],
+                label: "steering/message \(event.sequence) data")
+            guard DeepSeekHarnessJSON.count(event.data["turn"]) != nil else {
+                throw malformedLegacy(sessionID, event)
+            }
             return replacing(event, type: "user/message", data: wrapped)
         }
-        guard event.data["turn"] != nil,
+        try DeepSeekHarnessPayloadValidator.keys(
+            event.data, required: ["turn", "content", "source"], optional: [],
+            label: "steering/message \(event.sequence) data")
+        guard DeepSeekHarnessJSON.count(event.data["turn"]) != nil,
               event.data["content"] != nil, event.data["source"] != nil else {
             throw malformedLegacy(sessionID, event)
         }
@@ -553,6 +628,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
         _ event: DeepSeekHarnessEnvelope,
         state: inout V1State
     ) throws {
+        // Released v1 admission runs before transformation (except
+        // assistant/chunk), ported from the decoded v1-to-v2 stage: only
+        // released known dispositions are validated, with the v1 payload
+        // generation and never the v2 rules.
+        if event.type != "assistant/chunk",
+           DeepSeekHarnessPayloadValidator.v0Dispositions[event.type] != nil {
+            try DeepSeekHarnessPayloadValidator.assertReleasedV0EventPayload(event, version: 1)
+        }
         // Released v1 refuses every event absent from the released v1
         // inventory, even when marked ignorable. Unknown-ignorable
         // retention exists only for native/current v3, where the released
@@ -1380,7 +1463,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
             }
         }
         if let start = event.surfaceOp?.startValue, let end = event.surfaceOp?.endValue {
-            guard start <= end, start >= 0, end < event.sequence else {
+            // Both endpoints must be non-negative and earlier than the
+            // event. No numeric start <= end ordering is required here:
+            // live-surface order is enforced by the relationship
+            // `applySurface`, which compares positions on the current
+            // surface, so a span such as start=3,end=2 over surface
+            // [3,2] is valid.
+            guard start >= 0, start < event.sequence,
+                  end >= 0, end < event.sequence else {
                 throw DeepSeekHarnessFormatError.invalidReference(
                     "\(event.type) \(event.sequence) replacement endpoints must be earlier events")
             }
