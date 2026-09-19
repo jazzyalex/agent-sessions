@@ -7,10 +7,10 @@ import XCTest
 /// them green satisfies the task.
 final class SessionRowDisplayTests: XCTestCase {
 
-    func testCursorACPSubagentBadgeUsesGenericUserFacingLabel() {
+    func testCursorACPSubagentBadgeUsesUpstreamAlignedUserFacingLabel() {
         XCTAssertEqual(
             WorkflowSubagentBadge.displayLabel(for: CursorACPSubagentAssociation.subagentType),
-            "sub"
+            "subagent"
         )
         XCTAssertNotEqual(
             WorkflowSubagentBadge.displayLabel(for: CursorACPSubagentAssociation.subagentType),

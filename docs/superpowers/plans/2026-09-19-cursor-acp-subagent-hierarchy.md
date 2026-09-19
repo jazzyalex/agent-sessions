@@ -146,11 +146,13 @@ primary relationship source; the field-18 path map is compatibility fallback.
 
 - [ ] **Step 1: Add failing UI/pill tests**
 
-  Assert `WorkflowSubagentBadge.displayLabel(for: "cursor-acp-subagent")` returns the generic user-facing `sub` label. Assert the ACP parent retains the `acp` surface pill. Assert a linked child gets the generic `sub` marker and localized/accessibility text indicating an ACP subagent, while the internal value is never rendered literally. Assert hierarchy indentation and child count use the existing builder metadata.
+  Assert `WorkflowSubagentBadge.displayLabel(for: "cursor-acp-subagent")` returns the upstream-aligned user-facing `subagent` label. Assert the ACP parent retains the `acp` surface pill. Assert a linked child gets the `subagent` marker and ACP-specific accessibility/help text, while the internal value is never rendered literally. Assert hierarchy indentation and child count use the existing builder metadata.
 
 - [ ] **Step 2: Implement the smallest rendering change**
 
-  Reuse the existing `SubagentHierarchyBuilder` and generic sub marker. Add an explicit `cursor-acp-subagent` mapping in `WorkflowSubagentBadge.displayLabel` (for example `sub`) plus the ACP-specific accessibility/help text; do not add new table columns or duplicate hierarchy connections.
+  Reuse the existing `SubagentHierarchyBuilder` and existing subagent marker. Add an explicit `cursor-acp-subagent` mapping in `WorkflowSubagentBadge.displayLabel` to the upstream-aligned `subagent` label plus the ACP-specific accessibility/help text; do not add new table columns or duplicate hierarchy connections.
+
+  When merging chat metadata, if a validated child has the default `New Agent` name, read only its first persisted user text, remove `system_reminder`/`timestamp` transport blocks, prefer the first non-empty `user_query` line, and truncate it to a bounded title. Keep `New Agent` as the fallback and leave ordinary non-ACP title derivation untouched.
 
 - [ ] **Step 3: Run row tests**
 

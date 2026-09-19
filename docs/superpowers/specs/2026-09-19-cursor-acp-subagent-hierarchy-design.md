@@ -39,6 +39,10 @@ first prompt with an ACP row remains unresolved and is not attached.
 - ACP parent rows retain the `acp` surface pill.
 - Explicitly associated JSONL subtasks remain separate rows nested beneath their ACP parent through the existing `SubagentHierarchyBuilder`.
 - Nested rows retain their message count, size, title, and transcript content.
+- ACP child stores whose metadata name is the default `New Agent` may derive a
+  bounded title from the first user prompt: transport wrapper blocks are
+  removed, the first non-empty line is selected, and the result is truncated
+  to a fixed display-safe length. Ordinary non-ACP Cursor titles are unchanged.
 - Associated child rows are marked as subagents and identify the relationship as ACP-backed.
 - Parents show the existing disclosure control and child count.
 - Timestamp-prefixed JSONL sessions without an explicit ACP path reference remain ordinary Cursor rows and are not given an ACP marker.
@@ -60,7 +64,7 @@ The ACP reader should expose a backward-compatible `parseResult(at:) -> CursorAC
 3. `CursorSessionIndexer` builds a child-session-ID-to-parent-set lookup from validated chat metadata, restricted to parent IDs represented by indexed ACP rows. It also retains a normalized absolute-path-to-parent-set fallback lookup from ACP results. Normalization standardizes repeated separators and `.`/`..` lexically, never follows symlinks, and uses the host's case-sensitive path comparison semantics.
 4. Association runs after `SessionIndexingEngine.hydrateOrScan` returns, regardless of whether sessions came from fresh parsing or the persisted lightweight cache, and after Cursor metadata merge makes DB-only rows available but before sorting/publishing. Matching transcript or DB-only sessions receive the explicit parent ID, subagent type, and relationship kind through a relationship-copy helper.
 5. `SubagentHierarchyBuilder` resolves the parent ID and produces the existing parent-first, collapsible row structure.
-6. `SessionRowsBuilder` / title-row rendering expose the ACP relationship without removing the existing ACP pill from the parent. A linked child uses the existing generic `sub` marker plus a localized/accessibility label such as `ACP subagent`; it must not display the internal value `cursor-acp-subagent` as user-facing text.
+6. `SessionRowsBuilder` / title-row rendering expose the ACP relationship without removing the existing ACP pill from the parent. A linked child uses the upstream-aligned `subagent` marker plus ACP-specific accessibility/help text; it must not display the internal value `cursor-acp-subagent` as user-facing text. Child title derivation is restricted to metadata records carrying validated `subagentInfo` and keeps `New Agent` as the fallback.
 
 Path normalization must be deterministic: standardize absolute paths, resolve `.` and `..`, and compare path strings without following symlinks or using basename-only matching. Missing or malformed path values are ignored.
 
@@ -81,7 +85,7 @@ Add focused fixtures and tests for:
 
 1. ACP root field-18 extraction from a synthetic store containing one valid root transcript path and one valid `subagents/<childUUID>.jsonl` path, while a matching-looking path in a tool/blob payload is ignored.
 2. Path normalization and rejection tests for both accepted layouts, relative paths, `.`/`..`, repeated separators, symlink non-following, non-JSONL paths, mismatched root UUIDs, and host path case semantics.
-3. Indexer association of a matching JSONL `Session` with the ACP parent ID and internal `cursor-acp-subagent` type, while the user-facing badge is generic `sub` with ACP accessibility text.
+3. Indexer association of a matching JSONL `Session` with the ACP parent ID and internal `cursor-acp-subagent` type, while the user-facing badge is the upstream-aligned `subagent` label with ACP accessibility text.
 4. The same association when the transcript session comes from the persisted lightweight cache returned by `hydrateOrScan`.
 5. A timestamp-prefixed JSONL session with no ACP reference remaining unassociated.
 6. Repeated same-parent references deduplicating; cross-parent references remaining unresolved rather than arbitrarily attached.
@@ -90,6 +94,7 @@ Add focused fixtures and tests for:
 9. Two child-store metadata records for the same child with conflicting `parentAgentId` values remain unresolved; malformed or incomplete `subagentInfo` is ignored.
 9. Relationship-copy tests asserting events, surface/originator, model, project metadata, titles, and all other immutable `Session` fields are preserved.
 10. Existing hierarchy flattening, collapse behavior, ACP parent pill, and no-sensitive-payload tests continuing to pass.
+11. ACP child-title derivation removes system/timestamp transport wrappers, prefers the first line inside `user_query`, truncates long titles safely, and falls back to `New Agent`; ordinary Cursor transcript title behavior remains unchanged.
 
 ## Non-goals
 

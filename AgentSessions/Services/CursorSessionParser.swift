@@ -600,6 +600,32 @@ enum CursorACPStoreReader {
         parseResult(at: url)?.session
     }
 
+    /// Reads only the first persisted user text from a Cursor chat store.
+    /// This is used for a bounded display-title fallback for ACP child stores;
+    /// it does not expose tool arguments, tool results, or attachments.
+    static func firstUserText(at url: URL) -> String? {
+        guard let store = Store(url: url),
+              let rootJSON = store.rootJSON,
+              let rootID = rootJSON["latestRootBlobId"] as? String,
+              let rootIDData = Data(hexString: rootID), rootIDData.count == 32,
+              let root = store.blob(id: rootID) else { return nil }
+
+        let rootMessage = ProtoMessage(root)
+        for turnIDData in rootMessage.dataFields(number: 8) {
+            guard turnIDData.count == 32,
+                  let turn = store.blob(id: turnIDData.hexString) else { continue }
+            let turnMessage = ProtoMessage(turn)
+            guard let agentTurn = turnMessage.firstData(number: 1),
+                  let userBlobID = ProtoMessage(agentTurn).firstData(number: 1),
+                  userBlobID.count == 32,
+                  let user = store.blob(id: userBlobID.hexString),
+                  let text = ProtoMessage(user).firstString(number: 1),
+                  !text.isEmpty else { continue }
+            return text
+        }
+        return nil
+    }
+
     static func parseResult(at url: URL) -> CursorACPParseResult? {
         guard isACPStore(url),
               let rawID = UUID(uuidString: url.deletingLastPathComponent().lastPathComponent)?.uuidString.lowercased(),
@@ -717,16 +743,41 @@ enum CursorACPStoreReader {
         private var db: OpaquePointer?
 
         init?(url: URL) {
-            guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
-            sqlite3_busy_timeout(db, 250)
-            guard schemaIsSupported else {
-                sqlite3_close(db)
+            if let normal = Self.openDatabase(at: url.path, immutable: false) {
+                db = normal
+                sqlite3_busy_timeout(normal, 250)
+                if schemaIsSupported, rootJSON != nil {
+                    return
+                }
+                sqlite3_close(normal)
+                db = nil
+            }
+
+            guard let immutable = Self.openDatabase(at: url.path, immutable: true) else { return nil }
+            db = immutable
+            sqlite3_busy_timeout(immutable, 250)
+            guard schemaIsSupported, rootJSON != nil else {
+                sqlite3_close(immutable)
                 db = nil
                 return nil
             }
         }
 
         deinit { sqlite3_close(db) }
+
+        private static func openDatabase(at path: String, immutable: Bool) -> OpaquePointer? {
+            var database: OpaquePointer?
+            let target = immutable
+                ? URL(fileURLWithPath: path).absoluteString + "?immutable=1"
+                : path
+            let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+                | (immutable ? SQLITE_OPEN_URI : 0)
+            guard sqlite3_open_v2(target, &database, flags, nil) == SQLITE_OK else {
+                sqlite3_close(database)
+                return nil
+            }
+            return database
+        }
 
         var rootJSON: [String: Any]? {
             guard let hex = scalar("SELECT value FROM meta WHERE key = '0'"),

@@ -2,6 +2,59 @@ import Foundation
 import CryptoKit
 import SQLite3
 
+/// Converts the first user prompt of an ACP child store into a compact title.
+/// Cursor wraps many prompts in system/timestamp/query markers; those wrappers
+/// are transport metadata, not useful session titles.
+enum CursorSubagentTitle {
+    static let defaultName = "New Agent"
+
+    static func derive(from text: String, maxLength: Int = 80) -> String? {
+        guard maxLength > 0 else { return nil }
+
+        var candidate = removeBlock("system_reminder", from: text)
+        candidate = removeBlock("timestamp", from: candidate)
+        if let query = blockContents("user_query", in: candidate) {
+            candidate = query
+        } else {
+            candidate = candidate
+                .replacingOccurrences(of: "<user_query>", with: "")
+                .replacingOccurrences(of: "</user_query>", with: "")
+        }
+
+        guard let firstLine = candidate
+            .split(whereSeparator: { $0.isNewline })
+            .map(String.init)
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            return nil
+        }
+
+        let normalized = firstLine
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !normalized.isEmpty else { return nil }
+
+        let characters = Array(normalized)
+        guard characters.count > maxLength else { return normalized }
+        if maxLength == 1 { return "…" }
+        return String(characters.prefix(maxLength - 1)) + "…"
+    }
+
+    private static func blockContents(_ tag: String, in text: String) -> String? {
+        guard let start = text.range(of: "<\(tag)>") else { return nil }
+        guard let end = text.range(of: "</\(tag)>", range: start.upperBound..<text.endIndex) else { return nil }
+        return String(text[start.upperBound..<end.lowerBound])
+    }
+
+    private static func removeBlock(_ tag: String, from text: String) -> String {
+        var result = text
+        while let start = result.range(of: "<\(tag)>"),
+              let end = result.range(of: "</\(tag)>", range: start.upperBound..<result.endIndex) {
+            result.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        return result
+    }
+}
+
 /// Metadata extracted from a Cursor chat SQLite database's meta table.
 struct CursorSubagentInfo: Equatable {
     let parentAgentID: String
@@ -151,6 +204,11 @@ struct CursorChatMetaReader {
         let mode = obj["mode"] as? String ?? "default"
         let lastUsedModel = obj["lastUsedModel"] as? String ?? "default"
         let subagentInfo = parseSubagentInfo(obj["subagentInfo"])
+        let resolvedName = resolvedName(
+            rawName: name,
+            dbPath: dbPath,
+            subagentInfo: subagentInfo
+        )
 
         var createdAt = Date.distantPast
         if let ts = obj["createdAt"] as? Int64, ts > 0 {
@@ -161,7 +219,7 @@ struct CursorChatMetaReader {
 
         return CursorSessionMeta(
             agentId: agentId,
-            name: name,
+            name: resolvedName,
             createdAt: createdAt,
             lastUsedModel: lastUsedModel,
             mode: mode,
@@ -169,6 +227,20 @@ struct CursorChatMetaReader {
             dbPath: dbPath,
             subagentInfo: subagentInfo
         )
+    }
+
+    private static func resolvedName(
+        rawName: String,
+        dbPath: String,
+        subagentInfo: CursorSubagentInfo?
+    ) -> String {
+        guard rawName == CursorSubagentTitle.defaultName,
+              subagentInfo != nil,
+              let firstUserText = CursorACPStoreReader.firstUserText(at: URL(fileURLWithPath: dbPath)),
+              let title = CursorSubagentTitle.derive(from: firstUserText) else {
+            return rawName
+        }
+        return title
     }
 
     /// Cursor keeps some chat stores in WAL mode while another process may be

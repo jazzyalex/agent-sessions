@@ -256,6 +256,85 @@ final class CursorSessionParserTests: XCTestCase {
 
 final class CursorChatMetaReaderTests: XCTestCase {
 
+    func testSubagentTitleRemovesTransportWrappersAndUsesFirstQueryLine() {
+        let prompt = """
+        <system_reminder>internal reminder</system_reminder>
+        <timestamp>Saturday, Sep 12, 2026, 2:37 AM (UTC+8)</timestamp>
+        <user_query>
+        Implement Task 8: launch occupancy-matrix routing in this worktree ONLY.
+        Read the plan and continue.
+        </user_query>
+        """
+
+        XCTAssertEqual(
+            CursorSubagentTitle.derive(from: prompt),
+            "Implement Task 8: launch occupancy-matrix routing in this worktree ONLY."
+        )
+        XCTAssertEqual(CursorSubagentTitle.derive(from: String(repeating: "x", count: 20), maxLength: 8), "xxxxxxx…")
+    }
+
+    func testChildStoreMetadataUsesDerivedTitleOnlyForSubagents() throws {
+        let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
+        let root = Data(repeating: 1, count: 32)
+        let turn = Data(repeating: 2, count: 32)
+        let user = Data(repeating: 3, count: 32)
+        let prompt = """
+        <system_reminder>internal reminder</system_reminder>
+        <timestamp>Saturday, Sep 12, 2026, 2:37 AM (UTC+8)</timestamp>
+        <user_query>
+        Implement Task 8: launch occupancy-matrix routing in this worktree ONLY.
+        </user_query>
+        """
+        let dbURL = try writeTempACPStore(
+            sessionID: sessionID,
+            blobs: [
+                (root.hex, proto(field: 8, data: turn)),
+                (turn.hex, proto(field: 1, data: proto(field: 1, data: user))),
+                (user.hex, proto(field: 1, data: Data(prompt.utf8)))
+            ],
+            rootID: root.hex,
+            metadata: [
+                "agentId": sessionID,
+                "name": CursorSubagentTitle.defaultName,
+                "subagentInfo": [
+                    "parentAgentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "rootParentAgentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "toolCallId": "tool-call-1",
+                    "typeName": "generalPurpose"
+                ]
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().deletingLastPathComponent()) }
+
+        let meta = try XCTUnwrap(CursorChatMetaReader.sessionMeta(dbPath: dbURL.path))
+        XCTAssertEqual(meta.name, "Implement Task 8: launch occupancy-matrix routing in this worktree ONLY.")
+        XCTAssertNotNil(meta.subagentInfo)
+    }
+
+    func testChildStoreWithoutReadablePromptKeepsDefaultTitle() throws {
+        let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
+        let root = Data(repeating: 1, count: 32)
+        let dbURL = try writeTempACPStore(
+            sessionID: sessionID,
+            blobs: [],
+            rootID: root.hex,
+            metadata: [
+                "agentId": sessionID,
+                "name": CursorSubagentTitle.defaultName,
+                "subagentInfo": [
+                    "parentAgentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "rootParentAgentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "toolCallId": "tool-call-1",
+                    "typeName": "generalPurpose"
+                ]
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().deletingLastPathComponent()) }
+
+        let meta = try XCTUnwrap(CursorChatMetaReader.sessionMeta(dbPath: dbURL.path))
+        XCTAssertEqual(meta.name, CursorSubagentTitle.defaultName)
+    }
+
     func testReadMetaFromFixtureDB() {
         let fixtureDB = FixturePaths.repoRootURL()
             .appendingPathComponent("AgentSessionsTests", isDirectory: true)
@@ -458,50 +537,59 @@ final class CursorSessionIndexerTests: XCTestCase {
         XCTAssertNil(CursorACPStoreReader.parse(at: dbURL))
     }
 
-    private func writeTempACPStore(sessionID: String, blobs: [(String, Data)], rootID: String, schemaVersion: Int = 1) throws -> URL {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cursor_acp_test_\(UUID().uuidString)")
-        let dbURL = root.appendingPathComponent("acp-sessions").appendingPathComponent(sessionID).appendingPathComponent("store.db")
-        try FileManager.default.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB);", nil, nil, nil), SQLITE_OK)
-        let json = try JSONSerialization.data(withJSONObject: ["latestRootBlobId": rootID, "name": "ACP fixture", "createdAt": "2026-09-17T00:00:00Z"])
-        try insert(db: db, table: "meta", id: "0", data: Data(json.hex.utf8))
-        for (id, data) in blobs { try insert(db: db, table: "blobs", id: id, data: data) }
-        try JSONSerialization.data(withJSONObject: ["schemaVersion": schemaVersion, "cwd": "/tmp/acp-fixture"]).write(to: dbURL.deletingLastPathComponent().appendingPathComponent("meta.json"))
-        return dbURL
-    }
-
-    private func insert(db: OpaquePointer?, table: String, id: String, data: Data) throws {
-        var statement: OpaquePointer?
-        let sql = table == "meta" ? "INSERT INTO meta (key, value) VALUES (?, ?)" : "INSERT INTO blobs (id, data) VALUES (?, ?)"
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw NSError(domain: "CursorACPTest", code: 1) }
-        defer { sqlite3_finalize(statement) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        sqlite3_bind_text(statement, 1, id, -1, transient)
-        let bindResult = data.withUnsafeBytes { sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), transient) }
-        guard bindResult == SQLITE_OK else { throw NSError(domain: "CursorACPTest", code: 3) }
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw NSError(domain: "CursorACPTest", code: 2) }
-    }
-
-    private func proto(field: Int, data: Data) -> Data {
-        encodeVarint(UInt64(field << 3 | 2)) + encodeVarint(UInt64(data.count)) + data
-    }
-
-    private func encodeVarint(_ value: UInt64) -> Data {
-        var value = value
-        var bytes: [UInt8] = []
-        repeat {
-            var byte = UInt8(value & 0x7f)
-            value >>= 7
-            if value != 0 { byte |= 0x80 }
-            bytes.append(byte)
-        } while value != 0
-        return Data(bytes)
-    }
 }
 
-private extension Data {
+fileprivate func writeTempACPStore(
+    sessionID: String,
+    blobs: [(String, Data)],
+    rootID: String,
+    schemaVersion: Int = 1,
+    metadata extraMetadata: [String: Any] = [:]
+) throws -> URL {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cursor_acp_test_\(UUID().uuidString)")
+    let dbURL = root.appendingPathComponent("acp-sessions").appendingPathComponent(sessionID).appendingPathComponent("store.db")
+    try FileManager.default.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    var db: OpaquePointer?
+    XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+    defer { sqlite3_close(db) }
+    XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB);", nil, nil, nil), SQLITE_OK)
+    var metadata: [String: Any] = ["latestRootBlobId": rootID, "name": "ACP fixture", "createdAt": "2026-09-17T00:00:00Z"]
+    for (key, value) in extraMetadata { metadata[key] = value }
+    let json = try JSONSerialization.data(withJSONObject: metadata)
+    try insertACPTestBlob(db: db, table: "meta", id: "0", data: Data(json.hex.utf8))
+    for (id, data) in blobs { try insertACPTestBlob(db: db, table: "blobs", id: id, data: data) }
+    try JSONSerialization.data(withJSONObject: ["schemaVersion": schemaVersion, "cwd": "/tmp/acp-fixture"]).write(to: dbURL.deletingLastPathComponent().appendingPathComponent("meta.json"))
+    return dbURL
+}
+
+fileprivate func insertACPTestBlob(db: OpaquePointer?, table: String, id: String, data: Data) throws {
+    var statement: OpaquePointer?
+    let sql = table == "meta" ? "INSERT INTO meta (key, value) VALUES (?, ?)" : "INSERT INTO blobs (id, data) VALUES (?, ?)"
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw NSError(domain: "CursorACPTest", code: 1) }
+    defer { sqlite3_finalize(statement) }
+    let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    sqlite3_bind_text(statement, 1, id, -1, transient)
+    let bindResult = data.withUnsafeBytes { sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), transient) }
+    guard bindResult == SQLITE_OK else { throw NSError(domain: "CursorACPTest", code: 3) }
+    guard sqlite3_step(statement) == SQLITE_DONE else { throw NSError(domain: "CursorACPTest", code: 2) }
+}
+
+fileprivate func proto(field: Int, data: Data) -> Data {
+    encodeACPTestVarint(UInt64(field << 3 | 2)) + encodeACPTestVarint(UInt64(data.count)) + data
+}
+
+fileprivate func encodeACPTestVarint(_ value: UInt64) -> Data {
+    var value = value
+    var bytes: [UInt8] = []
+    repeat {
+        var byte = UInt8(value & 0x7f)
+        value >>= 7
+        if value != 0 { byte |= 0x80 }
+        bytes.append(byte)
+    } while value != 0
+    return Data(bytes)
+}
+
+fileprivate extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
 }

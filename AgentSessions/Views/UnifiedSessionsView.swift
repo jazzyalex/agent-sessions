@@ -9,7 +9,7 @@ enum WorkflowSubagentBadge {
         case Session.claudeWorkflowSubagentType:
             return "workflow"
         case CursorACPSubagentAssociation.subagentType:
-            return "sub"
+            return "subagent"
         default:
             return agentType
         }
