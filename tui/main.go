@@ -1,0 +1,471 @@
+// Command as is the terminal UI for Agent Sessions: browse, search, and read local
+// coding-agent sessions. All data comes from the `as-core` binary (the macOS app's
+// shared Swift core), so parsing and search behave exactly as in the app.
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+const listLimit = 500
+
+type focus int
+
+const (
+	focusList focus = iota
+	focusPreview
+	focusSearch
+)
+
+// Messages from background as-core calls.
+type (
+	rowsMsg struct {
+		rows  []SessionRow
+		query string
+		err   error
+	}
+	indexMsg struct {
+		results []IndexResult
+		err     error
+	}
+	previewMsg struct {
+		id     string
+		events []Event
+		err    error
+	}
+	// previewDueMsg fires after the cursor has rested on a row for previewDelay.
+	previewDueMsg struct{ id string }
+	resumeMsg     struct {
+		cmd ResumeCommand
+		err error
+	}
+)
+
+// Each preview is a full parse in a separate as-core process, which can take seconds for
+// a large Codex rollout; wait until the cursor stops instead of parsing every row passed.
+const previewDelay = 150 * time.Millisecond
+
+const ageWidth = 6
+
+type model struct {
+	core     Core
+	rows     []SessionRow
+	cursor   int
+	offset   int
+	focus    focus
+	search   textinput.Model
+	query    string // active search; "" means the plain newest-first list
+	sources  []string
+	srcIdx   int // index into sources; 0 = all
+	preview  viewport.Model
+	cache    map[string][]Event
+	shownID  string
+	status   string
+	indexing bool
+	width    int
+	height   int
+	// resume is set when the user picked "open in agent"; main execs it after the
+	// TUI exits so the agent takes over this terminal.
+	resume *ResumeCommand
+}
+
+func newModel(core Core) model {
+	ti := textinput.New()
+	ti.Placeholder = "search sessions"
+	ti.Prompt = "/ "
+	return model{
+		core:     core,
+		search:   ti,
+		sources:  []string{"", "codex", "claude", "opencode", "copilot", "antigravity"},
+		cache:    map[string][]Event{},
+		status:   "loading…",
+		indexing: true,
+	}
+}
+
+func (m model) source() string { return m.sources[m.srcIdx] }
+
+func (m model) Init() tea.Cmd {
+	// Show what the index already has right away, then refresh it in the background.
+	return tea.Batch(m.loadRows(), m.runIndex())
+}
+
+func (m model) loadRows() tea.Cmd {
+	core, query, source := m.core, m.query, m.source()
+	return func() tea.Msg {
+		var rows []SessionRow
+		var err error
+		if query == "" {
+			rows, err = core.List(source, listLimit)
+		} else {
+			rows, err = core.Search(query, source, listLimit)
+		}
+		return rowsMsg{rows: rows, query: query, err: err}
+	}
+}
+
+func (m model) runIndex() tea.Cmd {
+	core := m.core
+	return func() tea.Msg {
+		results, err := core.Index()
+		return indexMsg{results: results, err: err}
+	}
+}
+
+func (m model) schedulePreview() tea.Cmd {
+	if len(m.rows) == 0 {
+		return nil
+	}
+	id := m.rows[m.cursor].ID
+	if _, ok := m.cache[id]; ok {
+		return nil
+	}
+	return tea.Tick(previewDelay, func(time.Time) tea.Msg { return previewDueMsg{id: id} })
+}
+
+func (m model) loadPreview() tea.Cmd {
+	if len(m.rows) == 0 {
+		return nil
+	}
+	row := m.rows[m.cursor]
+	if _, ok := m.cache[row.ID]; ok {
+		return nil
+	}
+	core := m.core
+	return func() tea.Msg {
+		events, err := core.Show(row)
+		return previewMsg{id: row.ID, events: events, err: err}
+	}
+}
+
+func (m *model) layout() {
+	listW := m.listWidth()
+	m.preview.Width = m.width - listW - 3
+	m.preview.Height = m.bodyHeight()
+	m.search.Width = listW - 4
+}
+
+func (m model) listWidth() int {
+	w := m.width * 2 / 5
+	if w < 30 {
+		w = 30
+	}
+	return w
+}
+
+func (m model) bodyHeight() int {
+	h := m.height - 3 // header + search/status line + footer
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+func (m *model) refreshPreview() {
+	if len(m.rows) == 0 {
+		m.preview.SetContent("")
+		m.shownID = ""
+		return
+	}
+	row := m.rows[m.cursor]
+	if m.shownID == row.ID {
+		return
+	}
+	events, ok := m.cache[row.ID]
+	if !ok {
+		m.preview.SetContent(styleDim.Render("loading…"))
+		return
+	}
+	m.shownID = row.ID
+	m.preview.SetContent(renderTranscript(events, m.preview.Width))
+	m.preview.GotoTop()
+}
+
+func (m *model) moveCursor(delta int) tea.Cmd {
+	if len(m.rows) == 0 {
+		return nil
+	}
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.rows) {
+		m.cursor = len(m.rows) - 1
+	}
+	h := m.bodyHeight()
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	m.refreshPreview()
+	return m.schedulePreview()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.layout()
+		m.shownID = "" // re-wrap at the new width
+		m.refreshPreview()
+		return m, nil
+
+	case rowsMsg:
+		if msg.query != m.query {
+			return m, nil // stale result from an earlier query
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		prevID := ""
+		if len(m.rows) > 0 {
+			prevID = m.rows[m.cursor].ID
+		}
+		m.rows = msg.rows
+		m.cursor, m.offset = 0, 0
+		for i, r := range m.rows {
+			if r.ID == prevID {
+				m.cursor = i
+				break
+			}
+		}
+		m.shownID = ""
+		cmd := m.moveCursor(0)
+		if !m.indexing {
+			m.status = m.countStatus()
+		}
+		return m, cmd
+
+	case indexMsg:
+		m.indexing = false
+		if msg.err != nil {
+			m.status = "index failed: " + msg.err.Error()
+			return m, nil
+		}
+		processed := 0
+		for _, r := range msg.results {
+			processed += r.Processed
+		}
+		m.status = fmt.Sprintf("index up to date (%d updated)", processed)
+		return m, m.loadRows()
+
+	case resumeMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		m.resume = &msg.cmd
+		return m, tea.Quit
+
+	case previewDueMsg:
+		if len(m.rows) == 0 || m.rows[m.cursor].ID != msg.id {
+			return m, nil // the cursor moved on
+		}
+		return m, m.loadPreview()
+
+	case previewMsg:
+		if msg.err != nil {
+			m.cache[msg.id] = []Event{{Kind: "error", Text: strPtr(msg.err.Error())}}
+		} else {
+			m.cache[msg.id] = msg.events
+		}
+		m.refreshPreview()
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.focus == focusSearch {
+			return m.updateSearch(msg)
+		}
+		switch msg.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "/":
+			m.focus = focusSearch
+			m.search.SetValue(m.query)
+			return m, m.search.Focus()
+		case "esc":
+			if m.query != "" {
+				m.query = ""
+				return m, m.loadRows()
+			}
+		case "tab":
+			if m.focus == focusList {
+				m.focus = focusPreview
+			} else {
+				m.focus = focusList
+			}
+		case "s":
+			m.srcIdx = (m.srcIdx + 1) % len(m.sources)
+			return m, m.loadRows()
+		case "o":
+			if len(m.rows) > 0 {
+				row, core := m.rows[m.cursor], m.core
+				m.status = "preparing resume…"
+				return m, func() tea.Msg {
+					cmd, err := core.Resume(row)
+					return resumeMsg{cmd: cmd, err: err}
+				}
+			}
+		case "r":
+			if !m.indexing {
+				m.indexing = true
+				m.status = "indexing…"
+				return m, m.runIndex()
+			}
+		}
+		if m.focus == focusPreview {
+			var cmd tea.Cmd
+			m.preview, cmd = m.preview.Update(msg)
+			return m, cmd
+		}
+		switch msg.String() {
+		case "up", "k":
+			return m, m.moveCursor(-1)
+		case "down", "j":
+			return m, m.moveCursor(1)
+		case "pgup":
+			return m, m.moveCursor(-m.bodyHeight())
+		case "pgdown":
+			return m, m.moveCursor(m.bodyHeight())
+		case "home", "g":
+			return m, m.moveCursor(-len(m.rows))
+		case "end", "G":
+			return m, m.moveCursor(len(m.rows))
+		case "enter":
+			m.focus = focusPreview
+		}
+	}
+	return m, nil
+}
+
+func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.query = strings.TrimSpace(m.search.Value())
+		m.focus = focusList
+		m.search.Blur()
+		m.status = "searching…"
+		return m, m.loadRows()
+	case "esc":
+		m.focus = focusList
+		m.search.Blur()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
+	return m, cmd
+}
+
+func (m model) countStatus() string {
+	if m.query != "" {
+		return fmt.Sprintf("%d matches for %q", len(m.rows), m.query)
+	}
+	return fmt.Sprintf("%d sessions", len(m.rows))
+}
+
+var (
+	styleHeader   = lipgloss.NewStyle().Bold(true)
+	styleSelected = lipgloss.NewStyle().Reverse(true)
+	styleBorder   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+)
+
+func (m model) View() string {
+	if m.width == 0 {
+		return ""
+	}
+	listW := m.listWidth()
+	h := m.bodyHeight()
+	now := time.Now()
+
+	filter := "all sources"
+	if m.source() != "" {
+		filter = m.source()
+	}
+	header := styleHeader.Render("Agent Sessions") + styleDim.Render("  ·  "+filter)
+	if m.query != "" {
+		header += styleDim.Render("  ·  search: ") + m.query
+	}
+
+	var list strings.Builder
+	for i := m.offset; i < len(m.rows) && i < m.offset+h; i++ {
+		r := m.rows[i]
+		age := fmt.Sprintf("%*s", ageWidth, relativeTime(r.ActivityTime(), now))
+		titleW := listW - 8 - 1 - ageWidth - 2
+		line := sourceBadge(r.Source) + " " + truncate(r.DisplayTitle(), titleW)
+		pad := listW - lipgloss.Width(line) - lipgloss.Width(age)
+		if pad < 1 {
+			pad = 1
+		}
+		line += strings.Repeat(" ", pad) + styleDim.Render(age)
+		if i == m.cursor {
+			if m.focus == focusList {
+				line = styleSelected.Render(lipgloss.NewStyle().Width(listW).Render(line))
+			} else {
+				line = styleHeader.Render(line)
+			}
+		}
+		list.WriteString(line + "\n")
+	}
+	if len(m.rows) == 0 {
+		list.WriteString(styleDim.Render("no sessions"))
+	}
+	left := lipgloss.NewStyle().Width(listW).Height(h).MaxHeight(h).Render(list.String())
+	sep := styleBorder.Render(strings.Repeat("│\n", h-1) + "│")
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", sep, " ", m.preview.View())
+
+	status := styleDim.Render(m.status)
+	if m.indexing {
+		status = styleDim.Render("indexing… " + m.status)
+	}
+	if m.focus == focusSearch {
+		status = m.search.View()
+	}
+	footer := styleDim.Render("↑↓ move · enter/tab read · o open in agent · / search · esc clear · s source · r reindex · q quit")
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
+}
+
+func strPtr(s string) *string { return &s }
+
+func main() {
+	bin, err := findCore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "as:", err)
+		os.Exit(1)
+	}
+	p := tea.NewProgram(newModel(Core{bin: bin}), tea.WithAltScreen())
+	final, err := p.Run()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "as:", err)
+		os.Exit(1)
+	}
+	if m, ok := final.(model); ok && m.resume != nil {
+		execResume(*m.resume)
+	}
+}
+
+// execResume replaces this process with the agent, so it owns the terminal exactly as
+// if the user had typed the command.
+func execResume(cmd ResumeCommand) {
+	fmt.Fprintln(os.Stderr, "→", cmd.Shell)
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "as: sh not found:", err)
+		os.Exit(1)
+	}
+	err = syscall.Exec(sh, []string{"sh", "-c", cmd.Shell}, os.Environ())
+	fmt.Fprintln(os.Stderr, "as: exec failed:", err)
+	os.Exit(1)
+}

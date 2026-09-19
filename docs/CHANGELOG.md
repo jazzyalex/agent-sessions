@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Experimental Linux console version.** `as` is a terminal UI to browse, search, read, and resume local Codex, Claude Code, OpenCode, Copilot CLI, and Antigravity sessions; `as-core` is the JSON engine behind it, built from the same Swift parsers and search index as the Mac app. Build with `linux/package.sh arm64|amd64`. Not yet distributed; the Mac app is unchanged.
+
 ### Improvements
 - **Large session libraries avoid redundant refresh work.** Live-presence lookup caching now retains a bounded large-library working set, and refresh completion no longer rebuilds the session table a second time after the published rows are already applied.
 - **Quota Meter's weekly lens now shows the combined burn rate and time left at that pace.** The compact header keeps the weekly reset visible, separates hour and minute units for readability, summarizes projections longer than one day as a whole-hour lower bound, and uses `∞` consistently when Codex has no five-hour limit. Active rates still report measuring, unavailable, or exhausted states; when no session is active, the rate and ETA area stays empty instead of showing a meaningless placeholder.
