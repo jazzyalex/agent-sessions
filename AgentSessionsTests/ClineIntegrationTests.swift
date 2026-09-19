@@ -256,15 +256,18 @@ final class ClineIntegrationTests: XCTestCase {
         XCTAssertTrue(PreferencesTab.sidebarAgentTabs.contains(.cline))
     }
 
-    func testToolbarPillSequenceEndsWithCline() {
+    func testToolbarPillSequenceKeepsClineBeforeDeepSeekHarness() {
         let derived = SessionSourceRegistry.ordered.compactMap { adapter -> (SessionSource, String, String?)? in
             guard let pill = adapter.descriptor.otherAgentPill else { return nil }
             return (adapter.descriptor.source, adapter.descriptor.shortLabel, pill.shortcut)
         }
-        guard let last = derived.last else { return XCTFail("no pills derived") }
-        XCTAssertEqual(last.0, .cline)
-        XCTAssertEqual(last.1, "Cline")
-        XCTAssertNil(last.2)
+        guard derived.count >= 2 else { return XCTFail("expected Cline and DSH pills") }
+        XCTAssertEqual(derived[derived.count - 2].0, .cline)
+        XCTAssertEqual(derived[derived.count - 2].1, "Cline")
+        XCTAssertNil(derived[derived.count - 2].2)
+        XCTAssertEqual(derived.last?.0, .deepseekHarness)
+        XCTAssertEqual(derived.last?.1, "DeepSeek Harness")
+        XCTAssertNil(derived.last?.2)
     }
 
     // MARK: - Golden fixtures
