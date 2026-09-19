@@ -18,10 +18,10 @@
 
 - [ ] **Step 1: Add failing result/API tests**
 
-  Extend the synthetic ACP store fixture helper to encode root field 18 resource paths and add tests that:
+  Extend the synthetic ACP store fixture helper to encode root field 18 resource paths using a protobuf varint key encoder (field 18's key is 146, so the helper must not take a `UInt8`) and add tests that:
 
-  - accept `agent-transcripts/<rootUUID>/<rootUUID>.jsonl` as the root layout but do not treat it as a child;
-  - accept `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` with distinct valid UUIDs;
+  - accept absolute `/.../agent-transcripts/<rootUUID>/<rootUUID>.jsonl` as the root layout but do not treat it as a child;
+  - accept absolute `/.../agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` with distinct valid UUIDs;
   - ignore field-18 paths with wrong UUID layout, non-JSONL extensions, relative paths, and paths placed only in tool/blob payloads;
   - assert `parseResult(at:)` returns a `Session` plus referenced normalized path set while `parse(at:)` remains session-only compatible.
 
@@ -31,7 +31,7 @@
 
 - [ ] **Step 2: Implement the bounded result type and extractor**
 
-  Add `CursorACPParseResult` with the parsed session and referenced transcript paths. Keep `parse(at:)` as a wrapper. Decode only repeated root field 18 wire-type-2 values, validate the two exact path layouts, and normalize lexically without symlink resolution. Keep all existing schema/root/turn validation and sensitive-payload exclusion unchanged.
+  Add `CursorACPParseResult` with the parsed session and referenced transcript paths. Keep `parse(at:)` as a wrapper. Decode only repeated root field 18 wire-type-2 values, validate the two exact absolute-path layouts, and normalize lexically without symlink resolution. Exclude the root self-reference from the child-reference set (or make the association resolver ignore it). Keep all existing schema/root/turn validation and sensitive-payload exclusion unchanged.
 
 - [ ] **Step 3: Run parser tests**
 
@@ -62,7 +62,7 @@
 
 - [ ] **Step 2: Implement a dedicated relationship-copy helper**
 
-  Add an internal/publicly testable helper on `Session` that returns a copy with relationship fields changed and all immutable metadata/events plus runtime state preserved. Do not reconstruct sessions at call sites with partial initializers.
+  Add an internal/publicly testable helper on `Session` that returns a copy with relationship fields changed and all immutable metadata/events plus runtime state preserved: `isHousekeeping`, `hasToolCallEvent`, lightweight cwd/repo/title/commands, custom title, Codex IDs/origin/source/surface, origin/source/surface, reasoning effort, deleted state, `isFavorite`, and `isPartiallyHydrated` must all survive. Do not reconstruct sessions at call sites with partial initializers.
 
 - [ ] **Step 3: Run the focused test**
 
@@ -78,9 +78,11 @@
 ### Task 3: Apply explicit associations after fresh or cached hydration
 
 **Files:**
+- Create: `AgentSessions/Services/CursorACPSubagentAssociation.swift` (pure path lookup, conflict resolution, and relationship application)
 - Modify: `AgentSessions/Services/CursorSessionIndexer.swift`
 - Modify: `AgentSessions/Cursor/CursorSourceDescriptor.swift` (route full ACP parsing through the result API where required)
-- Test: `AgentSessionsTests/CursorSessionParserTests.swift` and/or `AgentSessionsTests/SessionParserTests.swift`
+- Modify: `AgentSessions/Services/SessionIndexer.swift` only if the shared hydration result needs an explicit cache-preserving seam
+- Test: `AgentSessionsTests/CursorACPSubagentAssociationTests.swift`, `AgentSessionsTests/CursorSessionParserTests.swift`, and/or `AgentSessionsTests/SessionParserTests.swift`
 
 - [ ] **Step 1: Add failing association tests**
 
@@ -97,30 +99,32 @@
 
 - [ ] **Step 2: Implement normalized path lookup and fail-closed association**
 
-  Build a normalized-path-to-`Set<String>` parent map from all ACP parse results. Apply it after `hydrateOrScan` returns and before Cursor metadata merge/sort. Require exactly one candidate before any upgrade; handle raw path-derived parent UUID matching as specified; use the field-preserving helper.
+  Build a normalized-path-to-`Set<String>` parent map from all ACP parse results before the JSONL hydration call. After `SessionIndexingEngine.hydrateOrScan` returns (whether fresh or cached), pass the returned sessions through the pure association resolver before Cursor metadata merge/sort. Require exactly one candidate before any upgrade; handle raw path-derived parent UUID matching as specified; use the field-preserving helper. Rebuild the map and re-associate from the current discovery set on every full reconciliation so stale references cannot leave dangling children. The cache-path test must call the resolver with a cached session set directly; the stale-reference test must exercise a refresh mode that actually reconciles/removes missing files, not a cache-only fast path.
 
-- [ ] **Step 3: Update full parse call sites**
+  Normalize only absolute paths with `URL(fileURLWithPath:).standardizedFileURL.path`; never call `resolvingSymlinksInPath`, never lower-case, and compare the resulting path strings exactly. The extractor rejects relative resource values before normalization.
 
-  Preserve `Session?` descriptor contracts by using the result API internally and returning `.session` where a full parser closure needs only a session. Ensure reload/search paths do not lose the relationship metadata.
+- [ ] **Step 3: Update full parse and reload call sites**
+
+  Preserve `Session?` descriptor contracts by using the result API internally and returning `.session` where a full parser closure needs only a session. Update `CursorSessionIndexer.reloadSession` at its direct `CursorSessionParser.parseFileFull` call site so the reloaded session merges/preserves the previously associated relationship and all metadata. Ensure search paths do not lose relationship metadata.
 
 - [ ] **Step 4: Run targeted tests**
 
-  Run the Cursor parser and session parser test subsets.
+  Run the Cursor parser, association, reload, and session parser test subsets. Include the cache-only resolver test and a full-reconciliation stale-file test.
 
   Expected: PASS; no existing ACP parser or hierarchy regressions.
 
 - [ ] **Step 5: Commit**
 
   ```bash
-  git add AgentSessions/Services/CursorSessionIndexer.swift AgentSessions/Cursor/CursorSourceDescriptor.swift AgentSessionsTests/CursorSessionParserTests.swift AgentSessionsTests/SessionParserTests.swift
+  git add AgentSessions/Services/CursorACPSubagentAssociation.swift AgentSessions/Services/CursorSessionIndexer.swift AgentSessions/Cursor/CursorSourceDescriptor.swift AgentSessions/Services/SessionIndexer.swift AgentSessionsTests/CursorACPSubagentAssociationTests.swift AgentSessionsTests/CursorSessionParserTests.swift AgentSessionsTests/SessionParserTests.swift
   git commit -m "feat: link explicitly referenced Cursor ACP subtasks"
   ```
 
 ### Task 4: Render ACP-backed child relationship
 
 **Files:**
-- Modify: `AgentSessions/Services/SessionRowsBuilder.swift`
-- Modify: `AgentSessions/Views/UnifiedSessionsView.swift` only if the existing generic sub marker needs an ACP-specific accessibility/help string
+- Modify: `AgentSessions/Services/SessionRowsBuilder.swift` if surface-pill logic needs the ACP child relationship
+- Modify: `AgentSessions/Views/UnifiedSessionsView.swift` (`WorkflowSubagentBadge.displayLabel` and nested-row accessibility/help rendering)
 - Test: `AgentSessionsTests/SessionRowDisplayTests.swift` and `AgentSessionsTests/SessionRowsBuilderTests.swift`
 
 - [ ] **Step 1: Add failing UI/pill tests**
@@ -129,7 +133,7 @@
 
 - [ ] **Step 2: Implement the smallest rendering change**
 
-  Reuse the existing `SubagentHierarchyBuilder` and generic sub marker. Add only the ACP-specific accessibility/help mapping needed for `cursor-acp-subagent`; do not add new table columns or duplicate hierarchy connections.
+  Reuse the existing `SubagentHierarchyBuilder` and generic sub marker. Add an explicit `cursor-acp-subagent` mapping in `WorkflowSubagentBadge.displayLabel` (for example `sub`) plus the ACP-specific accessibility/help text; do not add new table columns or duplicate hierarchy connections.
 
 - [ ] **Step 3: Run row tests**
 
@@ -145,7 +149,7 @@
 ### Task 5: Full verification and documentation
 
 **Files:**
-- Modify: `README.md` or `docs/guides/cursor-agent-local-history.html` only if the existing ACP capability matrix needs the new explicit-association boundary documented
+- Modify: `docs/guides/cursor-agent-local-history.html` to document the explicit-path-only ACP subagent association boundary
 - Test: existing full AgentSessionsTests suite
 
 - [ ] **Step 1: Run focused regression suite**
@@ -170,6 +174,6 @@
 - [ ] **Step 5: Commit documentation if needed**
 
   ```bash
-  git add README.md docs/guides/cursor-agent-local-history.html
+  git add docs/guides/cursor-agent-local-history.html
   git commit -m "docs: describe explicit Cursor ACP subagent links"
   ```
