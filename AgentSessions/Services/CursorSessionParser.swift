@@ -584,6 +584,12 @@ final class CursorSessionParser {
 /// results, attachments, and the root's blob-encryption key never enter the index.
 enum CursorACPStoreReader {
     private static let idPrefix = "cursor-acp:"
+    private static let transcriptFieldNumber = 18
+
+    struct ParseResult {
+        let session: Session
+        let referencedTranscriptPaths: Set<String>
+    }
 
     static func isACPStore(_ url: URL) -> Bool {
         url.lastPathComponent == "store.db"
@@ -591,6 +597,10 @@ enum CursorACPStoreReader {
     }
 
     static func parse(at url: URL) -> Session? {
+        parseResult(at: url)?.session
+    }
+
+    static func parseResult(at url: URL) -> ParseResult? {
         guard isACPStore(url),
               let rawID = UUID(uuidString: url.deletingLastPathComponent().lastPathComponent)?.uuidString.lowercased(),
               let sidecar = readSidecar(url.deletingLastPathComponent().appendingPathComponent("meta.json")),
@@ -601,7 +611,12 @@ enum CursorACPStoreReader {
               let rootIDData = Data(hexString: rootID), rootIDData.count == 32,
               let root = store.blob(id: rootID) else { return nil }
 
-        let turns = ProtoMessage(root).dataFields(number: 8)
+        let rootMessage = ProtoMessage(root)
+        let rootTranscriptPath = transcriptPath(
+            from: rootMessage.dataFields(number: transcriptFieldNumber),
+            expectedRootID: rawID
+        )
+        let turns = rootMessage.dataFields(number: 8)
         var events: [SessionEvent] = []
         for (turnIndex, turnIDData) in turns.enumerated() {
             guard turnIDData.count == 32,
@@ -627,22 +642,56 @@ enum CursorACPStoreReader {
         let created = date(rootJSON["createdAt"])
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-        return Session(id: idPrefix + rawID,
-                       source: .cursor,
-                       startTime: created,
-                       endTime: modified ?? created,
-                       model: nil,
-                       filePath: url.path,
-                       fileSizeBytes: size,
-                       eventCount: events.count,
-                       events: events,
-                       cwd: sidecar["cwd"] as? String,
-                       repoName: (sidecar["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent },
-                       lightweightTitle: rootJSON["name"] as? String,
-                       customTitle: rootJSON["name"] as? String,
-                       originator: "cursor-agent",
-                       originSource: "acp-persisted",
-                       surface: .acp)
+        let session = Session(id: idPrefix + rawID,
+                              source: .cursor,
+                              startTime: created,
+                              endTime: modified ?? created,
+                              model: nil,
+                              filePath: url.path,
+                              fileSizeBytes: size,
+                              eventCount: events.count,
+                              events: events,
+                              cwd: sidecar["cwd"] as? String,
+                              repoName: (sidecar["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent },
+                              lightweightTitle: rootJSON["name"] as? String,
+                              customTitle: rootJSON["name"] as? String,
+                              originator: "cursor-agent",
+                              originSource: "acp-persisted",
+                              surface: .acp)
+        return ParseResult(session: session, referencedTranscriptPaths: rootTranscriptPath)
+    }
+
+    private static func transcriptPath(from values: [Data], expectedRootID: String) -> Set<String> {
+        var paths = Set<String>()
+        for value in values {
+            guard let rawPath = String(data: value, encoding: .utf8),
+                  rawPath.hasPrefix("/") else { continue }
+            let normalized = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+            let components = normalized.split(separator: "/").map(String.init)
+            guard let marker = components.lastIndex(of: "agent-transcripts") else { continue }
+            let suffix = Array(components.dropFirst(marker + 1))
+            guard suffix.count == 2 || suffix.count == 3 else { continue }
+
+            if suffix.count == 2 {
+                guard let directoryID = UUID(uuidString: suffix[0])?.uuidString.lowercased(),
+                      let filenameID = UUID(uuidString: String(suffix[1].dropLast(".jsonl".count)))?.uuidString.lowercased(),
+                      suffix[1].hasSuffix(".jsonl"),
+                      directoryID == filenameID else { continue }
+                // The root transcript identifies the ACP session itself, not a child.
+                guard directoryID == expectedRootID else { continue }
+                continue
+            } else {
+                guard suffix[1] == "subagents",
+                      let directoryID = UUID(uuidString: suffix[0])?.uuidString.lowercased(),
+                      let filenameID = UUID(uuidString: String(suffix[2].dropLast(".jsonl".count)))?.uuidString.lowercased(),
+                      suffix[2].hasSuffix(".jsonl"),
+                      directoryID != filenameID else { continue }
+            }
+            // The parent directory and child filename have been validated as UUIDs.
+            // Keep the normalized path as the resolver's exact, lexical lookup key.
+            paths.insert(normalized)
+        }
+        return paths
     }
 
     private static func event(id: String, turn: Int, kind: SessionEventKind, text: String) -> SessionEvent {

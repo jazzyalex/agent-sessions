@@ -378,6 +378,64 @@ final class CursorSessionIndexerTests: XCTestCase {
         XCTAssertFalse(session.events.contains { $0.text?.contains("sensitive") == true })
     }
 
+    func testACPStoreReaderParseResultExtractsOnlyExplicitTranscriptPaths() throws {
+        let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
+        let parentID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        let childID = "d88b213c-84e1-427d-bb5e-3859c1011087"
+        let root = Data(repeating: 1, count: 32)
+        let rootPath = "/Users/test/.cursor/projects/project/agent-transcripts/\(sessionID)/\(sessionID).jsonl"
+        let childPath = "/Users/test/.cursor/projects/project/agent-transcripts/\(parentID)/subagents/\(childID).jsonl"
+        let dbURL = try writeTempACPStore(sessionID: sessionID, blobs: [
+            (root.hex, proto(field: 18, data: Data(rootPath.utf8))
+                + proto(field: 18, data: Data(childPath.utf8)))
+        ], rootID: root.hex)
+        defer { try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().deletingLastPathComponent()) }
+
+        let result = try XCTUnwrap(CursorACPStoreReader.parseResult(at: dbURL))
+        XCTAssertEqual(result.session.id, "cursor-acp:\(sessionID)")
+        XCTAssertEqual(result.referencedTranscriptPaths, [childPath])
+        XCTAssertEqual(CursorACPStoreReader.parse(at: dbURL)?.id, result.session.id)
+    }
+
+    func testACPStoreReaderParseResultRejectsMalformedOrRelativePaths() throws {
+        let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
+        let root = Data(repeating: 1, count: 32)
+        let validParent = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        let validChild = "d88b213c-84e1-427d-bb5e-3859c1011087"
+        let values = [
+            "relative/agent-transcripts/\(validParent)/subagents/\(validChild).jsonl",
+            "/tmp/agent-transcripts/not-a-uuid/subagents/\(validChild).jsonl",
+            "/tmp/agent-transcripts/\(validParent)/subagents/not-a-uuid.jsonl",
+            "/tmp/agent-transcripts/\(validParent)/subagents/\(validChild).txt",
+            "/tmp/agent-transcripts/\(validParent)/\(validParent).jsonl"
+        ]
+        let rootData = values.dropFirst().reduce(proto(field: 18, data: Data(values[0].utf8))) { data, value in
+            data + proto(field: 18, data: Data(value.utf8))
+        }
+        let dbURL = try writeTempACPStore(sessionID: sessionID, blobs: [(root.hex, rootData)], rootID: root.hex)
+        defer { try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().deletingLastPathComponent()) }
+
+        let result = try XCTUnwrap(CursorACPStoreReader.parseResult(at: dbURL))
+        XCTAssertTrue(result.referencedTranscriptPaths.isEmpty)
+    }
+
+    func testACPStoreReaderParseResultDoesNotInspectNestedBlobPayloads() throws {
+        let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
+        let parentID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        let childID = "d88b213c-84e1-427d-bb5e-3859c1011087"
+        let root = Data(repeating: 1, count: 32)
+        let turn = Data(repeating: 2, count: 32)
+        let nestedPath = "/tmp/agent-transcripts/\(parentID)/subagents/\(childID).jsonl"
+        let dbURL = try writeTempACPStore(sessionID: sessionID, blobs: [
+            (root.hex, proto(field: 8, data: turn)),
+            (turn.hex, proto(field: 18, data: Data(nestedPath.utf8)))
+        ], rootID: root.hex)
+        defer { try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().deletingLastPathComponent()) }
+
+        let result = try XCTUnwrap(CursorACPStoreReader.parseResult(at: dbURL))
+        XCTAssertTrue(result.referencedTranscriptPaths.isEmpty)
+    }
+
     func testACPStoreReaderRejectsUnknownSchemaVersion() throws {
         let sessionID = "8acca1dc-7b3c-4db1-a390-35773e7a1c8d"
         let root = Data(repeating: 1, count: 32)
@@ -427,8 +485,20 @@ final class CursorSessionIndexerTests: XCTestCase {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw NSError(domain: "CursorACPTest", code: 2) }
     }
 
-    private func proto(field: UInt8, data: Data) -> Data {
-        Data([field << 3 | 2, UInt8(data.count)]) + data
+    private func proto(field: Int, data: Data) -> Data {
+        encodeVarint(UInt64(field << 3 | 2)) + encodeVarint(UInt64(data.count)) + data
+    }
+
+    private func encodeVarint(_ value: UInt64) -> Data {
+        var value = value
+        var bytes: [UInt8] = []
+        repeat {
+            var byte = UInt8(value & 0x7f)
+            value >>= 7
+            if value != 0 { byte |= 0x80 }
+            bytes.append(byte)
+        } while value != 0
+        return Data(bytes)
     }
 }
 
