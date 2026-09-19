@@ -193,6 +193,8 @@
 		50808132D09197085B34B63E /* FilteredDefaultsObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E77D775A7E1D081B6EA91C6 /* FilteredDefaultsObserverTests.swift */; };
 		50F22064ADD499654338441E /* DevinSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6514220FE9461868DE489291 /* DevinSourceDescriptor.swift */; };
 		511CCA1B0D47E4DFAF2B32E9 /* SessionRowDisplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CC0C3D8AA930D4672F70B67 /* SessionRowDisplayTests.swift */; };
+		B7C2D3E4F5A60718293A4B5C /* CursorACPSubagentAssociationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociationTests.swift */; };
+		B8C2D3E4F5A60718293A4B5C /* CursorACPSubagentAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociation.swift */; };
 		D1E2F3A4B5C60718293A4B5C /* SessionRelationshipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* SessionRelationshipTests.swift */; };
 		51A34A2BBB145228EC9B3A68 /* CodexSideChatLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD21A67716B8A7D96D3FB15F /* CodexSideChatLogReader.swift */; };
 		531D5F6D6B6745FDA5A8843D /* DroidSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFC9620B8D33B2E927DC16A /* DroidSourceDescriptor.swift */; };
@@ -1243,6 +1245,8 @@
 		ED9B9885C7279A88B62FA973 /* ClaudeWorkflowSubagentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeWorkflowSubagentTests.swift; sourceTree = SOURCE_ROOT; };
 		EE51E91DDB45FF63A7579B6B /* ImageBrowserIndexCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserIndexCache.swift; sourceTree = SOURCE_ROOT; };
 		EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CursorSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		C8D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CursorACPSubagentAssociation.swift; sourceTree = SOURCE_ROOT; };
+		C7D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CursorACPSubagentAssociationTests.swift; sourceTree = SOURCE_ROOT; };
 		EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/AgentTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
 		EF47E1D1397757AF0B4E3797 /* ClaudeRunwayParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeRunwayParserTests.swift; sourceTree = SOURCE_ROOT; };
 		EFA1DA683C6BB025DA89EA6E /* CodexSideChatLogReaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CodexSideChatLogReaderTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1939,6 +1943,7 @@
 				B00000120A0A000100000001 /* Info.plist */,
 				B0000011FA0A000100000001 /* SessionParserTests.swift */,
 				A1B2C3D4E5F60718293A4B5C /* SessionRelationshipTests.swift */,
+				C7D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociationTests.swift */,
 				B00000173A0A000100000001 /* TranscriptBuilderTests.swift */,
 				B00000179A0A000100000001 /* SessionTitleTests.swift */,
 				A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */,
@@ -2202,6 +2207,7 @@
 				244A406366EFEFF96A75B5DC /* CursorSessionDiscovery.swift */,
 				F907EDC5569C03CA84AC9963 /* CursorSessionParser.swift */,
 				EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */,
+				C8D2E3F4A5B60718293A4B5C /* CursorACPSubagentAssociation.swift */,
 				3461C92597A6EC663D5D67EB /* HermesSessionDiscovery.swift */,
 				DC465AC4F3A51868CBF81044 /* HermesSessionParser.swift */,
 				30A71A6F3D66468A840DCEEE /* HermesSessionIndexer.swift */,
@@ -3042,6 +3048,7 @@
 				7FB7424C6E9E83DD27243857 /* CursorSessionDiscovery.swift in Sources */,
 				C175836A2966A91207158754 /* CursorSessionParser.swift in Sources */,
 				EC762372C84091AFA2F77ECD /* CursorSessionIndexer.swift in Sources */,
+				B8C2D3E4F5A60718293A4B5C /* CursorACPSubagentAssociation.swift in Sources */,
 				9C1C91D57A76756AB7386E12 /* PreferencesView+Cursor.swift in Sources */,
 				867937185092A7641F1E1508 /* CursorTranscriptView.swift in Sources */,
 				C6CE5E7F605CB2847D0B5CB3 /* CursorResumeTypes.swift in Sources */,
@@ -3320,6 +3327,7 @@
 				D90DC1910BFD698FD8C7B6CF /* SessionListFingerprintTests.swift in Sources */,
 				511CCA1B0D47E4DFAF2B32E9 /* SessionRowDisplayTests.swift in Sources */,
 				D1E2F3A4B5C60718293A4B5C /* SessionRelationshipTests.swift in Sources */,
+				B7C2D3E4F5A60718293A4B5C /* CursorACPSubagentAssociationTests.swift in Sources */,
 				DC1F5088E6C61C8FD6BF89FB /* TranscriptAutoJumpPolicyTests.swift in Sources */,
 				B17905835FD9A93AD12C0472 /* PresenceEngineRegressionTests.swift in Sources */,
 				1E2F2DE066304D55C8B158B8 /* TranscriptDerivedStateTests.swift in Sources */,

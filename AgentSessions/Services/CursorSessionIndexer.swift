@@ -133,10 +133,16 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
 
         let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
         let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : requestedPriority
-        let capturedCustomRoot = current.isEmpty ? nil : current
+            let capturedCustomRoot = current.isEmpty ? nil : current
 
         Task.detached(priority: prio) { [weak self, token] in
             guard let self else { return }
+
+            // Parse the authoritative ACP graph before transcript hydration so
+            // the same explicit path map is applied to fresh and cached rows.
+            let acpResults = self.discovery.discoverACPSessionDBs().compactMap {
+                CursorACPStoreReader.parseResult(at: $0)
+            }
 
             // Step 1: Discover and parse JSONL transcripts
             let config = SessionIndexingEngine.ScanConfig(
@@ -187,11 +193,15 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             }
 
             // ACP persistence is a separate graph and uses namespaced internal IDs.
-            for db in self.discovery.discoverACPSessionDBs() {
-                if let session = CursorACPStoreReader.parse(at: db) {
-                    transcriptSessions.append(session)
-                }
-            }
+            transcriptSessions.append(contentsOf: acpResults.map(\.session))
+
+            // Attach only explicitly referenced JSONL subagents. The resolver
+            // is deliberately applied after hydration so cached rows receive
+            // the same relationship treatment as freshly parsed rows.
+            transcriptSessions = CursorACPSubagentAssociation.apply(
+                sessions: transcriptSessions,
+                acpResults: acpResults
+            )
 
             // Sort by most recent first
             let sorted = transcriptSessions.sorted { $0.modifiedAt > $1.modifiedAt }
@@ -335,29 +345,15 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
 
                 if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                     let current = self.allSessions[idx]
-                    let merged = Session(
-                        id: parsed.id,
-                        source: parsed.source,
-                        startTime: parsed.startTime ?? current.startTime,
-                        endTime: parsed.endTime ?? current.endTime,
-                        model: parsed.model ?? current.model,
-                        filePath: parsed.filePath,
-                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, parsed.nonMetaCount),
-                        events: parsed.events,
-                        cwd: current.lightweightCwd ?? parsed.cwd,
-                        repoName: current.repoName,
-                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands,
-                        parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
-                        subagentType: parsed.subagentType ?? current.subagentType,
-                        customTitle: current.customTitle ?? parsed.customTitle
-                    )
-                    self.allSessions[idx] = merged
+                    let merged = Self.mergeReloadedSession(parsed: parsed, current: current)
+                    var runtimeMerged = merged
+                    runtimeMerged.isFavorite = current.isFavorite
+                    runtimeMerged.isPartiallyHydrated = parsed.isPartiallyHydrated
+                    self.allSessions[idx] = runtimeMerged
 
                     let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
-                    self.transcriptCache.set(merged.id, transcript: transcript)
+                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: runtimeMerged, filters: filters, mode: .normal)
+                    self.transcriptCache.set(runtimeMerged.id, transcript: transcript)
                 }
                 self.recomputeNow()
             }
@@ -365,6 +361,28 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     }
 
     // MARK: - Merge Helpers
+
+    private static func mergeReloadedSession(parsed: Session, current: Session) -> Session {
+        Session(
+            id: parsed.id,
+            source: parsed.source,
+            startTime: parsed.startTime ?? current.startTime,
+            endTime: parsed.endTime ?? current.endTime,
+            model: parsed.model ?? current.model,
+            filePath: parsed.filePath,
+            fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+            eventCount: max(current.eventCount, parsed.nonMetaCount),
+            events: parsed.events,
+            cwd: current.lightweightCwd ?? parsed.cwd,
+            repoName: current.repoName,
+            lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
+            lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands,
+            parentSessionID: current.parentSessionID ?? parsed.parentSessionID,
+            subagentType: current.subagentType ?? parsed.subagentType,
+            relationshipKind: current.relationshipKind ?? parsed.relationshipKind,
+            customTitle: current.customTitle ?? parsed.customTitle
+        )
+    }
 
     /// Enrich a transcript-parsed session with chat DB metadata.
     private static func enrichSession(_ session: Session, with meta: CursorSessionMeta, knownProjectPaths: [String]) -> Session {

@@ -5,7 +5,14 @@ import AppKit
 /// (e.g. "workflow-subagent") short in the session list.
 enum WorkflowSubagentBadge {
     static func displayLabel(for agentType: String) -> String {
-        agentType == Session.claudeWorkflowSubagentType ? "workflow" : agentType
+        switch agentType {
+        case Session.claudeWorkflowSubagentType:
+            return "workflow"
+        case CursorACPSubagentAssociation.subagentType:
+            return "sub"
+        default:
+            return agentType
+        }
     }
 }
 
@@ -4426,6 +4433,9 @@ private struct SessionTitleCell: View, Equatable {
     }
 
     private var subagentPillHelp: String {
+        if session.subagentType == CursorACPSubagentAssociation.subagentType {
+            return "Cursor ACP subagent"
+        }
         guard let effort = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
               !effort.isEmpty else {
             return "Subagent"

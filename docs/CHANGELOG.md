@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Cursor ACP persisted sessions in `~/.cursor/acp-sessions` are discovered and indexed read-only for user and assistant text. ACP rows are labeled separately and cannot invoke the incompatible Cursor CLI resume command.
+- Cursor ACP roots now attach explicitly referenced Cursor JSONL subagent transcripts as nested child rows, while ambiguous or heuristic-only matches remain unassociated.
 
 All notable changes to this project will be documented in this file.
 
