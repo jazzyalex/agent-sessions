@@ -153,6 +153,7 @@ def _http_get_json(url: str, timeout: int) -> Any:
 
 
 _SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+_DSH_SEMVER_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?")
 
 
 @dataclass(frozen=True, order=True)
@@ -175,6 +176,46 @@ class Semver:
 def _extract_semver(text: str) -> str | None:
     v = Semver.parse(text)
     return str(v) if v else None
+
+
+def _extract_dsh_semver(text: str) -> str | None:
+    match = _DSH_SEMVER_RE.search(text)
+    return match.group(0) if match else None
+
+
+def _compare_dsh_semver(a: str | None, b: str | None) -> int | None:
+    """Compare DSH prereleases by SemVer precedence without changing other agents."""
+    if not a or not b:
+        return None
+    left = _DSH_SEMVER_RE.search(a)
+    right = _DSH_SEMVER_RE.search(b)
+    if not left or not right:
+        return None
+    base_a = tuple(int(left.group(i)) for i in range(1, 4))
+    base_b = tuple(int(right.group(i)) for i in range(1, 4))
+    if base_a != base_b:
+        return (base_a > base_b) - (base_a < base_b)
+    pre_a, pre_b = left.group(4), right.group(4)
+    if pre_a is None or pre_b is None:
+        return (pre_a is None) - (pre_b is None)
+    for item_a, item_b in zip(pre_a.split("."), pre_b.split(".")):
+        if item_a == item_b:
+            continue
+        numeric_a, numeric_b = item_a.isdigit(), item_b.isdigit()
+        if numeric_a and numeric_b:
+            return (int(item_a) > int(item_b)) - (int(item_a) < int(item_b))
+        if numeric_a != numeric_b:
+            return -1 if numeric_a else 1
+        return (item_a > item_b) - (item_a < item_b)
+    return (len(pre_a.split(".")) > len(pre_b.split("."))) - (
+        len(pre_a.split(".")) < len(pre_b.split("."))
+    )
+
+
+def _upstream_newer_than_verified(agent_name: str, upstream: str | None,
+                                   verified: str | None) -> bool:
+    compare = _compare_dsh_semver if agent_name == "deepseek_harness" else _compare_semver
+    return compare(upstream, verified) == 1
 
 
 def _run_cmd(argv: list[str], timeout: int) -> tuple[int, str, str]:
@@ -2583,7 +2624,7 @@ def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
         raw = tag if isinstance(tag, str) else (name if isinstance(name, str) else "")
         return {
             "ok": True,
-            "version": _extract_semver(raw) or None,
+            "version": _extract_dsh_semver(raw) or None,
             "url": url,
             "html_url": obj.get("html_url"),
             "tag_name": tag,
@@ -3932,7 +3973,10 @@ def main(argv: list[str]) -> int:
         agent_out.mkdir(parents=True, exist_ok=True)
 
         verified = verified_map.get(agent_name)
-        verified_semver = _extract_semver(verified or "") if verified else None
+        verified_semver = (
+            _extract_dsh_semver(verified or "") if agent_name == "deepseek_harness"
+            else _extract_semver(verified or "")
+        ) if verified else None
 
         installed_cmd = agent_cfg.get("installed_version_cmd")
         effective_installed_cmd = installed_cmd if isinstance(installed_cmd, list) else None
@@ -3946,6 +3990,8 @@ def main(argv: list[str]) -> int:
                 installed_stderr,
                 installed,
             ) = _run_installed_version_cmds(agent_cfg)
+            if agent_name == "deepseek_harness" and installed_rc == 0:
+                installed = _extract_dsh_semver(installed_stdout) or installed
 
         upstream_sources = agent_cfg.get("upstream") or []
         upstream: str | None = None
@@ -3990,10 +4036,13 @@ def main(argv: list[str]) -> int:
         upstream_newer_than_verified = False
         installed_newer_than_verified = False
         if verified_semver and upstream:
-            cmp_uv = _compare_semver(upstream, verified_semver)
-            upstream_newer_than_verified = (cmp_uv == 1)
+            upstream_newer_than_verified = _upstream_newer_than_verified(
+                agent_name, upstream, verified_semver
+            )
         if verified_semver and installed:
-            cmp_iv = _compare_semver(installed, verified_semver)
+            cmp_iv = (_compare_dsh_semver if agent_name == "deepseek_harness" else _compare_semver)(
+                installed, verified_semver
+            )
             installed_newer_than_verified = (cmp_iv == 1)
 
         monitoring_failed = False
@@ -4225,8 +4274,8 @@ def main(argv: list[str]) -> int:
                     upstream = chosen
                     # Recompute the drift flag against the version we actually adopted;
                     # leaving it derived from the superseded value is the whole defect.
-                    upstream_newer_than_verified = bool(
-                        verified_semver and _compare_semver(upstream, verified_semver) == 1
+                    upstream_newer_than_verified = _upstream_newer_than_verified(
+                        agent_name, upstream, verified_semver
                     )
                     # `monitoring_failed` is deliberately NOT cleared here. If the
                     # configured source failed outright, that source is still broken and

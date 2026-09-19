@@ -412,7 +412,26 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             var fallbackURLs: [String: URL]? = nil
             for id in pinned {
                 if var info = loadInfoIfExists(source: source, id: id) {
-                    ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    if source == .deepseekHarness {
+                        // Existing DSH Saved metadata may point at v2 while the
+                        // immutable live directory has advanced to v3. Periodic
+                        // sync must rediscover the current primary; otherwise the
+                        // filtered snapshot permanently excludes successors.
+                        if fallbackURLs == nil {
+                            fallbackURLs = resolveBackfillURLsFromFilesystem(source: source)
+                        }
+                        if let url = fallbackURLs?[id],
+                           let session = DeepSeekHarnessSessionParser.parseFile(at: url),
+                           session.id == id {
+                            ensureArchiveExistsAndSync(session: session, reason: reason)
+                        } else {
+                            // An unreadable or absent upstream is not authority
+                            // to replace the healthy Saved copy.
+                            ensureArchiveExistsAndSync(info: &info, reason: reason)
+                        }
+                    } else {
+                        ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    }
                     let key = key(source: source, id: id)
                     missingResolutionLogged.remove(key)
                     continue

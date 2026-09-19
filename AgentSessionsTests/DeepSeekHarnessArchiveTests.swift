@@ -264,7 +264,31 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         )
         let previousProvider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider
         SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = { appSupport }
-        defer { SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider }
+        let previousRoot = UserDefaults.standard.object(forKey: DeepSeekHarnessSettings.Keys.rootOverride)
+        let previousFavorites = UserDefaults.standard.object(forKey: StarredSessionsStore.defaultsKey)
+        let previousStarPins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions)
+        UserDefaults.standard.set(upstreamRoot.path, forKey: DeepSeekHarnessSettings.Keys.rootOverride)
+        UserDefaults.standard.set(true, forKey: PreferencesKey.Archives.starPinsSessions)
+        UserDefaults.standard.set([StarredSessionKey(source: .deepseekHarness, id: id).persistedString],
+                                  forKey: StarredSessionsStore.defaultsKey)
+        defer {
+            SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider
+            if let previousRoot {
+                UserDefaults.standard.set(previousRoot, forKey: DeepSeekHarnessSettings.Keys.rootOverride)
+            } else {
+                UserDefaults.standard.removeObject(forKey: DeepSeekHarnessSettings.Keys.rootOverride)
+            }
+            if let previousFavorites {
+                UserDefaults.standard.set(previousFavorites, forKey: StarredSessionsStore.defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: StarredSessionsStore.defaultsKey)
+            }
+            if let previousStarPins {
+                UserDefaults.standard.set(previousStarPins, forKey: PreferencesKey.Archives.starPinsSessions)
+            } else {
+                UserDefaults.standard.removeObject(forKey: PreferencesKey.Archives.starPinsSessions)
+            }
+        }
 
         let manager = SessionArchiveManager.shared
         let v2Session = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: v2))
@@ -276,16 +300,21 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
             root: upstreamRoot, id: id, version: 3,
             data: try validGenerationData(version: 3, id: id)
         )
-        let v3Session = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: v3))
-        manager.syncSessionForTesting(v3Session)
-        let advanced = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
-
-        XCTAssertEqual(advanced.pinnedAt, first.pinnedAt)
-        XCTAssertEqual(advanced.upstreamPath, v3.deletingLastPathComponent().path)
-        XCTAssertEqual(advanced.primaryRelativePath, "session.v3.jsonl")
         let archivedV3 = appSupport.appendingPathComponent(
             "AgentSessions/Archives/deepseek-harness/\(id)/data/session.v3.jsonl"
         )
+        manager.syncPinnedSessionsNow()
+        waitUntil("periodic Saved sync should advance DSH primary") {
+            manager.archiveInfoForTesting(source: .deepseekHarness, id: id)?.primaryRelativePath
+                == "session.v3.jsonl"
+                && DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id == id
+        }
+        let advanced = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+
+        XCTAssertEqual(advanced.pinnedAt, first.pinnedAt)
+        XCTAssertEqual(URL(fileURLWithPath: advanced.upstreamPath).lastPathComponent,
+                       v3.deletingLastPathComponent().lastPathComponent)
+        XCTAssertEqual(advanced.primaryRelativePath, "session.v3.jsonl")
         XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
     }
 

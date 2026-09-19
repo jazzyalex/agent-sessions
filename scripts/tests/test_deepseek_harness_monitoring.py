@@ -76,7 +76,19 @@ def test_dsh_upstream_source_includes_prereleases(monkeypatch) -> None:
     )
 
     assert result["ok"] is True
-    assert result["version"] == "0.1.6"
+    assert result["version"] == "0.1.6-alpha.2"
     assert result["tag_name"] == "dsh-v0.1.6-alpha.2"
     assert result["prerelease"] is True
     assert captured["url"].endswith("/releases?per_page=20")
+
+
+def test_dsh_prerelease_advancement_triggers_upstream_drift() -> None:
+    verified = agent_watch._extract_dsh_semver("0.1.6-alpha.2")
+    upstream = agent_watch._extract_dsh_semver("dsh-v0.1.6-alpha.3")
+    assert agent_watch._upstream_newer_than_verified("deepseek_harness", upstream, verified)
+    assert not agent_watch._upstream_newer_than_verified(
+        "deepseek_harness", "0.1.6-alpha.2", "0.1.6-alpha.3"
+    )
+    assert agent_watch._compare_dsh_semver("0.1.6", "0.1.6-rc.1") == 1
+    assert agent_watch._compare_dsh_semver("0.1.6-alpha.10", "0.1.6-alpha.2") == 1
+    assert agent_watch._compare_dsh_semver("0.1.6-alpha.3", verified) == 1
