@@ -52,7 +52,7 @@ Path normalization must be deterministic: standardize absolute paths, resolve `.
 - A malformed or non-transcript resource path is ignored; it cannot attach an unrelated session.
 - Repeated references from the same ACP parent are deduplicated and remain a single association.
 - The lookup stores a set of candidate ACP parent IDs per normalized path. A path referenced by multiple distinct ACP parents is ambiguous; it remains unresolved and no parent is chosen.
-- The existing Cursor path parser may already assign a raw parent UUID for the `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` layout. When that raw UUID equals the ACP store's UUID, the ACP association is an authoritative namespace upgrade: replace the raw parent key with `cursor-acp:<uuid>` and use the ACP child relationship. When it differs, preserve the existing inferred parent metadata and mark the ACP reference unresolved rather than overwriting it. Other authoritative non-ACP parent metadata also wins. An identical ACP association is idempotent.
+- The existing Cursor path parser may already assign a raw parent UUID for the `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` layout. Ambiguity is checked first: the raw-parent namespace upgrade is allowed only when the normalized path has exactly one candidate ACP parent ID. When that sole candidate equals the raw parent UUID, the ACP association is an authoritative namespace upgrade: replace the raw parent key with `cursor-acp:<uuid>` and use the ACP child relationship. When it differs, preserve the existing inferred parent metadata and mark the ACP reference unresolved rather than overwriting it. Other authoritative non-ACP parent metadata also wins. An identical ACP association is idempotent.
 - Stale references to missing transcript files have no effect; when a referenced file disappears on rescan, its child row disappears through normal discovery and no dangling row is synthesized.
 - The reader remains read-only: no Cursor files, stores, or metadata are written or deleted.
 - Tool arguments/results, reasoning, attachments, and encrypted payloads remain outside the index.
@@ -67,9 +67,10 @@ Add focused fixtures and tests for:
 4. The same association when the transcript session comes from the persisted lightweight cache returned by `hydrateOrScan`.
 5. A timestamp-prefixed JSONL session with no ACP reference remaining unassociated.
 6. Repeated same-parent references deduplicating; cross-parent references remaining unresolved rather than arbitrarily attached.
-7. The actual discovered `subagents/<childUUID>.jsonl` path-derived raw parent UUID being upgraded to `cursor-acp:<parentUUID>` when it matches the ACP store, while a conflicting non-ACP parent remains unchanged.
-8. Relationship-copy tests asserting events, surface/originator, model, project metadata, titles, and all other immutable `Session` fields are preserved.
-9. Existing hierarchy flattening, collapse behavior, ACP parent pill, and no-sensitive-payload tests continuing to pass.
+7. The actual discovered `subagents/<childUUID>.jsonl` path-derived raw parent UUID being upgraded to `cursor-acp:<parentUUID>` when it matches the sole ACP candidate, while a conflicting non-ACP parent remains unchanged.
+8. Two ACP stores referencing the same child path remaining unresolved even when one candidate happens to match the child's raw path-derived parent UUID.
+9. Relationship-copy tests asserting events, surface/originator, model, project metadata, titles, and all other immutable `Session` fields are preserved.
+10. Existing hierarchy flattening, collapse behavior, ACP parent pill, and no-sensitive-payload tests continuing to pass.
 
 ## Non-goals
 
