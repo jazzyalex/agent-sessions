@@ -5,7 +5,8 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "CodexO
 
 // MARK: - Codex OAuth Credentials
 //
-// Reads access tokens from ~/.codex/auth.json (written by `codex login`).
+// Reads access tokens from $CODEX_HOME/auth.json or ~/.codex/auth.json
+// (written by `codex login`).
 // Read on every resolution so an in-process account switch cannot keep using
 // the prior account's token. No token refresh in this layer — callers fall
 // through to CLI RPC or tmux probe on 401.
@@ -27,7 +28,7 @@ enum CodexCredentialRead: Equatable {
 
 actor CodexOAuthCredentials {
     private static let authFilePath: String = {
-        (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
+        CodexSessionDiscovery.codexHome().appendingPathComponent("auth.json").path
     }()
 
     func resolve() -> CodexTokenSet? {
@@ -44,7 +45,7 @@ actor CodexOAuthCredentials {
     /// Result-typed variant of `readFromFile()` that distinguishes an absent
     /// auth file from one that is present but malformed / has no usable
     /// token. Honors `AS_TEST_CODEX_AUTH_PATH` to allow tests to point at a
-    /// fixture file instead of the real `~/.codex/auth.json`. Does not read
+    /// fixture file instead of the real Codex auth file. Does not read
     /// or write the in-memory cache — this is a diagnostic read, not the
     /// hot path used by `resolve()`. Declared `nonisolated` (it touches no
     /// actor-isolated state) so callers — including synchronous test code —
