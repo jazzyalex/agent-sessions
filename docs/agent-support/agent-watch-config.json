@@ -748,6 +748,38 @@
           ]
         }
       }
+    },
+    "deepseek_harness": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["dsh", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.deepseek_harness.max_verified_version",
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "deepseek-ai/deepseek-harness" }
+      ],
+      "risk_keywords": {
+        "schema": [
+          "session", "format", "migration", "jsonl", "zstd", "event",
+          "persistence", "generation", "archive"
+        ],
+        "usage": []
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"],
+          "glob": "*.jsonl",
+          "max_lines": 5000
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "deepseek_harness_fixture_manifest",
+            "argv": ["./scripts/verify_dsh_fixture_manifest.py"],
+            "timeout_seconds": 15
+          }
+        ],
+        "_privacy_note": "Monitoring verifies the committed sanitized corpus and upstream releases only. It does not inspect ~/.dsh without separate owner authorization."
+      }
     }
   }
 }

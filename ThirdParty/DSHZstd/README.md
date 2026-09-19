@@ -20,6 +20,11 @@ The package product and target/module are both named `libzstd`, so existing
 static library from the selected C sources and defines `ZSTD_DISABLE_ASM` and
 `ZSTD_LEGACY_SUPPORT=0`.
 
+[`UPSTREAM_SHA256SUMS`](UPSTREAM_SHA256SUMS) is the exact allowlist and
+per-file digest manifest for the copied upstream license, sources, and headers.
+Run `./scripts/verify_dsh_zstd_vendor.sh` from the repository root to reject a
+missing, extra, or modified upstream file. The verifier is fully offline.
+
 ## Copied upstream files
 
 The files below are copied unchanged from the release archive, preserving their
@@ -65,8 +70,10 @@ vendored.
    files” into the matching `Sources/libzstd` subdirectories. Copy the upstream
    BSD `LICENSE` unchanged. Do not add assembly, compression, dictionary,
    legacy, or deprecated sources.
-4. From this directory, run `swift package dump-package` and `swift build`.
-5. Review the resulting file list, upstream notices, and both intended macOS
+4. Regenerate `UPSTREAM_SHA256SUMS`, review every path and digest, then run
+   `./scripts/verify_dsh_zstd_vendor.sh` from the repository root.
+5. From this directory, run `swift package dump-package` and `swift build`.
+6. Review the resulting file list, upstream notices, and both intended macOS
    architectures before updating the provenance values above.
 
 The decoder is linked in-process. It does not invoke a `zstd` executable,

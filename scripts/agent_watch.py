@@ -593,6 +593,7 @@ MATRIX_KEY_FOR_AGENT: dict[str, str] = {
     "devin": "devin_cli",
     "fx": "fx",
     "cline": "cline",
+    "deepseek_harness": "deepseek_harness",
     "droid": "droid",
 }
 
@@ -2299,7 +2300,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
     fps: list[dict[str, Any]] = []
 
-    if agent_name in ("codex", "claude", "copilot", "droid", "pi", "qwen"):
+    if agent_name in ("codex", "claude", "copilot", "deepseek_harness", "droid", "pi", "qwen"):
         for p in filtered:
             if not p.endswith(".jsonl"):
                 continue
