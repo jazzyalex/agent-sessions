@@ -106,7 +106,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.4/AgentSessions-5.4.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5/AgentSessions-5.5.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
