@@ -6,16 +6,24 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
     private let customRoot: String?
     private let homeDirectory: URL
     private let environment: [String: String]
-    private let fileManager: FileManager
+    private let directoryContents: (URL) throws -> [URL]
+    private let itemAttributes: (String) throws -> [FileAttributeKey: Any]
 
     init(customRoot: String? = nil,
          homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
          environment: [String: String] = ProcessInfo.processInfo.environment,
-         fileManager: FileManager = .default) {
+         fileManager: FileManager = .default,
+         directoryContents: ((URL) throws -> [URL])? = nil,
+         itemAttributes: ((String) throws -> [FileAttributeKey: Any])? = nil) {
         self.customRoot = Self.normalized(customRoot)
         self.homeDirectory = homeDirectory
         self.environment = environment
-        self.fileManager = fileManager
+        self.directoryContents = directoryContents ?? { url in
+            try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [])
+        }
+        self.itemAttributes = itemAttributes ?? { path in
+            try fileManager.attributesOfItem(atPath: path)
+        }
     }
 
     func sessionsRoot() -> URL {
@@ -33,7 +41,18 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
 
     func discover() -> DeepSeekHarnessDiscoveryResult {
         let root = sessionsRoot()
-        guard isDirectory(root), !isSymlink(root) else {
+        let rootType: FileAttributeType
+        do {
+            rootType = try fileType(root)
+        } catch {
+            if Self.isMissingFileError(error) {
+                return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+            }
+            return DeepSeekHarnessDiscoveryResult(
+                candidates: [], issues: [.filesystemAccess(root.path)], encoding: nil
+            )
+        }
+        guard rootType == .typeDirectory else {
             return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
         }
 
@@ -41,15 +60,40 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
         var artifacts: [(url: URL, project: URL, session: URL, generation: Int, compression: DeepSeekHarnessCompression)] = []
         var encodings = Set<DeepSeekHarnessCompression>()
 
-        for projectDirectory in directChildren(of: root) where isDirectory(projectDirectory) && !isSymlink(projectDirectory) {
-            for child in directChildren(of: projectDirectory) {
-                if isRegularFile(child), let compression = Self.parseLegacyFlatFilename(child.lastPathComponent) {
+        let projectDirectories: [URL]
+        do {
+            projectDirectories = try directChildren(of: root)
+        } catch {
+            return DeepSeekHarnessDiscoveryResult(
+                candidates: [], issues: [.filesystemAccess(root.path)], encoding: nil
+            )
+        }
+        for projectDirectory in projectDirectories {
+            let projectType: FileAttributeType
+            do { projectType = try fileType(projectDirectory) }
+            catch { issues.append(.filesystemAccess(projectDirectory.path)); continue }
+            guard projectType == .typeDirectory else { continue }
+            let sessionEntries: [URL]
+            do { sessionEntries = try directChildren(of: projectDirectory) }
+            catch { issues.append(.filesystemAccess(projectDirectory.path)); continue }
+            for child in sessionEntries {
+                let childType: FileAttributeType
+                do { childType = try fileType(child) }
+                catch { issues.append(.filesystemAccess(child.path)); continue }
+                if childType == .typeRegular, let compression = Self.parseLegacyFlatFilename(child.lastPathComponent) {
                     issues.append(.legacyLayout(child))
                     encodings.insert(compression)
                     continue
                 }
-                guard isDirectory(child), !isSymlink(child) else { continue }
-                for artifact in directChildren(of: child) where isRegularFile(artifact) {
+                guard childType == .typeDirectory else { continue }
+                let sessionArtifacts: [URL]
+                do { sessionArtifacts = try directChildren(of: child) }
+                catch { issues.append(.filesystemAccess(child.path)); continue }
+                for artifact in sessionArtifacts {
+                    let artifactType: FileAttributeType
+                    do { artifactType = try fileType(artifact) }
+                    catch { issues.append(.filesystemAccess(artifact.path)); continue }
+                    guard artifactType == .typeRegular else { continue }
                     guard let parsed = Self.parseGenerationFilename(artifact.lastPathComponent) else { continue }
                     artifacts.append((artifact, projectDirectory, child, parsed.generation, parsed.compression))
                     encodings.insert(parsed.compression)
@@ -255,22 +299,23 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
                                        physicalStat: stat)
     }
 
-    private func directChildren(of directory: URL) -> [URL] {
-        (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [])) ?? []
+    private func directChildren(of directory: URL) throws -> [URL] {
+        try directoryContents(directory)
     }
 
-    private func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    private func fileType(_ url: URL) throws -> FileAttributeType {
+        let attributes = try itemAttributes(url.path)
+        guard let type = attributes[.type] as? FileAttributeType else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return type
     }
 
-    private func isSymlink(_ url: URL) -> Bool {
-        guard let type = try? fileManager.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType else { return false }
-        return type == .typeSymbolicLink
-    }
-
-    private func isRegularFile(_ url: URL) -> Bool {
-        guard let type = try? fileManager.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType else { return false }
-        return type == .typeRegular
+    private static func isMissingFileError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain
+            && (nsError.code == CocoaError.fileNoSuchFile.rawValue
+                || nsError.code == CocoaError.fileReadNoSuchFile.rawValue)
     }
 
     private static func manifestRevision(siblings: [URL]) throws -> String {

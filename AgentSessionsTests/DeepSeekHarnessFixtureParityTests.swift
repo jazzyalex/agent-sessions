@@ -231,6 +231,9 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
             compression: .plain
         )
         XCTAssertEqual(result.skippedIgnorableTypes, ["x-synth/unknown-ignorable"])
+        XCTAssertEqual(result.skippedIgnorableEvents, [
+            DeepSeekHarnessIgnorableDiagnostic(type: "x-synth/unknown-ignorable", sequence: 11)
+        ])
 
         let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(result)
         let retained = normalized.filter { $0.canonicalType == "x-synth/unknown-ignorable" }

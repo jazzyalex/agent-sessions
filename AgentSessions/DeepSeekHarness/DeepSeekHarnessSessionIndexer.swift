@@ -141,6 +141,11 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
             let allIssues = result.issues + postParseResult.issues
             let errorText = allIssues.first?.localizedDescription
                 ?? (parseFailure ? "DeepSeek Harness session could not be parsed." : nil)
+            let livePaths = Set(parsed.map(\.filePath))
+            let projected = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(
+                into: parsed,
+                source: .deepseekHarness
+            )
             DispatchQueue.main.async {
                 guard self.refreshToken == token else { return }
                 // Root boundary: the healthy projection belongs to one
@@ -180,15 +185,15 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     self.finishRefresh(token: token, preserve: false)
                     return
                 }
-                self.lastHealthy = Dictionary(uniqueKeysWithValues: parsed.map { ($0.id, $0) })
-                self.allSessions = parsed.sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
+                self.lastHealthy = Dictionary(uniqueKeysWithValues: projected.map { ($0.id, $0) })
+                self.allSessions = projected.sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
                 self.indexingError = errorText
                 // Clean stable completed pass (empty allowed): the authoritative
                 // set of selected live generation paths. A failed pass above
                 // stays nil, so root-change failure remains unknown, never empty.
                 self.searchLivePathSnapshot = refreshFailed
                     ? nil
-                    : Set(parsed.map(\.filePath))
+                    : livePaths
                 self.finishRefresh(token: token, preserve: false)
             }
         }
@@ -253,14 +258,28 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     }
                 }
             }
-            guard let old, let candidate = sourceDiscovery.discover().candidates.first(where: { $0.id == id }) else { return }
-            guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: candidate.selectedURL) else { return }
-            // Generation selection belongs to the directory, not only the selected
-            // file. Recheck after the parse so a successor published concurrently
-            // cannot let an older generation overwrite the healthy projection.
-            guard let current = sourceDiscovery.discover().candidates.first(where: { $0.id == id }),
-                  current.manifestRevision == candidate.manifestRevision,
-                  current.selectedURL.standardizedFileURL == candidate.selectedURL.standardizedFileURL else { return }
+            guard let old else { return }
+            let discovered = sourceDiscovery.discover()
+            let full: Session
+            if let candidate = discovered.candidates.first(where: { $0.id == id }) {
+                guard let parsed = DeepSeekHarnessSessionParser.parseFileFull(at: candidate.selectedURL) else { return }
+                // Generation selection belongs to the directory, not only the selected
+                // file. Recheck after the parse so a successor published concurrently
+                // cannot let an older generation overwrite the healthy projection.
+                guard let current = sourceDiscovery.discover().candidates.first(where: { $0.id == id }),
+                      current.manifestRevision == candidate.manifestRevision,
+                      current.selectedURL.standardizedFileURL == candidate.selectedURL.standardizedFileURL else { return }
+                full = parsed
+            } else {
+                // Archive fallbacks already point at their copied primary. Once the
+                // live bundle is gone they must hydrate directly instead of depending
+                // on discovery under the live sessions root.
+                guard SessionArchiveManager.shared.isArchivedPrimary(session: old) else { return }
+                guard let parsed = DeepSeekHarnessSessionParser.parseFileFull(
+                    at: URL(fileURLWithPath: old.filePath)
+                ) else { return }
+                full = parsed
+            }
             DispatchQueue.main.async {
                 guard self.discovery.sessionsRoot() == sourceRoot else { return }
                 guard let index = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
@@ -270,7 +289,6 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                     session: full, filters: .current(showTimestamps: false, showMeta: false), mode: .normal))
                 self.recomputeNow()
             }
-            _ = old
             _ = force
             _ = reason
         }

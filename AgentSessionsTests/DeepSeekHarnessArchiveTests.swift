@@ -87,6 +87,16 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         try XCTUnwrap(SessionSource.deepseekHarness.descriptor.archive)
     }
 
+    private func waitUntil(_ description: String,
+                           timeout: TimeInterval = 10,
+                           condition: @escaping () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(condition(), description)
+    }
+
     func testArchiveUnitRootsAtExactSessionDirectoryAndSelectedFilename() throws {
         let root = try temporaryRoot("DeepSeekHarnessArchiveUnit")
         let id = "archive-unit"
@@ -242,6 +252,139 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
 
         let archivedPrimary = dataRoot.appendingPathComponent(primary.lastPathComponent)
         XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedPrimary)?.id, id)
+    }
+
+    func testArchiveSyncAdvancesSelectedGenerationWithoutChangingPinnedAt() throws {
+        let upstreamRoot = try temporaryRoot("DeepSeekHarnessArchiveAdvanceUpstream")
+        let appSupport = try temporaryRoot("DeepSeekHarnessArchiveAdvanceSupport")
+        let id = "archive-advance"
+        let v2 = try writeGeneration(
+            root: upstreamRoot, id: id, version: 2,
+            data: try validGenerationData(version: 2, id: id)
+        )
+        let previousProvider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider
+        SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = { appSupport }
+        defer { SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider }
+
+        let manager = SessionArchiveManager.shared
+        let v2Session = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: v2))
+        manager.syncSessionForTesting(v2Session)
+        let first = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+        XCTAssertEqual(first.primaryRelativePath, "session.v2.jsonl")
+
+        let v3 = try writeGeneration(
+            root: upstreamRoot, id: id, version: 3,
+            data: try validGenerationData(version: 3, id: id)
+        )
+        let v3Session = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: v3))
+        manager.syncSessionForTesting(v3Session)
+        let advanced = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+
+        XCTAssertEqual(advanced.pinnedAt, first.pinnedAt)
+        XCTAssertEqual(advanced.upstreamPath, v3.deletingLastPathComponent().path)
+        XCTAssertEqual(advanced.primaryRelativePath, "session.v3.jsonl")
+        let archivedV3 = appSupport.appendingPathComponent(
+            "AgentSessions/Archives/deepseek-harness/\(id)/data/session.v3.jsonl"
+        )
+        XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
+    }
+
+    func testArchiveOnlyFallbackHydratesAndProducesPhysicalSearchFileRef() throws {
+        let upstreamRoot = try temporaryRoot("DeepSeekHarnessArchiveFallbackUpstream")
+        let appSupport = try temporaryRoot("DeepSeekHarnessArchiveFallbackSupport")
+        let id = "archive-fallback"
+        let primary = try writeGeneration(
+            root: upstreamRoot, id: id, version: 2,
+            data: try validGenerationData(version: 2, id: id)
+        )
+        let previousProvider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider
+        SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = { appSupport }
+        let previousFavorites = UserDefaults.standard.object(forKey: StarredSessionsStore.defaultsKey)
+        UserDefaults.standard.set([StarredSessionKey(source: .deepseekHarness, id: id).persistedString],
+                                  forKey: StarredSessionsStore.defaultsKey)
+        defer {
+            SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider
+            if let previousFavorites {
+                UserDefaults.standard.set(previousFavorites, forKey: StarredSessionsStore.defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: StarredSessionsStore.defaultsKey)
+            }
+        }
+
+        let manager = SessionArchiveManager.shared
+        manager.syncSessionForTesting(try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: primary)))
+        try fileManager.removeItem(at: primary.deletingLastPathComponent())
+
+        let fallbacks = manager.mergePinnedArchiveFallbacks(into: [], source: .deepseekHarness)
+        let fallback = try XCTUnwrap(fallbacks.first)
+        XCTAssertEqual(fallback.id, id)
+        XCTAssertTrue(fallback.filePath.contains("/Archives/deepseek-harness/\(id)/data/"))
+        XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(
+            at: URL(fileURLWithPath: fallback.filePath)
+        )?.id, id)
+
+        let refs = UnifiedSessionIndexer.searchFileRefs(for: fallbacks)
+        let ref = try XCTUnwrap(refs.first)
+        XCTAssertEqual(ref.path, fallback.filePath)
+        XCTAssertNil(ref.manifestRevision)
+        XCTAssertGreaterThan(ref.size, 0)
+
+        let unowned = Session(
+            id: "not-the-saved-session", source: .deepseekHarness,
+            startTime: nil, endTime: nil, model: nil,
+            filePath: fallback.filePath, eventCount: 0, events: [],
+            cwd: cwd, repoName: nil, lightweightTitle: nil
+        )
+        XCTAssertTrue(UnifiedSessionIndexer.searchFileRefs(for: [unowned]).isEmpty,
+                      "a failed live resolver must not turn arbitrary paths into archive authority")
+    }
+
+    func testIndexerListsAndReloadsArchiveOnlySavedSession() throws {
+        let upstreamRoot = try temporaryRoot("DeepSeekHarnessArchiveIndexerUpstream")
+        let appSupport = try temporaryRoot("DeepSeekHarnessArchiveIndexerSupport")
+        let id = "archive-indexer"
+        let primary = try writeGeneration(
+            root: upstreamRoot, id: id, version: 2,
+            data: try validGenerationData(version: 2, id: id)
+        )
+        let previousProvider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider
+        SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = { appSupport }
+        let rootKey = DeepSeekHarnessSettings.Keys.rootOverride
+        let previousRoot = UserDefaults.standard.object(forKey: rootKey)
+        let previousFavorites = UserDefaults.standard.object(forKey: StarredSessionsStore.defaultsKey)
+        UserDefaults.standard.set(upstreamRoot.path, forKey: rootKey)
+        UserDefaults.standard.set([StarredSessionKey(source: .deepseekHarness, id: id).persistedString],
+                                  forKey: StarredSessionsStore.defaultsKey)
+        defer {
+            SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider = previousProvider
+            if let previousRoot { UserDefaults.standard.set(previousRoot, forKey: rootKey) }
+            else { UserDefaults.standard.removeObject(forKey: rootKey) }
+            if let previousFavorites {
+                UserDefaults.standard.set(previousFavorites, forKey: StarredSessionsStore.defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: StarredSessionsStore.defaultsKey)
+            }
+        }
+
+        SessionArchiveManager.shared.syncSessionForTesting(
+            try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: primary))
+        )
+        try fileManager.removeItem(at: primary.deletingLastPathComponent())
+
+        let indexer = DeepSeekHarnessSessionIndexer()
+        indexer.refresh()
+        waitUntil("archive-only refresh should finish") { !indexer.isIndexing }
+        let fallback = try XCTUnwrap(indexer.allSessions.first(where: { $0.id == id }))
+        XCTAssertTrue(fallback.events.isEmpty)
+        XCTAssertTrue(fallback.filePath.contains("/Archives/deepseek-harness/\(id)/data/"))
+        XCTAssertEqual(indexer.searchLivePathSnapshot, [],
+                       "archive paths must not enter authoritative live-path membership")
+
+        indexer.reloadSession(id: id, force: true, reason: .manualRefresh)
+        waitUntil("archive-only row should hydrate directly") {
+            indexer.allSessions.first(where: { $0.id == id })?.events.isEmpty == false
+        }
+        XCTAssertEqual(indexer.allSessions.first(where: { $0.id == id })?.id, id)
     }
 
     func testUnstableUpstreamFailsClosedAndPreservesHealthyArchive() throws {

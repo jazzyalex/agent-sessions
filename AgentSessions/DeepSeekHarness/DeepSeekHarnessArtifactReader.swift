@@ -116,7 +116,9 @@ enum DeepSeekHarnessArtifactReader {
             if case .event(let envelope) = row { return envelope }
             return nil
         }
-        let skipped = envelopes.filter(\.ignorable).map(\.type)
+        let skipped = envelopes.filter(\.ignorable).map {
+            DeepSeekHarnessIgnorableDiagnostic(type: $0.type, sequence: $0.sequence)
+        }
         let logicalEventCount = rows.reduce(into: 0) { count, row in
             switch row {
             case .event: count += 1
@@ -158,7 +160,7 @@ enum DeepSeekHarnessArtifactReader {
         }
         return DeepSeekHarnessParseResult(header: header, rows: rows,
                                           inheritedEventCount: cut,
-                                          skippedIgnorableTypes: skipped,
+                                          skippedIgnorableEvents: skipped,
                                           incompleteTurn: hasOpenTurn(envelopes))
     }
 

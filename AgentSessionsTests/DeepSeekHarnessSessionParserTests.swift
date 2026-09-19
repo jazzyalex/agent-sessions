@@ -487,6 +487,11 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         XCTAssertEqual(full.surface, .unknown)
         XCTAssertEqual(full.lightweightTitle, "Forked work")
         XCTAssertTrue(full.events.contains { $0.role == "seed" }, "seed boundary stays visible")
+        let headerMetadata = try XCTUnwrap(full.events.first { $0.role == "dsh-header" })
+        XCTAssertTrue(headerMetadata.rawJSON.contains("\"parentSession\":\"dsh-parent-1\""))
+        XCTAssertTrue(headerMetadata.rawJSON.contains("\"isSeeded\":true"))
+        XCTAssertTrue(headerMetadata.rawJSON.contains("\"inheritedEventCount\":2"))
+        XCTAssertNil(headerMetadata.text, "fork provenance must remain non-rendered metadata")
     }
 
     // MARK: - Parse modes and determinism
@@ -689,8 +694,12 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
             return XCTFail("full parse returned nil")
         }
         XCTAssertEqual(full.lightweightTitle, "Visible prompt")
-        XCTAssertFalse(full.events.contains { ($0.rawJSON).contains("x-test/ignorable") },
-                       "diagnostic-only envelopes must not leak into retained rows")
+        let diagnostic = try XCTUnwrap(full.events.first { $0.role == "diagnostic" })
+        XCTAssertEqual(diagnostic.kind, .meta)
+        XCTAssertNil(diagnostic.text)
+        XCTAssertEqual(diagnostic.rawJSON, "{\"seq\":3,\"type\":\"x-test\\/ignorable\"}")
+        XCTAssertFalse(diagnostic.rawJSON.contains("data"),
+                       "diagnostic metadata must not retain the extension payload")
         XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1)
     }
 }

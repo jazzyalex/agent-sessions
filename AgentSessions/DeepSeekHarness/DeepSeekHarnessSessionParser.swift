@@ -97,7 +97,7 @@ import Foundation
 /// plus a parent id nests beneath the parent with the normalized preset
 /// (`code` → `ptc` via `normalizedHeader`) as subtype. A parent id without
 /// subagent origin is a seeded fork and stays a root; fork provenance lives in
-/// the raw header metadata, never in `parentSessionID`, because Agent Sessions
+/// a bounded non-searchable header metadata event, never in `parentSessionID`, because Agent Sessions
 /// interprets every such parent as a subagent.
 ///
 /// Lightweight (`parseFile`) and full (`parseFileFull`) parses share one
@@ -159,7 +159,9 @@ enum DeepSeekHarnessSessionParser {
               DeepSeekHarnessPresentation.isComplete else { return nil }
 
         let header = DeepSeekHarnessHistoricalNormalizer.normalizedHeader(result.header)
-        let projection = project(header: header, events: normalized, incompleteTurn: result.incompleteTurn)
+        let projection = project(header: header, events: normalized,
+                                 inheritedEventCount: result.inheritedEventCount,
+                                 incompleteTurn: result.incompleteTurn)
         let size = (attrs[.size] as? NSNumber)?.intValue
         let modificationDate = attrs[.modificationDate] as? Date
         let endDate = [projection.startDate, projection.lastDate, modificationDate].compactMap { $0 }.max()
@@ -186,6 +188,7 @@ enum DeepSeekHarnessSessionParser {
 
     private static func project(header: DeepSeekHarnessHeader,
                                 events: [DeepSeekHarnessNormalizedEvent],
+                                inheritedEventCount: Int,
                                 incompleteTurn: Bool) -> Projection {
         let startDate = Date(timeIntervalSince1970: TimeInterval(header.createdAtMilliseconds) / 1_000)
         var lastDate = startDate
@@ -232,8 +235,8 @@ enum DeepSeekHarnessSessionParser {
         }
 
         for item in events {
+            if item.diagnosticOnly { continue }
             guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
-            guard !item.diagnosticOnly else { continue }
             let data = item.data
             switch disposition {
             case .assistantRendering:
@@ -303,14 +306,35 @@ enum DeepSeekHarnessSessionParser {
 
         // Phase B: emit in log order.
         var rows: [SessionEvent] = []
+        var headerMetadata: [String: Any] = [
+            "version": header.version,
+            "isSeeded": header.isSeeded,
+            "delegationDepth": header.delegationDepth,
+            "inheritedEventCount": inheritedEventCount,
+        ]
+        if let parent = header.parentSessionID { headerMetadata["parentSession"] = parent }
+        if let origin = header.origin { headerMetadata["origin"] = origin }
+        if let preset = header.agentPreset { headerMetadata["agentPreset"] = preset }
+        rows.append(makeEvent(id: "dsh-header", timestamp: startDate,
+                              kind: .meta, role: "dsh-header", text: nil,
+                              raw: boundedRaw(headerMetadata)))
         var emittedInvocations = Set<Int>()
 
         for item in events {
-            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
-            guard !item.diagnosticOnly else { continue }
             let envelope = item.envelope
             let timestamp = eventDate(milliseconds: envelope.timeMilliseconds)
             if let timestamp { lastDate = max(lastDate, timestamp) }
+            if item.diagnosticOnly {
+                rows.append(makeEvent(id: "dsh-\(envelope.sequence)-diagnostic",
+                                      timestamp: timestamp, kind: .meta,
+                                      role: "diagnostic", text: nil,
+                                      raw: boundedRaw([
+                                        "type": item.canonicalType,
+                                        "seq": envelope.sequence,
+                ])))
+                continue
+            }
+            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
             let data = item.data
             switch disposition {
             case .userMessage:
@@ -384,8 +408,8 @@ enum DeepSeekHarnessSessionParser {
                 // assistant/attempt is diagnostic-only and filtered above;
                 // step/start, step/end, session/title*, tool/ptc-dispatch* and
                 // every other known v3 type: intentionally ignored per the
-                // disposition inventory above. Unknown ignorable events are
-                // diagnostic-only and filtered above; unknown required events
+                // disposition inventory above. Unknown ignorable events emit
+                // bounded type/sequence diagnostics above; unknown required events
                 // fail normalization.
                 continue
             }

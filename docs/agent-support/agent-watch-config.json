@@ -754,7 +754,7 @@
       "installed_version_cmd": ["dsh", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.deepseek_harness.max_verified_version",
       "upstream": [
-        { "kind": "github_latest_release", "repo": "deepseek-ai/deepseek-harness" }
+        { "kind": "github_latest_release_including_prerelease", "repo": "deepseek-ai/deepseek-harness" }
       ],
       "risk_keywords": {
         "schema": [

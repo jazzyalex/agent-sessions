@@ -330,6 +330,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         dataRootURL(source: info.source, id: info.sessionID)?.appendingPathComponent(info.primaryRelativePath, isDirectory: false)
     }
 
+    /// A path may use physical-file search freshness only when it is the
+    /// recorded copied primary for this saved session. A failed live artifact
+    /// resolution alone is never proof that a file belongs to our archive.
+    func isArchivedPrimary(session: Session) -> Bool {
+        guard let info = loadInfoIfExists(source: session.source, id: session.id),
+              let archived = archivedPrimaryPath(info: info) else { return false }
+        return archived.standardizedFileURL == URL(fileURLWithPath: session.filePath).standardizedFileURL
+    }
+
     // MARK: - Cache
 
     private func reloadCache() {
@@ -491,8 +500,16 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             archiveSizeBytes: nil
         )
 
-        // If archive already exists, keep the existing pinnedAt and upstream path, but refresh display metadata.
+        // If archive already exists, keep its identity and sync history, but let a
+        // directory-artifact source advance its selected primary generation. DSH
+        // publishes immutable successors (v2 -> v3) under the same session root;
+        // retaining the old primary here would permanently pin the archive to v2.
         if var existing = loadInfoIfExists(source: session.source, id: session.id) {
+            if session.source == .deepseekHarness {
+                existing.upstreamPath = info.upstreamPath
+                existing.upstreamIsDirectory = info.upstreamIsDirectory
+                existing.primaryRelativePath = info.primaryRelativePath
+            }
             existing.startTime = info.startTime
             existing.endTime = info.endTime
             existing.model = info.model

@@ -2560,6 +2560,39 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
 
 def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
     kind = source.get("kind")
+    if kind == "github_latest_release_including_prerelease":
+        repo = source.get("repo")
+        if not isinstance(repo, str) or not repo:
+            return {"ok": False, "error": "missing_repo"}
+        url = f"https://api.github.com/repos/{repo}/releases?per_page=20"
+        try:
+            payload = _http_get_json(url, timeout=timeout)
+        except (urllib.error.URLError, json.JSONDecodeError) as exc:
+            return {"ok": False, "error": "fetch_failed", "detail": str(exc), "url": url}
+        if not isinstance(payload, list):
+            return {"ok": False, "error": "invalid_response", "url": url}
+        releases = [
+            item for item in payload
+            if isinstance(item, dict) and item.get("draft") is not True
+        ]
+        if not releases:
+            return {"ok": False, "error": "no_release", "url": url}
+        obj = max(releases, key=lambda item: str(item.get("published_at") or item.get("created_at") or ""))
+        tag = obj.get("tag_name")
+        name = obj.get("name")
+        raw = tag if isinstance(tag, str) else (name if isinstance(name, str) else "")
+        return {
+            "ok": True,
+            "version": _extract_semver(raw) or None,
+            "url": url,
+            "html_url": obj.get("html_url"),
+            "tag_name": tag,
+            "name": name,
+            "body": obj.get("body"),
+            "published_at": obj.get("published_at"),
+            "prerelease": obj.get("prerelease") is True,
+        }
+
     if kind == "github_latest_release":
         repo = source.get("repo")
         if not isinstance(repo, str) or not repo:

@@ -61,6 +61,49 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         DeepSeekHarnessDiscovery(customRoot: root.path).discover()
     }
 
+    func testRootEnumerationFailureIsReportedInsteadOfAuthoritativeEmpty() throws {
+        let root = try temporarySessionsRoot()
+        let discovery = DeepSeekHarnessDiscovery(
+            customRoot: root.path,
+            directoryContents: { url in
+                if url.standardizedFileURL == root.standardizedFileURL {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                return try self.fileManager.contentsOfDirectory(
+                    at: url, includingPropertiesForKeys: nil, options: []
+                )
+            }
+        )
+
+        let result = discovery.discover()
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertEqual(result.issues, [.filesystemAccess(root.path)])
+    }
+
+    func testChildStatFailureIsReportedInsteadOfSilentlyDroppingCandidate() throws {
+        let root = try temporarySessionsRoot()
+        let generation = try writeGeneration(
+            root: root, cwd: "/tmp/dsh-stat-failure", id: "stat-failure", version: 2
+        )
+        let project = generation.deletingLastPathComponent().deletingLastPathComponent()
+        let discovery = DeepSeekHarnessDiscovery(
+            customRoot: root.path,
+            itemAttributes: { path in
+                if URL(fileURLWithPath: path).lastPathComponent == project.lastPathComponent {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                return try self.fileManager.attributesOfItem(atPath: path)
+            }
+        )
+
+        let result = discovery.discover()
+        XCTAssertTrue(result.candidates.isEmpty)
+        guard case .filesystemAccess(let failedPath) = result.issues.first else {
+            return XCTFail("expected filesystem access issue")
+        }
+        XCTAssertEqual(URL(fileURLWithPath: failedPath).lastPathComponent, project.lastPathComponent)
+    }
+
     func testRecognizesOnlyExactCanonicalGenerationFilenames() {
         let accepted: [(String, Int, DeepSeekHarnessCompression)] = [
             ("session.jsonl", 0, .plain),

@@ -2059,11 +2059,22 @@ final class UnifiedSessionIndexer: ObservableObject {
             let url = URL(fileURLWithPath: session.filePath)
             let descriptor = session.source.descriptor
             if let resolveArtifact = descriptor.artifactRevision {
-                guard let revision = resolveArtifact(url) else { return nil }
-                return SearchIngestService.FileRef(path: revision.selectedURL.path,
-                                                   mtime: revision.physicalStat.mtime,
-                                                   size: revision.physicalStat.size,
-                                                   manifestRevision: revision.manifestRevision)
+                if let revision = resolveArtifact(url) {
+                    return SearchIngestService.FileRef(path: revision.selectedURL.path,
+                                                       mtime: revision.physicalStat.mtime,
+                                                       size: revision.physicalStat.size,
+                                                       manifestRevision: revision.manifestRevision)
+                }
+                // A pinned DSH fallback points at the copied primary inside Agent
+                // Sessions' archive, outside the live canonical root. It is a stable
+                // standalone file and must still enter search after the live bundle
+                // disappears; physical stat is the correct archive revision.
+                guard session.source == .deepseekHarness,
+                      SessionArchiveManager.shared.isArchivedPrimary(session: session),
+                      let stat = SessionFileStat.from(url) else { return nil }
+                return SearchIngestService.FileRef(path: url.path,
+                                                   mtime: stat.mtime,
+                                                   size: stat.size)
             }
             guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
                 return nil

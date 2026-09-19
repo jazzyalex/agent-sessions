@@ -701,6 +701,7 @@ enum DeepSeekHarnessFormatError: Error, Equatable, LocalizedError, Sendable {
     case legacyLayout(URL)
     case canonicalPathMismatch
     case ambiguousSession(String)
+    case filesystemAccess(String)
     case staleAnchor
     case limitsExceeded(String)
 
@@ -724,6 +725,7 @@ enum DeepSeekHarnessFormatError: Error, Equatable, LocalizedError, Sendable {
         case .legacyLayout(let url): return "DeepSeek Harness legacy flat artifact is unsupported: \(url.lastPathComponent)."
         case .canonicalPathMismatch: return "DeepSeek Harness artifact path does not match its header-derived identity."
         case .ambiguousSession(let id): return "DeepSeek Harness session id is ambiguous across project directories: \(id)."
+        case .filesystemAccess(let path): return "DeepSeek Harness could not read session storage: \(path)."
         case .staleAnchor: return "DeepSeek Harness artifact changed generation while it was being read."
         case .limitsExceeded(let value): return "DeepSeek Harness read limit exceeded: \(value)."
         }
@@ -738,8 +740,39 @@ struct DeepSeekHarnessParseResult {
     /// Inherited prefix length: `seedLength` for v0/v1, derived from the
     /// inherited `session/end-seed` marker for v2/v3.
     let inheritedEventCount: Int
-    let skippedIgnorableTypes: [String]
+    /// Unknown ignorable records retained for diagnostics without retaining
+    /// their payload. Sequence makes repeated extension events actionable.
+    let skippedIgnorableEvents: [DeepSeekHarnessIgnorableDiagnostic]
     let incompleteTurn: Bool
+
+    var skippedIgnorableTypes: [String] { skippedIgnorableEvents.map(\.type) }
+
+    init(header: DeepSeekHarnessHeader,
+         rows: [DeepSeekHarnessPhysicalRow],
+         inheritedEventCount: Int,
+         skippedIgnorableEvents: [DeepSeekHarnessIgnorableDiagnostic],
+         incompleteTurn: Bool) {
+        self.header = header
+        self.rows = rows
+        self.inheritedEventCount = inheritedEventCount
+        self.skippedIgnorableEvents = skippedIgnorableEvents
+        self.incompleteTurn = incompleteTurn
+    }
+
+    /// Test/source compatibility initializer. Production reads retain real
+    /// sequence values through `skippedIgnorableEvents`.
+    init(header: DeepSeekHarnessHeader,
+         rows: [DeepSeekHarnessPhysicalRow],
+         inheritedEventCount: Int,
+         skippedIgnorableTypes: [String],
+         incompleteTurn: Bool) {
+        self.init(header: header, rows: rows,
+                  inheritedEventCount: inheritedEventCount,
+                  skippedIgnorableEvents: skippedIgnorableTypes.map {
+                    DeepSeekHarnessIgnorableDiagnostic(type: $0, sequence: -1)
+                  },
+                  incompleteTurn: incompleteTurn)
+    }
 
     var envelopes: [DeepSeekHarnessEnvelope] {
         rows.compactMap {
@@ -747,6 +780,11 @@ struct DeepSeekHarnessParseResult {
             return nil
         }
     }
+}
+
+struct DeepSeekHarnessIgnorableDiagnostic: Equatable {
+    let type: String
+    let sequence: Int
 }
 
 struct DeepSeekHarnessSessionCandidate: Equatable {

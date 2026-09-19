@@ -41,3 +41,42 @@ def test_dsh_is_public_and_mapped_to_its_matrix_entry() -> None:
     public = json.loads((REPO / "docs/agent-support/public-agents.json").read_text())
     assert {agent["id"] for agent in public["agents"]} >= {"deepseek-harness"}
     assert agent_watch.MATRIX_KEY_FOR_AGENT["deepseek_harness"] == "deepseek_harness"
+
+
+def test_dsh_upstream_source_includes_prereleases(monkeypatch) -> None:
+    captured = {}
+
+    def fake_get(url: str, timeout: int):
+        captured["url"] = url
+        return [
+            {
+                "tag_name": "dsh-v0.1.5",
+                "published_at": "2026-09-10T00:00:00Z",
+                "draft": False,
+                "prerelease": False,
+            },
+            {
+                "tag_name": "dsh-v0.1.6-alpha.2",
+                "published_at": "2026-09-17T00:00:00Z",
+                "draft": False,
+                "prerelease": True,
+            },
+            {
+                "tag_name": "dsh-v9.0.0-draft",
+                "published_at": "2026-09-18T00:00:00Z",
+                "draft": True,
+            },
+        ]
+
+    monkeypatch.setattr(agent_watch, "_http_get_json", fake_get)
+    result = agent_watch._fetch_upstream(
+        {"kind": "github_latest_release_including_prerelease",
+         "repo": "deepseek-ai/deepseek-harness"},
+        timeout=5,
+    )
+
+    assert result["ok"] is True
+    assert result["version"] == "0.1.6"
+    assert result["tag_name"] == "dsh-v0.1.6-alpha.2"
+    assert result["prerelease"] is True
+    assert captured["url"].endswith("/releases?per_page=20")
