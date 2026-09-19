@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1402
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1429
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "fe79d5f9a017defb8362ce363f4d67ad3af76fe9592206f14d5b44ca9984c173"
+    "f39fd94e3d727ae884a3b42e18c723e030879ce431c423b33909b706e1f9bf75"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -51,6 +51,7 @@ PRESERVED_TERMS = (
     "Claude Desktop",
     "Claude Code",
     "Codex CLI",
+    "Cline",
     "Qwen Code",
     "Kimi Code",
     "Grok CLI",
@@ -123,6 +124,7 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "/path/to/agent",
     "/path/to/agy",
     "/path/to/claude",
+    "/path/to/cline",
     "/path/to/codex",
     "/path/to/copilot",
     "/path/to/devin",
@@ -149,6 +151,7 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "~/.cursor",
     "~/.cursor/chats/*/*/store.db",
     "~/.cursor/projects/*/agent-transcripts/",
+    "$CLINE_DATA_DIR/sessions, or ~/.cline/data/sessions",
     "~/.factory/projects",
     "~/.factory/sessions",
     "~/.fx/sessions",
@@ -159,6 +162,8 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "~/.openclaw",
     "~/.pi/agent/sessions",
     "~/.qwen/projects",
+    "Cline",
+    "<1%",
     "·",
     "· %@",
     "—",
