@@ -2,7 +2,21 @@
 
 ## Status
 
-Approved design; implementation not started.
+Approved design; implementation in progress.
+
+### Evidence revision (2026-09-19)
+
+Inspection of Cursor's persisted chat stores showed that ACP-created
+subtasks are written as top-level transcript directories rather than under
+`agent-transcripts/<parent>/subagents/<child>.jsonl`. The child chat store's
+hex-encoded `meta` record contains a validated lineage object:
+
+```json
+{"subagentInfo":{"parentAgentId":"<parent>","rootParentAgentId":"<root>","toolCallId":"<tool-call>","typeName":"<type>"}}
+```
+
+This metadata is now the authoritative association source. The existing
+field-18 nested transcript-path association remains a compatibility fallback.
 
 ## Goal
 
@@ -14,7 +28,11 @@ The first phase deliberately does not infer relationships from shared project pa
 
 Cursor ACP persisted sessions are stored at `~/.cursor/acp-sessions/<uuid>/store.db` with `meta.json`. The current read-only ACP reader decodes the root turn graph and creates one `.acp` `Session`, but it does not expose the root record's local transcript/resource paths. Cursor JSONL transcripts are discovered separately under `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`; their first user content may begin with a `<timestamp>` marker, but that marker is not a parent identifier.
 
-The only accepted parent-child evidence in this phase is an exact, normalized transcript path present in the ACP root record's persisted resource/path fields. A transcript that merely shares `cwd`, project, time range, or title with an ACP row remains unresolved and is not attached.
+The accepted parent-child evidence is either a validated child chat-store
+`subagentInfo.parentAgentId`, or an exact, normalized nested transcript path
+present in the ACP root record's persisted resource/path fields. A transcript
+that merely shares `cwd`, project, time range, title, or a timestamp-prefixed
+first prompt with an ACP row remains unresolved and is not attached.
 
 ## User-visible behavior
 
@@ -37,10 +55,10 @@ The ACP reader should expose a backward-compatible `parseResult(at:) -> CursorAC
 
 ## Architecture and flow
 
-1. `CursorACPStoreReader` validates the existing ACP schema and root graph as it does today.
+1. `CursorACPStoreReader` validates the existing ACP schema and root graph as it does today. `CursorChatMetaReader` additionally decodes validated child-store `subagentInfo` metadata without reading message blobs.
 2. The accepted path-bearing field is the observed root protobuf message's repeated field **18**, wire type 2, whose value is a UTF-8 resource path. Extraction is bounded to field 18 on the validated root message only; it does not recursively scan turn, step, tool, raw JSON, or blob payloads. Two exact layouts are recognized: a root transcript `agent-transcripts/<rootUUID>/<rootUUID>.jsonl` (both UUID tokens are the same), and a child transcript `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` (the UUID tokens are valid but intentionally different). Only the second layout can produce a child association; a root transcript reference identifies the ACP session's own transcript and is ignored for parent assignment. Relative paths, `.`/`..` paths, arbitrary strings, tool payloads, encrypted blobs, and non-JSONL resources are ignored in phase one.
-3. `CursorSessionIndexer` builds a normalized absolute-path-to-parent-set lookup from all ACP results. Normalization standardizes repeated separators and `.`/`..` lexically, never follows symlinks, and uses the host's case-sensitive path comparison semantics.
-4. Association runs after `SessionIndexingEngine.hydrateOrScan` returns, regardless of whether sessions came from fresh parsing or the persisted lightweight cache, and before Cursor metadata merge/sorting/publishing. Matching transcript sessions receive the explicit parent ID, subagent type, and relationship kind through a relationship-copy helper.
+3. `CursorSessionIndexer` builds a child-session-ID-to-parent-set lookup from validated chat metadata, restricted to parent IDs represented by indexed ACP rows. It also retains a normalized absolute-path-to-parent-set fallback lookup from ACP results. Normalization standardizes repeated separators and `.`/`..` lexically, never follows symlinks, and uses the host's case-sensitive path comparison semantics.
+4. Association runs after `SessionIndexingEngine.hydrateOrScan` returns, regardless of whether sessions came from fresh parsing or the persisted lightweight cache, and after Cursor metadata merge makes DB-only rows available but before sorting/publishing. Matching transcript or DB-only sessions receive the explicit parent ID, subagent type, and relationship kind through a relationship-copy helper.
 5. `SubagentHierarchyBuilder` resolves the parent ID and produces the existing parent-first, collapsible row structure.
 6. `SessionRowsBuilder` / title-row rendering expose the ACP relationship without removing the existing ACP pill from the parent. A linked child uses the existing generic `sub` marker plus a localized/accessibility label such as `ACP subagent`; it must not display the internal value `cursor-acp-subagent` as user-facing text.
 
@@ -69,6 +87,7 @@ Add focused fixtures and tests for:
 6. Repeated same-parent references deduplicating; cross-parent references remaining unresolved rather than arbitrarily attached.
 7. The actual discovered `subagents/<childUUID>.jsonl` path-derived raw parent UUID being upgraded to `cursor-acp:<parentUUID>` when it matches the sole ACP candidate, while a conflicting non-ACP parent remains unchanged.
 8. Two ACP stores referencing the same child path remaining unresolved even when one candidate happens to match the child's raw path-derived parent UUID.
+9. Two child-store metadata records for the same child with conflicting `parentAgentId` values remain unresolved; malformed or incomplete `subagentInfo` is ignored.
 9. Relationship-copy tests asserting events, surface/originator, model, project metadata, titles, and all other immutable `Session` fields are preserved.
 10. Existing hierarchy flattening, collapse behavior, ACP parent pill, and no-sensitive-payload tests continuing to pass.
 

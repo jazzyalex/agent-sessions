@@ -2,9 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Attach Cursor JSONL subtask rows to an ACP parent only when the ACP root explicitly references the child's transcript path, then render the relationship through the existing collapsible hierarchy.
+**Goal:** Attach Cursor JSONL subtask rows to an ACP parent using Cursor's persisted child-store `subagentInfo.parentAgentId` metadata, with the existing explicit nested transcript-path association retained as a fallback, then render the relationship through the existing collapsible hierarchy.
 
-**Architecture:** Add a result-bearing ACP parser API that extracts only the bounded root protobuf field-18 resource paths. Apply a normalized path-to-parent map after lightweight hydration (including cache hits), using a field-preserving `Session` relationship copy and fail-closed conflict rules; let `SubagentHierarchyBuilder` continue to own flattening and collapse behavior.
+**Architecture:** Decode validated `subagentInfo` metadata from Cursor chat `store.db` records, map child IDs to known `cursor-acp:<parent>` rows, and apply that strong map after metadata hydration (including cache hits). Retain the result-bearing ACP parser API and bounded root field-18 path map for alternate nested layouts. Use a field-preserving `Session` relationship copy and fail-closed conflict rules; let `SubagentHierarchyBuilder` continue to own flattening and collapse behavior.
+
+### Implementation revision
+
+The observed Cursor ACP implementation creates top-level child chat stores and
+records `parentAgentId`, `rootParentAgentId`, `toolCallId`, and `typeName` in
+the child's hex-encoded JSON metadata. Chat-store metadata is therefore the
+primary relationship source; the field-18 path map is compatibility fallback.
 
 **Tech Stack:** Swift, SwiftUI, SQLite3, XCTest, existing `Session`/`SubagentHierarchyBuilder`/`SessionIndexingEngine` infrastructure.
 
