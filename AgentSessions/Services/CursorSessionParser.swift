@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import CryptoKit
 
 /// Parser for Cursor agent transcript JSONL files.
@@ -575,4 +576,209 @@ final class CursorSessionParser {
         let d = SHA256.hash(data: Data(path.utf8))
         return d.map { String(format: "%02x", $0) }.joined()
     }
+}
+
+/// Read-only decoder for Cursor ACP persisted sessions. Cursor stores a small root
+/// record in SQLite `meta` and protobuf conversation nodes in content-addressed
+/// `blobs`. This deliberately decodes only user and assistant text; tool arguments,
+/// results, attachments, and the root's blob-encryption key never enter the index.
+enum CursorACPStoreReader {
+    private static let idPrefix = "cursor-acp:"
+
+    static func isACPStore(_ url: URL) -> Bool {
+        url.lastPathComponent == "store.db"
+            && url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == "acp-sessions"
+    }
+
+    static func parse(at url: URL) -> Session? {
+        guard isACPStore(url),
+              let rawID = UUID(uuidString: url.deletingLastPathComponent().lastPathComponent)?.uuidString.lowercased(),
+              let sidecar = readSidecar(url.deletingLastPathComponent().appendingPathComponent("meta.json")),
+              sidecar["schemaVersion"] as? Int == 1,
+              let store = Store(url: url),
+              let rootJSON = store.rootJSON,
+              let rootID = rootJSON["latestRootBlobId"] as? String,
+              let rootIDData = Data(hexString: rootID), rootIDData.count == 32,
+              let root = store.blob(id: rootID) else { return nil }
+
+        let turns = ProtoMessage(root).dataFields(number: 8)
+        var events: [SessionEvent] = []
+        for (turnIndex, turnIDData) in turns.enumerated() {
+            guard turnIDData.count == 32,
+                  let turn = store.blob(id: turnIDData.hexString) else { return nil }
+            let turnMessage = ProtoMessage(turn)
+            guard let agentTurn = turnMessage.firstData(number: 1) else { continue }
+            let agent = ProtoMessage(agentTurn)
+
+            if let userBlobID = agent.firstData(number: 1), userBlobID.count == 32,
+               let user = store.blob(id: userBlobID.hexString),
+               let text = ProtoMessage(user).firstString(number: 1), !text.isEmpty {
+                events.append(event(id: rawID, turn: turnIndex, kind: .user, text: text))
+            }
+            for (stepIndex, stepBlobID) in agent.dataFields(number: 2).enumerated() {
+                guard stepBlobID.count == 32,
+                      let step = store.blob(id: stepBlobID.hexString),
+                      let assistant = ProtoMessage(step).firstData(number: 1),
+                      let text = ProtoMessage(assistant).firstString(number: 1), !text.isEmpty else { continue }
+                events.append(event(id: rawID, turn: turnIndex * 10_000 + stepIndex, kind: .assistant, text: text))
+            }
+        }
+
+        let created = date(rootJSON["createdAt"])
+        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        return Session(id: idPrefix + rawID,
+                       source: .cursor,
+                       startTime: created,
+                       endTime: modified ?? created,
+                       model: nil,
+                       filePath: url.path,
+                       fileSizeBytes: size,
+                       eventCount: events.count,
+                       events: events,
+                       cwd: sidecar["cwd"] as? String,
+                       repoName: (sidecar["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent },
+                       lightweightTitle: rootJSON["name"] as? String,
+                       customTitle: rootJSON["name"] as? String,
+                       originator: "cursor-agent",
+                       originSource: "acp-persisted",
+                       surface: .acp)
+    }
+
+    private static func event(id: String, turn: Int, kind: SessionEventKind, text: String) -> SessionEvent {
+        SessionEvent(id: "\(id):\(kind.rawValue):\(turn)", timestamp: nil, kind: kind,
+                     role: kind == .user ? "user" : "assistant", text: text, toolName: nil,
+                     toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil,
+                     isDelta: false, rawJSON: "")
+    }
+
+    private static func date(_ value: Any?) -> Date? {
+        if let seconds = value as? TimeInterval { return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1_000 : seconds) }
+        guard let string = value as? String else { return nil }
+        return ISO8601DateFormatter().date(from: string)
+    }
+
+    private static func readSidecar(_ url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return object as? [String: Any]
+    }
+
+    private final class Store {
+        private var db: OpaquePointer?
+
+        init?(url: URL) {
+            guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+            sqlite3_busy_timeout(db, 250)
+            guard schemaIsSupported else {
+                sqlite3_close(db)
+                db = nil
+                return nil
+            }
+        }
+
+        deinit { sqlite3_close(db) }
+
+        var rootJSON: [String: Any]? {
+            guard let hex = scalar("SELECT value FROM meta WHERE key = '0'"),
+                  let data = Data(hexString: hex),
+                  let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
+            return object as? [String: Any]
+        }
+
+        func blob(id: String) -> Data? {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT data FROM blobs WHERE id = ? LIMIT 1", -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, id, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+            return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+        }
+
+        private var schemaIsSupported: Bool {
+            guard let count = scalar("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('blobs', 'meta')"),
+                  count == "2" else { return false }
+            return columnNames(for: "blobs") == ["id", "data"]
+                && columnNames(for: "meta") == ["key", "value"]
+        }
+
+        private func columnNames(for table: String) -> [String] {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &statement, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(statement) }
+            var names: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let text = sqlite3_column_text(statement, 1) else { return [] }
+                names.append(String(cString: text))
+            }
+            return names
+        }
+
+        private func scalar(_ sql: String) -> String? {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let text = sqlite3_column_text(statement, 0) else { return nil }
+            return String(cString: text)
+        }
+    }
+}
+
+private struct ProtoMessage {
+    private let fields: [(number: Int, data: Data)]
+
+    init(_ data: Data) {
+        let bytes = Array(data)
+        var offset = 0
+        var parsed: [(Int, Data)] = []
+        while offset < bytes.count, let key = Self.readVarint(bytes, &offset) {
+            let field = Int(key >> 3)
+            switch key & 7 {
+            case 0: _ = Self.readVarint(bytes, &offset)
+            case 1: offset += 8
+            case 2:
+                guard let length = Self.readVarint(bytes, &offset), length <= UInt64(bytes.count - offset) else { offset = bytes.count; break }
+                let end = offset + Int(length)
+                parsed.append((field, Data(bytes[offset..<end])))
+                offset = end
+            case 5: offset += 4
+            default: offset = bytes.count
+            }
+        }
+        fields = parsed
+    }
+
+    func dataFields(number: Int) -> [Data] { fields.filter { $0.number == number }.map(\.data) }
+    func firstData(number: Int) -> Data? { dataFields(number: number).first }
+    func firstString(number: Int) -> String? { firstData(number: number).flatMap { String(data: $0, encoding: .utf8) } }
+
+    private static func readVarint(_ bytes: [UInt8], _ offset: inout Int) -> UInt64? {
+        var value: UInt64 = 0
+        for shift in stride(from: 0, through: 63, by: 7) {
+            guard offset < bytes.count else { return nil }
+            let byte = bytes[offset]; offset += 1
+            value |= UInt64(byte & 0x7f) << UInt64(shift)
+            if byte & 0x80 == 0 { return value }
+        }
+        return nil
+    }
+}
+
+private extension Data {
+    init?(hexString: String) {
+        let clean = hexString.hasPrefix("0x") ? String(hexString.dropFirst(2)) : hexString
+        guard clean.count.isMultiple(of: 2) else { return nil }
+        var result = Data(); result.reserveCapacity(clean.count / 2)
+        var index = clean.startIndex
+        while index < clean.endIndex {
+            let end = clean.index(index, offsetBy: 2)
+            guard let byte = UInt8(clean[index..<end], radix: 16) else { return nil }
+            result.append(byte); index = end
+        }
+        self = result
+    }
+
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }

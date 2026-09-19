@@ -372,6 +372,9 @@ enum SessionRowsBuilder {
         case .cli:
             guard supportsAgentSurfacePills(session) else { return [] }
             return [.standard(label: "cli", accessibilityLabel: "CLI")]
+        case .acp:
+            guard session.source == .cursor else { return [] }
+            return [.standard(label: "acp", accessibilityLabel: "ACP persisted session")]
         case .subagent:
             guard session.source == .codex else { return [] }
             return codexOriginatorSurfacePill(for: session).map { [$0] } ?? []

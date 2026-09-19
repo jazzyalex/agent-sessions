@@ -18,6 +18,266 @@
         }
       }
     },
+    "Cline CLI Binary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline CLI Binary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline CLI 可执行文件"
+          }
+        }
+      }
+    },
+    "Cline CLI not found": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline CLI not found"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到 Cline CLI"
+          }
+        }
+      }
+    },
+    "Cline Only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline Only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅 Cline"
+          }
+        }
+      }
+    },
+    "Cline sessions are browsed locally. Resume in Terminal is not offered for this source.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline sessions are browsed locally. Resume in Terminal is not offered for this source."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline 会话仅在本地浏览；此来源不提供在 Terminal 中继续。"
+          }
+        }
+      }
+    },
+    "Cline writes one directory per session under its sessions root, holding <session-id>.json (the manifest) beside <session-id>.messages.json (the transcript). A custom root overrides both CLINE_DATA_DIR and the fallback path.": {
+      "comment": "Explanation of the local Cline session storage layout.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline writes one directory per session under its sessions root, holding <session-id>.json (the manifest) beside <session-id>.messages.json (the transcript). A custom root overrides both CLINE_DATA_DIR and the fallback path."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline 会在会话根目录下为每个会话写入一个目录，其中包含 <session-id>.json（清单）和旁边的 <session-id>.messages.json（转录）。自定义根目录会覆盖 CLINE_DATA_DIR 和备用路径。"
+          }
+        }
+      }
+    },
+    "Copy the detected Cline CLI path to clipboard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the detected Cline CLI path to clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将检测到的 Cline CLI 路径复制到剪贴板"
+          }
+        }
+      }
+    },
+    "Enter the full path to a custom Cline CLI binary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter the full path to a custom Cline CLI binary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入自定义 Cline CLI 可执行文件的完整路径"
+          }
+        }
+      }
+    },
+    "Estimated API price at published rates: %@ USD. Reference value, not a subscription charge.": {
+      "comment": "Session analytics estimate; preserve the runtime price placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated API price at published rates: %@ USD. Reference value, not a subscription charge."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按公布费率估算的 API 价格：%@ USD。仅供参考，不是订阅费用。"
+          }
+        }
+      }
+    },
+    "Install the Cline CLI and ensure `cline` is on PATH. Desktop sessions are found without the CLI when ~/.cline/data/sessions exists.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install the Cline CLI and ensure `cline` is on PATH. Desktop sessions are found without the CLI when ~/.cline/data/sessions exists."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装 Cline CLI，并确保 `cline` 位于 PATH 中。即使没有 CLI，只要存在 ~/.cline/data/sessions，也可以找到 Desktop 会话。"
+          }
+        }
+      }
+    },
+    "Invalid Cline binary path.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid Cline binary path."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cline 可执行文件路径无效。"
+          }
+        }
+      }
+    },
+    "Query the detected Cline CLI for its version": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Query the detected Cline CLI for its version"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查询检测到的 Cline CLI 版本"
+          }
+        }
+      }
+    },
+    "Reveal the detected Cline CLI binary in Finder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal the detected Cline CLI binary in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Finder 中显示检测到的 Cline CLI 可执行文件"
+          }
+        }
+      }
+    },
+    "Select Cline CLI Binary": {
+      "comment": "Title in a file selection panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Cline CLI Binary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Cline CLI 可执行文件"
+          }
+        }
+      }
+    },
+    "Select Cline Sessions Directory": {
+      "comment": "Title in a file selection panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Cline Sessions Directory"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Cline 会话目录"
+          }
+        }
+      }
+    },
+    "Select a Cline sessions directory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a Cline sessions directory"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Cline 会话目录"
+          }
+        }
+      }
+    },
+    "Select the Cline CLI binary from the filesystem": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select the Cline CLI binary from the filesystem"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从文件系统中选择 Cline CLI 可执行文件"
+          }
+        }
+      }
+    },
     "A calmer toolbar": {
       "comment": "Title for the Agent Sessions 5.3 What's New toolbar highlight.",
       "localizations": {
@@ -31,6 +291,136 @@
           "stringUnit": {
             "state": "translated",
             "value": "更简洁的工具栏"
+          }
+        }
+      }
+    },
+    "Session info updates only when you select a session or choose Refresh.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session info updates only when you select a session or choose Refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有在选择会话或点击“刷新”时，会话信息才会更新。"
+          }
+        }
+      }
+    },
+    "Thinking": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thinking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "思考"
+          }
+        }
+      }
+    },
+    "This transcript records no model setting.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transcript records no model setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此转录未记录模型设置。"
+          }
+        }
+      }
+    },
+    "Token share: cached %@, fresh %@, output %@. %@": {
+      "comment": "Token composition help text; preserve runtime placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token share: cached %@, fresh %@, output %@. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token 占比：缓存 %@、新鲜 %@、输出 %@。%@"
+          }
+        }
+      }
+    },
+    "Transcript span": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript span"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转录跨度"
+          }
+        }
+      }
+    },
+    "Updated %@": {
+      "comment": "Timestamp label; preserve the runtime placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新于 %@"
+          }
+        }
+      }
+    },
+    "Updating…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新中…"
+          }
+        }
+      }
+    },
+    "Use the auto-detected Cline CLI or supply a custom path": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the auto-detected Cline CLI or supply a custom path"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用自动检测的 Cline CLI，或提供自定义路径"
           }
         }
       }
@@ -1670,23 +2060,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "API 等值费用"
-          }
-        }
-      }
-    },
-    "API-equivalent estimate at published rates: %@ USD. Not a subscription charge.": {
-      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API-equivalent estimate at published rates: %@ USD. Not a subscription charge."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "按已公布费率估算的 API 等值费用：%@ 美元。并非订阅费用。"
           }
         }
       }
@@ -3382,6 +3755,22 @@
         }
       }
     },
+    "Browse your Cline CLI and Desktop sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browse your Cline CLI and Desktop sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览你的 Cline CLI 和 Desktop 会话"
+          }
+        }
+      }
+    },
     "Browse your Claude Code conversations": {
       "localizations": {
         "en": {
@@ -4109,6 +4498,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "选择 Devin 会话文件夹"
+          }
+        }
+      }
+    },
+    "Choose the Cline sessions folder": {
+      "comment": "Instructions in a file selection panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the Cline sessions folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Cline 会话文件夹"
+          }
+        }
+      }
+    },
+    "Choose the cline executable file": {
+      "comment": "Instructions in a file selection panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the cline executable file"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 cline 可执行文件"
           }
         }
       }
@@ -18902,23 +19325,6 @@
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
     },
-    "Span": {
-      "comment": "Session info row label for the wall-clock time between the first and last request.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Span"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "跨度"
-          }
-        }
-      }
-    },
     "Spawned a workflow": {
       "localizations": {
         "en": {
@@ -20198,23 +20604,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "此对话记录中带时间戳的请求少于两次。"
-          }
-        }
-      }
-    },
-    "This transcript records no model or effort setting.": {
-      "comment": "User-visible Session info copy.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This transcript records no model or effort setting."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此会话记录未包含模型或思考强度设置。"
           }
         }
       }
@@ -22126,23 +22515,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "每周消耗速度采用实测值，而非平均值"
-          }
-        }
-      }
-    },
-    "Weekly quota": {
-      "comment": "User-visible Session info copy.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weekly quota"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每周额度"
           }
         }
       }

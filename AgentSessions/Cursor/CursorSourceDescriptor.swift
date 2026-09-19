@@ -29,11 +29,14 @@ extension SessionSourceDescriptor {
                 // Also check the chats root (DB-only sessions live there). The live switch
                 // does this before the shared sessions-root check, so the order is kept.
                 if ctx.directoryExists(disc.chatsRoot()) { return true }
+                if ctx.directoryExists(disc.acpSessionsRoot()) { return true }
                 if ctx.directoryExists(disc.sessionsRoot()) { return true }
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .whenAvailable,
-            parseFullByPath: { url in CursorSessionParser.parseFileFull(at: url) },
+            parseFullByPath: { url in
+                CursorACPStoreReader.isACPStore(url) ? CursorACPStoreReader.parse(at: url) : CursorSessionParser.parseFileFull(at: url)
+            },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
             archive: ArchiveCapability(
@@ -102,7 +105,9 @@ extension SessionSourceAdapter {
                 searchAdapter: .init(
                     transcriptCache: indexer.searchTranscriptCache,
                     update: { indexer.updateSession($0) },
-                    parseFull: { url, forcedID in CursorSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+                    parseFull: { url, forcedID in
+                        CursorACPStoreReader.isACPStore(url) ? CursorACPStoreReader.parse(at: url) : CursorSessionParser.parseFileFull(at: url, forcedID: forcedID)
+                    }
                 )
             )
         }
