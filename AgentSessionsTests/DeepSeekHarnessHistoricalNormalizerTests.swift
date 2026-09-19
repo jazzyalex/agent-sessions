@@ -237,6 +237,38 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
         XCTAssertEqual(normalized.filter { $0.canonicalType == "assistant/attempt" }.count, 0)
     }
 
+    func testSeededV1PackedPrefixCarriesMigratedCutIntoV3() throws {
+        let rows = try v1Rows()
+        let seeded = DeepSeekHarnessParseResult(
+            header: header(version: 1, isSeeded: true), rows: rows,
+            inheritedEventCount: 5, skippedIgnorableTypes: [], incompleteTurn: false)
+
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(seeded)
+        let marker = try XCTUnwrap(normalized.first { $0.canonicalType == "session/end-seed" })
+        XCTAssertLessThan(marker.envelope.sequence, 5,
+                          "packed prefix must contract before v2-to-v3 receives the cut")
+        XCTAssertEqual(normalized.filter { $0.canonicalType == "assistant/message" }.count, 1)
+    }
+
+    func testSeedCutBetweenPackedRunsOfOneAttemptIsRejected() throws {
+        let rows: [DeepSeekHarnessPhysicalRow] = [
+            .event(envelope("turn/start", 0, data: ["turn": 1])),
+            .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+            .packed(try packedRun(type: "text-chunks", sequence: 2, payload: ["inherited"])),
+            .packed(try packedRun(type: "reasoning-chunks", sequence: 3, payload: ["current"])),
+            .event(envelope("step/end", 4, data: ["turn": 1, "step": 1])),
+        ]
+        let seeded = DeepSeekHarnessParseResult(
+            header: header(version: 1, isSeeded: true), rows: rows,
+            inheritedEventCount: 3, skippedIgnorableTypes: [], incompleteTurn: true)
+        XCTAssertThrowsError(try DeepSeekHarnessHistoricalNormalizer.normalize(seeded)) { error in
+            guard case .unsupportedMigration(let detail) = error as? DeepSeekHarnessFormatError else {
+                return XCTFail("expected unsupportedMigration, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("splits one Assistant attempt"), detail)
+        }
+    }
+
     func testV1ReferenceIntoConsumedPackedChunkFails() throws {
         XCTAssertThrowsError(try DeepSeekHarnessHistoricalNormalizer.normalize(
             result(version: 1, rows: try v1Rows(includeConsumedReference: true))

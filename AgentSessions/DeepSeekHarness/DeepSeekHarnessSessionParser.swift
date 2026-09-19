@@ -161,7 +161,7 @@ enum DeepSeekHarnessSessionParser {
         let header = DeepSeekHarnessHistoricalNormalizer.normalizedHeader(result.header)
         let projection = project(header: header, events: normalized,
                                  inheritedEventCount: result.inheritedEventCount,
-                                 incompleteTurn: result.incompleteTurn)
+                                 incompleteTurn: hasOpenNormalizedTurn(normalized))
         let size = (attrs[.size] as? NSNumber)?.intValue
         let modificationDate = attrs[.modificationDate] as? Date
         let endDate = [projection.startDate, projection.lastDate, modificationDate].compactMap { $0 }.max()
@@ -184,6 +184,15 @@ enum DeepSeekHarnessSessionParser {
                        subagentType: isSubagent ? header.agentPreset : nil,
                        relationshipKind: isSubagent ? .subagent : .root,
                        surface: isSubagent ? .subagent : .unknown)
+    }
+
+    private static func hasOpenNormalizedTurn(_ events: [DeepSeekHarnessNormalizedEvent]) -> Bool {
+        var depth = 0
+        for event in events {
+            if event.canonicalType == "turn/start" { depth += 1 }
+            if event.canonicalType == "turn/end" { depth = max(0, depth - 1) }
+        }
+        return depth > 0
     }
 
     private static func project(header: DeepSeekHarnessHeader,
@@ -445,8 +454,12 @@ enum DeepSeekHarnessSessionParser {
         rows.append(makeEvent(id: "dsh-\(sequence)-user", timestamp: timestamp,
                               kind: isDirectHuman ? .user : .meta, role: "user", text: text,
                               messageID: data["id"] as? String, raw: raw))
-        emitAttachmentPlaceholders(blocks: blocks, sequence: sequence, timestamp: timestamp,
-                                   messageID: data["id"] as? String, rows: &rows)
+        // Non-human user/message context is retained in its metadata row, but
+        // derived attachment labels must not become independently searchable.
+        if isDirectHuman {
+            emitAttachmentPlaceholders(blocks: blocks, sequence: sequence, timestamp: timestamp,
+                                       messageID: data["id"] as? String, rows: &rows)
+        }
     }
 
     private static func emitAssistantMessage(data: [String: Any], sequence: Int, timestamp: Date?,

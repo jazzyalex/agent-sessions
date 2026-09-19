@@ -320,6 +320,14 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         XCTAssertEqual(manager.archiveInfoForTesting(source: .deepseekHarness, id: id)?.primaryRelativePath,
                        "session.v3.jsonl")
         XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
+
+        // Re-starring the now-visible v2 goes through writePinPlaceholder and
+        // ensureArchiveExistsAndSync, not the periodic guard above.
+        manager.pinSessionForTesting(v2Session)
+        let afterRepin = try XCTUnwrap(manager.archiveInfoForTesting(source: .deepseekHarness, id: id))
+        XCTAssertEqual(afterRepin.primaryRelativePath, "session.v3.jsonl")
+        XCTAssertEqual(afterRepin.pinnedAt, first.pinnedAt)
+        XCTAssertEqual(DeepSeekHarnessSessionParser.parseFileFull(at: archivedV3)?.id, id)
     }
 
     func testArchiveOnlyFallbackHydratesAndProducesPhysicalSearchFileRef() throws {

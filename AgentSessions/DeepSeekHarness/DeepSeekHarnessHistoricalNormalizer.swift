@@ -30,6 +30,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
     static func normalize(_ result: DeepSeekHarnessParseResult) throws -> [DeepSeekHarnessNormalizedEvent] {
         var rows = result.rows
         var version = result.header.version
+        var inheritedEventCount = result.inheritedEventCount
 
         if version == 0 {
             rows = try migrateV0ToV1(rows, header: result.header,
@@ -39,8 +40,10 @@ enum DeepSeekHarnessHistoricalNormalizer {
 
         var events: [DeepSeekHarnessEnvelope]
         if version == 1 {
-            events = try migrateV1ToV2(rows, header: result.header,
-                                       inheritedEventCount: result.inheritedEventCount)
+            let migrated = try migrateV1ToV2(rows, header: result.header,
+                                             inheritedEventCount: inheritedEventCount)
+            events = migrated.events
+            inheritedEventCount = migrated.inheritedEventCount
             version = 2
         } else {
             events = try rows.map { row in
@@ -60,7 +63,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 try DeepSeekHarnessPayloadValidator.assertV2EventPreMigration(event)
             }
             events = try migrateV2ToV3(events, header: result.header,
-                                       inheritedEventCount: result.inheritedEventCount)
+                                       inheritedEventCount: inheritedEventCount)
             version = 3
         }
         guard version == 3 else { throw DeepSeekHarnessFormatError.unsupportedVersion(version) }
@@ -575,7 +578,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
         _ rows: [DeepSeekHarnessPhysicalRow],
         header: DeepSeekHarnessHeader,
         inheritedEventCount: Int
-    ) throws -> [DeepSeekHarnessEnvelope] {
+    ) throws -> (events: [DeepSeekHarnessEnvelope], inheritedEventCount: Int) {
         var state = V1State(
             header: header,
             sourceCut: inheritedEventCount,
@@ -596,7 +599,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 timeMilliseconds: state.lastTime, data: ["inherited": true]
             ))
         }
-        return state.output
+        return (state.output, state.targetCut ?? 0)
     }
 
     private static func appendPackedRun(
@@ -614,6 +617,11 @@ enum DeepSeekHarnessHistoricalNormalizer {
         }
         guard var pending = state.pending else { return }
         if (run.firstSeq < state.sourceCut) != (run.lastSeq < state.sourceCut) {
+            throw DeepSeekHarnessFormatError.unsupportedMigration(
+                "inherited cut \(state.sourceCut) splits one Assistant attempt")
+        }
+        let first = pending.group.spans.first?.firstSeq ?? run.firstSeq
+        if (first < state.sourceCut) != (run.lastSeq < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }

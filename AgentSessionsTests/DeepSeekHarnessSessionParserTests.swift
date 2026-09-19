@@ -235,6 +235,55 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
                        "only direct-human messages count as user events")
         XCTAssertFalse(full.lightweightTitle?.contains("PLUGIN") == true)
         XCTAssertFalse(full.title.contains("PLUGIN"))
+        let searchText = SessionSearchTextBuilder.build(session: full)
+        XCTAssertFalse(searchText.contains("PLUGIN INJECTED CONTEXT"),
+                       "plugin context must remain visible as metadata but absent from Instant search")
+        XCTAssertTrue(searchText.contains("Fix the parser bug"))
+        XCTAssertTrue(searchText.contains("Need to read the parser first."),
+                      "assistant reasoning remains searchable")
+    }
+
+    func testPluginAttachmentNamesDoNotEnterSearch() throws {
+        var rows = mainRows()
+        var plugin = userData(id: "u-plugin", text: "PLUGIN INJECTED CONTEXT",
+                              kind: "plugin", plugin: "demo-plugin")
+        plugin["content"] = [
+            ["type": "text", "text": "PLUGIN INJECTED CONTEXT"],
+            ["type": "file", "attachment": ["name": "internal-plan.md", "bytes": 1234]],
+            ["type": "image", "attachment": ["name": "internal-chart.png",
+                                             "mediaType": "image/png", "bytes": 5678]],
+        ] as [[String: Any]]
+        rows[4]["data"] = plugin
+        let url = try writeSession(filename: "session.v3.jsonl", rows: rows)
+        let full = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        let searchText = SessionSearchTextBuilder.build(session: full)
+        XCTAssertFalse(searchText.contains("PLUGIN INJECTED CONTEXT"))
+        XCTAssertFalse(searchText.contains("internal-plan.md"))
+        XCTAssertFalse(searchText.contains("internal-chart.png"))
+        XCTAssertTrue(searchText.contains("shot.png"), "direct-human attachments remain searchable")
+    }
+
+    func testRepairedV1InterruptedTurnDoesNotAddTrailingInterruptedMarker() throws {
+        var historicalHeader = header(id: "dsh-repaired-turn", version: 1)
+        historicalHeader.removeValue(forKey: "isSeeded")
+        let rows: [[String: Any]] = [
+            historicalHeader,
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("step/end", 2, data: ["turn": 1, "step": 1]),
+            envelope("agent/inbox/spliced", 3, data: [
+                "target": "next-turn", "start": 0,
+                "inserted": [userData(id: "spliced-user", text: "continue")],
+            ]),
+            envelope("turn/start", 4, data: ["turn": 2]),
+            envelope("turn/end", 5, data: ["turn": 2, "reason": ["kind": "completed"]]),
+        ]
+        let url = try writeSession(filename: "session.v1.jsonl", rows: rows)
+        let physical = try DeepSeekHarnessArtifactReader.read(url: url, compression: .plain)
+        _ = try DeepSeekHarnessHistoricalNormalizer.normalize(physical)
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        XCTAssertFalse(parsed.events.contains { $0.text == "Interrupted turn" })
+        XCTAssertTrue(parsed.events.contains { $0.text == "Turn 1 ended: interrupted" })
     }
 
     func testGeneratedSessionTitleEventNeverTitles() throws {

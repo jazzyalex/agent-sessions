@@ -239,6 +239,11 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         ensureArchiveExistsAndSync(session: session, reason: "test")
     }
 
+    func pinSessionForTesting(_ session: Session) {
+        writePinPlaceholder(session: session, key: key(source: session.source, id: session.id))
+        ensureArchiveExistsAndSync(session: session, reason: "test-pin")
+    }
+
     func syncPinnedSessionsForTesting() {
         syncPinnedSessions(reason: "test")
     }
@@ -491,6 +496,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             .generation ?? Int.max
     }
 
+    private func wouldDowngradeDSHArchive(_ session: Session) -> Bool {
+        guard session.source == .deepseekHarness,
+              let existing = loadInfoIfExists(source: session.source, id: session.id) else { return false }
+        let primary = Self.archiveUnit(for: session).primaryRelativePath
+        return Self.dshGeneration(of: primary) < Self.dshGeneration(of: existing.primaryRelativePath)
+    }
+
     /// Best-effort session for a `(sessionID, upstreamURL)` pair the filesystem sweep found.
     ///
     /// Each source's `archive.sessionForBackfill` carries its old arm verbatim, including the
@@ -508,6 +520,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func ensureArchiveExistsAndSync(session: Session, reason: String) {
+        // A saved successor remains authoritative even if the live source later
+        // exposes only an older generation (including through a re-star).
+        guard !wouldDowngradeDSHArchive(session) else { return }
         let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
@@ -556,6 +571,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func writePinPlaceholder(session: Session, key: String) {
+        guard !wouldDowngradeDSHArchive(session) else { return }
         let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
