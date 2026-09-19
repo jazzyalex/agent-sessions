@@ -94,8 +94,11 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         let fm = FileManager.default
         let projects = discovery.sessionsRoot()
         let chats = discovery.chatsRoot()
+        let acp = discovery.acpSessionsRoot()
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: projects.path, isDirectory: &isDir), isDir.boolValue { return true }
+        var isDirACP: ObjCBool = false
+        if fm.fileExists(atPath: acp.path, isDirectory: &isDirACP), isDirACP.boolValue { return true }
         var isDir2: ObjCBool = false
         return fm.fileExists(atPath: chats.path, isDirectory: &isDir2) && isDir2.boolValue
     }
@@ -181,6 +184,13 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             for meta in metaList where !transcriptIDs.contains(meta.agentId) {
                 let dbOnlySession = Self.sessionFromMeta(meta, knownProjectPaths: projectPaths)
                 transcriptSessions.append(dbOnlySession)
+            }
+
+            // ACP persistence is a separate graph and uses namespaced internal IDs.
+            for db in self.discovery.discoverACPSessionDBs() {
+                if let session = CursorACPStoreReader.parse(at: db) {
+                    transcriptSessions.append(session)
+                }
             }
 
             // Sort by most recent first
@@ -443,13 +453,16 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         return paths
     }
 
-    /// Returns true if the session is a DB-metadata-only Cursor session (no transcript file).
+    /// Returns true if the session is a Cursor store-backed session that does not have a
+    /// JSONL transcript. These rows must remain visible under the low-message filters.
     ///
     /// Detection: Cursor transcript sessions have `.jsonl` file paths; DB-only sessions point
     /// at the chat `store.db`. We check for the absence of `.jsonl` rather than the presence
     /// of a specific DB filename, so this survives if Cursor renames the database file.
     static func isDBOnlySession(_ session: Session) -> Bool {
-        session.source == .cursor && session.events.isEmpty && !session.filePath.hasSuffix(".jsonl")
+        guard session.source == .cursor else { return false }
+        if session.surface == .acp { return true }
+        return session.events.isEmpty && !session.filePath.hasSuffix(".jsonl")
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {

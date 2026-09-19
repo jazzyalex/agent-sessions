@@ -39,6 +39,12 @@ struct CursorBackendDetector {
             .appendingPathComponent("chats", isDirectory: true)
     }
 
+    /// Root for ACP-persisted Cursor CLI sessions. Path: ~/.cursor/acp-sessions
+    static func acpSessionsRoot(customRoot: String?) -> URL {
+        cursorRoot(customRoot: customRoot)
+            .appendingPathComponent("acp-sessions", isDirectory: true)
+    }
+
     /// Detect which storage surfaces are available.
     static func detect(customRoot: String?) -> CursorStorageBackend {
         if AppRuntime.isHostedByTooling {

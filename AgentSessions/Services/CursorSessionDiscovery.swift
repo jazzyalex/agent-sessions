@@ -22,6 +22,33 @@ final class CursorSessionDiscovery: SessionDiscovery {
         return CursorBackendDetector.chatsRoot(customRoot: customRoot)
     }
 
+    /// Returns the root containing Cursor ACP persisted sessions.
+    func acpSessionsRoot() -> URL {
+        CursorBackendDetector.acpSessionsRoot(customRoot: customRoot)
+    }
+
+    /// Discovers only the canonical ACP store path: acp-sessions/<UUID>/store.db.
+    func discoverACPSessionDBs() -> [URL] {
+        let root = acpSessionsRoot()
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue,
+              let children = try? fm.contentsOfDirectory(at: root,
+                                                           includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+                                                           options: [.skipsHiddenFiles]) else { return [] }
+        return children.compactMap { child in
+            let db = child.appendingPathComponent("store.db")
+            var childIsDir: ObjCBool = false
+            guard fm.fileExists(atPath: child.path, isDirectory: &childIsDir), childIsDir.boolValue,
+                  fm.fileExists(atPath: db.path), UUID(uuidString: child.lastPathComponent) != nil else { return nil }
+            return db
+        }.sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return a > b
+        }
+    }
+
     /// Discovers JSONL transcript files across all projects.
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
