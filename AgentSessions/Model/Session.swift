@@ -323,6 +323,63 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.deletedAt = deletedAt
     }
 
+    /// Returns this session with only its hierarchy relationship replaced.
+    ///
+    /// Relationship resolution happens after a session may have been hydrated
+    /// from a lightweight index row, or after a full transcript parse.  Keep
+    /// that operation in one place so callers cannot accidentally rebuild a
+    /// session through a partial initializer and discard provenance, events,
+    /// metadata, or runtime UI state.
+    func withRelationship(parentSessionID: String?,
+                          subagentType: String?,
+                          relationshipKind: SessionRelationshipKind?) -> Session {
+        var copy = Session(
+            copying: self,
+            parentSessionID: parentSessionID,
+            subagentType: subagentType,
+            relationshipKind: relationshipKind
+        )
+        copy.isFavorite = isFavorite
+        copy.isPartiallyHydrated = isPartiallyHydrated
+        return copy
+    }
+
+    private init(copying session: Session,
+                 parentSessionID: String?,
+                 subagentType: String?,
+                 relationshipKind: SessionRelationshipKind?) {
+        self.id = session.id
+        self.source = session.source
+        self.startTime = session.startTime
+        self.endTime = session.endTime
+        self.model = session.model
+        self.filePath = session.filePath
+        self.fileSizeBytes = session.fileSizeBytes
+        self.eventCount = session.eventCount
+        self.events = session.events
+        self.isHousekeeping = session.isHousekeeping
+        self.hasToolCallEvent = session.hasToolCallEvent
+        self.lightweightCommands = session.lightweightCommands
+        self.lightweightCwd = session.lightweightCwd
+        self.lightweightRepoName = session.lightweightRepoName
+        self.lightweightTitle = session.lightweightTitle
+        self.customTitle = session.customTitle
+        self.codexInternalSessionIDHint = session.codexInternalSessionIDHint
+        self.codexOriginator = session.codexOriginator
+        self.codexSource = session.codexSource
+        self.codexSurface = session.codexSurface
+        self.originator = session.originator
+        self.originSource = session.originSource
+        self.surface = session.surface
+        self.reasoningEffort = session.reasoningEffort
+        self.parentSessionID = parentSessionID
+        self.subagentType = subagentType
+        self.relationshipKind = relationshipKind
+        self.isFavorite = session.isFavorite
+        self.isPartiallyHydrated = session.isPartiallyHydrated
+        self.deletedAt = session.deletedAt
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case source

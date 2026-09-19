@@ -193,6 +193,7 @@
 		50808132D09197085B34B63E /* FilteredDefaultsObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E77D775A7E1D081B6EA91C6 /* FilteredDefaultsObserverTests.swift */; };
 		50F22064ADD499654338441E /* DevinSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6514220FE9461868DE489291 /* DevinSourceDescriptor.swift */; };
 		511CCA1B0D47E4DFAF2B32E9 /* SessionRowDisplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CC0C3D8AA930D4672F70B67 /* SessionRowDisplayTests.swift */; };
+		D1E2F3A4B5C60718293A4B5C /* SessionRelationshipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* SessionRelationshipTests.swift */; };
 		51A34A2BBB145228EC9B3A68 /* CodexSideChatLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD21A67716B8A7D96D3FB15F /* CodexSideChatLogReader.swift */; };
 		531D5F6D6B6745FDA5A8843D /* DroidSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFC9620B8D33B2E927DC16A /* DroidSourceDescriptor.swift */; };
 		533EEDFDD5ECB108C13D7FBC /* FxSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1170E93AE1FDD62D47B685D /* FxSessionParserTests.swift */; };
@@ -935,6 +936,7 @@
 		7B7CAD45F87994CCC597F5A1 /* CodexResetCreditsFetcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexOAuth/CodexResetCreditsFetcher.swift; sourceTree = SOURCE_ROOT; };
 		7C018BA230F9D81E63EEB125 /* PiResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/PiResume/PiResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		7CC0C3D8AA930D4672F70B67 /* SessionRowDisplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionRowDisplayTests.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F60718293A4B5C /* SessionRelationshipTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionRelationshipTests.swift; sourceTree = SOURCE_ROOT; };
 		7CDBC977E728A3F767B1185C /* CLIBinaryPresenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CLIBinaryPresenceTests.swift; sourceTree = SOURCE_ROOT; };
 		7D60A57D33ADD8309F775C5A /* DroidSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		7E101E0039767737C6AA50E6 /* HUDRebuildGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/HUDRebuildGate.swift; sourceTree = SOURCE_ROOT; };
@@ -1936,6 +1938,7 @@
 			children = (
 				B00000120A0A000100000001 /* Info.plist */,
 				B0000011FA0A000100000001 /* SessionParserTests.swift */,
+				A1B2C3D4E5F60718293A4B5C /* SessionRelationshipTests.swift */,
 				B00000173A0A000100000001 /* TranscriptBuilderTests.swift */,
 				B00000179A0A000100000001 /* SessionTitleTests.swift */,
 				A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */,
@@ -3316,6 +3319,7 @@
 				490E6DB11885C1FB80E4255E /* ClaudeDesktopSessionTitlesTests.swift in Sources */,
 				D90DC1910BFD698FD8C7B6CF /* SessionListFingerprintTests.swift in Sources */,
 				511CCA1B0D47E4DFAF2B32E9 /* SessionRowDisplayTests.swift in Sources */,
+				D1E2F3A4B5C60718293A4B5C /* SessionRelationshipTests.swift in Sources */,
 				DC1F5088E6C61C8FD6BF89FB /* TranscriptAutoJumpPolicyTests.swift in Sources */,
 				B17905835FD9A93AD12C0472 /* PresenceEngineRegressionTests.swift in Sources */,
 				1E2F2DE066304D55C8B158B8 /* TranscriptDerivedStateTests.swift in Sources */,
