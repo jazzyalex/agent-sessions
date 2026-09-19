@@ -10,6 +10,7 @@ const SOURCE_COMMIT = 'ddefc45fbc7f8e46dd73185e68295696d1297887'
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const REFERENCE_ROOT = resolve(SCRIPT_DIR, '..', '..', 'deepseek-harness')
 const CATALOG_PATH = `${REFERENCE_ROOT}/packages/session/session-format-catalog/lib/index.js`
+const ZSTD_PATH = `${REFERENCE_ROOT}/packages/session/session-persistence-jsonl/lib/types/zstd.js`
 const DEFAULT_OUTPUT = 'AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness'
 const GENERATOR_COMMAND = 'node scripts/generate_deepseek_harness_fixtures.mjs --output AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness'
 const CREATED_AT = 1_700_000_000_000
@@ -43,7 +44,7 @@ function stableJSON(value) {
 }
 
 function sha256(text) {
-  return createHash('sha256').update(text, 'utf8').digest('hex')
+  return createHash('sha256').update(text).digest('hex')
 }
 
 function event(type, seq, time, data, extras = {}) {
@@ -253,8 +254,14 @@ function writeFile(output, name, text) {
   return text
 }
 
+function writeBinaryFile(output, name, data) {
+  writeFileSync(resolve(output, name), data)
+  return data
+}
+
 verifyReferenceCommit()
 const { sessionFormatCatalog } = await import(CATALOG_PATH)
+const { compressZstdFrame } = await import(ZSTD_PATH)
 const output = outputPath()
 mkdirSync(dirname(resolve(output, 'manifest.json')), { recursive: true })
 mkdirSync(output, { recursive: true })
@@ -315,6 +322,26 @@ writeFile(output, 'normalized_v3_expected.json', expectedText)
 
 for (const [name, text] of physicalFixtures) writeFile(output, name, text)
 
+const compressedSourceNames = [
+  'v0_minimal_session.jsonl',
+  'v1_minimal_session.jsonl',
+  'v2_minimal_session.jsonl',
+  'v3_minimal_session.jsonl',
+  'unknown_ignorable_event.jsonl',
+]
+const compressedFixtures = new Map()
+for (const name of compressedSourceNames) {
+  const text = physicalFixtures.get(name)
+  if (text === undefined) throw new Error(`missing accepted plain fixture for compression: ${name}`)
+  const lines = text.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  if (lines.some(line => line.length === 0)) throw new Error(`accepted fixture contains an empty JSONL record: ${name}`)
+  const frames = await Promise.all(lines.map(line => compressZstdFrame(`${line}\n`)))
+  const compressed = Buffer.concat(frames)
+  const compressedName = name.replace(/\.jsonl$/, '.jsonl.zstd')
+  compressedFixtures.set(compressedName, writeBinaryFile(output, compressedName, compressed))
+}
+
 const expectedHash = sha256(expectedText)
 const fixtureMetadata = [
   ['v0_minimal_session.jsonl', 0, 'accept: normalize v0->v1->v2->v3; fold the released packed text run exactly once into the assistant stream', 'Generated from the released v0 physical header and packed text-chunks row shapes, then validated and normalized by the pinned production catalog.'],
@@ -341,12 +368,31 @@ const fixtures = fixtureMetadata.map(([name, version, outcome, note]) => ({
   ...(name in expected.fixtures ? { expectedNormalizedV3: 'normalized_v3_expected.json' } : {}),
   sha256: sha256(physicalFixtures.get(name)),
 }))
+const fixtureMetadataByName = new Map(fixtureMetadata.map(metadata => [metadata[0], metadata]))
+for (const name of compressedSourceNames) {
+  const [, version, outcome, note] = fixtureMetadataByName.get(name)
+  const compressedName = name.replace(/\.jsonl$/, '.jsonl.zstd')
+  fixtures.push({
+    file: compressedName,
+    physicalFormatVersion: version,
+    physicalFormat: `${version < 2
+      ? `released v${version} plain JSONL header plus zero-based envelopes and released packed assistant rows`
+      : `released v${version} plain JSONL header plus zero-based one-event-per-row envelopes`}; each record is one independently framed Zstandard payload`,
+    generation: 0,
+    encoding: 'zstd-jsonl',
+    expectedOutcome: outcome,
+    derivationNote: `Derived from ${name}: frame the header line alone as frame 0 and every later JSONL record in its own independently compressed, checksummed Zstandard frame using the pinned ${SOURCE_COMMIT} reference implementation's built compressZstdFrame. ${note}`,
+    generatorCommand: GENERATOR_COMMAND,
+    expectedNormalizedV3: 'normalized_v3_expected.json',
+    sha256: sha256(compressedFixtures.get(compressedName)),
+  })
+}
 const manifest = {
   sourceCommit: SOURCE_COMMIT,
   generatorCommand: GENERATOR_COMMAND,
   generator: 'scripts/generate_deepseek_harness_fixtures.mjs',
-  physicalFormat: 'UTF-8 plain JSONL with LF line endings; v0/v1 use released packed assistant rows; v2/v3 use one event envelope per row; all physical sequences are zero-based and dense for accepted fixtures.',
-  encoding: 'plain JSONL: UTF-8, LF line endings, one JSON object per line, newline-terminated except malformed_torn_tail.jsonl, which is byte-truncated.',
+  physicalFormat: 'UTF-8 plain JSONL with LF line endings plus independently framed Zstandard variants; v0/v1 use released packed assistant rows; v2/v3 use one event envelope per row; all physical sequences are zero-based and dense for accepted fixtures.',
+  encoding: 'plain-jsonl or zstd-jsonl: plain fixtures are UTF-8 LF-delimited records; compressed fixtures frame the header line alone first and every later JSONL record independently with checksummed Zstandard.',
   generation: 'Each fixture is a generation-0 session artifact; physicalFormatVersion identifies its released DSH schema.',
   expectedNormalizedV3: {
     file: 'normalized_v3_expected.json',
@@ -363,4 +409,4 @@ const manifest = {
 }
 writeFile(output, 'manifest.json', `${stableJSON(manifest)}\n`)
 
-console.log(`generated ${physicalFixtures.size} JSONL fixtures and normalized_v3_expected.json in ${output}`)
+console.log(`generated ${physicalFixtures.size} JSONL fixtures, ${compressedFixtures.size} Zstandard fixtures, and normalized_v3_expected.json in ${output}`)

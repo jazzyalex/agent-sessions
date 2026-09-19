@@ -18,6 +18,13 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         "v3_minimal_session.jsonl",
         "unknown_ignorable_event.jsonl",
     ]
+    private static let acceptedVariants = [
+        (plain: "v0_minimal_session.jsonl", compressed: "v0_minimal_session.jsonl.zstd"),
+        (plain: "v1_minimal_session.jsonl", compressed: "v1_minimal_session.jsonl.zstd"),
+        (plain: "v2_minimal_session.jsonl", compressed: "v2_minimal_session.jsonl.zstd"),
+        (plain: "v3_minimal_session.jsonl", compressed: "v3_minimal_session.jsonl.zstd"),
+        (plain: "unknown_ignorable_event.jsonl", compressed: "unknown_ignorable_event.jsonl.zstd"),
+    ]
 
     private func fixtureDir() throws -> URL {
         let dir = URL(fileURLWithPath: #filePath)
@@ -130,8 +137,8 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         let entries = try manifestEntries(manifest)
         let listedFixtures = Set(entries.compactMap { $0["file"] as? String })
         let onDiskFixtures = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path)
-            .filter { $0.hasSuffix(".jsonl") })
-        XCTAssertEqual(listedFixtures, onDiskFixtures, "manifest inventory must match committed JSONL fixtures")
+            .filter { $0.hasSuffix(".jsonl") || $0.hasSuffix(".jsonl.zstd") })
+        XCTAssertEqual(listedFixtures, onDiskFixtures, "manifest inventory must match every committed fixture file")
 
         guard let expectedDescriptor = manifest["expectedNormalizedV3"] as? [String: Any],
               let expectedFile = expectedDescriptor["file"] as? String,
@@ -169,14 +176,19 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         let expectedData = try Data(contentsOf: dir.appendingPathComponent(expectedFile))
         let expected = try jsonObject(String(decoding: expectedData, as: UTF8.self))
 
-        for file in Self.acceptedFiles {
+        var canonicalByFile: [String: String] = [:]
+        let filesAndCompression: [(String, DeepSeekHarnessCompression)] =
+            Self.acceptedFiles.map { ($0, .plain) } +
+            Self.acceptedVariants.map { ($0.compressed, .zstd) }
+
+        for (file, compression) in filesAndCompression {
             let entry = try manifestEntry(file, in: entries)
             let outcome = try XCTUnwrap(entry["expectedOutcome"] as? String, file)
             XCTAssertTrue(outcome.hasPrefix("accept:"), file)
             let version = try XCTUnwrap(entry["physicalFormatVersion"] as? Int, file)
 
             let url = dir.appendingPathComponent(file)
-            let result = try DeepSeekHarnessArtifactReader.read(url: url, compression: .plain)
+            let result = try DeepSeekHarnessArtifactReader.read(url: url, compression: compression)
             XCTAssertEqual(result.header.version, version, file)
 
             let first = try DeepSeekHarnessHistoricalNormalizer.normalize(result)
@@ -185,12 +197,23 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
             let secondBytes = try stableRepresentation(result: result, events: second)
             XCTAssertEqual(firstBytes, secondBytes, "normalization must be byte-deterministic: \(file)")
 
-            let expectedObject = try expectedEntry(file, in: expected)
+            let expectedFileKey = Self.acceptedVariants.first(where: { $0.compressed == file })?.plain ?? file
+            let expectedObject = try expectedEntry(expectedFileKey, in: expected)
             let expectedCanonical = try XCTUnwrap(
                 DeepSeekHarnessJSON.canonicalString(expectedObject),
                 file
             )
-            XCTAssertEqual(String(decoding: firstBytes, as: UTF8.self), expectedCanonical, file)
+            let actualCanonical = String(decoding: firstBytes, as: UTF8.self)
+            XCTAssertEqual(actualCanonical, expectedCanonical, file)
+            canonicalByFile[file] = actualCanonical
+        }
+
+        for variant in Self.acceptedVariants {
+            XCTAssertEqual(
+                canonicalByFile[variant.compressed],
+                canonicalByFile[variant.plain],
+                "plain and independently framed Zstandard artifacts must normalize identically: \(variant.plain)"
+            )
         }
     }
 

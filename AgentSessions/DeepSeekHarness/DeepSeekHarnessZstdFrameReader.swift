@@ -39,8 +39,14 @@ enum DeepSeekHarnessZstdFrameReader {
                 guard frameIndex < maxFrames else {
                     throw DeepSeekHarnessFormatError.limitsExceeded("frame count")
                 }
-                guard data.count - offset >= magic.count,
-                      Array(UnsafeBufferPointer(start: base.advanced(by: offset), count: magic.count)) == magic else {
+                let remaining = data.count - offset
+                if remaining < magic.count {
+                    throw DeepSeekHarnessFormatError.incompleteFrame(
+                        frame: frameIndex,
+                        offset: offset
+                    )
+                }
+                guard Array(UnsafeBufferPointer(start: base.advanced(by: offset), count: magic.count)) == magic else {
                     throw DeepSeekHarnessFormatError.corruptFrame(
                         frame: frameIndex,
                         offset: offset,

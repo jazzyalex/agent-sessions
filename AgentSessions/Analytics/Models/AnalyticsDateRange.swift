@@ -77,6 +77,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
     case devinOnly = "Devin Only"
     case fxOnly = "fx Only"
     case clineOnly = "Cline Only"
+    case deepseekHarnessOnly = "DeepSeek Harness Only"
 
     var id: String { rawValue }
 
@@ -99,6 +100,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
         case .devinOnly: return "Devin Only"
         case .fxOnly: return "fx Only"
         case .clineOnly: return "Cline Only"
+        case .deepseekHarnessOnly: return "DeepSeek Harness Only"
         }
     }
 
@@ -152,6 +154,8 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
             return source == .fx
         case .clineOnly:
             return source == .cline
+        case .deepseekHarnessOnly:
+            return source == .deepseekHarness
         }
     }
 }

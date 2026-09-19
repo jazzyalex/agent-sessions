@@ -332,6 +332,8 @@ struct PreferencesView: View {
     @State var deepSeekHarnessSessionsPath: String = UserDefaults.standard.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? ""
     @State var clineSessionsPathValid: Bool = true
     @State var clineSessionsPathDebounce: DispatchWorkItem? = nil
+    @State var deepSeekHarnessSessionsPathValid: Bool = true
+    @State var deepSeekHarnessSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -491,9 +493,7 @@ struct PreferencesView: View {
             case .cline:
                 clineTab
             case .deepseekHarness:
-                // DSH's source controls are not part of this bounded core slice;
-                // keep the tab selectable until its dedicated pane is integrated.
-                generalTab
+                deepseekHarnessTab
             case .about:
                 aboutTab
             }
@@ -837,6 +837,8 @@ struct PreferencesView: View {
         fxSessionsPath = ""
         clineSessionsPath = ""
         UserDefaults.standard.removeObject(forKey: ClinePreferencesKey.sessionsRootOverride)
+        deepSeekHarnessSessionsPath = ""
+        UserDefaults.standard.removeObject(forKey: DeepSeekHarnessSettings.Keys.rootOverride)
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
@@ -847,6 +849,7 @@ struct PreferencesView: View {
         validateDevinSessionsPath()
         validateFxSessionsPath()
         validateClineSessionsPath()
+        validateDeepSeekHarnessSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true

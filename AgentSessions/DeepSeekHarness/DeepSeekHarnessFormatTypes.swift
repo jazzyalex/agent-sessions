@@ -565,6 +565,123 @@ enum DeepSeekHarnessVocabulary {
     static let contentKinds: Set<String> = ["text", "reasoning", "image", "file", "tool-call", "tool-result"]
 }
 
+// MARK: - Presentation dispositions
+
+/// V1 presentation disposition for each frozen first-party v3 event type.
+///
+/// Categories mirror the existing `DeepSeekHarnessSessionParser` behavior;
+/// adding this table changes no rendering. User-message, system, assistant,
+/// tool, request, turn, and seed entries describe emitted rows or metadata.
+/// Diagnostic-attempt and intentionally-ignored entries describe admitted
+/// but non-rendered events.
+enum DeepSeekHarnessPresentationDisposition: String, Sendable, CaseIterable {
+    case userMessage
+    case systemMetadata
+    case assistantRendering
+    case diagnosticAttempt
+    case toolCall
+    case toolResult
+    case requestHeader
+    case requestContext
+    case turnLifecycle
+    case seedBoundary
+    case intentionallyIgnored
+}
+
+/// Checked-in inventory with exactly one entry per `v3Known` name. Lookup is
+/// an explicit dictionary fetch with no default: a known name without an
+/// entry is a programming error and must fail closed in the parser.
+///
+/// Intentionally ignored first-party events are safe for v1 presentation
+/// because they carry coordination or provenance state (approvals, hooks,
+/// compaction, team, workflows, feedback, scheduling, dispatch) rather than
+/// transcript content, and mapping unaudited shapes as tool activity would
+/// risk double-counting or misattribution. They remain admitted and
+/// strictly validated upstream (`validateV3` plus `assertV3EventPostMigration`),
+/// so a malformed ignored payload still refuses the file; the parser simply
+/// renders no row for a well-formed one. Step coordinates survive inside
+/// neighbouring events' raw payloads, and DSH's own generated titles stay
+/// out because the v1 title is always the first direct-human user text.
+/// Unknown ignorable events stay diagnostic-only through the normalizer and
+/// unknown required events still fail closed there.
+enum DeepSeekHarnessPresentation {
+    static let dispositions: [String: DeepSeekHarnessPresentationDisposition] = [
+        "agent-preset/selected": .intentionallyIgnored,
+        "agent/inbox/spliced": .intentionallyIgnored,
+        "approval/asked": .intentionallyIgnored,
+        "approval/decided": .intentionallyIgnored,
+        "approval/policy": .intentionallyIgnored,
+        "assistant/attempt": .diagnosticAttempt,
+        "assistant/message": .assistantRendering,
+        "command/done": .intentionallyIgnored,
+        "command/run": .intentionallyIgnored,
+        "compaction/end": .intentionallyIgnored,
+        "compaction/prune": .intentionallyIgnored,
+        "compaction/start": .intentionallyIgnored,
+        "compaction/summary": .intentionallyIgnored,
+        "deliverables/presented": .intentionallyIgnored,
+        "feedback/message-delete": .intentionallyIgnored,
+        "feedback/message-put": .intentionallyIgnored,
+        "feedback/record": .intentionallyIgnored,
+        "goal/change": .intentionallyIgnored,
+        "hook/invoked": .intentionallyIgnored,
+        "hook/result": .intentionallyIgnored,
+        "image/offload": .intentionallyIgnored,
+        "llm/retry": .intentionallyIgnored,
+        "llm/retry-started": .intentionallyIgnored,
+        "model/selection": .intentionallyIgnored,
+        "permission/preset": .intentionallyIgnored,
+        "plan/mode": .intentionallyIgnored,
+        "request/context": .requestContext,
+        "request/header": .requestHeader,
+        "sandbox/mode": .intentionallyIgnored,
+        "schedule/change": .intentionallyIgnored,
+        "session-log-deepseek/delivery-accepted": .intentionallyIgnored,
+        "session/end-seed": .seedBoundary,
+        "session/title": .intentionallyIgnored,
+        "session/title-llm-request": .intentionallyIgnored,
+        "step/end": .intentionallyIgnored,
+        "step/start": .intentionallyIgnored,
+        "subagent/catalog": .intentionallyIgnored,
+        "subagent/descriptor": .intentionallyIgnored,
+        "subagent/model-selection-policy": .intentionallyIgnored,
+        "system/message": .systemMetadata,
+        "team/member": .intentionallyIgnored,
+        "team/message/delivered": .intentionallyIgnored,
+        "team/message/queued": .intentionallyIgnored,
+        "team/task": .intentionallyIgnored,
+        "todo/write": .intentionallyIgnored,
+        "tool-workflow/agent-end": .intentionallyIgnored,
+        "tool-workflow/agent-start": .intentionallyIgnored,
+        "tool-workflow/run-end": .intentionallyIgnored,
+        "tool-workflow/run-start": .intentionallyIgnored,
+        "tool/call": .toolCall,
+        "tool/ptc-dispatch": .intentionallyIgnored,
+        "tool/ptc-dispatch-start": .intentionallyIgnored,
+        "tool/result": .toolResult,
+        "turn/end": .turnLifecycle,
+        "turn/start": .turnLifecycle,
+        "user/message": .userMessage,
+        "web/deepseek-search-llm-request": .intentionallyIgnored,
+        "workspace/changes": .intentionallyIgnored,
+    ]
+
+    /// Explicit lookup only. Known names classify solely through the table
+    /// above; there is no default mapping. Returns nil for unknown types so
+    /// callers preserve the existing normalizer contract (diagnostic-only
+    /// ignorable passthrough, fail-closed required events upstream).
+    static func disposition(for eventType: String) -> DeepSeekHarnessPresentationDisposition? {
+        dispositions[eventType]
+    }
+
+    static var isComplete: Bool {
+        dispositions.count == v3KnownCount
+            && Set(dispositions.keys) == DeepSeekHarnessVocabulary.v3Known
+    }
+
+    private static let v3KnownCount = 58
+}
+
 enum DeepSeekHarnessFormatError: Error, Equatable, LocalizedError, Sendable {
     case unsupportedVersion(Int)
     case invalidHeader

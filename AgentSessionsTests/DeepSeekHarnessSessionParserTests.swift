@@ -38,7 +38,8 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
 
     private func envelope(_ type: String, _ sequence: Int,
                           data: [String: Any],
-                          surfaceAppend: Bool = false) -> [String: Any] {
+                          surfaceAppend: Bool = false,
+                          ignorable: Bool = false) -> [String: Any] {
         var row: [String: Any] = [
             "type": type,
             "seq": sequence,
@@ -46,6 +47,7 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
             "data": data,
         ]
         if surfaceAppend { row["surfaceOp"] = "append" }
+        if ignorable { row["ignorable"] = true }
         return row
     }
 
@@ -449,5 +451,138 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         let wrongName = dir.appendingPathComponent("random.jsonl")
         try "x\n".write(to: wrongName, atomically: true, encoding: .utf8)
         XCTAssertNil(DeepSeekHarnessSessionParser.parseFile(at: wrongName))
+    }
+
+    // MARK: - Presentation inventory (owner decision 3A)
+
+    func testPresentationInventoryMatchesFrozenV3Known() {
+        XCTAssertEqual(DeepSeekHarnessVocabulary.v3Known.count, 58,
+                       "frozen v3Known must stay at 58 names")
+        XCTAssertEqual(DeepSeekHarnessPresentation.dispositions.count, 58,
+                       "inventory must carry exactly one entry per known name")
+        XCTAssertEqual(Set(DeepSeekHarnessPresentation.dispositions.keys),
+                       DeepSeekHarnessVocabulary.v3Known,
+                       "inventory keys must equal the frozen v3Known set with no extras")
+    }
+
+    func testPresentationDispositionsArePinned() {
+        let expected: [String: DeepSeekHarnessPresentationDisposition] = [
+            "agent-preset/selected": .intentionallyIgnored,
+            "agent/inbox/spliced": .intentionallyIgnored,
+            "approval/asked": .intentionallyIgnored,
+            "approval/decided": .intentionallyIgnored,
+            "approval/policy": .intentionallyIgnored,
+            "assistant/attempt": .diagnosticAttempt,
+            "assistant/message": .assistantRendering,
+            "command/done": .intentionallyIgnored,
+            "command/run": .intentionallyIgnored,
+            "compaction/end": .intentionallyIgnored,
+            "compaction/prune": .intentionallyIgnored,
+            "compaction/start": .intentionallyIgnored,
+            "compaction/summary": .intentionallyIgnored,
+            "deliverables/presented": .intentionallyIgnored,
+            "feedback/message-delete": .intentionallyIgnored,
+            "feedback/message-put": .intentionallyIgnored,
+            "feedback/record": .intentionallyIgnored,
+            "goal/change": .intentionallyIgnored,
+            "hook/invoked": .intentionallyIgnored,
+            "hook/result": .intentionallyIgnored,
+            "image/offload": .intentionallyIgnored,
+            "llm/retry": .intentionallyIgnored,
+            "llm/retry-started": .intentionallyIgnored,
+            "model/selection": .intentionallyIgnored,
+            "permission/preset": .intentionallyIgnored,
+            "plan/mode": .intentionallyIgnored,
+            "request/context": .requestContext,
+            "request/header": .requestHeader,
+            "sandbox/mode": .intentionallyIgnored,
+            "schedule/change": .intentionallyIgnored,
+            "session-log-deepseek/delivery-accepted": .intentionallyIgnored,
+            "session/end-seed": .seedBoundary,
+            "session/title": .intentionallyIgnored,
+            "session/title-llm-request": .intentionallyIgnored,
+            "step/end": .intentionallyIgnored,
+            "step/start": .intentionallyIgnored,
+            "subagent/catalog": .intentionallyIgnored,
+            "subagent/descriptor": .intentionallyIgnored,
+            "subagent/model-selection-policy": .intentionallyIgnored,
+            "system/message": .systemMetadata,
+            "team/member": .intentionallyIgnored,
+            "team/message/delivered": .intentionallyIgnored,
+            "team/message/queued": .intentionallyIgnored,
+            "team/task": .intentionallyIgnored,
+            "todo/write": .intentionallyIgnored,
+            "tool-workflow/agent-end": .intentionallyIgnored,
+            "tool-workflow/agent-start": .intentionallyIgnored,
+            "tool-workflow/run-end": .intentionallyIgnored,
+            "tool-workflow/run-start": .intentionallyIgnored,
+            "tool/call": .toolCall,
+            "tool/ptc-dispatch": .intentionallyIgnored,
+            "tool/ptc-dispatch-start": .intentionallyIgnored,
+            "tool/result": .toolResult,
+            "turn/end": .turnLifecycle,
+            "turn/start": .turnLifecycle,
+            "user/message": .userMessage,
+            "web/deepseek-search-llm-request": .intentionallyIgnored,
+            "workspace/changes": .intentionallyIgnored,
+        ]
+        XCTAssertEqual(expected.count, 58, "pinned table must list all 58 names once")
+        XCTAssertEqual(Set(expected.keys), DeepSeekHarnessVocabulary.v3Known,
+                       "pinned table must match the frozen vocabulary")
+        for (type, disposition) in expected {
+            XCTAssertEqual(DeepSeekHarnessPresentation.disposition(for: type), disposition,
+                           "presentation disposition for \(type)")
+        }
+        XCTAssertEqual(Set(DeepSeekHarnessPresentation.dispositions.keys), Set(expected.keys),
+                       "production inventory must not carry extra names")
+        XCTAssertNil(DeepSeekHarnessPresentation.disposition(for: "future/thing"),
+                     "unknown types must not classify through the known inventory")
+    }
+
+    func testIntentionallyIgnoredKnownTypesRenderNoRows() throws {
+        let url = try writeSession(filename: "session.v3.jsonl", rows: [
+            header(id: "dsh-ignored-1"),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("user/message", 2, data: userData(id: "u-1", text: "Keep the title"),
+                      surfaceAppend: true),
+            envelope("todo/write", 3, data: ["todos": []]),
+            envelope("step/end", 4, data: ["turn": 1, "step": 1]),
+            envelope("turn/end", 5, data: ["turn": 1, "reason": ["kind": "completed"]]),
+            envelope("session/title", 6, data: [
+                "title": "LLM TITLE MUST NOT WIN",
+                "messageSeqs": [2],
+                "source": ["kind": "fallback"] as [String: Any],
+            ]),
+        ])
+        guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        XCTAssertEqual(full.lightweightTitle, "Keep the title")
+        XCTAssertFalse(full.events.contains { ($0.text ?? "").contains("LLM TITLE MUST NOT WIN") })
+        XCTAssertTrue(full.events.allSatisfy { $0.kind == .user || $0.kind == .meta },
+                      "ignored todo/title/step markers must not emit non-meta rows")
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1)
+        XCTAssertEqual(full.eventCount, 1)
+    }
+
+    func testUnknownIgnorableStaysDiagnosticOnly() throws {
+        let url = try writeSession(filename: "session.v3.jsonl", rows: [
+            header(id: "dsh-ignorable-1"),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("user/message", 2, data: userData(id: "u-1", text: "Visible prompt"),
+                      surfaceAppend: true),
+            envelope("x-test/ignorable", 3, data: [:], ignorable: true),
+            envelope("step/end", 4, data: ["turn": 1, "step": 1]),
+            envelope("turn/end", 5, data: ["turn": 1, "reason": ["kind": "completed"]]),
+        ])
+        guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        XCTAssertEqual(full.lightweightTitle, "Visible prompt")
+        XCTAssertFalse(full.events.contains { ($0.rawJSON).contains("x-test/ignorable") },
+                       "diagnostic-only envelopes must not leak into retained rows")
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1)
     }
 }

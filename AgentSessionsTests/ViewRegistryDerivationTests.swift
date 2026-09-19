@@ -55,7 +55,8 @@ final class ViewRegistryDerivationTests: XCTestCase {
             (.qwen, "Qwen Code", nil),
             (.devin, "Devin CLI", nil),
             (.fx, "fx", nil),
-            (.cline, "Cline", nil)
+            (.cline, "Cline", nil),
+            (.deepseekHarness, "DeepSeek Harness", nil)
         ]
 
         XCTAssertEqual(derived.count, expected.count)
@@ -88,6 +89,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .droid).resumeAgentLabel)
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .openclaw).resumeAgentLabel)
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .cline).resumeAgentLabel)
+        XCTAssertNil(SessionSourceRegistry.descriptor(for: .deepseekHarness).resumeAgentLabel)
     }
 
     // MARK: - Preferences panes (K13)
@@ -135,7 +137,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
     func testSidebarAgentTabOrderIsFrozen() {
         XCTAssertEqual(PreferencesTab.sidebarAgentTabs,
                        [.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI,
-                        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermesCLI, .openClawCLI, .fx, .cline])
+                        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermesCLI, .openClawCLI, .fx, .cline, .deepseekHarness])
     }
 
     /// Every pane a source maps to must have a non-empty title and icon: the sidebar rows

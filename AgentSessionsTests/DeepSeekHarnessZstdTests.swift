@@ -232,6 +232,24 @@ final class DeepSeekHarnessZstdTests: XCTestCase {
         }
     }
 
+    func testShortFinalMagicTailIsClassifiedAsIncompleteFrame() throws {
+        let first = try zstdFrame(headerLine())
+        let magicPrefix: [UInt8] = [0x28, 0xB5, 0x2F]
+
+        for byteCount in 1...3 {
+            var bytes = Data(first)
+            bytes.append(contentsOf: magicPrefix.prefix(byteCount))
+
+            XCTAssertThrowsError(try DeepSeekHarnessZstdFrameReader.readFrames(from: bytes)) { error in
+                XCTAssertEqual(
+                    error as? DeepSeekHarnessFormatError,
+                    .incompleteFrame(frame: 1, offset: first.count),
+                    "a (byteCount)-byte final magic prefix is an incomplete next frame"
+                )
+            }
+        }
+    }
+
     func testFrameCountLimitIsEnforced() throws {
         let frame = try zstdFrame(Data("x".utf8))
         var bytes = Data(capacity: frame.count * (DeepSeekHarnessZstdFrameReader.maxFrames + 1))

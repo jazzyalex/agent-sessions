@@ -28,7 +28,9 @@ import Foundation
 ///
 /// Explicit event dispositions (plan Task 5 gate: nothing is silently
 /// dropped; each arm below is covered by
-/// `DeepSeekHarnessSessionParserTests`):
+/// `DeepSeekHarnessSessionParserTests`). Every known v3 name routes through
+/// the checked-in `DeepSeekHarnessPresentation.dispositions` inventory, so a
+/// missing entry rejects the parse instead of falling through the switch:
 ///
 /// - `user/message` with `source.kind == "user"` → `.user` event and the only
 ///   title source. Any other source kind (plugin, agent-instructions,
@@ -135,7 +137,8 @@ enum DeepSeekHarnessSessionParser {
         guard let parsedFilename = DeepSeekHarnessDiscovery.parseGenerationFilename(url.lastPathComponent) else { return nil }
         guard let result = try? DeepSeekHarnessArtifactReader.read(url: url, compression: parsedFilename.compression),
               let normalized = try? DeepSeekHarnessHistoricalNormalizer.normalize(result),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              DeepSeekHarnessPresentation.isComplete else { return nil }
 
         let header = DeepSeekHarnessHistoricalNormalizer.normalizedHeader(result.header)
         let projection = project(header: header, events: normalized, incompleteTurn: result.incompleteTurn)
@@ -182,10 +185,12 @@ enum DeepSeekHarnessSessionParser {
             mutate(&callsByID[id]!)
         }
 
-        for item in events where !item.diagnosticOnly {
+        for item in events {
+            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
+            guard !item.diagnosticOnly else { continue }
             let data = item.data
-            switch item.canonicalType {
-            case "assistant/message":
+            switch disposition {
+            case .assistantRendering:
                 if let message = data["message"] as? [String: Any],
                    let blocks = message["content"] as? [[String: Any]] {
                     for block in blocks {
@@ -201,7 +206,7 @@ enum DeepSeekHarnessSessionParser {
                         }
                     }
                 }
-            case "tool/call":
+            case .toolCall:
                 if let id = nonEmptyString(data["callId"]) {
                     recordCall(id: id) { info in
                         if info.event == nil {
@@ -212,7 +217,9 @@ enum DeepSeekHarnessSessionParser {
                         if let args = argumentsString(data["arguments"]) { info.arguments = args }
                     }
                 }
-            default:
+            case .userMessage, .systemMetadata, .diagnosticAttempt, .toolResult,
+                 .requestHeader, .requestContext, .turnLifecycle, .seedBoundary,
+                 .intentionallyIgnored:
                 break
             }
         }
@@ -222,21 +229,23 @@ enum DeepSeekHarnessSessionParser {
         var emittedCallIDs = Set<String>()
         let deferredBlockIDs = Set(callsByID.filter { $0.value.event != nil }.map(\.key))
 
-        for item in events where !item.diagnosticOnly {
+        for item in events {
+            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
+            guard !item.diagnosticOnly else { continue }
             let envelope = item.envelope
             let timestamp = eventDate(milliseconds: envelope.timeMilliseconds)
             if let timestamp { lastDate = max(lastDate, timestamp) }
             let data = item.data
-            switch item.canonicalType {
-            case "user/message":
+            switch disposition {
+            case .userMessage:
                 emitUserMessage(data: data, sequence: envelope.sequence, timestamp: timestamp,
                                 raw: boundedRaw(envelope.rawObject), rows: &rows,
                                 firstDirectUserText: &firstDirectUserText)
-            case "system/message":
+            case .systemMetadata:
                 rows.append(makeEvent(id: "dsh-\(envelope.sequence)-system", timestamp: timestamp,
                                       kind: .meta, role: "system", text: nil,
                                       raw: boundedRaw(envelope.rawObject)))
-            case "assistant/message":
+            case .assistantRendering:
                 emitAssistantMessage(data: data, sequence: envelope.sequence, timestamp: timestamp,
                                      raw: boundedRaw(envelope.rawObject), rows: &rows,
                                      deferredBlockIDs: deferredBlockIDs, emittedCallIDs: &emittedCallIDs,
@@ -247,7 +256,7 @@ enum DeepSeekHarnessSessionParser {
                    (source["kind"] as? String) == "model" {
                     fallbackAssistantModel = nonEmptyString(source["model"])
                 }
-            case "tool/call":
+            case .toolCall:
                 if let id = nonEmptyString(data["callId"]), !emittedCallIDs.contains(id),
                    let info = callsByID[id] {
                     rows.append(toolCallEvent(callID: id, info: info, sequence: envelope.sequence,
@@ -262,41 +271,44 @@ enum DeepSeekHarnessSessionParser {
                                           toolInput: capped(argumentsString(data["arguments"])),
                                           raw: boundedRaw(envelope.rawObject)))
                 }
-            case "tool/result":
+            case .toolResult:
                 emitToolResult(data: data, sequence: envelope.sequence, timestamp: timestamp,
                                raw: boundedRaw(envelope.rawObject), rows: &rows, callsByID: callsByID)
-            case "request/header":
+            case .requestHeader:
                 if let config = (data["header"] as? [String: Any])?["config"] as? [String: Any] {
                     if let name = nonEmptyString(config["model"]) { model = name }
                     if let effort = nonEmptyString(config["reasoningEffort"]) { reasoningEffort = effort }
                 }
-            case "request/context":
+            case .requestContext:
                 rows.append(makeEvent(id: "dsh-\(envelope.sequence)-context", timestamp: timestamp,
                                       kind: .meta, role: "request-context", text: nil,
                                       raw: boundedRaw(envelope.rawObject)))
-            case "turn/start":
-                if let turn = data["turn"] as? Int {
-                    rows.append(makeEvent(id: "dsh-\(envelope.sequence)-turn", timestamp: timestamp,
-                                          kind: .meta, role: "turn", text: "Turn \(turn) started",
-                                          raw: boundedRaw(envelope.rawObject)))
+            case .turnLifecycle:
+                if item.canonicalType == "turn/start" {
+                    if let turn = data["turn"] as? Int {
+                        rows.append(makeEvent(id: "dsh-\(envelope.sequence)-turn", timestamp: timestamp,
+                                              kind: .meta, role: "turn", text: "Turn \(turn) started",
+                                              raw: boundedRaw(envelope.rawObject)))
+                    }
+                } else if item.canonicalType == "turn/end" {
+                    if let turn = data["turn"] as? Int {
+                        let kind = (data["reason"] as? [String: Any])?["kind"] as? String ?? "ended"
+                        rows.append(makeEvent(id: "dsh-\(envelope.sequence)-turn", timestamp: timestamp,
+                                              kind: .meta, role: "turn", text: "Turn \(turn) ended: \(kind)",
+                                              raw: boundedRaw(envelope.rawObject)))
+                    }
                 }
-            case "turn/end":
-                if let turn = data["turn"] as? Int {
-                    let kind = (data["reason"] as? [String: Any])?["kind"] as? String ?? "ended"
-                    rows.append(makeEvent(id: "dsh-\(envelope.sequence)-turn", timestamp: timestamp,
-                                          kind: .meta, role: "turn", text: "Turn \(turn) ended: \(kind)",
-                                          raw: boundedRaw(envelope.rawObject)))
-                }
-            case "session/end-seed":
+            case .seedBoundary:
                 rows.append(makeEvent(id: "dsh-\(envelope.sequence)-seed", timestamp: timestamp,
                                       kind: .meta, role: "seed", text: "Seed boundary",
                                       raw: boundedRaw(envelope.rawObject)))
-            default:
+            case .diagnosticAttempt, .intentionallyIgnored:
+                // assistant/attempt is diagnostic-only and filtered above;
                 // step/start, step/end, session/title*, tool/ptc-dispatch* and
                 // every other known v3 type: intentionally ignored per the
-                // disposition table above. Unknown ignorable events are
-                // diagnostic-only and filtered before this switch; unknown
-                // required events fail normalization.
+                // disposition inventory above. Unknown ignorable events are
+                // diagnostic-only and filtered above; unknown required events
+                // fail normalization.
                 continue
             }
         }
@@ -574,6 +586,16 @@ enum DeepSeekHarnessSessionParser {
     }
 
     // MARK: - Small value helpers
+
+    /// Inventory lookup after `parse` has verified that every frozen
+    /// first-party name has a checked-in disposition. Unknown types return
+    /// nil so the caller preserves the normalizer contract (diagnostic-only
+    /// ignorable skip; required events already fail closed upstream).
+    private static func checkedPresentationDisposition(
+        for canonicalType: String
+    ) -> DeepSeekHarnessPresentationDisposition? {
+        DeepSeekHarnessPresentation.disposition(for: canonicalType)
+    }
 
     private static let renderedTextLimit = 32_768
     private static let rawJSONLimitBytes = 8_192
