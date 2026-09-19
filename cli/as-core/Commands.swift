@@ -1,0 +1,262 @@
+import Foundation
+
+// MARK: - Arguments
+
+struct Options {
+    var positional: [String] = []
+    var sources: [SourceDriver] = drivers
+    var limit = 50
+    var light = false
+    var sessionID: String?
+    var databaseURL = Options.defaultDatabaseURL()
+
+    /// `$AS_CORE_DB`, else `$XDG_DATA_HOME/agent-sessions/index.db`, else
+    /// `~/.local/share/agent-sessions/index.db`. Never the macOS app's index.
+    static func defaultDatabaseURL() -> URL {
+        let env = ProcessInfo.processInfo.environment
+        if let explicit = env["AS_CORE_DB"], !explicit.isEmpty {
+            return URL(fileURLWithPath: explicit)
+        }
+        let dataHome = env["XDG_DATA_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share")
+        return dataHome.appendingPathComponent("agent-sessions/index.db")
+    }
+
+    init(_ args: ArraySlice<String>) {
+        var selected: [SourceDriver] = []
+        var it = args.makeIterator()
+        while let arg = it.next() {
+            switch arg {
+            case "--source":
+                guard let name = it.next(), let d = driver(named: name) else {
+                    fail("--source needs one of: \(drivers.map(\.source.rawValue).joined(separator: ", "))", code: 2)
+                }
+                selected.append(d)
+            case "--limit":
+                guard let value = it.next().flatMap(Int.init), value > 0 else { fail("--limit needs a positive integer", code: 2) }
+                limit = value
+            case "--db":
+                guard let path = it.next() else { fail("--db needs a path", code: 2) }
+                databaseURL = URL(fileURLWithPath: path)
+            case "--light":
+                light = true
+            case "--id":
+                guard let id = it.next() else { fail("--id needs a session ID", code: 2) }
+                sessionID = id
+            default:
+                if arg.hasPrefix("--") { fail("unknown option \(arg)", code: 2) }
+                positional.append(arg)
+            }
+        }
+        if !selected.isEmpty { sources = selected }
+    }
+}
+
+// MARK: - Single-file commands
+
+func sessionSummary(_ session: Session?, path: String) -> [String: Any] {
+    guard let session else { return ["path": path, "error": "unparsed"] }
+    return [
+        "path": path,
+        "id": session.id,
+        "source": session.source.rawValue,
+        "events": session.events.count,
+        "model": orNull(session.model),
+        "title": session.title,
+    ]
+}
+
+/// `parse <source> <file>`: one summary for a single file.
+func runParse(_ options: Options) {
+    guard options.positional.count == 2, let d = driver(named: options.positional[0]) else {
+        fail("usage: as-core parse <source> <file>", code: 2)
+    }
+    let url = URL(fileURLWithPath: options.positional[1])
+    guard let session = d.parseFull(url) else { fail("could not parse \(url.path)", code: 1) }
+    emit(sessionSummary(session, path: url.path))
+}
+
+/// `scan [--source s] [--light]`: discover and parse without touching the index.
+func runScan(_ options: Options) {
+    for d in options.sources {
+        if let rows = d.scanDatabase(options.light) {
+            for (locator, session) in rows { emit(sessionSummary(session, path: locator)) }
+            continue
+        }
+        for url in d.discovery().discoverSessionFiles().sorted(by: { $0.path < $1.path }) {
+            emit(sessionSummary(options.light ? d.parseLight(url) : d.parseFull(url), path: url.path))
+        }
+    }
+}
+
+/// Loads one session for `show` / `resume`: by ID for database-backed sources, else by path.
+func loadSession(_ options: Options, usage: String) -> Session {
+    guard options.positional.count == 2, let d = driver(named: options.positional[0]) else {
+        fail(usage, code: 2)
+    }
+    let url = URL(fileURLWithPath: options.positional[1])
+    let loaded: Session?
+    if let id = options.sessionID, let loadByID = d.loadByID {
+        loaded = loadByID(id)
+    } else {
+        loaded = d.parseFull(url)
+    }
+    guard let session = loaded else { fail("could not load \(options.sessionID ?? url.path)", code: 1) }
+    return session
+}
+
+/// `resume <source> <file> [--id id]`: the shell command that reopens the session.
+func runResume(_ options: Options) {
+    let session = loadSession(options, usage: "usage: as-core resume <source> <file> [--id <session-id>]")
+    do {
+        let command = try resumeCommand(for: session)
+        emit(["type": "resume",
+              "id": session.id,
+              "source": session.source.rawValue,
+              "command": command.display,
+              "shell": command.shell,
+              "cwd": orNull(command.workingDirectory)])
+    } catch {
+        fail("\(error)", code: 1)
+    }
+}
+
+/// `show <source> <file> [--id id]`: header, then one line per event. Database-backed
+/// sources share one storage path, so they need `--id`.
+func runShow(_ options: Options) {
+    let session = loadSession(options, usage: "usage: as-core show <source> <file> [--id <session-id>]")
+    var header = sessionSummary(session, path: session.filePath)
+    header["type"] = "session"
+    header["cwd"] = orNull(session.cwd)
+    header["start"] = iso(session.startTime)
+    header["end"] = iso(session.endTime)
+    emit(header)
+    for event in session.events {
+        emit([
+            "type": "event",
+            "id": event.id,
+            "kind": event.kind.rawValue,
+            "timestamp": iso(event.timestamp),
+            "role": orNull(event.role),
+            "text": orNull(event.text),
+            "toolName": orNull(event.toolName),
+            "toolInput": orNull(event.toolInput),
+            "toolOutput": orNull(event.toolOutput),
+        ])
+    }
+}
+
+// MARK: - Index commands
+
+func openIndex(_ options: Options) -> IndexDB {
+    do {
+        return try IndexDB(databaseURL: options.databaseURL)
+    } catch {
+        fail("cannot open index at \(options.databaseURL.path): \(error)", code: 1)
+    }
+}
+
+/// `index [--source s]`: full-parse new or changed files into the index, through the same
+/// `SearchIngestService` the app uses (its skip gates make re-runs incremental).
+func runIndex(_ options: Options) async {
+    let db = openIndex(options)
+    let ingest = SearchIngestService(db: db)
+    for d in options.sources {
+        let started = Date()
+        let files: [SearchIngestService.FileRef]
+        var identitySnapshot: SearchIngestService.IdentitySnapshot?
+        if let database = d.databaseSessions() {
+            files = SearchIngestService.fileRefs(for: database.sessions)
+            identitySnapshot = database.snapshot
+        } else {
+            files = d.discovery().discoverSessionFiles().compactMap { url in
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+                let mtime = (attrs[.modificationDate] as? Date).map { Int64($0.timeIntervalSince1970) } ?? 0
+                let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+                return SearchIngestService.FileRef(path: url.path, mtime: mtime, size: size)
+            }
+        }
+        do {
+            let progress = try await ingest.ingest(source: d.source,
+                                                   files: files,
+                                                   toolIOEnabled: false,
+                                                   identitySnapshot: identitySnapshot,
+                                                   yieldNanoseconds: 0,
+                                                   quietSeconds: 0)
+            emit([
+                "type": "index",
+                "source": d.source.rawValue,
+                "files": files.count,
+                "processed": progress.processed,
+                "skippedFiles": progress.skipped,
+                "ms": Int(Date().timeIntervalSince(started) * 1000),
+            ])
+        } catch {
+            emit(["type": "index", "source": d.source.rawValue, "error": "\(error)"])
+        }
+    }
+}
+
+func metaSummary(_ row: SessionMetaRow) -> [String: Any] {
+    [
+        "type": "session",
+        "id": row.sessionID,
+        "source": row.source,
+        "path": row.path,
+        "title": orNull(row.customTitle ?? row.title),
+        "model": orNull(row.model),
+        "cwd": orNull(row.cwd),
+        "repo": orNull(row.repo),
+        "start": iso(epochSeconds: row.startTS),
+        "end": iso(epochSeconds: row.endTS),
+        // What `list` sorts by: the later of the last event and the file's mtime.
+        "modified": iso(epochSeconds: max(row.endTS, row.mtime)),
+        "messages": row.messages,
+        "commands": row.commands,
+        "parentSessionID": orNull(row.parentSessionID),
+    ]
+}
+
+func indexedRows(_ db: IndexDB, _ options: Options) async -> [SessionMetaRow] {
+    var rows: [SessionMetaRow] = []
+    for d in options.sources {
+        rows += (try? await db.fetchSessionMeta(for: d.source.rawValue)) ?? []
+    }
+    return rows
+}
+
+/// `list [--source s] [--limit n]`: newest indexed sessions first.
+func runList(_ options: Options) async {
+    let db = openIndex(options)
+    let rows = await indexedRows(db, options)
+        .filter { !$0.isHousekeeping }
+        .sorted { max($0.endTS, $0.mtime) > max($1.endTS, $1.mtime) }
+    for row in rows.prefix(options.limit) { emit(metaSummary(row)) }
+}
+
+/// `search <query> [--source s] [--limit n]`: full-text search, best match first.
+func runSearch(_ options: Options) async {
+    guard !options.positional.isEmpty else { fail("usage: as-core search <query>", code: 2) }
+    let query = options.positional.joined(separator: " ")
+    let db = openIndex(options)
+    let ids: [String]
+    do {
+        ids = try await db.searchSessionIDsFTS(sources: options.sources.map(\.source.rawValue),
+                                               model: nil,
+                                               repoSubstr: nil,
+                                               pathSubstr: nil,
+                                               dateFrom: nil,
+                                               dateTo: nil,
+                                               query: query,
+                                               includeSystemProbes: false,
+                                               limit: options.limit)
+    } catch {
+        fail("search failed: \(error)", code: 1)
+    }
+    let byID = Dictionary(await indexedRows(db, options).map { ($0.sessionID, $0) },
+                          uniquingKeysWith: { first, _ in first })
+    for id in ids {
+        guard let row = byID[id] else { continue }
+        emit(metaSummary(row))
+    }
+}

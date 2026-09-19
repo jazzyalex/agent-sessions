@@ -111,3 +111,5 @@ docs/_preview/
 
 # Generated GitHub Pages output; canonical sources live directly under docs/.
 docs/_site/
+.build-linux/
+.build-linux-amd64/
