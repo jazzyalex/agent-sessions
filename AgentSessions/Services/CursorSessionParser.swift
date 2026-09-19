@@ -578,6 +578,11 @@ final class CursorSessionParser {
     }
 }
 
+struct CursorACPParseResult {
+    let session: Session
+    let referencedTranscriptPaths: Set<String>
+}
+
 /// Read-only decoder for Cursor ACP persisted sessions. Cursor stores a small root
 /// record in SQLite `meta` and protobuf conversation nodes in content-addressed
 /// `blobs`. This deliberately decodes only user and assistant text; tool arguments,
@@ -585,11 +590,6 @@ final class CursorSessionParser {
 enum CursorACPStoreReader {
     private static let idPrefix = "cursor-acp:"
     private static let transcriptFieldNumber = 18
-
-    struct ParseResult {
-        let session: Session
-        let referencedTranscriptPaths: Set<String>
-    }
 
     static func isACPStore(_ url: URL) -> Bool {
         url.lastPathComponent == "store.db"
@@ -600,7 +600,7 @@ enum CursorACPStoreReader {
         parseResult(at: url)?.session
     }
 
-    static func parseResult(at url: URL) -> ParseResult? {
+    static func parseResult(at url: URL) -> CursorACPParseResult? {
         guard isACPStore(url),
               let rawID = UUID(uuidString: url.deletingLastPathComponent().lastPathComponent)?.uuidString.lowercased(),
               let sidecar = readSidecar(url.deletingLastPathComponent().appendingPathComponent("meta.json")),
@@ -658,7 +658,7 @@ enum CursorACPStoreReader {
                               originator: "cursor-agent",
                               originSource: "acp-persisted",
                               surface: .acp)
-        return ParseResult(session: session, referencedTranscriptPaths: rootTranscriptPath)
+        return CursorACPParseResult(session: session, referencedTranscriptPaths: rootTranscriptPath)
     }
 
     private static func transcriptPath(from values: [Data], expectedRootID: String) -> Set<String> {
