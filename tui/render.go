@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,6 +40,23 @@ func sourceBadge(source string) string {
 
 const toolOutputPreviewLines = 6
 
+// Harness text the agents inject into the user role: interrupted-turn notices, local
+// command output, environment and instruction preambles, system reminders. The Mac app
+// treats the same tags as scaffolding (Session.looksLikeAgentsPreamble). Each block
+// collapses to one dim marker line; any real prompt text around it is kept.
+var harnessBlock = regexp.MustCompile(`(?is)<(turn_aborted|local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|environment_context|system-reminder|user_instructions|instructions)\b[^>]*>.*?</(?:turn_aborted|local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|environment_context|system-reminder|user_instructions|instructions)>`)
+
+// splitHarness returns the user's own text with harness blocks removed, plus one label
+// per removed block (e.g. "turn aborted").
+func splitHarness(text string) (prompt string, labels []string) {
+	prompt = harnessBlock.ReplaceAllStringFunc(text, func(block string) string {
+		tag := harnessBlock.FindStringSubmatch(block)[1]
+		labels = append(labels, strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(tag), "_", " "), "-", " "))
+		return ""
+	})
+	return strings.TrimSpace(prompt), labels
+}
+
 // renderTranscript turns events into wrapped, styled text for the preview pane.
 func renderTranscript(events []Event, width int) string {
 	if width < 20 {
@@ -53,10 +71,18 @@ func renderTranscript(events []Event, width int) string {
 		}
 		switch e.Kind {
 		case "user":
-			if text == "" {
+			prompt, labels := splitHarness(text)
+			for _, label := range dedupe(labels) {
+				b.WriteString(styleDim.Render("· " + label))
+				b.WriteString("\n")
+			}
+			if prompt == "" {
+				if len(labels) > 0 {
+					b.WriteString("\n")
+				}
 				continue
 			}
-			b.WriteString(wrap.Render(styleUser.Render("› " + text)))
+			b.WriteString(wrap.Render(styleUser.Render("› " + prompt)))
 		case "assistant":
 			if text == "" {
 				continue
@@ -92,6 +118,18 @@ func renderTranscript(events []Event, width int) string {
 		return styleDim.Render("(no user or assistant messages)")
 	}
 	return b.String()
+}
+
+func dedupe(items []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, it := range items {
+		if !seen[it] {
+			seen[it] = true
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func indentPreview(s string, width, maxLines int) string {

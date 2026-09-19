@@ -7,6 +7,7 @@ struct Options {
     var sources: [SourceDriver] = drivers
     var limit = 50
     var light = false
+    var includeSubagents = false
     var sessionID: String?
     var databaseURL = Options.defaultDatabaseURL()
 
@@ -40,6 +41,8 @@ struct Options {
                 databaseURL = URL(fileURLWithPath: path)
             case "--light":
                 light = true
+            case "--include-subagents":
+                includeSubagents = true
             case "--id":
                 guard let id = it.next() else { fail("--id needs a session ID", code: 2) }
                 sessionID = id
@@ -214,7 +217,15 @@ func metaSummary(_ row: SessionMetaRow) -> [String: Any] {
         "messages": row.messages,
         "commands": row.commands,
         "parentSessionID": orNull(row.parentSessionID),
+        "subagentType": orNull(row.subagentType),
     ]
+}
+
+/// Subagent runs (Codex guardian approval reviews, explorer/general workers, Claude
+/// sidechains) nest under their parent in the app. A flat list shows top-level sessions
+/// only; a guardian row carries its parent's transcript, so search still finds the parent.
+func isSubagent(_ row: SessionMetaRow) -> Bool {
+    row.subagentType != nil || row.parentSessionID != nil
 }
 
 func indexedRows(_ db: IndexDB, _ options: Options) async -> [SessionMetaRow] {
@@ -229,7 +240,7 @@ func indexedRows(_ db: IndexDB, _ options: Options) async -> [SessionMetaRow] {
 func runList(_ options: Options) async {
     let db = openIndex(options)
     let rows = await indexedRows(db, options)
-        .filter { !$0.isHousekeeping }
+        .filter { !$0.isHousekeeping && (options.includeSubagents || !isSubagent($0)) }
         .sorted { max($0.endTS, $0.mtime) > max($1.endTS, $1.mtime) }
     for row in rows.prefix(options.limit) { emit(metaSummary(row)) }
 }
@@ -239,6 +250,9 @@ func runSearch(_ options: Options) async {
     guard !options.positional.isEmpty else { fail("usage: as-core search <query>", code: 2) }
     let query = options.positional.joined(separator: " ")
     let db = openIndex(options)
+    let rows = await indexedRows(db, options)
+    // Exclude in SQL, not afterwards, so `--limit` counts only rows we will show.
+    let hidden = options.includeSubagents ? [] : Set(rows.filter(isSubagent).map(\.sessionID))
     let ids: [String]
     do {
         ids = try await db.searchSessionIDsFTS(sources: options.sources.map(\.source.rawValue),
@@ -249,12 +263,12 @@ func runSearch(_ options: Options) async {
                                                dateTo: nil,
                                                query: query,
                                                includeSystemProbes: false,
-                                               limit: options.limit)
+                                               limit: options.limit,
+                                               ineligibleSessionIDs: hidden)
     } catch {
         fail("search failed: \(error)", code: 1)
     }
-    let byID = Dictionary(await indexedRows(db, options).map { ($0.sessionID, $0) },
-                          uniquingKeysWith: { first, _ in first })
+    let byID = Dictionary(rows.map { ($0.sessionID, $0) }, uniquingKeysWith: { first, _ in first })
     for id in ids {
         guard let row = byID[id] else { continue }
         emit(metaSummary(row))

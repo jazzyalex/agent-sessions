@@ -11,6 +11,7 @@ import Foundation
 //   as-core parse  <source> <file>                one-file summary (no index)
 //   as-core scan   [--source s]... [--light]      discover + parse (no index)
 //
+// list/search hide subagent runs (e.g. Codex auto-review) unless --include-subagents.
 // Common: --db <path> (default $AS_CORE_DB, $XDG_DATA_HOME/agent-sessions/index.db, or
 // ~/.local/share/agent-sessions/index.db; never the macOS app's index).
 
