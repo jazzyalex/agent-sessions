@@ -64,6 +64,8 @@
 
   Add an internal/publicly testable helper on `Session` that returns a copy with relationship fields changed and all immutable metadata/events plus runtime state preserved: `id`, `source`, start/end dates, model, file path/size, event count/events, `isHousekeeping`, `hasToolCallEvent`, lightweight cwd/repo/title/commands, custom title, Codex IDs/origin/source/surface, origin/source/surface, reasoning effort, deleted state, `isFavorite`, and `isPartiallyHydrated` must all survive. Do not reconstruct sessions at call sites with partial initializers.
 
+  Because `SessionRelationshipTests.swift` is new, register it with `./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests AgentSessionsTests/SessionRelationshipTests.swift AgentSessionsTests` before running the focused test.
+
 - [ ] **Step 3: Run the focused test**
 
   Expected: PASS with equality checks for all relevant fields.
@@ -82,7 +84,7 @@
 - Modify: `AgentSessions/Services/CursorSessionIndexer.swift`
 - Modify: `AgentSessions/Cursor/CursorSourceDescriptor.swift` (route full ACP parsing through the result API where required)
 - Do not modify: `AgentSessions/Services/SessionIndexer.swift`; the association resolver consumes the existing `hydrateOrScan` result without changing shared hydration behavior. If implementation proves a shared seam is unavoidable, stop and revise this plan before editing that file.
-- Test: `AgentSessionsTests/CursorACPSubagentAssociationTests.swift`, `AgentSessionsTests/CursorSessionParserTests.swift`, and/or `AgentSessionsTests/SessionParserTests.swift`
+- Test: Create `AgentSessionsTests/CursorACPSubagentAssociationTests.swift`; extend `AgentSessionsTests/CursorSessionParserTests.swift` and its `CursorSessionParserTests`/`CursorSessionIndexerTests` classes
 
 - [ ] **Step 1: Add failing association tests**
 
@@ -103,20 +105,28 @@
 
   Normalize only absolute paths with `URL(fileURLWithPath:).standardizedFileURL.path`; never call `resolvingSymlinksInPath`, never lower-case, and compare the resulting path strings exactly. The extractor rejects relative resource values before normalization.
 
+  Register the new production service and its test with `./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions AgentSessions/Services/CursorACPSubagentAssociation.swift AgentSessions/Services` and the corresponding `AgentSessionsTests/CursorACPSubagentAssociationTests.swift` path before building.
+
 - [ ] **Step 3: Update full parse and reload call sites**
 
   Preserve `Session?` descriptor contracts by using the result API internally and returning `.session` where a full parser closure needs only a session. Update `CursorSessionIndexer.reloadSession` at its direct `CursorSessionParser.parseFileFull` call site so the reloaded session merges/preserves the previously associated relationship and all metadata. Ensure search paths do not lose relationship metadata.
 
 - [ ] **Step 4: Run targeted tests**
 
-  Run the Cursor parser, association, reload, and session parser test subsets. Include the cache-only resolver test and a full-reconciliation stale-file test.
+  Register the new association test with `./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests AgentSessionsTests/CursorACPSubagentAssociationTests.swift AgentSessionsTests` and run the exact focused set:
+
+  ```bash
+  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/CursorSessionParserTests -only-testing:AgentSessionsTests/CursorSessionIndexerTests -only-testing:AgentSessionsTests/CursorACPSubagentAssociationTests test CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  ```
+
+  Include the cache-only resolver test and a full-reconciliation stale-file test.
 
   Expected: PASS; no existing ACP parser or hierarchy regressions.
 
 - [ ] **Step 5: Commit**
 
   ```bash
-  git add AgentSessions/Services/CursorACPSubagentAssociation.swift AgentSessions/Services/CursorSessionIndexer.swift AgentSessions/Cursor/CursorSourceDescriptor.swift AgentSessions/Services/SessionIndexer.swift AgentSessionsTests/CursorACPSubagentAssociationTests.swift AgentSessionsTests/CursorSessionParserTests.swift AgentSessionsTests/SessionParserTests.swift
+  git add AgentSessions/Services/CursorACPSubagentAssociation.swift AgentSessions/Services/CursorSessionIndexer.swift AgentSessions/Cursor/CursorSourceDescriptor.swift AgentSessionsTests/CursorACPSubagentAssociationTests.swift AgentSessionsTests/CursorSessionParserTests.swift AgentSessionsTests/SessionParserTests.swift
   git commit -m "feat: link explicitly referenced Cursor ACP subtasks"
   ```
 
@@ -125,7 +135,7 @@
 **Files:**
 - Modify: `AgentSessions/Services/SessionRowsBuilder.swift` if surface-pill logic needs the ACP child relationship
 - Modify: `AgentSessions/Views/UnifiedSessionsView.swift` (`WorkflowSubagentBadge.displayLabel` and nested-row accessibility/help rendering)
-- Test: `AgentSessionsTests/SessionRowDisplayTests.swift`, `AgentSessionsTests/SessionRowsBuilderTests.swift`, and a direct `WorkflowSubagentBadge.displayLabel` assertion in the appropriate existing UI test file
+- Test: `AgentSessionsTests/SessionRowDisplayTests.swift` (including the direct `WorkflowSubagentBadge.displayLabel` assertion) and `AgentSessionsTests/SessionRowsBuilderTests.swift`
 
 - [ ] **Step 1: Add failing UI/pill tests**
 
@@ -168,7 +178,7 @@
 
 - [ ] **Step 3: Run repository checks**
 
-  Run `git diff --check`, `python3 -m unittest scripts.tests.test_validate_localization_catalogs`, and the repository localization validator commands required by the current CI baseline.
+  Run the exact CI checks: `git diff --check`, `python3 -m unittest scripts.tests.test_validate_localization_catalogs`, `python3 scripts/validate_localization_catalogs.py`, and after the Debug build, `python3 scripts/validate_localization_catalogs.py --extraction-root .deriveddata-localization/Build/Intermediates.noindex/AgentSessions.build/Debug/AgentSessions.build/Objects-normal`. Also run `scripts/check_deploy_drift.sh` and `python3 scripts/check_docs_publish.py`.
 
 - [ ] **Step 4: Review the resulting UI with a real ACP store**
 
