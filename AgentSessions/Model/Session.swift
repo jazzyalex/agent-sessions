@@ -1081,6 +1081,12 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Sort helper for file size column (treat missing size as 0).
     public var fileSizeSortKey: Int { fileSizeBytes ?? 0 }
 
+    /// A Cursor session known only from its store.db (no Agent transcript JSONL): there is
+    /// no content for a transcript parser to read.
+    public var isCursorDatabaseOnly: Bool {
+        source == .cursor && events.isEmpty && !filePath.hasSuffix(".jsonl")
+    }
+
     public var modifiedRelative: String {
         // Use modifiedAt which correctly uses filename timestamp
         let ref = modifiedAt

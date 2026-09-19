@@ -4,15 +4,17 @@ import AppKit
 
 // MARK: - SessionSourceAdapter
 
-/// A source's entry in the registry (SPEC §3.2): the descriptor's value data plus the
-/// factory for that source's runtime object graph, so one adapter supplies everything the
-/// app needs from a provider.
+/// A source's entry in the registry (SPEC §3.2): the descriptor's value data, the app-only
+/// palette, and the factory for that source's runtime object graph, so one adapter
+/// supplies everything the app needs from a provider.
 ///
 /// `makeRuntime` is called exactly once per source, by `SessionProviderCatalog.init`, on the
-/// main actor. Each source declares its own in its descriptor file, so adding a source is
-/// still one new file plus one line in `ordered` below.
+/// main actor. Each source declares its own in its `<Source>SourceAdapter.swift`, next to
+/// the UI-free `<Source>SourceDescriptor.swift`; adding a source is those two files plus
+/// one line here and one in `SessionSourceDescriptorCatalog.ordered`.
 struct SessionSourceAdapter {
     let descriptor: SessionSourceDescriptor
+    let appearance: SessionSourceAppearance
     let makeRuntime: @MainActor () -> SourceRuntime
 }
 
@@ -26,9 +28,9 @@ struct SessionSourceAdapter {
 /// wrong place, fails immediately rather than drifting invisibly through the ~35 hand lists
 /// this program replaces.
 enum SessionSourceRegistry {
-    /// Each entry is a `static let` declared in that source's own descriptor file, next to
-    /// the descriptor it wraps.
-    static let ordered: [SessionSourceAdapter] = validateIdentityConfigurations([
+    /// Each entry is a `static let` declared in that source's own adapter file. Same order
+    /// as `SessionSourceDescriptorCatalog.ordered`.
+    static let ordered: [SessionSourceAdapter] = [
         .codex,
         .claude,
         .antigravity,
@@ -45,42 +47,17 @@ enum SessionSourceRegistry {
         .devin,
         .fx,
         .cline
-    ])
-
-    /// Identity parsing and URL classification are one capability. Keeping the closures
-    /// separate lets hybrid providers such as Hermes select only their database URLs, but
-    /// configuring just one side would silently drop search ingest for those identities.
-    private static func validateIdentityConfigurations(
-        _ adapters: [SessionSourceAdapter]
-    ) -> [SessionSourceAdapter] {
-        for adapter in adapters {
-            let descriptor = adapter.descriptor
-            let hasParser = descriptor.parseFullByIdentity != nil
-            let hasSelector = descriptor.searchUsesIdentityAtURL != nil
-            // `assert`, not `precondition`: the invariant is compile-time constant and is
-            // covered by the registry tests, so a descriptor mistake must fail the suite,
-            // not trap in a shipped build (this runs inside a `static let` initializer).
-            assert(
-                hasParser == hasSelector,
-                "\(descriptor.source) must configure parseFullByIdentity and searchUsesIdentityAtURL together"
-            )
-        }
-        return adapters
-    }
+    ]
 
     static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(
         uniqueKeysWithValues: ordered.map { ($0.descriptor.source, $0) }
     )
 
-    /// Sources whose sessions share one storage database and are therefore keyed by
-    /// identity rather than by file path. Their search rows record a per-session logical
-    /// revision instead of the storage file's stat, so file-stat currency predicates do
-    /// not apply to them — see `IndexDB.indexedSessionIDsCurrent`.
-    static let identityBackedSourceRawValues: Set<String> = Set(
-        ordered
-            .filter { $0.descriptor.parseFullByIdentity != nil && $0.descriptor.searchUsesIdentityAtURL != nil }
-            .map { $0.descriptor.source.rawValue }
-    )
+    /// Forwards to the UI-free catalog, which owns this set (see
+    /// `SessionSourceDescriptorCatalog.identityBackedSourceRawValues`).
+    static var identityBackedSourceRawValues: Set<String> {
+        SessionSourceDescriptorCatalog.identityBackedSourceRawValues
+    }
 
     /// Non-optional by design: a missing entry is a programming error the order test
     /// catches long before this runs.
@@ -92,7 +69,7 @@ enum SessionSourceRegistry {
     }
 
     static func descriptor(for source: SessionSource) -> SessionSourceDescriptor {
-        adapter(for: source).descriptor
+        SessionSourceDescriptorCatalog.descriptor(for: source)
     }
 
     /// One `NSColor` instance per source, built once.
@@ -110,14 +87,14 @@ enum SessionSourceRegistry {
     /// Safe with respect to the initialization cycle Task 3 hit: the only thing this
     /// computes with is `adaptiveBrand`, which never re-enters the registry.
     private static let resolvedBrandAccents: [SessionSource: NSColor] = Dictionary(
-        uniqueKeysWithValues: ordered.map { ($0.descriptor.source, makeBrandAccent(for: $0.descriptor)) }
+        uniqueKeysWithValues: ordered.map { ($0.descriptor.source, makeBrandAccent(for: $0.appearance)) }
     )
 
     /// Rebuilds exactly what `TranscriptColorSystem.agentBrandAccent(source:)` returned
     /// before Task 3: `.system` hues pass straight through, `.calibrated` triples go through
     /// `adaptiveBrand` (K6).
-    private static func makeBrandAccent(for descriptor: SessionSourceDescriptor) -> NSColor {
-        switch descriptor.brandHue {
+    private static func makeBrandAccent(for appearance: SessionSourceAppearance) -> NSColor {
+        switch appearance.brandHue {
         case .system(let color):
             return color
         case .calibrated(let red, let green, let blue):

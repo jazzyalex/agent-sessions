@@ -449,7 +449,7 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     /// at the chat `store.db`. We check for the absence of `.jsonl` rather than the presence
     /// of a specific DB filename, so this survives if Cursor renames the database file.
     static func isDBOnlySession(_ session: Session) -> Bool {
-        session.source == .cursor && session.events.isEmpty && !session.filePath.hasSuffix(".jsonl")
+        session.isCursorDatabaseOnly
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {

@@ -19,6 +19,14 @@ final class SessionSourceRegistryTests: XCTestCase {
         XCTAssertEqual(SessionSourceRegistry.ordered.map(\.descriptor.source), SessionSource.allCases)
     }
 
+    /// The app registry and the UI-free descriptor catalog (shared with the Linux core) are
+    /// two hand lists; a source added to one but not the other must fail here.
+    func testRegistryMatchesDescriptorCatalog() {
+        XCTAssertEqual(SessionSourceDescriptorCatalog.ordered.map(\.source), SessionSource.allCases)
+        XCTAssertEqual(SessionSourceRegistry.ordered.map(\.descriptor.source),
+                       SessionSourceDescriptorCatalog.ordered.map(\.source))
+    }
+
     func testRegistryLookupsCoverEverySource() {
         XCTAssertEqual(Set(SessionSourceRegistry.bySource.keys), Set(SessionSource.allCases))
         for source in SessionSource.allCases {

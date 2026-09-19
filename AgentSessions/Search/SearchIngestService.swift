@@ -139,6 +139,36 @@ actor SearchIngestService {
         value >= 1_000_000_000_000 ? value / 1_000 : value
     }
 
+    /// Provider-neutral search FileRefs for a session list. A source declaring
+    /// `descriptor.logicalFileStat` contributes its logical unit stat, so companion-only
+    /// writes re-ingest and stay FTS-current; identity-backed storage (shared databases)
+    /// carries the session ID and a content revision instead of relying on the file stat.
+    nonisolated static func fileRefs(for sessions: [Session]) -> [FileRef] {
+        sessions.compactMap { session -> FileRef? in
+            // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
+            // transcript) have no content for CursorSessionParser.parseFileFull to
+            // read: JSONLReader silently yields zero events on a non-JSONL file, so
+            // the parser returns an empty-but-non-nil Session that would otherwise get
+            // upserted as search-ready and never revisited. Skip them here (see
+            // `Session.isCursorDatabaseOnly`).
+            if session.isCursorDatabaseOnly { return nil }
+            let url = URL(fileURLWithPath: session.filePath)
+            let descriptor = SessionSourceDescriptorCatalog.descriptor(for: session.source)
+            guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
+                return nil
+            }
+            let usesIdentity = descriptor.parseFullByIdentity != nil
+                && descriptor.searchUsesIdentityAtURL?(url) == true
+            return FileRef(path: session.filePath,
+                           mtime: stat.mtime,
+                           size: stat.size,
+                           sessionID: usesIdentity ? session.id : nil,
+                           contentRevision: usesIdentity
+                            ? contentRevision(for: session)
+                            : nil)
+        }
+    }
+
     nonisolated static func contentRevision(for session: Session) -> ContentRevision {
         let updated = session.endTime ?? session.startTime ?? Date(timeIntervalSince1970: 0)
         return ContentRevision(updatedMillis: Int64((updated.timeIntervalSince1970 * 1_000.0).rounded()),
@@ -266,7 +296,7 @@ actor SearchIngestService {
             for row in rows { indexedByPath[row.path] = row }
         }
         let searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: sourceRaw)) ?? []
-        let descriptor = source.descriptor
+        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
         let usesSessionIdentity = descriptor.parseFullByIdentity != nil
             && descriptor.searchUsesIdentityAtURL != nil
         let searchIdentityStatesBySessionID = usesSessionIdentity
@@ -610,7 +640,7 @@ actor SearchIngestService {
     private static func parseFileFull(url: URL,
                                       source: SessionSource,
                                       sessionID: String?) -> Session? {
-        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
         if let sessionID, let parseFullByIdentity = descriptor.parseFullByIdentity {
             return parseFullByIdentity(url, sessionID)
         }

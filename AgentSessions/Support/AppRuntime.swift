@@ -36,8 +36,14 @@ enum AppRuntime {
     /// Coupled to bundle ID `com.triada.AgentSessions` — update if the app is rebranded.
     static let isHostedByTooling: Bool = {
         if isRunningTests { return true }
+        if isStandaloneCoreHost { return false }
         return Bundle.main.bundleIdentifier != "com.triada.AgentSessions"
     }()
+
+    /// Set to true by non-app hosts that legitimately read session stores — the
+    /// `as-core` CLI, which has no bundle ID — before any provider code runs, so
+    /// `isHostedByTooling` does not mistake them for build-time metadata extraction.
+    nonisolated(unsafe) static var isStandaloneCoreHost = false
 }
 
 /// Lightweight helper for measuring launch-time phases end-to-end.

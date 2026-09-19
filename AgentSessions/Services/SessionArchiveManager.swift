@@ -996,3 +996,22 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         log("archivesRoot=\(root.path)")
     }
 }
+
+// MARK: - Indexing engine entry point
+
+extension SessionIndexingEngine {
+    /// The app's scan entry point: the shared engine plus pinned-archive fallbacks, which
+    /// are an app feature and so are injected here rather than referenced from the core.
+    static func hydrateOrScan(
+        hydrate: (() async throws -> [Session]?)? = nil,
+        hydrateRetryDelayNanoseconds: UInt64 = 250_000_000,
+        config: ScanConfig
+    ) async -> Result {
+        await scan(hydrate: hydrate,
+                   hydrateRetryDelayNanoseconds: hydrateRetryDelayNanoseconds,
+                   config: config,
+                   mergeArchives: { sessions, source in
+                       SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sessions, source: source)
+                   })
+    }
+}

@@ -108,10 +108,15 @@ struct IndexRefreshExecutionProfile: Equatable {
 		        }
 		    }
 
-    static func hydrateOrScan(
+    /// Hydrate from the index when possible, otherwise scan. `mergeArchives` folds pinned
+    /// archive fallbacks into a fresh scan when `config.shouldMergeArchives` is set; the app
+    /// supplies it through `hydrateOrScan` (SessionArchiveManager.swift), while hosts
+    /// without archives (the Linux CLI) pass nil.
+    static func scan(
         hydrate: (() async throws -> [Session]?)? = nil,
         hydrateRetryDelayNanoseconds: UInt64 = 250_000_000,
-        config: ScanConfig
+        config: ScanConfig,
+        mergeArchives: (([Session], SessionSource) -> [Session])?
     ) async -> Result {
         if let hydrate {
             var indexed = (try? await hydrate()) ?? nil
@@ -186,7 +191,7 @@ struct IndexRefreshExecutionProfile: Equatable {
 
 	        let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
         let final = config.shouldMergeArchives
-            ? SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: config.source)
+            ? (mergeArchives?(sorted, config.source) ?? sorted)
             : sorted
         return Result(kind: .scanned, sessions: final, totalFiles: files.count)
     }
