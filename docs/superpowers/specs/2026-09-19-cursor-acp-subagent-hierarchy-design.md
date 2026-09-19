@@ -38,7 +38,7 @@ The ACP reader should expose a backward-compatible `parseResult(at:) -> CursorAC
 ## Architecture and flow
 
 1. `CursorACPStoreReader` validates the existing ACP schema and root graph as it does today.
-2. The accepted path-bearing field is the observed root protobuf message's repeated field **18**, wire type 2, whose value is a UTF-8 resource path. Extraction is bounded to field 18 on the validated root message only; it does not recursively scan turn, step, tool, raw JSON, or blob payloads. A value qualifies only when it is an absolute path ending in `agent-transcripts/<UUID>/<UUID>.jsonl` (the two UUIDs must match). Relative paths, `.`/`..` paths, arbitrary strings, tool payloads, encrypted blobs, and non-JSONL resources are ignored in phase one.
+2. The accepted path-bearing field is the observed root protobuf message's repeated field **18**, wire type 2, whose value is a UTF-8 resource path. Extraction is bounded to field 18 on the validated root message only; it does not recursively scan turn, step, tool, raw JSON, or blob payloads. Two exact layouts are recognized: a root transcript `agent-transcripts/<rootUUID>/<rootUUID>.jsonl` (both UUID tokens are the same), and a child transcript `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` (the UUID tokens are valid but intentionally different). Only the second layout can produce a child association; a root transcript reference identifies the ACP session's own transcript and is ignored for parent assignment. Relative paths, `.`/`..` paths, arbitrary strings, tool payloads, encrypted blobs, and non-JSONL resources are ignored in phase one.
 3. `CursorSessionIndexer` builds a normalized absolute-path-to-parent-set lookup from all ACP results. Normalization standardizes repeated separators and `.`/`..` lexically, never follows symlinks, and uses the host's case-sensitive path comparison semantics.
 4. Association runs after `SessionIndexingEngine.hydrateOrScan` returns, regardless of whether sessions came from fresh parsing or the persisted lightweight cache, and before Cursor metadata merge/sorting/publishing. Matching transcript sessions receive the explicit parent ID, subagent type, and relationship kind through a relationship-copy helper.
 5. `SubagentHierarchyBuilder` resolves the parent ID and produces the existing parent-first, collapsible row structure.
@@ -52,7 +52,7 @@ Path normalization must be deterministic: standardize absolute paths, resolve `.
 - A malformed or non-transcript resource path is ignored; it cannot attach an unrelated session.
 - Repeated references from the same ACP parent are deduplicated and remain a single association.
 - The lookup stores a set of candidate ACP parent IDs per normalized path. A path referenced by multiple distinct ACP parents is ambiguous; it remains unresolved and no parent is chosen.
-- If a transcript already has a non-ACP `parentSessionID` or relationship metadata, that explicit existing relationship wins. A conflicting ACP reference is recorded as unresolved/ambiguous rather than overwritten. An identical existing parent is idempotent.
+- The existing Cursor path parser may already assign a raw parent UUID for the `agent-transcripts/<parentUUID>/subagents/<childUUID>.jsonl` layout. When that raw UUID equals the ACP store's UUID, the ACP association is an authoritative namespace upgrade: replace the raw parent key with `cursor-acp:<uuid>` and use the ACP child relationship. When it differs, preserve the existing inferred parent metadata and mark the ACP reference unresolved rather than overwriting it. Other authoritative non-ACP parent metadata also wins. An identical ACP association is idempotent.
 - Stale references to missing transcript files have no effect; when a referenced file disappears on rescan, its child row disappears through normal discovery and no dangling row is synthesized.
 - The reader remains read-only: no Cursor files, stores, or metadata are written or deleted.
 - Tool arguments/results, reasoning, attachments, and encrypted payloads remain outside the index.
@@ -61,13 +61,13 @@ Path normalization must be deterministic: standardize absolute paths, resolve `.
 
 Add focused fixtures and tests for:
 
-1. ACP root field-18 extraction from a synthetic store containing one valid absolute transcript path, while a matching-looking path in a tool/blob payload is ignored.
-2. Path normalization and rejection tests for relative paths, `.`/`..`, repeated separators, symlink non-following, non-JSONL paths, and host path case semantics.
+1. ACP root field-18 extraction from a synthetic store containing one valid root transcript path and one valid `subagents/<childUUID>.jsonl` path, while a matching-looking path in a tool/blob payload is ignored.
+2. Path normalization and rejection tests for both accepted layouts, relative paths, `.`/`..`, repeated separators, symlink non-following, non-JSONL paths, mismatched root UUIDs, and host path case semantics.
 3. Indexer association of a matching JSONL `Session` with the ACP parent ID and internal `cursor-acp-subagent` type, while the user-facing badge is generic `sub` with ACP accessibility text.
 4. The same association when the transcript session comes from the persisted lightweight cache returned by `hydrateOrScan`.
 5. A timestamp-prefixed JSONL session with no ACP reference remaining unassociated.
 6. Repeated same-parent references deduplicating; cross-parent references remaining unresolved rather than arbitrarily attached.
-7. Existing non-ACP parent metadata taking precedence over a conflicting ACP reference.
+7. The actual discovered `subagents/<childUUID>.jsonl` path-derived raw parent UUID being upgraded to `cursor-acp:<parentUUID>` when it matches the ACP store, while a conflicting non-ACP parent remains unchanged.
 8. Relationship-copy tests asserting events, surface/originator, model, project metadata, titles, and all other immutable `Session` fields are preserved.
 9. Existing hierarchy flattening, collapse behavior, ACP parent pill, and no-sensitive-payload tests continuing to pass.
 
