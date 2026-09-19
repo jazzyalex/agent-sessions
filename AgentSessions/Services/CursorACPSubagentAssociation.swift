@@ -9,38 +9,83 @@ enum CursorACPSubagentAssociation {
 
     static func apply(
         sessions: [Session],
-        acpResults: [CursorACPParseResult]
+        acpResults: [CursorACPParseResult],
+        chatMetadata: [CursorSessionMeta] = []
     ) -> [Session] {
-        let references = referenceMap(from: acpResults)
-        guard !references.isEmpty else { return sessions }
+        let metadataReferences = metadataReferenceMap(from: chatMetadata, acpResults: acpResults)
+        let pathReferences = referenceMap(from: acpResults)
+        guard !metadataReferences.isEmpty || !pathReferences.isEmpty else { return sessions }
 
         return sessions.map { session in
+            // Cursor's child-store lineage is the strong signal. The path
+            // map is consulted only when no validated metadata relation exists
+            // for this child, preserving compatibility with older layouts.
+            if let candidates = metadataReferences[session.id],
+               let candidate = uniqueCandidate(candidates),
+               let linked = apply(candidate: candidate, to: session) {
+                return linked
+            }
+
             let path = normalizedAbsolutePath(session.filePath)
             guard let path,
-                  let candidates = references[path],
-                  candidates.count == 1,
-                  let candidate = candidates.first else {
+                  let candidates = pathReferences[path],
+                  let candidate = uniqueCandidate(candidates),
+                  let linked = apply(candidate: candidate, to: session) else {
                 return session
             }
-
-            let candidateID = candidate
-            if let existingParent = session.parentSessionID,
-               existingParent != candidateID {
-                // A raw UUID derived from the path can be upgraded only when
-                // it is the sole authoritative candidate. Conflicts remain
-                // untouched, as do any other existing parent identifiers.
-                guard existingParent == candidateID ||
-                        existingParent == candidateID.replacingOccurrences(of: parentIDPrefix, with: "") else {
-                    return session
-                }
-            }
-
-            return session.withRelationship(
-                parentSessionID: candidateID,
-                subagentType: subagentType,
-                relationshipKind: .subagent
-            )
+            return linked
         }
+    }
+
+    /// Build child-ID → ACP-parent IDs from Cursor's explicit child-store
+    /// metadata. Unknown parents are intentionally omitted: attaching a child
+    /// to a guessed/raw UUID would make an incomplete ACP graph look certain.
+    static func metadataReferenceMap(
+        from metadata: [CursorSessionMeta],
+        acpResults: [CursorACPParseResult]
+    ) -> [String: Set<String>] {
+        let knownParents = Set(acpResults.compactMap { rawParentID(from: $0.session.id) })
+        guard !knownParents.isEmpty else { return [:] }
+        var map: [String: Set<String>] = [:]
+        for meta in metadata {
+            guard let info = meta.subagentInfo,
+                  knownParents.contains(info.parentAgentID) else { continue }
+            map[meta.agentId, default: []].insert(parentID(for: info.parentAgentID))
+        }
+        return map
+    }
+
+    private static func uniqueCandidate(_ candidates: Set<String>) -> String? {
+        candidates.count == 1 ? candidates.first : nil
+    }
+
+    private static func apply(candidate: String, to session: Session) -> Session? {
+        if let existingParent = session.parentSessionID,
+           existingParent != candidate {
+            // A raw UUID derived from a nested transcript path may be upgraded
+            // only when it names this exact ACP parent. Other authoritative
+            // relationships remain untouched.
+            guard existingParent == candidate.replacingOccurrences(of: parentIDPrefix, with: "") else {
+                return nil
+            }
+        }
+        return session.withRelationship(
+            parentSessionID: candidate,
+            subagentType: subagentType,
+            relationshipKind: .subagent
+        )
+    }
+
+    private static func rawParentID(from sessionID: String) -> String? {
+        let raw = sessionID.hasPrefix(parentIDPrefix)
+            ? String(sessionID.dropFirst(parentIDPrefix.count))
+            : sessionID
+        guard let uuid = UUID(uuidString: raw) else { return nil }
+        return uuid.uuidString.lowercased()
+    }
+
+    private static func parentID(for rawUUID: String) -> String {
+        parentIDPrefix + rawUUID.lowercased()
     }
 
     static func referenceMap(

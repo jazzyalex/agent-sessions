@@ -65,6 +65,64 @@ final class CursorACPSubagentAssociationTests: XCTestCase {
         XCTAssertNil(CursorACPSubagentAssociation.apply(sessions: [child], acpResults: [result])[0].parentSessionID)
     }
 
+    func testChildStoreSubagentInfoLinksTopLevelTranscriptToKnownACPParent() {
+        let parent = session(id: "cursor-acp:\(parentUUID)", path: "/tmp/acp/parent.db", surface: .acp)
+        let result = CursorACPParseResult(session: parent, referencedTranscriptPaths: [])
+        let child = session(id: childUUID, path: "/tmp/projects/agent-transcripts/\(childUUID)/\(childUUID).jsonl")
+        let metadata = meta(
+            agentID: childUUID,
+            subagentInfo: CursorSubagentInfo(
+                parentAgentID: parentUUID,
+                rootParentAgentID: parentUUID,
+                toolCallID: "tool-call-1",
+                typeName: "generalPurpose"
+            )
+        )
+
+        let linked = CursorACPSubagentAssociation.apply(
+            sessions: [child],
+            acpResults: [result],
+            chatMetadata: [metadata]
+        )
+
+        XCTAssertEqual(linked[0].parentSessionID, "cursor-acp:\(parentUUID)")
+        XCTAssertEqual(linked[0].subagentType, CursorACPSubagentAssociation.subagentType)
+        XCTAssertEqual(linked[0].relationshipKind, .subagent)
+    }
+
+    func testConflictingChildStoreLineageRemainsUnresolved() {
+        let otherParent = "33333333-3333-3333-3333-333333333333"
+        let results = [
+            CursorACPParseResult(session: session(id: "cursor-acp:\(parentUUID)", path: "/tmp/acp/one.db", surface: .acp), referencedTranscriptPaths: []),
+            CursorACPParseResult(session: session(id: "cursor-acp:\(otherParent)", path: "/tmp/acp/two.db", surface: .acp), referencedTranscriptPaths: [])
+        ]
+        let child = session(id: childUUID, path: "/tmp/projects/agent-transcripts/\(childUUID)/\(childUUID).jsonl")
+        let first = meta(agentID: childUUID, subagentInfo: CursorSubagentInfo(parentAgentID: parentUUID, rootParentAgentID: parentUUID, toolCallID: "one", typeName: "generalPurpose"))
+        let second = meta(agentID: childUUID, subagentInfo: CursorSubagentInfo(parentAgentID: otherParent, rootParentAgentID: otherParent, toolCallID: "two", typeName: "generalPurpose"))
+
+        let unresolved = CursorACPSubagentAssociation.apply(
+            sessions: [child],
+            acpResults: results,
+            chatMetadata: [first, second]
+        )
+
+        XCTAssertNil(unresolved[0].parentSessionID)
+    }
+
+    func testUnknownOrMalformedLineageIsIgnored() {
+        let parent = session(id: "cursor-acp:\(parentUUID)", path: "/tmp/acp/parent.db", surface: .acp)
+        let child = session(id: childUUID, path: "/tmp/projects/agent-transcripts/\(childUUID)/\(childUUID).jsonl")
+        let malformed = meta(agentID: childUUID, subagentInfo: nil)
+
+        let unresolved = CursorACPSubagentAssociation.apply(
+            sessions: [child],
+            acpResults: [CursorACPParseResult(session: parent, referencedTranscriptPaths: [])],
+            chatMetadata: [malformed]
+        )
+
+        XCTAssertNil(unresolved[0].parentSessionID)
+    }
+
     private func session(
         id: String,
         path: String,
@@ -84,6 +142,19 @@ final class CursorACPSubagentAssociationTests: XCTestCase {
             parentSessionID: parent,
             subagentType: type,
             surface: surface
+        )
+    }
+
+    private func meta(agentID: String, subagentInfo: CursorSubagentInfo?) -> CursorSessionMeta {
+        CursorSessionMeta(
+            agentId: agentID,
+            name: "child",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastUsedModel: "default",
+            mode: "default",
+            workspaceHash: "workspace",
+            dbPath: "/tmp/cursor/chats/workspace/\(agentID)/store.db",
+            subagentInfo: subagentInfo
         )
     }
 }

@@ -195,12 +195,14 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             // ACP persistence is a separate graph and uses namespaced internal IDs.
             transcriptSessions.append(contentsOf: acpResults.map(\.session))
 
-            // Attach only explicitly referenced JSONL subagents. The resolver
-            // is deliberately applied after hydration so cached rows receive
-            // the same relationship treatment as freshly parsed rows.
+            // Attach child-store-declared ACP subagents first, then fall back
+            // to explicitly referenced nested JSONL paths. The resolver is
+            // deliberately applied after hydration so cached rows receive the
+            // same relationship treatment as freshly parsed rows.
             transcriptSessions = CursorACPSubagentAssociation.apply(
                 sessions: transcriptSessions,
-                acpResults: acpResults
+                acpResults: acpResults,
+                chatMetadata: metaList
             )
 
             // Sort by most recent first
