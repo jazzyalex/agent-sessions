@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -139,11 +141,21 @@ func findCore() (string, error) {
 		"or keep it next to %s", filepath.Base(os.Args[0]))
 }
 
-type Core struct{ bin string }
+// Core runs the engine. Every command is bound to ctx, so cancelling it (on quit) also
+// stops a running `index` instead of leaving it behind; whatever it already stored stays.
+type Core struct {
+	bin string
+	ctx context.Context
+	// running counts in-flight commands so quit can wait until a cancelled `index` is
+	// really dead; cancelling alone only schedules the kill.
+	running *sync.WaitGroup
+}
 
 // run executes one as-core command and decodes each stdout line into T.
 func run[T any](c Core, args ...string) ([]T, error) {
-	cmd := exec.Command(c.bin, args...)
+	c.running.Add(1)
+	defer c.running.Done()
+	cmd := exec.CommandContext(c.ctx, c.bin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

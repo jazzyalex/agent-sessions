@@ -52,7 +52,9 @@ Notes:
 
 - The list shows top-level sessions. Subagent runs, such as Codex auto-review, are hidden.
 - The first start indexes your history, which can take minutes for gigabytes of Codex
-  rollouts; later starts only read what changed and take well under a second.
+  rollouts. The list fills in as sessions are found (the status line counts them), and
+  quitting stops the indexer; what it already stored is kept and the next start continues.
+  Later starts only read what changed and take well under a second.
 - Resume works for Claude Code, Codex, OpenCode and Copilot CLI. For other sources `o` and
   `y` report that they cannot be resumed yet; `Y` still copies the file path.
 - Copying uses the OSC 52 terminal sequence, so it also works over SSH. Terminals that do

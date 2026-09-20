@@ -4,10 +4,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -45,7 +47,9 @@ type (
 	}
 	// previewDueMsg fires after the cursor has rested on a row for previewDelay.
 	previewDueMsg struct{ id string }
-	resumeMsg     struct {
+	// refreshMsg fires while indexing so sessions show up as the engine stores them.
+	refreshMsg struct{}
+	resumeMsg  struct {
 		cmd ResumeCommand
 		err error
 	}
@@ -65,6 +69,15 @@ type (
 const previewDelay = 150 * time.Millisecond
 
 const ageWidth = 6
+
+// While the index builds, re-read the list this often. The engine commits session by
+// session, so a first run over gigabytes of history fills the list instead of showing an
+// empty screen until the whole pass ends.
+const refreshInterval = 2 * time.Second
+
+func refreshTick() tea.Cmd {
+	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return refreshMsg{} })
+}
 
 type model struct {
 	core     Core
@@ -107,7 +120,7 @@ func (m model) source() string { return m.sources[m.srcIdx] }
 
 func (m model) Init() tea.Cmd {
 	// Show what the index already has right away, then refresh it in the background.
-	return tea.Batch(m.loadRows(), m.runIndex(), m.loadSources())
+	return tea.Batch(m.loadRows(), m.runIndex(), m.loadSources(), refreshTick())
 }
 
 func (m model) loadRows() tea.Cmd {
@@ -248,7 +261,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			return m, nil
 		}
-		prevID := ""
+		prevID, prevOffset := "", m.offset
 		if len(m.rows) > 0 {
 			prevID = m.rows[m.cursor].ID
 		}
@@ -256,16 +269,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor, m.offset = 0, 0
 		for i, r := range m.rows {
 			if r.ID == prevID {
-				m.cursor = i
+				// Same session still there: keep it selected and the view where it was, so a
+				// background refresh does not make the list jump.
+				m.cursor, m.offset = i, prevOffset
 				break
 			}
 		}
 		m.shownID = ""
 		cmd := m.moveCursor(0)
-		if !m.indexing {
+		if m.indexing {
+			m.status = fmt.Sprintf("%d sessions so far", len(m.rows))
+		} else {
 			m.status = m.countStatus()
 		}
 		return m, cmd
+
+	case refreshMsg:
+		if !m.indexing {
+			return m, nil // the index finished; stop polling
+		}
+		return m, tea.Batch(m.loadRows(), refreshTick())
 
 	case indexMsg:
 		m.indexing = false
@@ -382,7 +405,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.indexing {
 				m.indexing = true
 				m.status = "indexing…"
-				return m, m.runIndex()
+				return m, tea.Batch(m.runIndex(), refreshTick())
 			}
 		}
 		if m.focus == focusPreview {
@@ -479,7 +502,11 @@ func (m model) View() string {
 		list.WriteString(line + "\n")
 	}
 	if len(m.rows) == 0 {
-		list.WriteString(styleDim.Render("no sessions"))
+		if m.indexing {
+			list.WriteString(styleDim.Render("Indexing your session history. The first run can take a few minutes; sessions appear here as they are found."))
+		} else {
+			list.WriteString(styleDim.Render("no sessions"))
+		}
 	}
 	left := lipgloss.NewStyle().Width(listW).Height(h).MaxHeight(h).Render(list.String())
 	sep := styleBorder.Render(strings.Repeat("│\n", h-1) + "│")
@@ -534,8 +561,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "as:", err)
 		os.Exit(1)
 	}
-	p := tea.NewProgram(newModel(Core{bin: bin}), tea.WithAltScreen())
+	ctx, cancel := context.WithCancel(context.Background())
+	core := Core{bin: bin, ctx: ctx, running: &sync.WaitGroup{}}
+	p := tea.NewProgram(newModel(core), tea.WithAltScreen())
 	final, err := p.Run()
+	// Stop a still-running index and wait for it to die (bounded), so nothing keeps
+	// writing after we exit or hand the terminal to an agent via syscall.Exec.
+	cancel()
+	stopped := make(chan struct{})
+	go func() { core.running.Wait(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "as:", err)
 		os.Exit(1)
