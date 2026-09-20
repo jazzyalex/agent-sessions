@@ -88,6 +88,8 @@ tools/release/deploy verify 2.8
 ### Quick Patch Release
 
 ```bash
+# QA is required before bump; bump enforces it automatically.
+tools/release/deploy qa --version 2.7.2
 tools/release/deploy bump patch
 git push origin main
 tools/release/deploy qa --version 2.7.2
@@ -144,11 +146,17 @@ Generate CHANGELOG from conventional commits:
 Release-candidate QA gate:
 - Shows scope since the last release tag
 - Requires a clean `main` checkout synced with `origin/main`
-- Runs Debug `xcodebuild`
+- Runs the CI docs-drift and docs-publication guards
+- Requires the pinned Xcode toolchain from `tools/release/ci-xcode-version.txt`
+- Validates the committed localization catalogs before building
+- Runs the no-signing Debug `xcodebuild` with `-destination 'platform=macOS'` and `.deriveddata-localization`
+- Runs the localization extraction-drift validator against the build's `Objects-normal` output
 - Runs the stable XCTest wrapper
 - Runs Python release/script tests
 - Prints a warning sweep from the build log
-- Writes a QA stamp tied to the current git `HEAD` and target version; `deploy release VERSION` and `deploy resume` require this stamp unless `--skip-qa` or `SKIP_QA=1` is explicit
+- Writes a QA stamp tied to the current git `HEAD` and target version only after every gate passes; `deploy release VERSION` and `deploy resume` require this stamp unless `--skip-qa` or `SKIP_QA=1` is explicit
+
+The localization build and extraction check intentionally mirror `.github/workflows/ci.yml`. This catches newly added user-facing SwiftUI strings, stale catalog entries, and accidental raw/verbatim strings before a release push can create a failing CI run.
 
 ### Emergency Rollback
 
@@ -705,32 +713,18 @@ Sparkle uses `CFBundleVersion` (build number), not `CFBundleShortVersionString` 
 
 **Solution**:
 ```bash
-# 1. Increment CURRENT_PROJECT_VERSION in project.pbxproj
-grep -n "CURRENT_PROJECT_VERSION" AgentSessions.xcodeproj/project.pbxproj
-# Update from 1 → 2 (or N → N+1) in BOTH Debug and Release configurations
+# Do not hand-edit release metadata or invoke a legacy build/publish script.
+# The canonical bump command increments the build number and requires target-version QA.
+tools/release/deploy bump patch
 
-# 2. Rebuild the app
-tools/release/build_sign_notarize_release.sh
-
-# 3. Verify new build number
-plutil -p dist/AgentSessions.app/Contents/Info.plist | grep CFBundleVersion
-# Should show: "CFBundleVersion" => "2" (or N+1)
-
-# 4. Regenerate appcast
-rm -rf dist/updates && mkdir dist/updates
-cp dist/AgentSessions-{VERSION}.dmg dist/updates/
-~/Library/Developer/Xcode/DerivedData/AgentSessions-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast dist/updates/
-
-# 5. Verify appcast has new build number
-grep "sparkle:version" dist/updates/appcast.xml
-# Should show: <sparkle:version>2</sparkle:version>
-
-# 6. Update docs/appcast.xml and push
-cp dist/updates/appcast.xml docs/appcast.xml
-# Fix DMG URL to GitHub Releases, then commit and push
+# Push the bump commit, then QA the exact pushed HEAD before publishing.
+git push origin main
+tools/release/deploy qa --version <VERSION>
+tools/release/deploy release <VERSION>
+tools/release/deploy verify <VERSION>
 ```
 
-**Prevention**: Always increment `CURRENT_PROJECT_VERSION` for each release (even patch releases).
+**Prevention**: Always use `tools/release/deploy bump`, which increments `CURRENT_PROJECT_VERSION`, requires the target-version QA stamp before mutation, and keeps release publication behind exact-commit QA.
 
 ### Sparkle update window shows spinning wheel forever
 
@@ -813,7 +807,9 @@ security find-identity -v -p codesigning
 
 ## Manual Deployment (Alternative)
 
-If automation fails, use manual steps:
+Use manual publication only for failures after release QA has passed on the exact clean, synced HEAD. Run `tools/release/deploy qa --version <VERSION>` first. Never use this fallback to bypass a failed or omitted localization/extraction gate; an explicit emergency `SKIP_QA=1` decision is required to bypass release QA.
+
+If automation fails after that QA gate, use manual steps:
 
 1. Build: `xcodebuild -scheme AgentSessions -configuration Release SYMROOT=build`
 2. Sign: `codesign --deep --force --verify --verbose --timestamp --options runtime --sign "Developer ID Application: Alex M (24NDRU35WD)" build/Release/AgentSessions.app`

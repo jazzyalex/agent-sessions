@@ -74,6 +74,13 @@ main() {
   check_exists "$CANONICAL_RUNBOOK"
   check_exists "$CANONICAL_SKILL"
 
+  # Direct use bypasses the unified QA stamp and can publish a build that CI has
+  # not checked. Keep the legacy implementation available to the tool, but do not
+  # let canonical operator docs turn it into a release command again.
+  if grep -nF -- "tools/release/build_sign_notarize_release.sh" "$CANONICAL_RUNBOOK" "$CANONICAL_SKILL" >/dev/null 2>&1; then
+    fail "Canonical deploy docs must not expose tools/release/build_sign_notarize_release.sh as an executable release path"
+  fi
+
   # The runbook title/identity should not be duplicated.
   check_pattern_only_in "Agent Sessions Deployment Runbook" "$CANONICAL_RUNBOOK"
   check_pattern_only_in "One-screen cheat sheet" "$CANONICAL_RUNBOOK"
