@@ -1,4 +1,52 @@
 {
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl.zstd": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl.zstd": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl.zstd": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl.zstd": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
   "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl": {
     "events": 3,
     "model": null,

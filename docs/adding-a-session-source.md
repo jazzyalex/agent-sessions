@@ -4,7 +4,7 @@ title: "Adding a session source"
 seo_title: "Adding a session source to Agent Sessions"
 description: "What it costs to add a coding agent as a searchable session source: the closed list of sites to touch, the fixtures, and the evidence a PR needs."
 image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
-last_modified_at: 2026-08-29
+last_modified_at: 2026-09-18
 ---
 # Adding a session source
 
@@ -64,9 +64,9 @@ version**, not a placeholder. What's New derives its provider-highlight rows fro
 `SessionSource.versionIntroduced`
 ([`WhatsNewCatalog`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Onboarding/Models/WhatsNewCatalog.swift)), so a
 wrong value either hides your source's announcement or attaches it to a release that
-already shipped. The shipped version is **4.8** (Grok), while Qwen is currently recorded
-for the upcoming **5.0** release. Confirm the intended release with the maintainer; another
-source landing in the same release can also use `"5.0"`.
+already shipped. The latest published version is **5.4** (Cline), while DeepSeek Harness is
+recorded for the upcoming **5.5** release. Confirm the intended release with the maintainer;
+another source landing in the same release can also use `"5.5"`.
 
 Do **not** use `"99.0"`. `NewProviderDiscoverabilityTests.testProviderHighlights_returnsEmptyForUnknownVersion`
 pins that string as a version no provider claims; the Task-0 spike broke the suite by
@@ -147,6 +147,29 @@ for every branch-derived field: rendered events, non-metadata count, title, cust
 and model. Do not merge those fields with `max` or stale non-nil fallbacks from the old row;
 that preserves discarded-branch metadata beside the newly parsed transcript. Add a regression
 that reloads a shorter active branch whose discarded branch carried the previous title.
+
+### 3.2 Immutable directory generations and framed artifacts
+
+For a file-backed source that publishes immutable generations inside one session directory,
+keep these boundaries explicit:
+
+- Treat the directory as the logical identity. Select the highest numeric canonical
+  generation after each discovery/reload, and keep a revision that includes the selected URL,
+  deterministic sibling manifest, and selected file stat. Do not use the selected file's mtime
+  and size as the directory's identity.
+- Select encoding at the configured-root level before publishing sessions. If plain and
+  compressed artifacts are mixed where the source forbids that, fail the root refresh rather
+  than silently choosing an encoding per session.
+- For concatenated compressed logs, enumerate independent frame boundaries and decode each
+  frame through a checksum-validating decoder. Never split on magic bytes or pass the whole
+  concatenation to a one-shot API; the first frame may also have a stricter header contract.
+- Treat an incomplete final line or frame as a fail-closed artifact. Do not publish a recovered
+  prefix as a complete session; preserve the last healthy row and search document while the
+  source reports the issue. Corruption in a complete frame is also a rejection.
+- Search freshness must carry the logical revision. If a successor appears after a `FileRef`
+  is created, mark that anchor stale without changing FTS, then ingest from the refreshed row.
+  Archive only the audited canonical sibling set (regular, non-symlink entries) needed to
+  reopen the selected generation; do not sweep unknown session-local files.
 
 ---
 

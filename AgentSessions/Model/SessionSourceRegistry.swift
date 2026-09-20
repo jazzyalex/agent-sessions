@@ -46,7 +46,8 @@ enum SessionSourceRegistry {
         .qwen,
         .devin,
         .fx,
-        .cline
+        .cline,
+        .deepseekHarness
     ]
 
     static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(

@@ -37,6 +37,7 @@ struct FirstRunSetupView: View {
     @AppStorage(DevinPreferencesKey.enabled) private var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @AppStorage(FxPreferencesKey.enabled) private var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
     @AppStorage(ClinePreferencesKey.enabled) private var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
+    @AppStorage(DeepSeekHarnessSettings.Keys.enabled) private var deepSeekHarnessAgentEnabled: Bool = AgentEnablement.isEnabled(.deepseekHarness)
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -393,6 +394,7 @@ struct FirstRunSetupView: View {
         case .devin: return devinAgentEnabled
         case .fx: return fxAgentEnabled
         case .cline: return clineAgentEnabled
+        case .deepseekHarness: return deepSeekHarnessAgentEnabled
         }
     }
 

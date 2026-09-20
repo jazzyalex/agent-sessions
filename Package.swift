@@ -13,6 +13,16 @@ let coreSources = [
     "AgentSessions/CopilotResume/CopilotResumeCommandBuilder.swift",
     "AgentSessions/Cursor/CursorBackendDetector.swift",
     "AgentSessions/Cursor/CursorSourceDescriptor.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessArtifactReader.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessDiscovery.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessFormatTypes.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessHistoricalNormalizer.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessPayloadValidator.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessRelationshipValidator.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessSessionParser.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessSettings.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessSourceDescriptor.swift",
+    "AgentSessions/DeepSeekHarness/DeepSeekHarnessZstdFrameReader.swift",
     "AgentSessions/Devin/DevinSourceDescriptor.swift",
     "AgentSessions/Devin/DevinSqliteReader.swift",
     "AgentSessions/Droid/DroidSourceDescriptor.swift",
@@ -98,6 +108,8 @@ let package = Package(
     dependencies: [
         // CryptoKit's API on Linux; the macOS build keeps using CryptoKit.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
+        // DeepSeek Harness reads zstd-framed transcripts; the app builds the same package.
+        .package(path: "ThirdParty/DSHZstd"),
     ],
     targets: [
         // macOS ships a SQLite3 module in the SDK; Linux needs libsqlite3-dev plus a module map.
@@ -109,6 +121,7 @@ let package = Package(
         .executableTarget(
             name: "as-core",
             dependencies: [
+                .product(name: "libzstd", package: "DSHZstd"),
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
                 .target(name: "SQLite3", condition: .when(platforms: [.linux])),
             ],

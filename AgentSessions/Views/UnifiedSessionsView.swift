@@ -364,6 +364,9 @@ struct UnifiedSessionsView: View {
     private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
     private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
     private var clineIndexer: ClineSessionIndexer { catalog.indexer(.cline, as: ClineSessionIndexer.self) }
+    private var deepSeekHarnessIndexer: DeepSeekHarnessSessionIndexer {
+        catalog.indexer(.deepseekHarness, as: DeepSeekHarnessSessionIndexer.self)
+    }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -647,11 +650,13 @@ struct UnifiedSessionsView: View {
             .onChange(of: unified.includeFx) { _, _ in restartSearchIfRunning() }
         let afterCline = afterFx
             .onChange(of: unified.includeCline) { _, _ in restartSearchIfRunning() }
+        let afterDeepSeekHarness = afterCline
+            .onChange(of: unified.includeDeepSeekHarness) { _, _ in restartSearchIfRunning() }
             .onChange(of: unified.searchDatasetMembershipRevision) { _, _ in
                 restartSearchForDatasetMembershipChangeIfNeeded()
             }
 
-        let afterActiveOnly = afterCline
+        let afterActiveOnly = afterDeepSeekHarness
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -1602,7 +1607,7 @@ struct UnifiedSessionsView: View {
             return FxSettings.shared.canBuildCopyCommandPlan(sessionID: session.id)
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
-        case .droid, .openclaw, .cline:
+        case .droid, .openclaw, .cline, .deepseekHarness:
             // Old `default: return false` — no resume command exists to copy. Unreachable
             // behind the `supportsResume` guard; explicit so a new source must decide.
             return false
@@ -1795,7 +1800,7 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
-        case .droid, .openclaw, .cline:
+        case .droid, .openclaw, .cline, .deepseekHarness:
             // Old `default: break` — neither ships a resume command to copy. Unreachable
             // behind the `supportsResume` guard above; explicit so a new source
             // cannot silently become a no-op here.
@@ -2160,6 +2165,7 @@ struct UnifiedSessionsView: View {
         case .devin:       return $unified.includeDevin
         case .fx:          return $unified.includeFx
         case .cline:       return $unified.includeCline
+        case .deepseekHarness: return $unified.includeDeepSeekHarness
         }
     }
 
@@ -2688,6 +2694,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeFx { unified.includeFx = true }
         case .cline:
             if !unified.includeCline { unified.includeCline = true }
+        case .deepseekHarness:
+            if !unified.includeDeepSeekHarness { unified.includeDeepSeekHarness = true }
         }
     }
 
@@ -2756,6 +2764,13 @@ struct UnifiedSessionsView: View {
             if unified.fxAgentEnabled, let e = fxIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { fxIndexer.reloadSession(id: id); return true }
         case .cline:
             if unified.clineAgentEnabled, let e = clineIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { clineIndexer.reloadSession(id: id); return true }
+        case .deepseekHarness:
+            if unified.deepSeekHarnessAgentEnabled,
+               let e = deepSeekHarnessIndexer.allSessions.first(where: { $0.id == id }),
+               e.events.isEmpty {
+                deepSeekHarnessIndexer.reloadSession(id: id)
+                return true
+            }
         }
         return false
     }
@@ -3385,7 +3400,7 @@ struct UnifiedSessionsView: View {
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
-        case .droid, .openclaw, .cline:
+        case .droid, .openclaw, .cline, .deepseekHarness:
             // Old `default: return false`. Unreachable — the descriptor guard above already
             // refused both — but written out so a new source must declare its own
             // per-session rule instead of silently inheriting "never resumable".
@@ -3655,7 +3670,7 @@ struct UnifiedSessionsView: View {
                 let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
                 reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
-        case .droid, .openclaw, .cline:
+        case .droid, .openclaw, .cline, .deepseekHarness:
             // Old `default: return` (SPEC §6.C). Neither has a resume path, and the
             // `supportsResume` guard above already returned — but the arm is written out so
             // a new source fails to compile here instead of quietly doing nothing
@@ -4179,6 +4194,9 @@ struct TranscriptHostView: View {
     private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
     private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
     private var clineIndexer: ClineSessionIndexer { catalog.indexer(.cline, as: ClineSessionIndexer.self) }
+    private var deepSeekHarnessIndexer: DeepSeekHarnessSessionIndexer {
+        catalog.indexer(.deepseekHarness, as: DeepSeekHarnessSessionIndexer.self)
+    }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -4257,6 +4275,14 @@ struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .cline ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: deepSeekHarnessIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "DeepSeek",
+                enableCaching: false
+            )
+            .opacity(kind == .deepseekHarness ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -4271,7 +4297,7 @@ struct TranscriptHostView: View {
     /// compares this set against `SessionSource.allCases`.
     static let coveredSources: Set<SessionSource> = [
         .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline, .deepseekHarness
     ]
 }
 

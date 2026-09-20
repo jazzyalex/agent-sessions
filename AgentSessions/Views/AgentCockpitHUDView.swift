@@ -3499,6 +3499,7 @@ enum HUDRunwayRequestBuilder {
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .codex),
             now: now,
             maxRows: maxRows,
+            recentSessionsRoot: CodexRunwayRecentSessionScanner.defaultRoot(),
             weeklyResetAt: weekResetAt,
             expectedAccountHash: WeeklyQuotaCalibrationScope.hashAccount(
                 CodexCalibrationAccountScope.accountId(now: now)

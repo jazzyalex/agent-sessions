@@ -31,6 +31,12 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(SessionSource.cursor.versionIntroduced, "3.2")
     }
 
+    func testDeepSeekHarnessVersionIntroduced() {
+        XCTAssertEqual(SessionSource.deepseekHarness.versionIntroduced, "5.5")
+        XCTAssertEqual(String(localized: SessionSource.deepseekHarness.featureDescription),
+                       "Browse your DeepSeek sessions")
+    }
+
     func testOriginalProvidersHaveEarlyVersions() {
         XCTAssertEqual(SessionSource.codex.versionIntroduced, "1.0")
         XCTAssertEqual(SessionSource.claude.versionIntroduced, "1.0")
@@ -69,7 +75,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
-        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline, .droid] {
+        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline, .droid, .deepseekHarness] {
             XCTAssertFalse(AgentEnablement.isEnabled(source, defaults: defaults),
                            "\(source.rawValue) is availability-gated and must stay off when unavailable")
         }
@@ -215,6 +221,15 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(item.kind, .highlight)
         XCTAssertTrue(String(localized: item.title).contains("Cursor"), "provider highlight should name Cursor")
         XCTAssertEqual(item.iconSystemName, SessionSource.cursor.iconName)
+    }
+
+    func testProviderHighlights_returnsDeepSeekHarnessItemForVersion5_5() {
+        let items = WhatsNewCatalog.providerHighlights(for: "5.5")
+        XCTAssertEqual(items.count, 1)
+        let item = items[0]
+        XCTAssertEqual(item.kind, .highlight)
+        XCTAssertEqual(String(localized: item.title), "New: DeepSeek")
+        XCTAssertEqual(item.iconSystemName, SessionSource.deepseekHarness.iconName)
     }
 
     func testProviderHighlights_returnsEmptyForUnknownVersion() {

@@ -1727,9 +1727,16 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
 /// whole status path async. Only the account id is read, and only its hash is ever
 /// stored — see `WeeklyQuotaCalibrationScope.hashAccount`.
 enum CodexCalibrationAccountScope {
-    static func accountId(now _: Date = Date()) -> String? {
-        accountId(authURL: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/auth.json"))
+    static func accountId(
+        now _: Date = Date(),
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String? {
+        let authURL = CodexSessionDiscovery.codexHome(
+            environment: environment,
+            homeDirectory: homeDirectory
+        ).appendingPathComponent("auth.json")
+        return accountId(authURL: authURL)
     }
 
     static func accountId(authURL: URL) -> String? {

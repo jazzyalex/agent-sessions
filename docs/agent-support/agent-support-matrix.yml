@@ -325,3 +325,35 @@ agents:
       - "AgentSessionsTests/ClineSessionDiscoveryTests.swift"
       - "AgentSessionsTests/ClineIntegrationTests.swift"
       - "scripts/tests/test_cline_monitoring.py"
+  deepseek_harness:
+    max_verified_version: "0.1.6-alpha.2"
+    version_field: "repository release/tag plus physical header version 0-3; fixtures pin source commit ddefc45fbc7f8e46dd73185e68295696d1297887"
+    support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v3 plain or independently framed Zstandard histories"
+    unsupported_surfaces:
+      - "resume and live ingestion"
+      - "DSH archive-state mirroring"
+      - "partial recovery publication"
+      - "telemetry, usage, quota, and image extraction"
+      - "custom required event extensions outside the pinned 58-event catalog"
+    notes:
+      - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout; an opt-in local UI smoke test opened real sessions, but this is not a representative compatibility corpus."
+      - "Weekly monitoring compares upstream releases, fingerprints the checked-in v0-v3 plain fixtures against a non-empty baseline, and verifies every plain/Zstandard fixture hash. It deliberately does not read ~/.dsh without separate owner authorization."
+      - "Fork provenance is retained as metadata while forks remain roots; DSH archive flags are ignored; incomplete or corrupt artifacts remain invisible."
+    evidence_docs:
+      - "docs/superpowers/plans/2026-09-18-dsh-source-implementation-plan.md"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/manifest.json"
+    evidence_fixtures:
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl.zstd"
+    evidence_tests:
+      - "AgentSessionsTests/DeepSeekHarnessFixtureParityTests.swift"
+      - "AgentSessionsTests/DeepSeekHarnessDiscoveryTests.swift"
+      - "scripts/tests/test_deepseek_harness_monitoring.py"

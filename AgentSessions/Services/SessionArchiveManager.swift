@@ -5,6 +5,12 @@ import SQLite3
 #if DEBUG
 enum SessionArchiveManagerTestHooks {
     static var applicationSupportDirectoryProvider: (() -> URL?)?
+    /// Deterministic churn seam at the post-copy/pre-resnapshot boundary of
+    /// the archive retry loop. Invoked synchronously after each attempt's
+    /// copy, before the stability re-snapshot, so a test can mutate upstream
+    /// on every attempt and prove fail-closed behavior. Nil in production.
+    /// Tests must reset it in defer.
+    static var postCopyHook: (() -> Void)?
 }
 #endif
 
@@ -74,6 +80,26 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
         var errorDescription: String? {
             "Application Support directory unavailable"
+        }
+    }
+
+    // Fail-closed errors for provider-filtered manifests. A nil filter result
+    // or an entry that escapes/is not a regular file throws before any copy,
+    // so no partial archive is ever committed.
+    private enum ArchiveManifestError: LocalizedError {
+        case providerManifestUnavailable(source: String, id: String)
+        case filteredEntryInvalid(path: String)
+        case upstreamUnstable(source: String, id: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .providerManifestUnavailable(let source, let id):
+                return "Archive manifest unavailable for \(source):\(id)"
+            case .filteredEntryInvalid(let path):
+                return "Archive entry invalid: \(path)"
+            case .upstreamUnstable(let source, let id):
+                return "Session was updating continuously; no stable snapshot for \(source):\(id), archive not updated"
+            }
         }
     }
 
@@ -213,6 +239,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         ensureArchiveExistsAndSync(session: session, reason: "test")
     }
 
+    func pinSessionForTesting(_ session: Session) {
+        writePinPlaceholder(session: session, key: key(source: session.source, id: session.id))
+        ensureArchiveExistsAndSync(session: session, reason: "test-pin")
+    }
+
+    func syncPinnedSessionsForTesting() {
+        syncPinnedSessions(reason: "test")
+    }
+
     func archiveInfoForTesting(source: SessionSource, id: String) -> SessionArchiveInfo? {
         loadInfoIfExists(source: source, id: id)
     }
@@ -304,6 +339,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         dataRootURL(source: info.source, id: info.sessionID)?.appendingPathComponent(info.primaryRelativePath, isDirectory: false)
     }
 
+    /// A path may use physical-file search freshness only when it is the
+    /// recorded copied primary for this saved session. A failed live artifact
+    /// resolution alone is never proof that a file belongs to our archive.
+    func isArchivedPrimary(session: Session) -> Bool {
+        guard let info = loadInfoIfExists(source: session.source, id: session.id),
+              let archived = archivedPrimaryPath(info: info) else { return false }
+        return archived.standardizedFileURL == URL(fileURLWithPath: session.filePath).standardizedFileURL
+    }
+
     // MARK: - Cache
 
     private func reloadCache() {
@@ -377,7 +421,30 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             var fallbackURLs: [String: URL]? = nil
             for id in pinned {
                 if var info = loadInfoIfExists(source: source, id: id) {
-                    ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    if source == .deepseekHarness {
+                        // Existing DSH Saved metadata may point at v2 while the
+                        // immutable live directory has advanced to v3. Periodic
+                        // sync must rediscover the current primary; otherwise the
+                        // filtered snapshot permanently excludes successors.
+                        if fallbackURLs == nil {
+                            fallbackURLs = resolveBackfillURLsFromFilesystem(source: source)
+                        }
+                        if let url = fallbackURLs?[id],
+                           let session = DeepSeekHarnessSessionParser.parseFile(at: url),
+                           session.id == id,
+                           Self.dshGeneration(of: session.filePath) >= Self.dshGeneration(
+                            of: info.primaryRelativePath
+                           ) {
+                            ensureArchiveExistsAndSync(session: session, reason: reason)
+                        } else if !FileManager.default.fileExists(atPath: info.upstreamPath) {
+                            // A removed upstream can be marked missing. An
+                            // existing but unreadable/partial directory is not
+                            // authority to resnapshot or downgrade a healthy copy.
+                            ensureArchiveExistsAndSync(info: &info, reason: reason)
+                        }
+                    } else {
+                        ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    }
                     let key = key(source: source, id: id)
                     missingResolutionLogged.remove(key)
                     continue
@@ -424,6 +491,18 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         SessionSourceRegistry.descriptor(for: source).archive?.backfillURLs(.standard) ?? [:]
     }
 
+    private static func dshGeneration(of path: String) -> Int {
+        DeepSeekHarnessDiscovery.parseGenerationFilename(URL(fileURLWithPath: path).lastPathComponent)?
+            .generation ?? Int.max
+    }
+
+    private func wouldDowngradeDSHArchive(_ session: Session) -> Bool {
+        guard session.source == .deepseekHarness,
+              let existing = loadInfoIfExists(source: session.source, id: session.id) else { return false }
+        let primary = Self.archiveUnit(for: session).primaryRelativePath
+        return Self.dshGeneration(of: primary) < Self.dshGeneration(of: existing.primaryRelativePath)
+    }
+
     /// Best-effort session for a `(sessionID, upstreamURL)` pair the filesystem sweep found.
     ///
     /// Each source's `archive.sessionForBackfill` carries its old arm verbatim, including the
@@ -441,6 +520,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func ensureArchiveExistsAndSync(session: Session, reason: String) {
+        // A saved successor remains authoritative even if the live source later
+        // exposes only an older generation (including through a re-star).
+        guard !wouldDowngradeDSHArchive(session) else { return }
         let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
@@ -465,8 +547,16 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             archiveSizeBytes: nil
         )
 
-        // If archive already exists, keep the existing pinnedAt and upstream path, but refresh display metadata.
+        // If archive already exists, keep its identity and sync history, but let a
+        // directory-artifact source advance its selected primary generation. DSH
+        // publishes immutable successors (v2 -> v3) under the same session root;
+        // retaining the old primary here would permanently pin the archive to v2.
         if var existing = loadInfoIfExists(source: session.source, id: session.id) {
+            if session.source == .deepseekHarness {
+                existing.upstreamPath = info.upstreamPath
+                existing.upstreamIsDirectory = info.upstreamIsDirectory
+                existing.primaryRelativePath = info.primaryRelativePath
+            }
             existing.startTime = info.startTime
             existing.endTime = info.endTime
             existing.model = info.model
@@ -481,6 +571,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func writePinPlaceholder(session: Session, key: String) {
+        guard !wouldDowngradeDSHArchive(session) else { return }
         let unit = Self.archiveUnit(for: session)
         var info = SessionArchiveInfo(
             sessionID: session.id,
@@ -647,7 +738,35 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return try? JSONDecoder().decode(SessionArchiveManifest.self, from: data)
         }()
 
-        let snapshotBefore = try scanUpstreamSnapshot(at: upstreamURL, primaryRelativePath: info.primaryRelativePath)
+        // Safety boundary: the provider-filtered relative set is resolved once
+        // per sync so snapshot-before, copy, snapshot-after/stability, and size
+        // all observe the same manifest. Nil means no seam: legacy recursive
+        // scan, byte-for-byte unchanged. A seam that returns nil throws below
+        // and commits nothing (fail closed).
+        let providerEntries = try resolveProviderEntries(source: info.source,
+                                                          upstream: upstreamURL,
+                                                          primaryRelativePath: info.primaryRelativePath,
+                                                          sessionID: info.sessionID)
+
+        func takeSnapshot() throws -> SessionArchiveManifest {
+            if let entries = providerEntries {
+                return try snapshotFilteredManifest(at: upstreamURL,
+                                                    entries: entries,
+                                                    primaryRelativePath: info.primaryRelativePath)
+            }
+            return try scanUpstreamSnapshot(at: upstreamURL, primaryRelativePath: info.primaryRelativePath)
+        }
+
+        func stagedSizeBytes(dataRoot: URL, manifest: SessionArchiveManifest) throws -> Int64 {
+            // The staging dir holds exactly the copied manifest entries, so the
+            // filtered path sums those staged files (same set, no re-scan).
+            if providerEntries != nil {
+                return try filteredStagedSizeBytes(dataRoot: dataRoot, manifest: manifest)
+            }
+            return try computeArchiveSizeBytes(dataRoot: dataRoot)
+        }
+
+        let snapshotBefore = try takeSnapshot()
 
         // Only surface the "Saving…" staging state when we actually need to copy.
         // Otherwise periodic sync checks can cause UI flicker even when nothing changes.
@@ -690,7 +809,12 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             log("sync staging created path=\(stagingSessionRoot.path) exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
             try copySnapshot(snapshot, from: upstreamURL, upstreamIsDirectory: info.upstreamIsDirectory, to: stagingDataRoot)
-            let snapshotAfter = try scanUpstreamSnapshot(at: upstreamURL, primaryRelativePath: info.primaryRelativePath)
+#if DEBUG
+            SessionArchiveManagerTestHooks.postCopyHook?()
+#endif
+            // Same filtered entry set re-statted (no re-list, no widening);
+            // legacy nil-seam path re-enumerates exactly as before.
+            let snapshotAfter = try takeSnapshot()
 
             if snapshotAfter == snapshot {
                 // Stable enough to commit.
@@ -701,7 +825,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 committedInfo.lastError = nil
                 committedInfo.upstreamMissing = false
                 committedInfo.lastUpstreamChangeAt = committedInfo.lastSyncAt
-                committedInfo.archiveSizeBytes = try computeArchiveSizeBytes(dataRoot: stagingDataRoot)
+                committedInfo.archiveSizeBytes = try stagedSizeBytes(dataRoot: stagingDataRoot, manifest: snapshot)
 
                 try fm.createDirectory(at: stagingSessionRoot, withIntermediateDirectories: true)
                 try writeInfoTo(path: stagingSessionRoot.appendingPathComponent("meta.json", isDirectory: false), info: committedInfo)
@@ -727,6 +851,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             snapshot = snapshotAfter
         }
 
+        // A source requiring stable snapshots fails closed after the retry
+        // budget: no unchecked fifth copy/commit, so an existing healthy
+        // archive is never replaced by a torn read. The throw propagates
+        // through the existing archive error/status handling (status .error,
+        // lastError surfaced, staged data discarded).
+        if SessionSourceRegistry.descriptor(for: info.source).archive?.requiresStableSnapshot == true {
+            throw ArchiveManifestError.upstreamUnstable(source: info.source.rawValue, id: info.sessionID)
+        }
+
         // If upstream is churning, commit a best-effort snapshot and keep syncing.
         let staging = try makeStagingDir(source: info.source, sessionID: info.sessionID)
         defer { try? fm.removeItem(at: staging) }
@@ -741,7 +874,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         committedInfo.lastUpstreamSeenAt = Date()
         committedInfo.upstreamMissing = false
         committedInfo.lastUpstreamChangeAt = committedInfo.lastSyncAt
-        committedInfo.archiveSizeBytes = try computeArchiveSizeBytes(dataRoot: stagingDataRoot)
+        committedInfo.archiveSizeBytes = try stagedSizeBytes(dataRoot: stagingDataRoot, manifest: snapshot)
         committedInfo.lastError = "Session was updating continuously; archived a best-effort snapshot (reason=\(reason))"
 
         try fm.createDirectory(at: stagingSessionRoot, withIntermediateDirectories: true)
@@ -797,6 +930,63 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // Safety boundary for provider-filtered directory archives: nil means no
+    // seam (legacy scan). A seam result is used verbatim as the manifest set;
+    // a nil seam result throws so nothing is committed.
+    private func resolveProviderEntries(source: SessionSource, upstream: URL, primaryRelativePath: String, sessionID: String) throws -> [String]? {
+        guard let filter = SessionSourceRegistry.descriptor(for: source).archive?.manifestEntries else { return nil }
+        guard let entries = filter(upstream, primaryRelativePath) else {
+            throw ArchiveManifestError.providerManifestUnavailable(source: source.rawValue, id: sessionID)
+        }
+        return entries
+    }
+
+    // Stats exactly the provider-filtered set: no directory enumeration, no
+    // widening. Rejects path escapes and non-regular files even if a provider
+    // filter is buggy, and requires the primary to be present. Sorted output
+    // keeps manifests deterministic.
+    private func snapshotFilteredManifest(at upstream: URL, entries: [String], primaryRelativePath: String) throws -> SessionArchiveManifest {
+        guard entries.contains(primaryRelativePath) else {
+            throw ArchiveManifestError.filteredEntryInvalid(path: primaryRelativePath)
+        }
+        let fm = FileManager.default
+        var out: [SessionArchiveManifest.Entry] = []
+        for rel in entries {
+            guard !rel.isEmpty, !rel.contains("/"), rel != ".", rel != ".." else {
+                throw ArchiveManifestError.filteredEntryInvalid(path: rel)
+            }
+            let url = upstream.appendingPathComponent(rel, isDirectory: false)
+            guard let type = (try? fm.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType,
+                  type == .typeRegular else {
+                throw ArchiveManifestError.filteredEntryInvalid(path: rel)
+            }
+            let rv = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = Int64(rv.fileSize ?? 0)
+            let mtime = (rv.contentModificationDate ?? Date.distantPast).timeIntervalSince1970
+            out.append(.init(relativePath: rel, sizeBytes: size, mtimeSeconds: mtime, sha256: hashIfSmall(url: url, sizeBytes: size)))
+        }
+        out.sort { $0.relativePath < $1.relativePath }
+        return SessionArchiveManifest(entries: out)
+    }
+
+    // Sums exactly the staged manifest entries (same filtered set as the
+    // snapshot and copy); the staging dir holds only those files.
+    private func filteredStagedSizeBytes(dataRoot: URL, manifest: SessionArchiveManifest) throws -> Int64 {
+        var total: Int64 = 0
+        for e in manifest.entries {
+            guard !e.relativePath.isEmpty, !e.relativePath.contains("/"), e.relativePath != ".", e.relativePath != ".." else {
+                throw ArchiveManifestError.filteredEntryInvalid(path: e.relativePath)
+            }
+            let url = dataRoot.appendingPathComponent(e.relativePath, isDirectory: false)
+            let rv = try url.resourceValues(forKeys: [.fileSizeKey])
+            total += Int64(rv.fileSize ?? 0)
+        }
+        return total
+    }
+
+    // Copies exactly the manifest entries. Directory archives copy each listed
+    // relative path; filtered providers (DSH) supply a flat sibling set, so no
+    // recursive walk ever runs for them.
     private func copySnapshot(_ manifest: SessionArchiveManifest, from upstream: URL, upstreamIsDirectory: Bool, to destDataRoot: URL) throws {
         let fm = FileManager.default
         if upstreamIsDirectory {

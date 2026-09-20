@@ -24,7 +24,8 @@ enum SessionSourceDescriptorCatalog {
         .qwen,
         .devin,
         .fx,
-        .cline
+        .cline,
+        .deepseekHarness
     ])
 
     /// Identity parsing and URL classification are one capability. Keeping the closures

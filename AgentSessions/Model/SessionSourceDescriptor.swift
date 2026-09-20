@@ -59,13 +59,30 @@ struct ArchiveCapability {
     /// file itself; a paired source returns its session directory with the primary's
     /// filename so the copy carries the companion files the full parse needs.
     let archiveUnit: ((URL) -> ArchiveUnit?)?
+    /// Optional provider-filtered manifest entry set for directory archives.
+    /// nil (the default) preserves the legacy recursive snapshot byte-for-byte.
+    /// A non-nil seam takes `(upstreamRoot, primaryRelativePath)` and returns the
+    /// sorted relative paths to snapshot/copy/size; the manager stats and copies
+    /// exactly that set with no re-scan or widening. A nil return fails closed
+    /// (the sync throws and commits nothing).
+    let manifestEntries: ((URL, String) -> [String]?)?
+    /// True when the source's upstream snapshot unit churns under concurrent
+    /// writers, so a snapshot that never settles across the retry budget must
+    /// fail closed instead of committing a best-effort copy. Default false
+    /// preserves the legacy fifth best-effort commit byte-for-byte for every
+    /// existing source; only DSH opts in.
+    let requiresStableSnapshot: Bool
 
     init(backfillURLs: @escaping (UserDefaults) -> [String: URL],
          sessionForBackfill: @escaping (String, URL) -> Session?,
-         archiveUnit: ((URL) -> ArchiveUnit?)? = nil) {
+         archiveUnit: ((URL) -> ArchiveUnit?)? = nil,
+         manifestEntries: ((URL, String) -> [String]?)? = nil,
+         requiresStableSnapshot: Bool = false) {
         self.backfillURLs = backfillURLs
         self.sessionForBackfill = sessionForBackfill
         self.archiveUnit = archiveUnit
+        self.manifestEntries = manifestEntries
+        self.requiresStableSnapshot = requiresStableSnapshot
     }
 }
 
@@ -152,6 +169,26 @@ struct TelemetryCapabilities: Equatable, Sendable {
     }
 }
 
+// MARK: - SessionArtifactRevision
+
+/// Generic directory-artifact freshness token for sources whose logical session is a
+/// directory rather than a single file.
+///
+/// The selected generation is the physical parse anchor, while the sibling manifest
+/// revision is part of freshness even when the selected file itself did not change:
+/// a successor generation or a sibling-only write produces a different revision with
+/// an unchanged selected-file stat. Consumers resolve the revision through
+/// `SessionSourceDescriptor.artifactRevision` and treat it as an in-memory token —
+/// it never touches the DB schema.
+struct SessionArtifactRevision: Equatable, Sendable {
+    /// The currently selected physical generation to parse.
+    let selectedURL: URL
+    /// Revision over the artifact's sibling manifest (names plus physical stats).
+    let manifestRevision: String
+    /// Physical stat of `selectedURL` at resolution time.
+    let physicalStat: SessionFileStat
+}
+
 // MARK: - SessionSourceDescriptor
 
 struct SessionSourceDescriptor {
@@ -230,6 +267,14 @@ struct SessionSourceDescriptor {
     /// the primary path.
     let logicalFileStat: ((URL) -> SessionFileStat?)?
 
+    /// Generic directory-artifact revision resolver. Given any previously selected
+    /// canonical generation URL, it rescans the logical session directory/root and
+    /// returns the currently selected generation plus the sibling manifest revision
+    /// plus the selected file's stat. nil (the default) preserves every existing
+    /// source: only directory-artifact sources whose selected generation can move
+    /// underneath a stored anchor declare this.
+    let artifactRevision: ((URL) -> SessionArtifactRevision?)?
+
     // MARK: Archive
 
     /// nil = archiving unsupported for this source (SPEC §4).
@@ -261,6 +306,7 @@ struct SessionSourceDescriptor {
          parseLightweightByPath: ((URL) -> Session?)? = nil,
          listDatabaseSessions: ((AvailabilityContext) -> [Session])? = nil,
          logicalFileStat: ((URL) -> SessionFileStat?)? = nil,
+         artifactRevision: ((URL) -> SessionArtifactRevision?)? = nil,
          archive: ArchiveCapability?,
          supportsResume: Bool,
          resumeAgentLabel: String?) {
@@ -283,6 +329,7 @@ struct SessionSourceDescriptor {
         self.parseLightweightByPath = parseLightweightByPath
         self.listDatabaseSessions = listDatabaseSessions
         self.logicalFileStat = logicalFileStat
+        self.artifactRevision = artifactRevision
         self.archive = archive
         self.supportsResume = supportsResume
         self.resumeAgentLabel = resumeAgentLabel

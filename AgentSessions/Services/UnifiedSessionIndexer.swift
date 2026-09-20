@@ -72,6 +72,21 @@ final class UnifiedSessionIndexer: ObservableObject {
         let path: String
         let modifiedAt: Date
         let size: Int64
+        /// Directory-artifact manifest revision (see
+        /// `SessionSourceDescriptor.artifactRevision`). nil for ordinary file stats —
+        /// the default keeps every existing construction site unchanged while the
+        /// revision participates in `Equatable` state wherever it is set.
+        let manifestRevision: String?
+
+        init(path: String,
+             modifiedAt: Date,
+             size: Int64,
+             manifestRevision: String? = nil) {
+            self.path = path
+            self.modifiedAt = modifiedAt
+            self.size = size
+            self.manifestRevision = manifestRevision
+        }
     }
 
     private struct FocusedSessionContext: Equatable {
@@ -119,6 +134,22 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
 
+        enum SearchLivePathSnapshots {
+            case notApplicable
+            case provider(@MainActor () -> Set<String>?)
+
+            var isApplicable: Bool {
+                if case .provider = self { return true }
+                return false
+            }
+
+            @MainActor
+            func current() -> Set<String>? {
+                guard case .provider(let snapshot) = self else { return nil }
+                return snapshot()
+            }
+        }
+
         let allSessions: AnyPublisher<[Session], Never>
         let isIndexing: AnyPublisher<Bool, Never>
         let isProcessingTranscripts: AnyPublisher<Bool, Never>
@@ -130,6 +161,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let currentIsIndexing: @MainActor () -> Bool
         let currentLaunchPhase: @MainActor () -> LaunchPhase
         let searchIdentitySnapshots: SearchIdentitySnapshots
+        let searchLivePathSnapshots: SearchLivePathSnapshots
         /// **Contract: this must publish `isIndexing = true` before it returns.**
         ///
         /// `performProviderRefresh` calls it and then immediately polls `currentIsIndexing()`
@@ -163,6 +195,7 @@ final class UnifiedSessionIndexer: ObservableObject {
              currentIsIndexing: @escaping @MainActor () -> Bool,
              currentLaunchPhase: @escaping @MainActor () -> LaunchPhase,
              searchIdentitySnapshots: SearchIdentitySnapshots,
+             searchLivePathSnapshots: SearchLivePathSnapshots = .notApplicable,
              refresh: @escaping @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void,
              reloadFocusedSession: @escaping @MainActor (String, Bool, FocusedReloadTrigger) -> Void) {
             self.allSessions = allSessions
@@ -176,6 +209,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             self.currentIsIndexing = currentIsIndexing
             self.currentLaunchPhase = currentLaunchPhase
             self.searchIdentitySnapshots = searchIdentitySnapshots
+            self.searchLivePathSnapshots = searchLivePathSnapshots
             self.refresh = refresh
             self.reloadFocusedSession = reloadFocusedSession
         }
@@ -507,6 +541,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeCline: Bool = UnifiedSessionIndexer.storedInclude(.cline) {
         didSet { applyInclude(.cline, includeCline) }
     }
+    @Published var includeDeepSeekHarness: Bool = UnifiedSessionIndexer.storedInclude(.deepseekHarness) {
+        didSet { applyInclude(.deepseekHarness, includeDeepSeekHarness) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -531,6 +568,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     @Published private(set) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
     @Published private(set) var clineAgentEnabled: Bool = AgentEnablement.isEnabled(.cline)
+    @Published private(set) var deepSeekHarnessAgentEnabled: Bool = AgentEnablement.isEnabled(.deepseekHarness)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -1029,6 +1067,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.devin) != devinAgentEnabled { devinAgentEnabled = value(.devin) }
         if value(.fx) != fxAgentEnabled { fxAgentEnabled = value(.fx) }
         if value(.cline) != clineAgentEnabled { clineAgentEnabled = value(.cline) }
+        if value(.deepseekHarness) != deepSeekHarnessAgentEnabled {
+            deepSeekHarnessAgentEnabled = value(.deepseekHarness)
+        }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -1768,15 +1809,29 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static func performSearchIngestOnce(source: SessionSource,
                                                 service: SearchIngestService,
                                                 providerHandle: ProviderHandle) async {
-        let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?) in
+        let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?, SearchIngestService.LivePathAuthority) in
             let files = searchFileRefs(for: providerHandle.currentSessions())
-            return (files, providerHandle.searchIdentitySnapshots.current())
+            let liveAuthority: SearchIngestService.LivePathAuthority
+            if providerHandle.searchLivePathSnapshots.isApplicable {
+                if let snapshot = providerHandle.searchLivePathSnapshots.current() {
+                    liveAuthority = .authoritative(snapshot)
+                } else {
+                    liveAuthority = .unknown
+                }
+            } else {
+                liveAuthority = .notApplicable
+            }
+            return (files, providerHandle.searchIdentitySnapshots.current(), liveAuthority)
         }
         let files = input.0
         let identitySnapshot = input.1
-        // Identity-backed sources must run even with no current sessions so the
-        // ingest service can remove the final archived/deleted database identity.
-        if files.isEmpty, source.descriptor.searchUsesIdentityAtURL == nil { return }
+        let livePathAuthority = input.2
+        // Identity-backed and path-backed sources must run even with no current
+        // sessions so the ingest service can remove the final archived/deleted
+        // database identity or the last live path. Ordinary file sources with no
+        // applicable authority still skip the empty pass.
+        if files.isEmpty, source.descriptor.searchUsesIdentityAtURL == nil,
+           !providerHandle.searchLivePathSnapshots.isApplicable { return }
 
         let toolIOEnabled = recentToolIOIndexEnabled()
         Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? start")
@@ -1784,7 +1839,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             let progress = try await service.ingest(source: source,
                                                     files: files,
                                                     toolIOEnabled: toolIOEnabled,
-                                                    identitySnapshot: identitySnapshot)
+                                                    identitySnapshot: identitySnapshot,
+                                                    livePathAuthority: livePathAuthority)
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) end")
         } catch is CancellationError {
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? cancelled")
@@ -1812,9 +1868,19 @@ final class UnifiedSessionIndexer: ObservableObject {
         let newestEndTime: Date?
         let identityRevisions: [String]
         let identitySnapshot: SearchIngestService.IdentitySnapshot?
+        /// Sorted standardized paths for ordinary/path-backed sessions. Identity-backed
+        /// sessions share one storage URL, so their path carries no per-session signal
+        /// and is covered by `identityRevisions` instead. A v2->v3 selected-generation
+        /// move keeps id/count/size/end identical while changing this.
+        let pathIdentities: [String]
+        /// Authoritative live-path set for path-backed sources. nil covers both
+        /// not-applicable and applicable-but-unknown; an authoritative value (empty
+        /// allowed) compares unequal to nil so unknown->empty recovery kicks ingest.
+        let livePathSnapshot: Set<String>?
 
         init(sessions: [Session],
-             identitySnapshot: SearchIngestService.IdentitySnapshot? = nil) {
+             identitySnapshot: SearchIngestService.IdentitySnapshot? = nil,
+             livePathSnapshot: Set<String>? = nil) {
             count = sessions.count
             totalSizeBytes = sessions.reduce(0) { $0 + ($1.fileSizeBytes ?? 0) }
             newestEndTime = sessions.compactMap(\.endTime).max()
@@ -1827,6 +1893,16 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return "\(session.id):\(revision.updatedMillis):\(revision.extent)"
             }.sorted()
             self.identitySnapshot = identitySnapshot
+            pathIdentities = sessions.compactMap { session in
+                let url = URL(fileURLWithPath: session.filePath)
+                let descriptor = session.source.descriptor
+                guard !(descriptor.parseFullByIdentity != nil
+                        && descriptor.searchUsesIdentityAtURL?(url) == true) else { return nil }
+                return url.standardizedFileURL.path
+            }.sorted()
+            self.livePathSnapshot = livePathSnapshot.map { snapshot in
+                Set(snapshot.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+            }
         }
     }
 
@@ -1834,7 +1910,8 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func currentSearchIngestFingerprint(for source: SessionSource) -> SessionListFingerprint {
         SessionListFingerprint(
             sessions: currentSessions(for: source),
-            identitySnapshot: handle(source).searchIdentitySnapshots.current()
+            identitySnapshot: handle(source).searchIdentitySnapshots.current(),
+            livePathSnapshot: handle(source).searchLivePathSnapshots.current()
         )
     }
 
@@ -1935,13 +2012,26 @@ final class UnifiedSessionIndexer: ObservableObject {
         return Self.logicalFocusedSignature(source: context.source, path: path)
     }
 
-    /// Provider-neutral focused-monitor signature. Most sources stat the primary file;
-    /// a source declaring `descriptor.logicalFileStat` (Cline's manifest+messages pair)
-    /// contributes its logical unit stat instead, so companion-only writes change the
-    /// signature and trip a reload. Internal so messages-only freshness is testable.
+    /// Provider-neutral focused-monitor signature. A source declaring
+    /// `descriptor.artifactRevision` (a directory artifact whose selected generation can
+    /// move) resolves the currently selected path/stat/revision, so a successor or a
+    /// sibling-only write changes the signature and trips a reload; an unresolvable
+    /// artifact yields nil rather than a stat of a superseded file. Most sources stat
+    /// the primary file; a source declaring `descriptor.logicalFileStat` (Cline's
+    /// manifest+messages pair) contributes its logical unit stat instead, so
+    /// companion-only writes change the signature and trip a reload. Internal so
+    /// messages-only freshness is testable.
     static func logicalFocusedSignature(source: SessionSource, path: String) -> FileSignature? {
         let url = URL(fileURLWithPath: path)
-        if let logical = SessionSourceRegistry.descriptor(for: source).logicalFileStat?(url) {
+        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        if let resolveArtifact = descriptor.artifactRevision {
+            guard let revision = resolveArtifact(url) else { return nil }
+            return FileSignature(path: revision.selectedURL.path,
+                                 modifiedAt: Date(timeIntervalSince1970: TimeInterval(revision.physicalStat.mtime)),
+                                 size: revision.physicalStat.size,
+                                 manifestRevision: revision.manifestRevision)
+        }
+        if let logical = descriptor.logicalFileStat?(url) {
             return FileSignature(path: path,
                                  modifiedAt: Date(timeIntervalSince1970: TimeInterval(logical.mtime)),
                                  size: logical.size)
@@ -1950,10 +2040,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// Provider-neutral search FileRefs for a session list — the same construction the
-    /// ingest kick uses. Implemented in the core (`SearchIngestService.fileRefs(for:)`) so
-    /// the Linux CLI builds identical refs; kept here for existing callers and tests.
+    /// ingest kick uses. Implemented in the core (`SearchIngestService.fileRefs(for:isArchivedPrimary:)`)
+    /// so the Linux CLI builds identical refs; the archive check is app state and is supplied
+    /// here. Internal so the messages-only re-ingest path is testable without a live kick.
     static func searchFileRefs(for sessions: [Session]) -> [SearchIngestService.FileRef] {
-        SearchIngestService.fileRefs(for: sessions)
+        SearchIngestService.fileRefs(for: sessions,
+                                     isArchivedPrimary: { SessionArchiveManager.shared.isArchivedPrimary(session: $0) })
     }
 
     @MainActor
@@ -2341,7 +2433,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// `lightweightCommands` (fx only sets it on a full parse).
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .cline:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .cline, .deepseekHarness:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.

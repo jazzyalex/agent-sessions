@@ -5,12 +5,14 @@ agents. It reads the same session files as the macOS app, through the same parse
 search index, and never sends anything off the machine.
 
 Supported sources: Codex, Claude Code, Antigravity, OpenCode, Hermes, GitHub Copilot CLI,
-Droid, OpenClaw, Cursor, Pi, Kimi Code, Grok CLI, Qwen Code, Devin, fx and Cline. A source
-shows up only if its session files exist for your user.
+Droid, OpenClaw, Cursor, Pi, Kimi Code, Grok CLI, Qwen Code, Devin, fx, Cline and DeepSeek
+Harness. A source shows up only if its session files exist for your user.
 
 Linux locations of Cursor, Cline Desktop, Antigravity and Devin have not been verified yet
-(the app's macOS paths are used); Codex, Claude Code, OpenCode and the other CLI sources
-follow their documented `~/.<agent>` layouts and are tested.
+(the app's macOS paths are used). DeepSeek Harness is verified against the repository's
+fixtures only, including its zstd-compressed generations, not against a real installation.
+Codex, Claude Code and OpenCode were tested on real Linux data; the other CLI sources follow
+their documented `~/.<agent>` layouts.
 
 ## Install
 

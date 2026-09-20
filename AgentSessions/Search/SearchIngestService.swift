@@ -45,6 +45,18 @@ actor SearchIngestService {
         }
     }
 
+    /// Authoritative live-path view for path-backed sources, parallel to
+    /// `IdentitySnapshot`. `.notApplicable` is an ordinary file source with no live
+    /// authority (existing behavior, never deletes); `.unknown` is an applicable
+    /// source whose discovery/parse pass failed (may run, must never delete);
+    /// `.authoritative` is an explicitly owned live set from a clean stable pass
+    /// (empty allowed — deletes every previously-owned live path).
+    enum LivePathAuthority: Equatable, Sendable {
+        case notApplicable
+        case unknown
+        case authoritative(Set<String>)
+    }
+
     /// Opaque per-session content revision for sources whose sessions share one storage URL.
     /// `updatedMillis` comes from the lightweight session row; `extent` catches
     /// same-timestamp message-count changes.
@@ -61,17 +73,23 @@ actor SearchIngestService {
         /// nil preserves the path-identified behavior used by ordinary transcript files.
         let sessionID: String?
         let contentRevision: ContentRevision?
+        /// Directory-artifact manifest revision for sources whose logical session is a
+        /// directory (see `SessionSourceDescriptor.artifactRevision`). nil preserves the
+        /// path-identified behavior used by ordinary transcript files.
+        let manifestRevision: String?
 
         init(path: String,
              mtime: Int64,
              size: Int64,
              sessionID: String? = nil,
-             contentRevision: ContentRevision? = nil) {
+             contentRevision: ContentRevision? = nil,
+             manifestRevision: String? = nil) {
             self.path = path
             self.mtime = mtime
             self.size = size
             self.sessionID = sessionID
             self.contentRevision = contentRevision
+            self.manifestRevision = manifestRevision
         }
 
         var searchMtime: Int64 { contentRevision?.updatedMillis ?? mtime }
@@ -85,6 +103,20 @@ actor SearchIngestService {
         let processed: Int
         let total: Int
         let skipped: Int
+        /// Anchors whose directory-artifact revision no longer matches the FileRef
+        /// (successor selected, or resolution failed). Deterministic in input order.
+        /// Stale anchors are counted in `skipped`, never in `processed`.
+        let staleAnchorPaths: [String]
+
+        init(processed: Int,
+             total: Int,
+             skipped: Int,
+             staleAnchorPaths: [String] = []) {
+            self.processed = processed
+            self.total = total
+            self.skipped = skipped
+            self.staleAnchorPaths = staleAnchorPaths
+        }
     }
 
     /// Cheap per-source aggregate of an incoming `[FileRef]` list, used to detect
@@ -99,6 +131,9 @@ actor SearchIngestService {
             let size: Int64
             let sessionID: String?
             let contentRevision: ContentRevision?
+            /// Participates so a sibling/successor manifest change cannot early-out as
+            /// "identical aggregate" while the selected generation moved underneath it.
+            let manifestRevision: String?
         }
 
         /// Preserve the caller's complete ordered input. In particular, a shared-DB
@@ -108,20 +143,29 @@ actor SearchIngestService {
         /// nil is a failed provider read, while an empty/non-empty value is authoritative.
         /// That distinction must participate in the early-out just like the file refs.
         let identitySnapshot: IdentitySnapshot?
+        /// Path-backed live authority. `.notApplicable` (ordinary sources without the
+        /// capability) ignores the seam entirely; `.unknown` vs `.authoritative`
+        /// (empty allowed) must bust the early-out exactly like the identity seam.
+        let livePathAuthority: LivePathAuthority
         // Included so toggling the tool-IO preference between calls (same files,
         // same mtimes/sizes) busts the early-out and falls through to the real
         // per-file gate, which is what actually backfills the missing toolIO rows.
         let toolIOEnabled: Bool
 
-        init(files: [FileRef], identitySnapshot: IdentitySnapshot?, toolIOEnabled: Bool) {
+        init(files: [FileRef],
+             identitySnapshot: IdentitySnapshot?,
+             livePathAuthority: LivePathAuthority,
+             toolIOEnabled: Bool) {
             self.files = files.map { file in
                 FileIdentity(path: file.path,
                              mtime: file.mtime,
                              size: file.size,
                              sessionID: file.sessionID,
-                             contentRevision: file.contentRevision)
+                             contentRevision: file.contentRevision,
+                             manifestRevision: file.manifestRevision)
             }
             self.identitySnapshot = identitySnapshot
+            self.livePathAuthority = livePathAuthority
             self.toolIOEnabled = toolIOEnabled
         }
     }
@@ -143,7 +187,8 @@ actor SearchIngestService {
     /// `descriptor.logicalFileStat` contributes its logical unit stat, so companion-only
     /// writes re-ingest and stay FTS-current; identity-backed storage (shared databases)
     /// carries the session ID and a content revision instead of relying on the file stat.
-    nonisolated static func fileRefs(for sessions: [Session]) -> [FileRef] {
+    nonisolated static func fileRefs(for sessions: [Session],
+                                     isArchivedPrimary: (Session) -> Bool = { _ in false }) -> [FileRef] {
         sessions.compactMap { session -> FileRef? in
             // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
             // transcript) have no content for CursorSessionParser.parseFileFull to
@@ -154,6 +199,27 @@ actor SearchIngestService {
             if session.isCursorDatabaseOnly { return nil }
             let url = URL(fileURLWithPath: session.filePath)
             let descriptor = SessionSourceDescriptorCatalog.descriptor(for: session.source)
+            // A source declaring `artifactRevision` anchors the FileRef to the currently
+            // selected revision (path/mtime/size) and carries the manifest revision; it
+            // never keeps an obsolete `Session.filePath` anchor, and an unresolvable
+            // artifact emits nothing.
+            if let resolveArtifact = descriptor.artifactRevision {
+                if let revision = resolveArtifact(url) {
+                    return FileRef(path: revision.selectedURL.path,
+                                   mtime: revision.physicalStat.mtime,
+                                   size: revision.physicalStat.size,
+                                   manifestRevision: revision.manifestRevision)
+                }
+                // A pinned DSH fallback points at the copied primary inside Agent
+                // Sessions' archive, outside the live canonical root. It is a stable
+                // standalone file and must still enter search after the live bundle
+                // disappears; physical stat is the correct archive revision. Whether a
+                // path is an archived primary is app state, so the caller supplies it.
+                guard session.source == .deepseekHarness,
+                      isArchivedPrimary(session),
+                      let stat = SessionFileStat.from(url) else { return nil }
+                return FileRef(path: url.path, mtime: stat.mtime, size: stat.size)
+            }
             guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
                 return nil
             }
@@ -245,8 +311,27 @@ actor SearchIngestService {
                 yieldNanoseconds: UInt64 = 40_000_000,
                 toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap,
                 quietSeconds: TimeInterval = 120,
-                reingestCooldownOverride: TimeInterval? = nil) async throws -> Progress {
+                reingestCooldownOverride: TimeInterval? = nil,
+                livePathAuthority: LivePathAuthority = .notApplicable) async throws -> Progress {
         let sourceRaw = source.rawValue
+        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
+
+        // Directory-artifact early-out guard: the remembered aggregate is keyed by the
+        // caller's anchor (selected path + manifest revision). If the directory has
+        // since selected a successor — or resolution now fails — the incoming anchor is
+        // stale and must reach the per-file gate below (which reports it with zero
+        // writes) rather than early-out as "unchanged". Ordinary files (nil
+        // manifestRevision) skip this entirely.
+        var artifactAnchorsCurrent = true
+        for file in files {
+            guard file.manifestRevision != nil else { continue }
+            guard let resolveArtifact = descriptor.artifactRevision,
+                  let current = resolveArtifact(URL(fileURLWithPath: file.path)),
+                  Self.artifactAnchorMatches(file: file, revision: current) else {
+                artifactAnchorsCurrent = false
+                break
+            }
+        }
 
         // Cheap early-out, before any of the per-source SQLite map reads below: if the
         // caller's freshly re-stat'd file list is aggregate-identical to what it was on
@@ -270,12 +355,14 @@ actor SearchIngestService {
         let noFileInDangerZone = files.allSatisfy { nowTS - $0.activityTimestamp >= widestGateWindow }
         let incomingAggregate = IngestAggregate(files: files,
                                                 identitySnapshot: identitySnapshot,
+                                                livePathAuthority: livePathAuthority,
                                                 toolIOEnabled: toolIOEnabled)
         // Rebuild Core Index advances this DB-backed token in the purge transaction.
         // A read failure disables the optimization for this pass; it is never treated
         // as a matching generation.
         let dbGenerationAtStart = try? await db.searchIngestGeneration(source: sourceRaw)
         if noFileInDangerZone,
+           artifactAnchorsCurrent,
            let lastClean = lastCleanAggregateBySource[sourceRaw],
            let dbGenerationAtStart,
            lastClean.dbGeneration == dbGenerationAtStart,
@@ -296,7 +383,6 @@ actor SearchIngestService {
             for row in rows { indexedByPath[row.path] = row }
         }
         let searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: sourceRaw)) ?? []
-        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
         let usesSessionIdentity = descriptor.parseFullByIdentity != nil
             && descriptor.searchUsesIdentityAtURL != nil
         let searchIdentityStatesBySessionID = usesSessionIdentity
@@ -334,10 +420,34 @@ actor SearchIngestService {
         var processed = 0
         var skipped = 0
         var hadIngestFailure = false
+        /// Deterministic (input-order) stale directory-artifact anchors seen this pass.
+        var staleAnchorPaths: [String] = []
+        /// Standardized selected paths committed by revision-aware ingests this pass.
+        var ingestedArtifactAnchors: Set<String> = []
         let total = files.count
 
         for (idx, file) in files.enumerated() {
             try Task.checkCancellation()
+
+            // Directory-artifact freshness gate, before the skip/quiet/cooldown gates
+            // below: those gates compare the anchor's own mtime/size and would report a
+            // superseded anchor as current. Resolve the live revision and require the
+            // anchor (selected path + manifest revision) to still match. A stale anchor
+            // is a distinct nonfatal outcome: zero writes, and it poisons the clean
+            // aggregate (via `hadIngestFailure`) so the refreshed anchor retries.
+            if file.manifestRevision != nil {
+                guard let resolveArtifact = descriptor.artifactRevision,
+                      let current = resolveArtifact(URL(fileURLWithPath: file.path)),
+                      Self.artifactAnchorMatches(file: file, revision: current) else {
+                    staleAnchorPaths.append(file.path)
+                    skipped += 1
+                    hadIngestFailure = true
+                    if idx < files.count - 1 {
+                        try? await Task.sleep(nanoseconds: yieldNanoseconds)
+                    }
+                    continue
+                }
+            }
 
             let pathIsCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
             let identityIsCurrent = file.sessionID.flatMap { id in
@@ -441,9 +551,17 @@ actor SearchIngestService {
 
             let didIngest = await ingestFile(file, source: source, sourceRaw: sourceRaw,
                                               toolIOEnabled: toolIOEnabled, toolIOCutoffTS: toolIOCutoffTS)
-            if didIngest {
+            switch didIngest {
+            case .ingested(let selectedPath):
                 processed += 1
-            } else {
+                if file.manifestRevision != nil {
+                    ingestedArtifactAnchors.insert(Self.standardizedPath(selectedPath))
+                }
+            case .parseFailed:
+                skipped += 1
+                hadIngestFailure = true
+            case .staleAnchor:
+                staleAnchorPaths.append(file.path)
                 skipped += 1
                 hadIngestFailure = true
             }
@@ -451,6 +569,34 @@ actor SearchIngestService {
             if idx < files.count - 1 {
                 try Task.checkCancellation()
                 try? await Task.sleep(nanoseconds: yieldNanoseconds)
+            }
+        }
+
+        // Directory-artifact supersession cleanup: committing a new selected generation
+        // leaves the superseded anchor's `files` row orphaned (same logical session, new
+        // physical path; `session_meta`/`session_search` were already re-keyed by the
+        // upserts above). Delete exactly those stored rows that resolve to a
+        // just-committed anchor without being that anchor. Runs only when this pass
+        // committed at least one revision-aware ingest, so a purely stale pass still
+        // performs zero writes. Fail-closed: unresolvable stored paths are kept —
+        // ordinary missing-file cleanup owns them. `deleteSessionsForPaths` is safe here
+        // because each deleted path's `session_meta` row already points at the new
+        // anchor, so its meta-joined arms match nothing and only the orphaned `files`
+        // row goes away.
+        if !ingestedArtifactAnchors.isEmpty, let resolveArtifact = descriptor.artifactRevision {
+            do {
+                var superseded: [String] = []
+                for storedPath in indexedByPath.keys {
+                    guard !ingestedArtifactAnchors.contains(Self.standardizedPath(storedPath)) else { continue }
+                    guard let current = resolveArtifact(URL(fileURLWithPath: storedPath)),
+                          ingestedArtifactAnchors.contains(Self.standardizedPath(current.selectedURL.path)) else { continue }
+                    superseded.append(storedPath)
+                }
+                if !superseded.isEmpty {
+                    _ = try await db.deleteSessionsForPaths(source: sourceRaw, paths: superseded)
+                }
+            } catch {
+                hadIngestFailure = true
             }
         }
 
@@ -513,6 +659,41 @@ actor SearchIngestService {
             }
         }
 
+        // Path-backed live authority: persists only the explicitly authoritative live
+        // path set for this source in index_state, analogous to identity storage
+        // ownership. On an authoritative pass, stale previously-owned live paths are
+        // deleted via the existing transactional `deleteSessionsForPaths` path. Never
+        // infer ownership from arbitrary files/session_meta rows: archive FileRefs
+        // are ingested as ordinary files above but are never members of the
+        // authoritative live set, so an archive row whose current meta path is an
+        // archive path survives removal of its old live path (the meta-joined
+        // deletes match nothing; only the orphaned live `files` row goes away).
+        // On unknown authority, preserve state and delete nothing. A failed/stale
+        // pass (any parse failure or stale anchor) also preserves and deletes
+        // nothing, keeping the directory-artifact zero-write contract: cleanup waits
+        // for a fully clean pass. Identity-backed behavior is unchanged.
+        switch livePathAuthority {
+        case .notApplicable:
+            break
+        case .unknown:
+            // An unknown provider-live read cannot authorize deletion or retirement.
+            // Keep retrying: remembering this aggregate as clean would strand the
+            // persisted corpus indefinitely.
+            hadIngestFailure = true
+        case .authoritative(let livePaths):
+            if hadIngestFailure {
+                break
+            }
+            do {
+                try await db.reconcileSearchLivePaths(
+                    source: sourceRaw,
+                    currentPaths: livePaths
+                )
+            } catch {
+                hadIngestFailure = true
+            }
+        }
+
         // Reaching here means the pass ran to completion (no throw/cancellation
         // propagated out of the loop above) — safe to remember this source's
         // aggregate as the early-out baseline for the next kick.
@@ -528,27 +709,60 @@ actor SearchIngestService {
             lastCleanAggregateBySource[sourceRaw] = nil
         }
 
-        return Progress(processed: processed, total: total, skipped: skipped)
+        return Progress(processed: processed, total: total, skipped: skipped,
+                          staleAnchorPaths: staleAnchorPaths)
     }
 
     // MARK: - Per-file ingest
 
+    /// Outcome of one file's ingest attempt. A stale directory-artifact anchor stays
+    /// distinct from a parse failure: both skip, but only staleness reports an anchor
+    /// — and neither is ever remembered as a clean aggregate.
+    private enum IngestFileOutcome {
+        case ingested(selectedPath: String)
+        case parseFailed
+        case staleAnchor
+    }
+
+    /// Directory-artifact anchor comparison: the FileRef's selected path and manifest
+    /// revision must both match the live resolution. Any resolver failure is a
+    /// mismatch — never authorization to write.
+    private static func artifactAnchorMatches(file: FileRef, revision: SessionArtifactRevision) -> Bool {
+        guard file.manifestRevision == revision.manifestRevision else { return false }
+        return standardizedPath(file.path) == standardizedPath(revision.selectedURL.path)
+    }
+
+    private static func standardizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
     /// Full-parses one file, builds search text, and upserts everything in a single
     /// transaction. Parsed session lifetime is scoped to this call: it is released once
-    /// the function returns. Returns true if the file was ingested, false if parsing failed
-    /// (in which case the file is counted as skipped rather than processed).
+    /// the function returns. `.ingested` carries the written session path; `.parseFailed`
+    /// and `.staleAnchor` both count as skipped rather than processed.
     private func ingestFile(_ file: FileRef,
                              source: SessionSource,
                              sourceRaw: String,
                              toolIOEnabled: Bool,
-                             toolIOCutoffTS: Int64) async -> Bool {
+                             toolIOCutoffTS: Int64) async -> IngestFileOutcome {
         let url = URL(fileURLWithPath: file.path)
         let _span = Perf.begin("searchIngestFile", thresholdMs: 200, "path=\(url.lastPathComponent)")
         defer { Perf.end(_span) }
 
         guard let session = Self.parseFileFull(url: url,
                                                source: source,
-                                               sessionID: file.sessionID) else { return false }
+                                               sessionID: file.sessionID) else { return .parseFailed }
+
+        // Post-parse anchor revalidation: the parse above is arbitrarily expensive, and
+        // a successor generation may have been selected while it ran. Resolve again and
+        // require the same exact anchor BEFORE any db.begin/upsert/write below.
+        if file.manifestRevision != nil {
+            guard let resolveArtifact = SessionSourceDescriptorCatalog.descriptor(for: source).artifactRevision,
+                  let current = resolveArtifact(url),
+                  Self.artifactAnchorMatches(file: file, revision: current) else {
+                return .staleAnchor
+            }
+        }
 
         let times = session.events.compactMap { $0.timestamp }
         let start = session.startTime ?? times.min() ?? Date(timeIntervalSince1970: TimeInterval(file.mtime))
@@ -622,10 +836,10 @@ actor SearchIngestService {
                                                  text: toolIOText)
             }
             try await db.commit()
-            return true
+            return .ingested(selectedPath: session.filePath)
         } catch {
             await db.rollbackSilently()
-            return false
+            return .parseFailed
         }
     }
 

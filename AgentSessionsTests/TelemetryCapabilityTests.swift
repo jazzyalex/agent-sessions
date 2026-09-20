@@ -9,7 +9,7 @@ import XCTest
 final class TelemetryCapabilityTests: XCTestCase {
 
     func testEverySourceDeclaresCapabilities() {
-        XCTAssertEqual(SessionSource.allCases.count, 16,
+        XCTAssertEqual(SessionSource.allCases.count, 17,
                        "A source was added or removed — update the telemetry capability table too")
         for source in SessionSource.allCases {
             _ = SessionSourceRegistry.descriptor(for: source).telemetry

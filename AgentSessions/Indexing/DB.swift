@@ -778,6 +778,10 @@ actor IndexDB {
         "search_identity_storage_paths:\(source)"
     }
 
+    private func searchLivePathsStateKey(source: String) -> String {
+        "search_live_paths:\(source)"
+    }
+
     private func searchIngestGenerationStateKey(source: String) -> String {
         "search_ingest_generation:\(source)"
     }
@@ -819,6 +823,51 @@ actor IndexDB {
             throw DBError.execFailed("encode search identity storage paths")
         }
         try setIndexState(key: searchIdentityStoragePathsStateKey(source: source), value: value)
+    }
+
+    /// Live paths that the last authoritative path-backed pass explicitly owned.
+    /// Values originate only from the provider's authoritative live-path snapshot;
+    /// callers must not seed this from arbitrary persisted metadata or file rows.
+    /// Absent state reads as unowned (empty), matching the identity seam.
+    func searchLivePaths(source: String) throws -> Set<String> {
+        let key = searchLivePathsStateKey(source: source)
+        guard let value = try indexStateValue(for: key) else { return [] }
+        guard let data = value.data(using: .utf8) else {
+            throw DBError.execFailed("decode search live paths")
+        }
+        return Set(try JSONDecoder().decode([String].self, from: data))
+    }
+
+    private func setSearchLivePaths(source: String, paths: Set<String>) throws {
+        let data = try JSONEncoder().encode(paths.sorted())
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw DBError.execFailed("encode search live paths")
+        }
+        try setIndexState(key: searchLivePathsStateKey(source: source), value: value)
+    }
+
+    /// Reconcile path-backed rows against the explicitly authoritative live set.
+    /// The previous ownership set is part of the same transaction as the stale-path
+    /// deletion and the new ownership marker, so a failed cleanup never advances
+    /// authority and a retry still sees every path that needs reconciliation.
+    /// Stale previously-owned live paths go through the existing transactional
+    /// `deleteSessionsForPaths` path: its meta-joined deletes match nothing for a
+    /// session whose current meta path is an archive path, so archive rows survive
+    /// removal of their old live path while the orphaned live `files` row goes away.
+    func reconcileSearchLivePaths(source: String, currentPaths: Set<String>) throws {
+        try begin()
+        do {
+            let previousPaths = try searchLivePaths(source: source)
+            let stale = previousPaths.subtracting(currentPaths).sorted()
+            if !stale.isEmpty {
+                _ = try deleteSessionsForPaths(source: source, paths: stale)
+            }
+            try setSearchLivePaths(source: source, paths: currentPaths)
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
     }
 
     /// Fetch indexed file records for a source from the files table.
@@ -1555,6 +1604,9 @@ actor IndexDB {
             try Self.execBind(handle,
                               "DELETE FROM index_state WHERE key = ?;",
                               searchIdentityStoragePathsStateKey(source: source))
+            try Self.execBind(handle,
+                              "DELETE FROM index_state WHERE key = ?;",
+                              searchLivePathsStateKey(source: source))
             try advanceSearchIngestGeneration(source: source)
             try commit()
         } catch {

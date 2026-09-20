@@ -13,12 +13,20 @@ of the file's absolute path, which differs per checkout and per container mount.
 import argparse
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 FIXTURES = REPO / "Resources/Fixtures/stage0/agents"
 GOLDEN = REPO / "Resources/Fixtures/stage0/as-core-contract.json"
+
+# DeepSeek Harness fixtures live with the tests and use descriptive names, while the parser
+# only accepts canonical generation names (session.jsonl, session.v1.jsonl, .jsonl.zstd for
+# the compressed form). Each is parsed through a temporary copy under its canonical name;
+# plain and zstd of the same generation must agree, which also covers the bundled libzstd.
+DSH_FIXTURES = REPO / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
 
 # Fixture directory -> source name. `gemini` holds Antigravity's Gemini-CLI layout.
 DIR_TO_SOURCE = {"gemini": "antigravity"}
@@ -51,6 +59,27 @@ def collect(binary: str) -> dict:
         if source not in sources:
             continue
         results[str(path.relative_to(REPO))] = parse(binary, source, path)
+    results.update(collect_deepseek(binary, sources))
+    return results
+
+
+def collect_deepseek(binary: str, sources: set) -> dict:
+    if "deepseek-harness" not in sources or not DSH_FIXTURES.is_dir():
+        return {}
+    results = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for path in sorted(DSH_FIXTURES.glob("v[0-3]_minimal_session.jsonl*")):
+            generation = int(path.name[1])
+            canonical = "session" if generation == 0 else f"session.v{generation}"
+            suffix = ".jsonl.zstd" if path.name.endswith(".zstd") else ".jsonl"
+            target_dir = pathlib.Path(tmp) / path.name
+            target_dir.mkdir()
+            target = target_dir / (canonical + suffix)
+            shutil.copy(path, target)
+            row = parse(binary, "deepseek-harness", target)
+            if "error" in row:
+                row = {"error": row["error"].replace(str(target), path.name)}
+            results[str(path.relative_to(REPO))] = row
     return results
 
 

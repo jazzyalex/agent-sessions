@@ -8,9 +8,14 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Select and verify Xcode toolchain
+        shell: bash
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          python3 scripts/check_xcode_version.py
       - name: Deploy docs drift guard
         shell: bash
         run: scripts/check_deploy_drift.sh
@@ -22,11 +27,11 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_validate_localization_catalogs
           python3 scripts/validate_localization_catalogs.py
-      - name: Xcode version
-        run: xcodebuild -version
       - name: Build (macOS, no signing)
         shell: bash
         run: |
+          # Keep this build and the extraction gate in sync with
+          # tools/release/deploy qa and docs/release/pre-release-qa.md.
           set -o pipefail
           xcodebuild \
             -project AgentSessions.xcodeproj \
@@ -46,12 +51,15 @@ jobs:
   # which avoids the intermittent nested-code-signature failures described in
   # agents.md → Tests. `clean` is omitted: the runner is already fresh.
   test:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Xcode version
-        run: xcodebuild -version
+      - uses: actions/checkout@v7
+      - name: Select and verify Xcode toolchain
+        shell: bash
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          python3 scripts/check_xcode_version.py
       - name: Test (macOS, no signing)
         shell: bash
         run: |
