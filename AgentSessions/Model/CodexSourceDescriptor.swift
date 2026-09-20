@@ -39,6 +39,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in CodexSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in CodexSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.codexSessionsRootOverride)) },
+            parseLightweightByPath: { CodexSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

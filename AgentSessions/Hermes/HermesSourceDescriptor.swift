@@ -38,6 +38,13 @@ extension SessionSourceDescriptor {
                 return HermesStateDBReader.loadFullSession(dbURL: url, sessionID: sessionID)
             },
             searchUsesIdentityAtURL: { $0.pathExtension.lowercased() == "db" },
+            makeDiscovery: { ctx in HermesSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.hermesSessionsRootOverride),
+                                       fileProbe: ctx.fileProbe,
+                                       homeDirectory: ctx.homeDirectory) },
+            parseLightweightByPath: { HermesSessionParser.parseFile(at: $0) },
+            listDatabaseSessions: { ctx in HermesStateDBReader.listSessions(dbURL: HermesSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.hermesSessionsRootOverride),
+                                                                  fileProbe: ctx.fileProbe,
+                                                                  homeDirectory: ctx.homeDirectory).stateDBURL()) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

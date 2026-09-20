@@ -55,6 +55,11 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in ClineSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in ClineSessionDiscovery(customRoot: ctx.customRoot(ClinePreferencesKey.sessionsRootOverride),
+                                      fileProbe: ctx.fileProbe,
+                                      homeDirectory: ctx.homeDirectory,
+                                      environment: ctx.environment) },
+            parseLightweightByPath: { ClineSessionParser.parseFile(at: $0) },
             logicalFileStat: { ClineSessionDiscovery.logicalFileStat(forManifest: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in

@@ -31,6 +31,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in GrokSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in GrokSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.grokSessionsRootOverride)) },
+            parseLightweightByPath: { GrokSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

@@ -30,6 +30,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in AntigravitySessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in AntigravitySessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.antigravitySessionsRootOverride)) },
+            parseLightweightByPath: { AntigravitySessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

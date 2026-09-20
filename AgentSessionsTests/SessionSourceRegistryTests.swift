@@ -19,6 +19,17 @@ final class SessionSourceRegistryTests: XCTestCase {
         XCTAssertEqual(SessionSourceRegistry.ordered.map(\.descriptor.source), SessionSource.allCases)
     }
 
+    /// Headless hosts (the `as-core` CLI) enumerate sessions through the descriptor, so a
+    /// source that declares neither a discovery nor a database listing is invisible there.
+    func testEveryDescriptorCanEnumerateItsSessions() {
+        for descriptor in SessionSourceDescriptorCatalog.ordered {
+            XCTAssertTrue(descriptor.makeDiscovery != nil || descriptor.listDatabaseSessions != nil,
+                          "\(descriptor.source) needs makeDiscovery or listDatabaseSessions")
+            XCTAssertTrue(descriptor.parseLightweightByPath != nil || descriptor.listDatabaseSessions != nil,
+                          "\(descriptor.source) needs parseLightweightByPath or listDatabaseSessions")
+        }
+    }
+
     /// The app registry and the UI-free descriptor catalog (shared with the Linux core) are
     /// two hand lists; a source added to one but not the other must fail here.
     func testRegistryMatchesDescriptorCatalog() {

@@ -210,6 +210,17 @@ struct SessionSourceDescriptor {
     /// a shared SQLite database.
     let searchUsesIdentityAtURL: ((URL) -> Bool)?
 
+    // MARK: Session enumeration
+
+    /// Builds this source's discovery for a context, so any host (the app's indexers, the
+    /// headless CLI) enumerates transcripts the same way. nil only for a source whose
+    /// sessions exist solely as database rows.
+    let makeDiscovery: ((AvailabilityContext) -> any SessionDiscovery)?
+    /// Metadata-only parse of one transcript file — what the app's list uses at launch.
+    let parseLightweightByPath: ((URL) -> Session?)?
+    /// Lightweight rows for sessions stored inside a shared database.
+    let listDatabaseSessions: ((AvailabilityContext) -> [Session])?
+
     // MARK: Pair-aware freshness
 
     /// Logical freshness stat for a session's primary file URL. nil (the default) stats
@@ -246,6 +257,9 @@ struct SessionSourceDescriptor {
          parseFullByPath: ((URL) -> Session?)?,
          parseFullByIdentity: ((URL, String) -> Session?)?,
          searchUsesIdentityAtURL: ((URL) -> Bool)?,
+         makeDiscovery: ((AvailabilityContext) -> any SessionDiscovery)? = nil,
+         parseLightweightByPath: ((URL) -> Session?)? = nil,
+         listDatabaseSessions: ((AvailabilityContext) -> [Session])? = nil,
          logicalFileStat: ((URL) -> SessionFileStat?)? = nil,
          archive: ArchiveCapability?,
          supportsResume: Bool,
@@ -265,6 +279,9 @@ struct SessionSourceDescriptor {
         self.parseFullByPath = parseFullByPath
         self.parseFullByIdentity = parseFullByIdentity
         self.searchUsesIdentityAtURL = searchUsesIdentityAtURL
+        self.makeDiscovery = makeDiscovery
+        self.parseLightweightByPath = parseLightweightByPath
+        self.listDatabaseSessions = listDatabaseSessions
         self.logicalFileStat = logicalFileStat
         self.archive = archive
         self.supportsResume = supportsResume

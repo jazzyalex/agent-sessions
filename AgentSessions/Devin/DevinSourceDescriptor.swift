@@ -48,6 +48,9 @@ extension SessionSourceDescriptor {
             searchUsesIdentityAtURL: { $0.pathExtension.lowercased() == "db" },
             // Archiving is a no-op: sessions are rows in a shared database,
             // so there is nothing per-session to copy out.
+            listDatabaseSessions: { ctx in DevinSqliteReader.listSessions(databasePath: DevinSessionDiscovery(customRoot: ctx.customRoot(DevinPreferencesKey.sessionsRootOverride),
+                                                                      fileProbe: ctx.fileProbe,
+                                                                      homeDirectory: ctx.homeDirectory).databaseURL().path) },
             archive: nil,
             supportsResume: true,
             resumeAgentLabel: "Devin CLI"

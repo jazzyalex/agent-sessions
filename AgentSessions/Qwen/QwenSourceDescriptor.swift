@@ -41,6 +41,10 @@ extension SessionSourceDescriptor {
             parseFullByPath: { QwenSessionParser.parseFileFull(at: $0) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in QwenSessionDiscovery(customRoot: ctx.customRoot(QwenPreferencesKey.sessionsRootOverride),
+                                     homeDirectory: ctx.homeDirectory,
+                                     environment: ctx.environment) },
+            parseLightweightByPath: { QwenSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     let value = defaults.string(forKey: QwenPreferencesKey.sessionsRootOverride)

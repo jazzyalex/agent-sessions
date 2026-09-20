@@ -36,6 +36,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in CopilotSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in CopilotSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.copilotSessionsRootOverride)) },
+            parseLightweightByPath: { CopilotSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

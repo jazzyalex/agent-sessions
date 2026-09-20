@@ -41,6 +41,10 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in ClaudeSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in ClaudeSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.claudeSessionsRootOverride),
+                                       fileProbe: ctx.fileProbe,
+                                       homeDirectory: ctx.homeDirectory) },
+            parseLightweightByPath: { ClaudeSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

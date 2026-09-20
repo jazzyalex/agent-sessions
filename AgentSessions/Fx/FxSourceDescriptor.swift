@@ -42,6 +42,10 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in FxSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in FxSessionDiscovery(customRoot: ctx.customRoot(FxPreferencesKey.sessionsRootOverride),
+                                   fileProbe: ctx.fileProbe,
+                                   homeDirectory: ctx.homeDirectory) },
+            parseLightweightByPath: { FxSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

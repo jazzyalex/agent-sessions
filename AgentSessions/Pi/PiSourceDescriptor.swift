@@ -34,6 +34,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in PiSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in PiSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.piSessionsRootOverride)) },
+            parseLightweightByPath: { PiSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

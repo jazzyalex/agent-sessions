@@ -33,6 +33,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in OpenClawSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in OpenClawSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.openClawSessionsRootOverride)) },
+            parseLightweightByPath: { OpenClawSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

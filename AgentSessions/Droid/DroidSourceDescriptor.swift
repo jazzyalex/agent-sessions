@@ -38,6 +38,9 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in DroidSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in DroidSessionDiscovery(customSessionsRoot: ctx.customRoot(PreferencesKey.Paths.droidSessionsRootOverride),
+                                      customProjectsRoot: ctx.customRoot(PreferencesKey.Paths.droidProjectsRootOverride)) },
+            parseLightweightByPath: { DroidSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

@@ -29,6 +29,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in CursorSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in CursorSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.cursorSessionsRootOverride)) },
+            parseLightweightByPath: { CursorSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

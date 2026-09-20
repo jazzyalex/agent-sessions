@@ -26,6 +26,8 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in KimiSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in KimiSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.kimiSessionsRootOverride)) },
+            parseLightweightByPath: { KimiSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]

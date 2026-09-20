@@ -38,6 +38,17 @@ extension SessionSourceDescriptor {
                 return OpenCodeSqliteReader.loadFullSession(customRoot: url.path, sessionID: sessionID)
             },
             searchUsesIdentityAtURL: { $0.lastPathComponent == "opencode.db" },
+            makeDiscovery: { ctx in OpenCodeSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.opencodeSessionsRootOverride),
+                                         fileProbe: ctx.fileProbe,
+                                         homeDirectory: ctx.homeDirectory) },
+            parseLightweightByPath: { OpenCodeSessionParser.parseFile(at: $0) },
+            listDatabaseSessions: { ctx in {
+                let custom = ctx.customRoot(PreferencesKey.Paths.opencodeSessionsRootOverride)
+                guard OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom,
+                                                               fileProbe: ctx.fileProbe,
+                                                               homeDirectory: ctx.homeDirectory) else { return [] }
+                return OpenCodeSqliteReader.listSessions(customRoot: custom)
+            }() },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
