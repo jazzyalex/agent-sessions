@@ -13,6 +13,25 @@ final class CopilotTerminalLauncher: CopilotTerminalLaunching {
 }
 
 @MainActor
+final class CopilotSelectedTerminalLauncher: CopilotTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: CopilotResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "CopilotTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class CopilotITermLauncher: CopilotTerminalLaunching {
     func launchInTerminal(_ package: CopilotResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "CopilotITermLauncher")

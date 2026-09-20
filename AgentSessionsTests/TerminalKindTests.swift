@@ -35,6 +35,36 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(kind, .terminalApp)
     }
 
+    func testInferGhosttyFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: nil, cfBundleIdentifier: "com.mitchellh.ghostty")
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testInferGhosttyFromTermProgram() {
+        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: nil)
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testInferKittyFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: nil, cfBundleIdentifier: "net.kovidgoyal.kitty")
+        XCTAssertEqual(kind, .kitty)
+    }
+
+    func testInferKittyFromTermProgram() {
+        let kind = TerminalKind.infer(termProgram: "kitty", cfBundleIdentifier: nil)
+        XCTAssertEqual(kind, .kitty)
+    }
+
+    func testInferWezTermFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: nil, cfBundleIdentifier: "com.github.wez.wezterm")
+        XCTAssertEqual(kind, .wezTerm)
+    }
+
+    func testInferWezTermFromTermProgram() {
+        let kind = TerminalKind.infer(termProgram: "WezTerm", cfBundleIdentifier: nil)
+        XCTAssertEqual(kind, .wezTerm)
+    }
+
     func testInferUnknownWhenBothNil() {
         let kind = TerminalKind.infer(termProgram: nil, cfBundleIdentifier: nil)
         XCTAssertEqual(kind, .unknown)
@@ -48,6 +78,103 @@ final class TerminalKindTests: XCTestCase {
 
     func testWarpStableBundleIdentifierMatchesInstalledApp() {
         XCTAssertEqual(TerminalKind.warp.bundleIdentifier, "dev.warp.Warp-Stable")
+    }
+
+    func testGhosttyBundleIdentifierMatchesInstalledApp() {
+        XCTAssertEqual(TerminalKind.ghostty.bundleIdentifier, "com.mitchellh.ghostty")
+    }
+
+    func testKittyBundleIdentifierMatchesInstalledApp() {
+        XCTAssertEqual(TerminalKind.kitty.bundleIdentifier, "net.kovidgoyal.kitty")
+    }
+
+    func testWezTermBundleIdentifierMatchesInstalledApp() {
+        XCTAssertEqual(TerminalKind.wezTerm.bundleIdentifier, "com.github.wez.wezterm")
+    }
+
+    func testInstalledTerminalKindsIncludesOnlyInstalledChoices() {
+        let installed = Set(["com.apple.Terminal", "com.mitchellh.ghostty"])
+
+        let kinds = installedTerminalKinds { installed.contains($0) }
+
+        XCTAssertEqual(kinds, [.terminalApp, .ghostty])
+    }
+
+    func testInstalledTerminalKindsConsidersEverySupportedKind() {
+        let expected = Set(TerminalKind.allCases.filter { $0.bundleIdentifier != nil })
+
+        let kinds = installedTerminalKinds { _ in true }
+
+        XCTAssertEqual(Set(kinds), expected)
+    }
+
+    func testInstalledTerminalKindsIncludesInstalledKitty() {
+        let installed = Set(["net.kovidgoyal.kitty"])
+
+        let names = installedTerminalKinds { installed.contains($0) }.map(\.displayName)
+
+        XCTAssertEqual(names, ["Kitty"])
+    }
+
+    func testInstalledTerminalKindsIncludesInstalledWezTerm() {
+        let installed = Set(["com.github.wez.wezterm"])
+
+        let names = installedTerminalKinds { installed.contains($0) }.map(\.displayName)
+
+        XCTAssertEqual(names, ["WezTerm"])
+    }
+
+    func testGhosttyColdStartSendsCompleteResumeCommandAsInitialInput() {
+        let command = #"'/opt/homebrew/bin/codex' resume 'session id' && printf '%s' 'quoted value'"#
+
+        let initialInput = AgentTerminalLauncher.ghosttyInitialInput(command)
+
+        XCTAssertEqual(initialInput, "\(command)\n")
+    }
+
+    func testGhosttySurfaceCommandQuotesTheCompleteResumeCommand() {
+        let command = #"'/opt/homebrew/bin/codex' resume 'session id' && printf '%s' 'quoted value'"#
+
+        let surfaceCommand = AgentTerminalLauncher.ghosttySurfaceCommand(command)
+
+        XCTAssertEqual(surfaceCommand, "/bin/zsh -lc \(ShellQuoting.quote(command))")
+    }
+
+    func testKittyArgumentsReuseAgentSessionsInstanceAndPreserveCommand() {
+        let command = #"'/opt/homebrew/bin/pi' --session 'session id'"#
+
+        let arguments = AgentTerminalLauncher.kittyArguments(
+            shellCommand: command,
+            cwd: "/Users/test/Project With Spaces"
+        )
+
+        XCTAssertEqual(arguments, [
+            "--single-instance",
+            "--instance-group=agent-sessions",
+            "--directory=/Users/test/Project With Spaces",
+            "/bin/zsh",
+            "-lc",
+            command
+        ])
+    }
+
+    func testWezTermArgumentsOpenNewWindowAndPreserveCommand() {
+        let command = #"'/opt/homebrew/bin/codex' resume 'session id'"#
+
+        let arguments = AgentTerminalLauncher.wezTermArguments(
+            shellCommand: command,
+            cwd: "/Users/test/Project With Spaces"
+        )
+
+        XCTAssertEqual(arguments, [
+            "start",
+            "--cwd",
+            "/Users/test/Project With Spaces",
+            "--",
+            "/bin/zsh",
+            "-lc",
+            command
+        ])
     }
 
     // MARK: - Warp tab config TOML

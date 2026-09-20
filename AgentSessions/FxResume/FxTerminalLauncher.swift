@@ -13,6 +13,25 @@ final class FxTerminalLauncher: FxTerminalLaunching {
 }
 
 @MainActor
+final class FxSelectedTerminalLauncher: FxTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: FxResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "FxTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class FxITermLauncher: FxTerminalLaunching {
     func launchInTerminal(_ package: FxResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "FxITermLauncher")

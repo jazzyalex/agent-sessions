@@ -13,6 +13,25 @@ final class AntigravityTerminalLauncher: AntigravityTerminalLaunching {
 }
 
 @MainActor
+final class AntigravitySelectedTerminalLauncher: AntigravityTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: AntigravityResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "AntigravityTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class AntigravityITermLauncher: AntigravityTerminalLaunching {
     func launchInTerminal(_ package: AntigravityResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "AntigravityITermLauncher")

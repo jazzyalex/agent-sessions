@@ -13,6 +13,25 @@ final class OpenCodeTerminalLauncher: OpenCodeTerminalLaunching {
 }
 
 @MainActor
+final class OpenCodeSelectedTerminalLauncher: OpenCodeTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: OpenCodeResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "OpenCodeTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class OpenCodeITermLauncher: OpenCodeTerminalLaunching {
     func launchInTerminal(_ package: OpenCodeResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "OpenCodeITermLauncher")

@@ -13,6 +13,25 @@ final class PiTerminalLauncher: PiTerminalLaunching {
 }
 
 @MainActor
+final class PiSelectedTerminalLauncher: PiTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: PiResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "PiTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class PiITermLauncher: PiTerminalLaunching {
     func launchInTerminal(_ package: PiResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "PiITermLauncher")
