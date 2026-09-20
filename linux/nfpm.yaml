@@ -1,0 +1,26 @@
+# Package definition for the Linux console build (nfpm builds both .deb and .rpm from it).
+# ARCH and VERSION come from linux/package.sh; the built binaries are mounted at /stage.
+name: agent-sessions
+arch: ${ARCH}
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Agent Sessions maintainers <noreply@example.com>
+description: |
+  Browse, search, read and resume local coding-agent sessions from the terminal.
+  agent-sessions is the terminal UI; agent-sessions-core is its JSON engine, built
+  from the same parsers and search index as the macOS app.
+homepage: https://github.com/jazzyalex/agent-sessions
+license: MIT
+contents:
+  - src: /stage/agent-sessions
+    dst: /usr/bin/agent-sessions
+  - src: /stage/agent-sessions-core
+    dst: /usr/bin/agent-sessions-core
+  - src: /stage/README
+    dst: /usr/share/doc/agent-sessions/README
+overrides:
+  deb:
+    depends: [libc6, libstdc++6]
+  rpm:
+    depends: [glibc, libstdc++]

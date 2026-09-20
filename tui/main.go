@@ -49,6 +49,15 @@ type (
 		cmd ResumeCommand
 		err error
 	}
+	sourcesMsg struct {
+		sources []Source
+		err     error
+	}
+	// copyMsg carries a resume command fetched for the clipboard rather than for exec.
+	copyMsg struct {
+		cmd ResumeCommand
+		err error
+	}
 )
 
 // Each preview is a full parse in a separate as-core process, which can take seconds for
@@ -84,9 +93,10 @@ func newModel(core Core) model {
 	ti.Placeholder = "search sessions"
 	ti.Prompt = "/ "
 	return model{
-		core:     core,
-		search:   ti,
-		sources:  []string{"", "codex", "claude", "opencode", "copilot", "antigravity"},
+		core:   core,
+		search: ti,
+		// Replaced by the engine's own list once `sources` answers; "" means all.
+		sources:  []string{""},
 		cache:    map[string][]Event{},
 		status:   "loading…",
 		indexing: true,
@@ -97,7 +107,7 @@ func (m model) source() string { return m.sources[m.srcIdx] }
 
 func (m model) Init() tea.Cmd {
 	// Show what the index already has right away, then refresh it in the background.
-	return tea.Batch(m.loadRows(), m.runIndex())
+	return tea.Batch(m.loadRows(), m.runIndex(), m.loadSources())
 }
 
 func (m model) loadRows() tea.Cmd {
@@ -111,6 +121,14 @@ func (m model) loadRows() tea.Cmd {
 			rows, err = core.Search(query, source, listLimit)
 		}
 		return rowsMsg{rows: rows, query: query, err: err}
+	}
+}
+
+func (m model) loadSources() tea.Cmd {
+	core := m.core
+	return func() tea.Msg {
+		sources, err := core.Sources()
+		return sourcesMsg{sources: sources, err: err}
 	}
 }
 
@@ -262,6 +280,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("index up to date (%d updated)", processed)
 		return m, m.loadRows()
 
+	case sourcesMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		current := m.source()
+		m.sources = []string{""}
+		for _, s := range msg.sources {
+			m.sources = append(m.sources, s.Name)
+		}
+		m.srcIdx = 0
+		for i, name := range m.sources {
+			if name == current {
+				m.srcIdx = i
+			}
+		}
+		return m, nil
+
+	case copyMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		copyToClipboard(msg.cmd.Shell)
+		m.status = "copied: " + msg.cmd.Shell
+		return m, nil
+
 	case resumeMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -310,6 +355,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.srcIdx = (m.srcIdx + 1) % len(m.sources)
 			return m, m.loadRows()
+		case "y":
+			if len(m.rows) > 0 {
+				row, core := m.rows[m.cursor], m.core
+				return m, func() tea.Msg {
+					cmd, err := core.Resume(row)
+					return copyMsg{cmd: cmd, err: err}
+				}
+			}
+		case "Y":
+			if len(m.rows) > 0 {
+				path := m.rows[m.cursor].Path
+				copyToClipboard(path)
+				m.status = "copied path: " + path
+			}
 		case "o":
 			if len(m.rows) > 0 {
 				row, core := m.rows[m.cursor], m.core
@@ -433,7 +492,7 @@ func (m model) View() string {
 	if m.focus == focusSearch {
 		status = m.search.View()
 	}
-	footer := styleDim.Render("↑↓ move · enter/tab read · o open in agent · / search · esc clear · s source · r reindex · q quit")
+	footer := styleDim.Render("↑↓ move · enter/tab read · o open · y copy command · Y copy path · / search · s source · r reindex · q quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
 }
 

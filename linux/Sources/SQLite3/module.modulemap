@@ -1,5 +1,6 @@
 module SQLite3 [system] {
     header "shim.h"
-    link "sqlite3"
+    // No `link "sqlite3"`: the executable links libsqlite3.a explicitly (see Package.swift)
+    // so the binary has no libsqlite3.so.0 runtime dependency.
     export *
 }

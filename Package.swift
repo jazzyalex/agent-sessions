@@ -114,7 +114,10 @@ let package = Package(
             ],
             path: ".",
             sources: coreSources + ["cli/as-core/main.swift", "cli/as-core/Drivers.swift", "cli/as-core/Output.swift", "cli/as-core/Commands.swift", "cli/as-core/Resume.swift"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            // Link SQLite statically on Linux (libsqlite3-dev ships libsqlite3.a), so the
+            // released binary runs on distros without libsqlite3.so.0 installed.
+            linkerSettings: [.unsafeFlags(["-l:libsqlite3.a"], .when(platforms: [.linux]))]
         ),
     ]
 )

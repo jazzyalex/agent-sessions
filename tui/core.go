@@ -71,6 +71,12 @@ type ResumeCommand struct {
 	Cwd     *string `json:"cwd"`
 }
 
+// Source is one `sources` line.
+type Source struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+}
+
 // IndexResult is one `index` line.
 type IndexResult struct {
 	Source    string `json:"source"`
@@ -79,22 +85,31 @@ type IndexResult struct {
 	Error     string `json:"error"`
 }
 
-// findCore resolves the as-core binary: $AS_CORE, then next to this executable,
-// then $PATH.
+// coreNames are the engine's file names: packages install it as agent-sessions-core
+// (plain `as` and `as-core` would collide with binutils' assembler on $PATH), while the
+// tarball and local builds keep the short name.
+var coreNames = []string{"agent-sessions-core", "as-core"}
+
+// findCore resolves the engine binary: $AS_CORE, then next to this executable, then $PATH.
 func findCore() (string, error) {
 	if p := os.Getenv("AS_CORE"); p != "" {
 		return p, nil
 	}
 	if self, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(self), "as-core")
-		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-			return candidate, nil
+		for _, name := range coreNames {
+			candidate := filepath.Join(filepath.Dir(self), name)
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				return candidate, nil
+			}
 		}
 	}
-	if p, err := exec.LookPath("as-core"); err == nil {
-		return p, nil
+	for _, name := range coreNames {
+		if p, err := exec.LookPath(name); err == nil {
+			return p, nil
+		}
 	}
-	return "", fmt.Errorf("as-core not found: set $AS_CORE, put it next to this binary, or on $PATH")
+	return "", fmt.Errorf("%s not found: set $AS_CORE, put it next to this binary, or on $PATH",
+		strings.Join(coreNames, "/"))
 }
 
 type Core struct{ bin string }
@@ -150,6 +165,10 @@ func (c Core) List(source string, limit int) ([]SessionRow, error) {
 func (c Core) Search(query, source string, limit int) ([]SessionRow, error) {
 	args := append([]string{"search", query, "--limit", fmt.Sprint(limit)}, sourceArgs(source)...)
 	return run[SessionRow](c, args...)
+}
+
+func (c Core) Sources() ([]Source, error) {
+	return run[Source](c, "sources")
 }
 
 func (c Core) Index() ([]IndexResult, error) {

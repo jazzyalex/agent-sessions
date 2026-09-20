@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- **Experimental Linux console version.** `as` is a terminal UI to browse, search, read, and resume local Codex, Claude Code, OpenCode, Copilot CLI, and Antigravity sessions; `as-core` is the JSON engine behind it, built from the same Swift parsers and search index as the Mac app. Build with `linux/package.sh arm64|amd64`. Not yet distributed; the Mac app is unchanged.
+- **Experimental Linux console version.** `agent-sessions` is a terminal UI to browse, search, read, copy, and resume local sessions from all 15 supported agents; `agent-sessions-core` is the JSON engine behind it, built from the same Swift parsers and search index as the Mac app, with SQLite linked in. `linux/package.sh arm64|amd64` builds a tarball, `.deb`, and `.rpm`; `scripts/build_unsigned_dmg.sh` builds an unsigned Mac DMG for forks. Nothing is published yet, and the Mac app is unchanged.
 
 ### Improvements
 - **Large session libraries avoid redundant refresh work.** Live-presence lookup caching now retains a bounded large-library working set, and refresh completion no longer rebuilds the session table a second time after the published rows are already applied.
