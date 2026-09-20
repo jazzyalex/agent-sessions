@@ -159,11 +159,21 @@ func runSources() {
 // MARK: - Index commands
 
 func openIndex(_ options: Options) -> IndexDB {
-    do {
-        return try IndexDB(databaseURL: options.databaseURL)
-    } catch {
-        fail("cannot open index at \(options.databaseURL.path): \(error)", code: 1)
+    // Two processes creating a fresh database at once (the UI's first `list` and `index`)
+    // can get "database is locked" even with a busy timeout: SQLite refuses to wait when
+    // waiting could deadlock while the database is switched to WAL. It settles as soon as
+    // one process finishes creating the schema, so retry briefly, and only for that error.
+    var lastError: Error?
+    for _ in 0..<40 {
+        do {
+            return try IndexDB(databaseURL: options.databaseURL)
+        } catch {
+            lastError = error
+            guard "\(error)".contains("locked") else { break }
+            usleep(150_000)
+        }
     }
+    fail("cannot open index at \(options.databaseURL.path): \(lastError.map { "\($0)" } ?? "unknown error")", code: 1)
 }
 
 /// `index [--source s]`: full-parse new or changed files into the index, through the same

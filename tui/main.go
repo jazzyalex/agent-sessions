@@ -498,7 +498,37 @@ func (m model) View() string {
 
 func strPtr(s string) *string { return &s }
 
+const usage = `agent-sessions - browse, search, read and resume local coding-agent sessions
+
+usage: agent-sessions [--core-path | --help]
+
+keys:  up/down move   enter read   / search   esc clear   s source   r reindex
+       o open in agent   y copy resume command   Y copy path   q quit
+
+The engine (agent-sessions-core) is found next to this program, in ../libexec/agent-sessions
+or ../lib/agent-sessions, or on $PATH; $AS_CORE overrides. The index lives in
+$XDG_DATA_HOME/agent-sessions/index.db (default ~/.local/share).
+`
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--help", "-h":
+			fmt.Print(usage)
+			return
+		case "--core-path":
+			bin, err := findCore()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "as:", err)
+				os.Exit(1)
+			}
+			fmt.Println(bin)
+			return
+		default:
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
+	}
 	bin, err := findCore()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "as:", err)

@@ -39,14 +39,7 @@ cp "$core" "$stage/agent-sessions-core"
 docker run --rm ${platform_args[@]+"${platform_args[@]}"} -v "$stage:/stage" "$image" strip /stage/agent-sessions-core
 (cd "$repo/tui" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -buildvcs=false -trimpath -ldflags "-s -w" \
   -o "$stage/agent-sessions" .)
-cat > "$stage/README" <<'EOF'
-Agent Sessions for the terminal.
-  agent-sessions        browse, search, read, and resume local coding-agent sessions
-  agent-sessions-core   the JSON engine behind it; run it with no arguments for usage
-Keep both files in the same directory, or put both on $PATH. Nothing else is required:
-the Swift runtime and SQLite are linked in, so only glibc and libstdc++ are needed.
-The index lives in $XDG_DATA_HOME/agent-sessions/index.db (default ~/.local/share).
-EOF
+cp "$repo/linux/README.md" "$stage/README"
 tar -C "$repo/dist" -czf "$stage.tar.gz" "$(basename "$stage")"
 
 # .deb and .rpm via nfpm, cross-built here and run inside the Linux image (nfpm needs no

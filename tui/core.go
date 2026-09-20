@@ -90,17 +90,44 @@ type IndexResult struct {
 // tarball and local builds keep the short name.
 var coreNames = []string{"agent-sessions-core", "as-core"}
 
-// findCore resolves the engine binary: $AS_CORE, then next to this executable, then $PATH.
+// coreDirs lists where the engine may sit relative to the directory holding this
+// executable, most specific first. Packages keep it out of $PATH so users see a single
+// command: <prefix>/bin/agent-sessions with the engine in <prefix>/libexec/agent-sessions
+// (RPM, manual installs) or <prefix>/lib/agent-sessions (Debian). A tarball unpacked
+// anywhere keeps both files side by side.
+func coreDirs(exeDir string) []string {
+	prefix := filepath.Dir(exeDir)
+	return []string{
+		exeDir,
+		filepath.Join(prefix, "libexec", "agent-sessions"),
+		filepath.Join(prefix, "lib", "agent-sessions"),
+	}
+}
+
+// findCoreNear returns the first engine binary found in coreDirs(exeDir).
+func findCoreNear(exeDir string) (string, bool) {
+	for _, dir := range coreDirs(exeDir) {
+		for _, name := range coreNames {
+			candidate := filepath.Join(dir, name)
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
+}
+
+// findCore resolves the engine binary: $AS_CORE, then the locations above, then $PATH.
 func findCore() (string, error) {
 	if p := os.Getenv("AS_CORE"); p != "" {
 		return p, nil
 	}
 	if self, err := os.Executable(); err == nil {
-		for _, name := range coreNames {
-			candidate := filepath.Join(filepath.Dir(self), name)
-			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-				return candidate, nil
-			}
+		if resolved, err := filepath.EvalSymlinks(self); err == nil {
+			self = resolved
+		}
+		if p, ok := findCoreNear(filepath.Dir(self)); ok {
+			return p, nil
 		}
 	}
 	for _, name := range coreNames {
@@ -108,8 +135,8 @@ func findCore() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("%s not found: set $AS_CORE, put it next to this binary, or on $PATH",
-		strings.Join(coreNames, "/"))
+	return "", fmt.Errorf("agent-sessions-core not found: reinstall the package, set $AS_CORE, "+
+		"or keep it next to %s", filepath.Base(os.Args[0]))
 }
 
 type Core struct{ bin string }
