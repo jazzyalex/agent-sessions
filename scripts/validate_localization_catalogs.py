@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1402
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1438
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "fe79d5f9a017defb8362ce363f4d67ad3af76fe9592206f14d5b44ca9984c173"
+    "aef094c106d313fab2d301b382b8af053f320f1cb57c72b60a7c0996f0b3ac8e"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -63,6 +63,8 @@ PRESERVED_TERMS = (
     "GitHub",
     "Codex",
     "Claude",
+    "Cline",
+    "DeepSeek",
     "Copilot",
     "Antigravity",
     "Cursor",
@@ -120,9 +122,12 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "%lld%%",
     "(%lld%%)",
     "(%lld)",
+    "$CLINE_DATA_DIR/sessions, or ~/.cline/data/sessions",
+    "$DSH_HOME/sessions, or ~/.dsh/sessions",
     "/path/to/agent",
     "/path/to/agy",
     "/path/to/claude",
+    "/path/to/cline",
     "/path/to/codex",
     "/path/to/copilot",
     "/path/to/devin",
