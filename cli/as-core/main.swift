@@ -3,6 +3,7 @@ import Foundation
 // as-core: headless Agent Sessions core. Prints JSON, one object per line, on stdout;
 // logs go to stderr.
 //
+//   as-core sources                               sources this build can read
 //   as-core index  [--source s]...                build or refresh the search index
 //   as-core list   [--source s]... [--limit n]    newest indexed sessions
 //   as-core search <query> [--source s]... [--limit n]
@@ -21,11 +22,12 @@ redirectLogsToStderr()
 
 let arguments = CommandLine.arguments.dropFirst()
 guard let command = arguments.first else {
-    fail("usage: as-core <index|list|search|show|resume|parse|scan> [options]", code: 2)
+    fail("usage: as-core <sources|index|list|search|show|resume|parse|scan> [options]", code: 2)
 }
 let options = Options(arguments.dropFirst())
 
 switch command {
+case "sources": runSources()
 case "index": await runIndex(options)
 case "list": await runList(options)
 case "search": await runSearch(options)

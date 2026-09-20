@@ -82,11 +82,11 @@ func runParse(_ options: Options) {
 /// `scan [--source s] [--light]`: discover and parse without touching the index.
 func runScan(_ options: Options) {
     for d in options.sources {
-        if let rows = d.scanDatabase(options.light) {
-            for (locator, session) in rows { emit(sessionSummary(session, path: locator)) }
-            continue
+        for row in d.databaseSessions() {
+            let full = options.light ? row : d.loadByID(URL(fileURLWithPath: row.filePath), row.id)
+            emit(sessionSummary(full ?? row, path: "\(row.filePath)#\(row.id)"))
         }
-        for url in d.discovery().discoverSessionFiles().sorted(by: { $0.path < $1.path }) {
+        for url in d.discoverFiles().sorted(by: { $0.path < $1.path }) {
             emit(sessionSummary(options.light ? d.parseLight(url) : d.parseFull(url), path: url.path))
         }
     }
@@ -99,8 +99,8 @@ func loadSession(_ options: Options, usage: String) -> Session {
     }
     let url = URL(fileURLWithPath: options.positional[1])
     let loaded: Session?
-    if let id = options.sessionID, let loadByID = d.loadByID {
-        loaded = loadByID(id)
+    if let id = options.sessionID, d.usesIdentity {
+        loaded = d.loadByID(url, id)
     } else {
         loaded = d.parseFull(url)
     }
@@ -149,6 +149,13 @@ func runShow(_ options: Options) {
     }
 }
 
+/// `sources`: the sources this build can read, in catalog order.
+func runSources() {
+    for d in drivers {
+        emit(["type": "source", "name": d.source.rawValue, "displayName": d.source.displayName])
+    }
+}
+
 // MARK: - Index commands
 
 func openIndex(_ options: Options) -> IndexDB {
@@ -166,18 +173,20 @@ func runIndex(_ options: Options) async {
     let ingest = SearchIngestService(db: db)
     for d in options.sources {
         let started = Date()
-        let files: [SearchIngestService.FileRef]
+        var files: [SearchIngestService.FileRef] = []
         var identitySnapshot: SearchIngestService.IdentitySnapshot?
-        if let database = d.databaseSessions() {
-            files = SearchIngestService.fileRefs(for: database.sessions)
-            identitySnapshot = database.snapshot
-        } else {
-            files = d.discovery().discoverSessionFiles().compactMap { url in
-                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
-                let mtime = (attrs[.modificationDate] as? Date).map { Int64($0.timeIntervalSince1970) } ?? 0
-                let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-                return SearchIngestService.FileRef(path: url.path, mtime: mtime, size: size)
-            }
+        let databaseSessions = d.databaseSessions()
+        if !databaseSessions.isEmpty {
+            files = SearchIngestService.fileRefs(for: databaseSessions)
+            // The authoritative set for this pass, so rows deleted upstream leave the index.
+            identitySnapshot = SearchIngestService.IdentitySnapshot(
+                storagePaths: Set(databaseSessions.map(\.filePath)),
+                sessionIDs: Set(databaseSessions.map(\.id))
+            )
+        }
+        files += d.discoverFiles().compactMap { url in
+            guard let stat = SessionFileStat.from(url) else { return nil }
+            return SearchIngestService.FileRef(path: url.path, mtime: stat.mtime, size: stat.size)
         }
         do {
             let progress = try await ingest.ingest(source: d.source,
