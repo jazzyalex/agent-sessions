@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Deploy docs drift guard
         shell: bash
         run: scripts/check_deploy_drift.sh
@@ -49,7 +49,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Xcode version
         run: xcodebuild -version
       - name: Test (macOS, no signing)
