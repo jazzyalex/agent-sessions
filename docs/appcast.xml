@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.4</title>
-            <pubDate>Wed, 16 Sep 2026 13:49:01 -0700</pubDate>
+            <title>5.5</title>
+            <pubDate>Sat, 19 Sep 2026 16:24:30 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,26 +27,26 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.4</h2>
+<h2>What&#x27;s New in 5.5</h2>
 <h3>Features</h3>
 <ul>
-<li><strong>Cline CLI and Desktop sessions now appear in Agent Sessions.</strong> The app discovers their shared local history, labels the originating surface, searches prompts, responses, thinking, and tool activity, and offers Cline-specific Settings controls. Custom roots are validated before they replace a working location, and partial companion files do not erase an open transcript. Resume, live status, image extraction, hierarchy, and usage tracking are not yet supported.</li>
+<li><strong>Browse and search DeepSeek Harness history locally.</strong> The read-only source supports v0-v3 plain JSONL and independently framed, checksum-validated Zstandard generations, discovers immutable directory generations, and selects the highest supported generation. A checked-in 58-event v3 catalog gives every known event an explicit tested presentation disposition; unknown required events and failed historical migrations fail closed. Explicit DSH subagents retain hierarchy, while seeded forks remain roots with their fork provenance. Recovered prefixes, incomplete tails, and corrupt artifacts are not published. DSH archive state is ignored, and the source exposes no DSH resume, live activity, quota/cost telemetry, attachment dereferencing, or archive-state mirroring. The decoder uses the vendored official Zstandard 1.5.7 decompression/common sources documented with their BSD license and archive checksum in <code>ThirdParty/DSHZstd/README.md</code>. Compatibility evidence comes from checked-in sanitized fixtures, the pinned event catalog, and a local manual UI smoke test; broad real-world coverage remains unverified.</li>
 </ul>
-<h3>Bug Fixes</h3>
+<h3>Improvements</h3>
 <ul>
-<li><strong>Session retrieval now stays exact and current.</strong> Project filtering distinguishes same-named clones while grouping real Git worktrees with their checkout, active searches refresh when sessions are added or removed without flashing blank, displayed titles are searchable even when the full-text index is stale, Codex fallback titles omit injected context wrappers, and Antigravity cache hydration reconciles confirmed changes and deletions without dropping data when a source root is temporarily unavailable.</li>
-<li><strong>OpenCode sessions are recognizable before you open them.</strong> Timestamp-only default names now fall back to the session&#x27;s first user prompt in both current SQLite and legacy JSON storage, while real names and subagent labels keep their existing precedence.</li>
-<li><strong>Droid session names survive transcript loading and search prewarming.</strong> Full parsing now retains the explicit title already shown by the lightweight list instead of replacing it with the first prompt.</li>
-<li><strong>OpenClaw source-aware titles stay stable after full parsing.</strong> Telegram origin-plus-prompt labels and tool-name fallbacks no longer regress to raw message envelopes or generic text after search prewarming.</li>
-<li><strong>Claude prompt titles stay clean after transcript loading.</strong> Full parsing and search prewarming now preserve the same title as the session list instead of exposing local-command Caveat wrappers.</li>
+<li><strong>Quota Meter scans Codex sessions from the configured root.</strong> Runway discovery now follows the same <code>SessionsRootOverride</code>, process-inherited <code>CODEX_HOME</code>, and default-path resolution as the session list instead of assuming <code>~/.codex/sessions</code>. For a GUI launch that does not inherit a shell-only <code>CODEX_HOME</code>, use the Codex sessions-directory override in Preferences.</li>
+<li><strong>DeepSeek Harness histories retain their intended boundaries.</strong> Seeded v0/v1 migrations carry the rewritten seed boundary forward; Saved archives cannot regress to an older generation when re-starred. Injected plugin context stays out of search, and repaired historical turns no longer show a false trailing interruption.</li>
+<li><strong>Large session libraries avoid redundant refresh work.</strong> Live-presence lookup caching now retains a bounded large-library working set, and refresh completion no longer rebuilds the session table a second time after the published rows are already applied.</li>
+<li><strong>Quota Meter&#x27;s weekly lens now shows the combined burn rate and time left at that pace.</strong> The compact header keeps the weekly reset visible, separates hour and minute units for readability, summarizes projections longer than one day as a whole-hour lower bound, and uses <code>∞</code> consistently when Codex has no five-hour limit. Active rates still report measuring, unavailable, or exhausted states; when no session is active, the rate and ETA area stays empty instead of showing a meaningless placeholder.</li>
+<li><strong>Quota Meter values have more breathing room.</strong> The compact header now clearly separates the remaining weekly percentage from its adjacent burn rate instead of letting values such as <code>95%</code> and <code>4.9%/h</code> run together.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.4</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5</a></p>
 </div>
             ]]></description>
-            <sparkle:version>75</sparkle:version>
-            <sparkle:shortVersionString>5.4</sparkle:shortVersionString>
+            <sparkle:version>76</sparkle:version>
+            <sparkle:shortVersionString>5.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.4/AgentSessions-5.4.dmg" length="25988846" type="application/octet-stream" sparkle:edSignature="d0SghkyTIRqAZL2iptIJwNdkiIc8+hHkSmA2ex5/guEfHGX/GejY7eHiZ2FJG0SqEDLD5ZoCPw4qdQQSmJu8DQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5/AgentSessions-5.5.dmg" length="26946632" type="application/octet-stream" sparkle:edSignature="qO43XP7H+U5C4vRwaAnjXn569Av/sQxY3OMMg/w+wdGmNRuPuEbdzF7mHrcGt02TNVu7W+pQwHg5Uc7tCdejCw=="/>
         </item>
     </channel>
 </rss>

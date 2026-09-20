@@ -525,6 +525,84 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Transcript UI
 
+### Transcript jump arrows are disconnected from Rich/block mode
+> **open** · sev: high · urg: med · verified 2026-09-18
+
+- **What:** the transcript's up arrow is often absent, and the down arrow can
+  disappear on click without moving the transcript. This is one regression in the
+  shared floating-control path, not two independent buttons.
+- **Where:** [TranscriptPlainView.swift:908-909](../AgentSessions/Views/TranscriptPlainView.swift:908)
+  renders the controls for both modes, but [TranscriptPlainView.swift:1454-1467](../AgentSessions/Views/TranscriptPlainView.swift:1454)
+  passes top/bottom proximity callbacks and `scrollToBottomToken` only to
+  `PlainTextScrollView`. [TranscriptBlockListView.swift:148-243](../AgentSessions/Views/TranscriptBlockListView.swift:148)
+  has no corresponding proximity callbacks or bottom-scroll token. The up-arrow
+  visibility then stays driven by the initial `isNearTranscriptTop` value
+  ([TranscriptPlainView.swift:1105-1106](../AgentSessions/Views/TranscriptPlainView.swift:1105)),
+  while the down action only changes state and increments a token
+  ([TranscriptPlainView.swift:1121-1125](../AgentSessions/Views/TranscriptPlainView.swift:1121)).
+- **Confirmed failure:** Rich mode never reports that the viewport left the top or
+  reached the bottom, so the up arrow can remain hidden and the down arrow remains
+  eligible from the `unknown` bottom state. Clicking down marks the parent as near
+  bottom, which hides the button, but the Rich block list receives no scroll intent,
+  so the viewport does not move.
+- **Fix shape:** give the block-list path the same top/bottom proximity reporting
+  and a consumable jump-to-latest intent, or move both modes behind one shared
+  scroll-intent/proximity contract. Cover both modes and the remount/session-switch
+  cases; do not infer a successful jump from the button's visibility change.
+- **Why deferred:** this turn is backlog-only; no implementation or UI validation
+  was performed.
+- **Risk if wrong:** transcript navigation is visibly broken, and a user can lose
+  their place in a long session or mistake a hidden control for a completed jump.
+- **To close:** in plain, terminal, and Rich modes, the up arrow appears after
+  scrolling away from the top and returns to the first prompt; the down arrow
+  appears away from the bottom and actually reaches the latest row before hiding.
+  Add state/intent tests plus one manual check of each rendered mode.
+
+### Session info does not expose known models for most agents
+> **open** · sev: med · urg: med · verified 2026-09-18
+
+- **What:** Session info currently shows model facts and model-change history only
+  when the source produces `SessionTelemetry`. OpenCode and most other agents fall
+  through to “No supported telemetry,” even when the session/indexer already knows
+  a model. This blocks the requested minimum (starting/known model) and the ideal
+  model-history timeline for non-Codex/Claude/Pi/Copilot agents.
+- **Where:** [TranscriptTelemetryView.swift:488-513](../AgentSessions/Views/TranscriptTelemetryView.swift:488)
+  renders no sidebar facts when telemetry is nil; the model row reads only
+  `telemetry.currentConfiguration` at [TranscriptTelemetryView.swift:596-611](../AgentSessions/Views/TranscriptTelemetryView.swift:596).
+  The history timeline is already modeled from an initial configuration plus
+  configuration changes at [TranscriptTelemetryView.swift:380-412](../AgentSessions/Views/TranscriptTelemetryView.swift:380).
+  The engine currently dispatches only Codex, Claude, Pi, and Copilot
+  ([SessionTelemetryEngine.swift:86-92](../AgentSessions/Telemetry/SessionTelemetryEngine.swift:86),
+  [SessionTelemetryEngine.swift:181-205](../AgentSessions/Telemetry/SessionTelemetryEngine.swift:181));
+  OpenCode is explicitly `.allUnavailable` in its descriptor
+  ([OpenCodeSourceDescriptor.swift:7-14](../AgentSessions/OpenCode/OpenCodeSourceDescriptor.swift:7),
+  while its reader already stores a model on `Session` at
+  [OpenCodeSqliteReader.swift:121-129](../AgentSessions/OpenCode/OpenCodeSqliteReader.swift:121)).
+- **Evidence boundary:** a scalar `Session.model` is not automatically a starting
+  model. The existing OpenCode audit found the session-table model blob populated
+  on only 20/76 rows, while per-message `modelID` is the reliable source
+  ([docs/backlog.md:257-263](../docs/backlog.md:257)). Each displayed value needs
+  provenance such as session metadata, first observed record, or provider change
+  event; unknown must remain unknown.
+- **Fix shape:** phase 1 should add a model-only session-info capability that can
+  show a clearly labeled known/current model for every source with trustworthy
+  scalar evidence, without requiring token/cost telemetry. Phase 2 should add
+  source-specific model/configuration adapters and feed explicit changes into the
+  existing history timeline. Sources with no model evidence should still have a
+  consistent Session info surface with an honest unavailable reason, rather than
+  disappearing behind a generic telemetry failure.
+- **Why deferred:** this turn is backlog-only; the source formats and provenance
+  rules need to be scoped before implementation. The existing telemetry backlog
+  covers token/cost accumulators, which is related but does not by itself satisfy
+  model visibility.
+- **Risk if wrong:** users cannot tell which model produced an agent session, and
+  labeling a last/current model as the starting model would create false historical
+  evidence.
+- **To close:** every supported agent has a Session info result; fixtures and tests
+  distinguish starting/first-observed/current values from model changes, OpenCode's
+  SQLite and message records are covered, and agents with no trustworthy model
+  evidence say so explicitly without invented history.
+
 ### Copilot split assistant messages cannot be coalesced by their logical message ID
 > **open** · sev: low · urg: low · verified 2026-09-09
 
@@ -1372,6 +1450,33 @@ this. The entry sat `verified —` and read as open work for two weeks.
 ---
 
 ## QM / Runway
+
+### Headless Codex and OpenCode CLI sessions disappear from live presence discovery
+> **open** · sev: med · urg: high · verified 2026-09-18
+
+- **What:** The process fallback admits a no-TTY process only when its PID is in
+  `headlessEligiblePIDs`. `PresenceEngine` builds and passes that allowlist only for
+  Claude. Codex uses `lsof -c codex` with the default empty allowlist, and OpenCode has
+  the same TTY-only `ps` filter. Therefore a headless Codex or OpenCode CLI session
+  without a fresh registry presence is dropped before live rows are built, so its
+  current session and live token usage cannot appear in Quota Meter.
+- **Where:** [`PresenceEngine.swift:1157`](../AgentSessions/Services/PresenceEngine.swift:1157)
+  builds only `claudeHeadlessPIDs`; [`PresenceEngine.swift:1185`](../AgentSessions/Services/PresenceEngine.swift:1185)
+  calls Codex discovery without an allowlist; [`PresenceEngine.swift:1164`](../AgentSessions/Services/PresenceEngine.swift:1164)
+  applies the TTY guard to OpenCode; the shared admission rule is
+  [`CodexActiveSessionsModel.swift:3172`](../AgentSessions/Services/CodexActiveSessionsModel.swift:3172).
+- **Fix shape:** derive headless PID sets for Codex and OpenCode using the existing
+  app-bundle exclusion, pass them to `discoverLsofPIDInfos`, and mark those presences
+  as headless. TTY remains metadata, never the CLI identity test. Keep the OpenCode
+  live-token view independent of quota/reset tracking.
+- **Why deferred:** this entry records the confirmed bug for an urgent implementation
+  pass; the current change is backlog-only and does not alter discovery behavior.
+- **Risk if wrong:** headless agent work is silently absent from the live session list,
+  and the Quota Meter under-reports active token use or shows no active session.
+- **To close:** regression fixtures prove no-TTY Codex and OpenCode CLI processes are
+  admitted, app-bundle processes are classified separately, registry and process
+  discoveries do not duplicate rows, and live OpenCode token totals join to the correct
+  current session.
 
 ### Quota Meter v2 needs one immutable, end-to-end evidence contract
 > **open** · sev: high · urg: low · verified 2026-09-08

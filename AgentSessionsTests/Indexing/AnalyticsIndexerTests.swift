@@ -15,6 +15,19 @@ final class AnalyticsIndexerTests: XCTestCase {
         XCTAssertFalse(AnalyticsAgentFilter.kimiOnly.matches(.pi))
     }
 
+    /// DeepSeek Harness resolves to its own distinct picker filter and matches
+    /// only itself, following the Pi/Kimi sentinel above.
+    func testDeepSeekHarnessHasADedicatedAnalyticsFilter() {
+        XCTAssertTrue(AnalyticsSourceSupport.sources.contains(.deepseekHarness))
+        XCTAssertTrue(AnalyticsSourceSupport.rawValues.contains(SessionSource.deepseekHarness.rawValue))
+        XCTAssertTrue(AnalyticsAgentFilter.deepseekHarnessOnly.matches(.deepseekHarness))
+        XCTAssertFalse(AnalyticsAgentFilter.deepseekHarnessOnly.matches(.cline))
+        XCTAssertFalse(AnalyticsAgentFilter.deepseekHarnessOnly.matches(.codex))
+        XCTAssertEqual(AnalyticsAgentFilter.dedicated(for: .deepseekHarness), .deepseekHarnessOnly)
+        XCTAssertEqual(AnalyticsAgentFilter.deepseekHarnessOnly.rawValue, "DeepSeek Harness Only")
+        XCTAssertEqual(String(localized: AnalyticsAgentFilter.deepseekHarnessOnly.displayName), "DeepSeek Only")
+    }
+
     /// Analytics rolls up every source, with no exceptions to remember.
     ///
     /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter` only checks the forward

@@ -34,6 +34,7 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(DevinPreferencesKey.includeSessions, "IncludeDevinSessions")
         XCTAssertEqual(FxPreferencesKey.includeSessions, "IncludeFxSessions")
         XCTAssertEqual(ClinePreferencesKey.includeSessions, "IncludeClineSessions")
+        XCTAssertEqual(DeepSeekHarnessSettings.Keys.include, "IncludeDeepSeekHarnessSessions")
 
         // Root-override constants asserted individually the same way (Droid has two —
         // sessions root and projects root, both frozen).
@@ -54,6 +55,7 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(DevinPreferencesKey.sessionsRootOverride, "DevinSessionsRootOverride")
         XCTAssertEqual(FxPreferencesKey.sessionsRootOverride, "FxSessionsRootOverride")
         XCTAssertEqual(ClinePreferencesKey.sessionsRootOverride, "ClineSessionsRootOverride")
+        XCTAssertEqual(DeepSeekHarnessSettings.Keys.rootOverride, "DeepSeekHarnessSessionsRootOverride")
 
         // CLI-availability constants, one line per constant. OpenClaw has none — it is
         // never probed as a CLI binary, so `storedBinaryPresence` returns nil for it and
@@ -77,6 +79,8 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(FxPreferencesKey.enabled, "AgentEnabledFx")
         XCTAssertEqual(ClinePreferencesKey.cliAvailable, "ClineCLIAvailable")
         XCTAssertEqual(ClinePreferencesKey.enabled, "AgentEnabledCline")
+        XCTAssertEqual(DeepSeekHarnessSettings.Keys.cliAvailable, "DeepSeekHarnessCLIAvailable")
+        XCTAssertEqual(DeepSeekHarnessSettings.Keys.enabled, "AgentEnabledDeepSeekHarness")
 
         // The shared include lookup must cover the same complete frozen row table.
         XCTAssertEqual(SourceKeyTable.include.count, SessionSource.allCases.count)
@@ -122,6 +126,7 @@ enum SourceKeyTable {
         Row(source: .devin, enablement: "AgentEnabledDevin", cliAvailable: "DevinCLIAvailable", rootOverrides: ["DevinSessionsRootOverride"], include: "IncludeDevinSessions"),
         Row(source: .fx, enablement: "AgentEnabledFx", cliAvailable: "FxCLIAvailable", rootOverrides: ["FxSessionsRootOverride"], include: "IncludeFxSessions"),
         Row(source: .cline, enablement: "AgentEnabledCline", cliAvailable: "ClineCLIAvailable", rootOverrides: ["ClineSessionsRootOverride"], include: "IncludeClineSessions"),
+        Row(source: .deepseekHarness, enablement: "AgentEnabledDeepSeekHarness", cliAvailable: "DeepSeekHarnessCLIAvailable", rootOverrides: ["DeepSeekHarnessSessionsRootOverride"], include: "IncludeDeepSeekHarnessSessions"),
     ]
 
     static let include = Dictionary(uniqueKeysWithValues: rows.map { ($0.source, $0.include) })

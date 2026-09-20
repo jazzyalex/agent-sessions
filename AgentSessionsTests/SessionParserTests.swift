@@ -4108,6 +4108,49 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(found.first?.lastPathComponent, sessionURL.lastPathComponent)
     }
 
+    func testCodexDiscoveryUsesInjectedCodexHomeBeforeDefault() {
+        let home = URL(fileURLWithPath: "/Users/codex-demo", isDirectory: true)
+        let codexHome = URL(fileURLWithPath: "/Volumes/codex-data", isDirectory: true)
+
+        let discovery = CodexSessionDiscovery(
+            environment: ["CODEX_HOME": codexHome.path],
+            homeDirectory: home
+        )
+
+        XCTAssertEqual(
+            discovery.sessionsRoot().path,
+            codexHome.appendingPathComponent("sessions").path
+        )
+    }
+
+    func testCodexDiscoveryCustomRootPrecedesInjectedCodexHome() {
+        let customRoot = "/Volumes/custom-codex/sessions"
+        let discovery = CodexSessionDiscovery(
+            customRoot: customRoot,
+            environment: ["CODEX_HOME": "/Volumes/codex-data"],
+            homeDirectory: URL(fileURLWithPath: "/Users/codex-demo", isDirectory: true)
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, customRoot)
+    }
+
+    func testCodexRunwayDefaultRootUsesConfiguredOverride() {
+        let suiteName = "CodexRunwayDefaultRootTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let customRoot = URL(fileURLWithPath: "/Volumes/custom-codex/sessions", isDirectory: true)
+        defaults.set(customRoot.path, forKey: PreferencesKey.Paths.codexSessionsRootOverride)
+
+        let resolved = CodexRunwayRecentSessionScanner.defaultRoot(
+            defaults: defaults,
+            environment: ["CODEX_HOME": "/Volumes/codex-data"],
+            homeDirectory: URL(fileURLWithPath: "/Users/codex-demo", isDirectory: true)
+        )
+
+        XCTAssertEqual(resolved.path, customRoot.path)
+    }
+
     func testCodexDiscoveryFindsSiblingArchivedSessionsForSessionsRoot() throws {
         let fm = FileManager.default
         let codexHome = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-Archived-\(UUID().uuidString)", isDirectory: true)

@@ -2007,6 +2007,26 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 }
 
 final class CodexCalibrationAccountScopeTests: XCTestCase {
+    func testAccountIdUsesNonDefaultCodexHomeAuthFile() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codex-account-home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let authURL = codexHome.appendingPathComponent("auth.json")
+        try Data(#"{"account_id":"non-default-account"}"#.utf8).write(to: authURL)
+
+        XCTAssertEqual(
+            CodexCalibrationAccountScope.accountId(
+                environment: ["CODEX_HOME": codexHome.path],
+                homeDirectory: root.appendingPathComponent("different-home", isDirectory: true)
+            ),
+            "non-default-account"
+        )
+    }
+
     func testAccountSwitchIsVisibleWithoutATTLWindow() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("codex-account-scope-\(UUID().uuidString)", isDirectory: true)

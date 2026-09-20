@@ -263,6 +263,9 @@ enum SessionSearchTextBuilder {
         }
 
         func appendEventFields(_ ev: SessionEvent, into out: inout [String], remaining: inout Int) {
+            // DSH preserves injected user/message context as transcript metadata,
+            // but it is not a direct user message and must not enter FTS.
+            if session.source == .deepseekHarness, ev.kind == .meta, ev.role == "user" { return }
             let isToolEvent = ev.kind == .tool_call
                 || ev.kind == .tool_result
                 || (ev.kind == .error && (ev.toolName != nil || ev.toolOutput != nil))
