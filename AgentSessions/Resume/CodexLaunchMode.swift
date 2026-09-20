@@ -6,10 +6,16 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
     case iterm
     case warp
     case warpPreview
+    case ghostty
+    case kitty
+    case wezTerm
 
     var id: String { rawValue }
 
     static func selectedResumeTerminalTitle(defaults: UserDefaults = .standard) -> String {
+        if defaults.string(forKey: ResumePreferenceHelpers.terminalKindKey) != nil {
+            return ResumePreferenceHelpers.resolveTerminalKind(defaults: defaults).displayName
+        }
         if let raw = defaults.string(forKey: CodexResumeSettings.Keys.defaultLaunchMode),
            let mode = CodexLaunchMode(rawValue: raw),
            mode != .embedded {
@@ -32,6 +38,24 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "Warp"
         case .warpPreview:
             return "WarpPreview"
+        case .ghostty:
+            return "Ghostty"
+        case .kitty:
+            return "Kitty"
+        case .wezTerm:
+            return "WezTerm"
+        }
+    }
+
+    var terminalKind: TerminalKind {
+        switch self {
+        case .embedded, .terminal: return .terminalApp
+        case .iterm:               return .iterm2
+        case .warp:                return .warp
+        case .warpPreview:         return .warpPreview
+        case .ghostty:             return .ghostty
+        case .kitty:               return .kitty
+        case .wezTerm:             return .wezTerm
         }
     }
 
@@ -47,6 +71,12 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "Open in Warp and continue the session there."
         case .warpPreview:
             return "Open in WarpPreview and continue the session there."
+        case .ghostty:
+            return "Open in Ghostty and continue the session there."
+        case .kitty:
+            return "Open in Kitty and continue the session there."
+        case .wezTerm:
+            return "Open in WezTerm and continue the session there."
         }
     }
 }

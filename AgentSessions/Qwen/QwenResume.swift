@@ -210,6 +210,23 @@ protocol QwenTerminalLaunching {
         try AgentTerminalLauncher.launchInTerminal(shellCommand: package.shellCommand, domain: "QwenTerminalLauncher")
     }
 }
+@MainActor final class QwenSelectedTerminalLauncher: QwenTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: QwenResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "QwenTerminalLauncher"
+        )
+    }
+}
 @MainActor final class QwenITermLauncher: QwenTerminalLaunching {
     func launchInTerminal(_ package: QwenResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "QwenITermLauncher")

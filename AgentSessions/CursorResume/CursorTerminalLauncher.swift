@@ -13,6 +13,25 @@ final class CursorTerminalLauncher: CursorTerminalLaunching {
 }
 
 @MainActor
+final class CursorSelectedTerminalLauncher: CursorTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: CursorResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "CursorTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class CursorITermLauncher: CursorTerminalLaunching {
     func launchInTerminal(_ package: CursorResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "CursorITermLauncher")

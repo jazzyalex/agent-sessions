@@ -364,7 +364,7 @@ struct CodexResumeSheet: View {
 
     private var visibleLaunchModes: [CodexLaunchMode] {
         // Embedded mode disabled to simplify UX
-        return [.terminal, .iterm, .warp, .warpPreview]
+        return [.terminal, .iterm, .warp, .warpPreview, .ghostty, .kitty, .wezTerm]
     }
 
     /// NOTE: currently unreferenced — a project-wide search finds no callers.
@@ -396,6 +396,12 @@ struct CodexResumeSheet: View {
         case .warpPreview:
             do {
                 try await launcher.launchInWarpPreview(package)
+            } catch {
+                launcher.lastError = error.localizedDescription
+            }
+        case .ghostty, .kitty, .wezTerm:
+            do {
+                try await launcher.launch(package, in: settings.launchMode.terminalKind)
             } catch {
                 launcher.lastError = error.localizedDescription
             }

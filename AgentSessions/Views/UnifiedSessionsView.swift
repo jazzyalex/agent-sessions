@@ -57,6 +57,22 @@ enum UnifiedTableSelectionPolicy {
     }
 }
 
+struct ResumeLaunchGate {
+    private(set) var sessionID: String?
+
+    var isPending: Bool { sessionID != nil }
+
+    mutating func begin(sessionID: String) -> Bool {
+        guard !isPending else { return false }
+        self.sessionID = sessionID
+        return true
+    }
+
+    mutating func finish() {
+        sessionID = nil
+    }
+}
+
 enum UnifiedRowsStabilityPolicy {
     static func shouldHoldRowsDuringRunningSearch(
         isSearchRunning: Bool,
@@ -388,6 +404,7 @@ struct UnifiedSessionsView: View {
     let onToggleLayout: () -> Void
 
     @State private var selection: String?
+    @State private var resumeLaunchGate = ResumeLaunchGate()
     // Advances only when the 150ms selectionPropagationTask fires (or on
     // first population) — the transcript pane renders from THIS, not the raw
     // `selection`, so key-repeat scrubbing never re-renders/rebuilds the pane.
@@ -1178,6 +1195,7 @@ struct UnifiedSessionsView: View {
 	                if canResumeSession(s, antigravityCLISessionID: antigravityCLISessionID) {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
+                            .disabled(resumeLaunchGate.isPending)
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
 	                    Divider()
 	                }
@@ -1978,7 +1996,7 @@ struct UnifiedSessionsView: View {
                 if let s = selectedSession { resume(s) }
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(!canResumeSelectedSession)
+            .disabled(!canResumeSelectedSession || resumeLaunchGate.isPending)
             .accessibilityLabel(Text("Resume"))
 
             ToolbarIconButton(help: imagesToolbarHelpText) { _ in
@@ -2422,6 +2440,7 @@ struct UnifiedSessionsView: View {
     /// the launch-failure retry made that worse, since users previously got at
     /// least *a* terminal.
     private func reportResumeFailure(launched: Bool, error: String?, source: SessionSource, in window: NSWindow?) {
+        resumeLaunchGate.finish()
         guard !launched else { return }
         showActionAlert(message: error ?? "\(resumeAgentLabel(source)) could not resume this session.",
                         in: window)
@@ -3415,6 +3434,7 @@ struct UnifiedSessionsView: View {
     private func resume(_ s: Session) {
         guard !s.isClaudeWorkflowSubagent else { return }
         guard s.source.descriptor.supportsResume else { return }
+        guard resumeLaunchGate.begin(sessionID: s.id) else { return }
         // Captured at click time, not at report time. A Warp cold start
         // activates Warp and deactivates us, so by the time a failure comes back
         // (3s later, more if Gatekeeper is verifying) `NSApp.keyWindow` is nil
@@ -3426,7 +3446,7 @@ struct UnifiedSessionsView: View {
             Task { @MainActor in
                 switch await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s) {
                 case .launched:
-                    break
+                    reportResumeFailure(launched: true, error: nil, source: s.source, in: presentingWindow)
                 case .needsConfiguration(let message), .failure(let message):
                     reportResumeFailure(launched: false, error: message, source: s.source, in: presentingWindow)
                 }
@@ -3443,6 +3463,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return OpenCodeITermLauncher()
                     case .warp:                    return OpenCodeWarpLauncher()
                     case .warpPreview:             return OpenCodeWarpPreviewLauncher()
+                    case .ghostty:                  return OpenCodeSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return OpenCodeSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return OpenCodeSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return OpenCodeTerminalLauncher()
                     }
                 }()
@@ -3462,6 +3485,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return HermesITermLauncher()
                     case .warp:                    return HermesWarpLauncher()
                     case .warpPreview:             return HermesWarpPreviewLauncher()
+                    case .ghostty:                  return HermesSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return HermesSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return HermesSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return HermesTerminalLauncher()
                     }
                 }()
@@ -3481,6 +3507,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return CopilotITermLauncher()
                     case .warp:                    return CopilotWarpLauncher()
                     case .warpPreview:             return CopilotWarpPreviewLauncher()
+                    case .ghostty:                  return CopilotSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return CopilotSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return CopilotSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return CopilotTerminalLauncher()
                     }
                 }()
@@ -3500,6 +3529,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return CursorITermLauncher()
                     case .warp:                    return CursorWarpLauncher()
                     case .warpPreview:             return CursorWarpPreviewLauncher()
+                    case .ghostty:                  return CursorSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return CursorSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return CursorSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return CursorTerminalLauncher()
                     }
                 }()
@@ -3520,6 +3552,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return PiITermLauncher()
                     case .warp:                    return PiWarpLauncher()
                     case .warpPreview:             return PiWarpPreviewLauncher()
+                    case .ghostty:                  return PiSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return PiSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return PiSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return PiTerminalLauncher()
                     }
                 }()
@@ -3539,6 +3574,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return KimiITermLauncher()
                     case .warp:                    return KimiWarpLauncher()
                     case .warpPreview:             return KimiWarpPreviewLauncher()
+                    case .ghostty:                  return KimiSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return KimiSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return KimiSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return KimiTerminalLauncher()
                     }
                 }()
@@ -3558,6 +3596,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return GrokITermLauncher()
                     case .warp:                    return GrokWarpLauncher()
                     case .warpPreview:             return GrokWarpPreviewLauncher()
+                    case .ghostty:                  return GrokSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return GrokSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return GrokSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return GrokTerminalLauncher()
                     }
                 }()
@@ -3567,7 +3608,10 @@ struct UnifiedSessionsView: View {
             }
         case .qwen:
             let storageContext = QwenResumeEligibility.configuredStorageContext()
-            guard QwenResumeEligibility.canResume(s, storageContext: storageContext) else { return }
+            guard QwenResumeEligibility.canResume(s, storageContext: storageContext) else {
+                resumeLaunchGate.finish()
+                return
+            }
             let settings = QwenSettings.shared
             let input = QwenResumeInput(
                 sessionID: s.id,
@@ -3581,6 +3625,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                return QwenITermLauncher()
                     case .warp:                  return QwenWarpLauncher()
                     case .warpPreview:           return QwenWarpPreviewLauncher()
+                    case .ghostty:                return QwenSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                  return QwenSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                return QwenSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown: return QwenTerminalLauncher()
                     }
                 }()
@@ -3605,6 +3652,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return DevinITermLauncher()
                     case .warp:                    return DevinWarpLauncher()
                     case .warpPreview:             return DevinWarpPreviewLauncher()
+                    case .ghostty:                  return DevinSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return DevinSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return DevinSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return DevinTerminalLauncher()
                     }
                 }()
@@ -3625,6 +3675,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                return FxITermLauncher()
                     case .warp:                  return FxWarpLauncher()
                     case .warpPreview:           return FxWarpPreviewLauncher()
+                    case .ghostty:                return FxSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                  return FxSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                return FxSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown: return FxTerminalLauncher()
                     }
                 }()
@@ -3644,6 +3697,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return AntigravityITermLauncher()
                     case .warp:                    return AntigravityWarpLauncher()
                     case .warpPreview:             return AntigravityWarpPreviewLauncher()
+                    case .ghostty:                  return AntigravitySelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return AntigravitySelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return AntigravitySelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return AntigravityTerminalLauncher()
                     }
                 }()
@@ -3663,6 +3719,9 @@ struct UnifiedSessionsView: View {
                     case .iterm2:                  return ClaudeITermLauncher()
                     case .warp:                    return ClaudeWarpLauncher()
                     case .warpPreview:             return ClaudeWarpPreviewLauncher()
+                    case .ghostty:                  return ClaudeSelectedTerminalLauncher(terminalKind: .ghostty)
+                    case .kitty:                    return ClaudeSelectedTerminalLauncher(terminalKind: .kitty)
+                    case .wezTerm:                  return ClaudeSelectedTerminalLauncher(terminalKind: .wezTerm)
                     case .terminalApp, .unknown:   return ClaudeTerminalLauncher()
                     }
                 }()

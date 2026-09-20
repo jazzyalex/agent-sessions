@@ -18,7 +18,8 @@ enum ResumePreferenceHelpers {
     /// Reads the shared terminal kind preference, migrating from legacy preferITerm booleans on first read.
     static func resolveTerminalKind(defaults: UserDefaults = .standard) -> TerminalKind {
         if let raw = defaults.string(forKey: terminalKindKey),
-           let kind = TerminalKind(rawValue: raw) {
+           let kind = TerminalKind(rawValue: raw),
+           kind != .unknown {
             return kind
         }
         // Migration: if any agent had preferITerm=true, default to .iterm2; else .terminalApp

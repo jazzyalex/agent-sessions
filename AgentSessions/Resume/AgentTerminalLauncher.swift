@@ -3,10 +3,34 @@ import AppKit
 
 /// Shared terminal launcher used by all agent resume flows.
 /// Runs a shell command in Terminal.app or iTerm2 via AppleScript.
+/// Also dispatches shared agent resume commands to other supported terminals.
 @MainActor
 enum AgentTerminalLauncher {
     /// How long Warp needs after launch before it will read a tab config.
     private static let warpColdStartSettleNanoseconds: UInt64 = 3_000_000_000
+
+    static func launch(
+        shellCommand: String,
+        displayCommand: String,
+        cwd: String?,
+        kind: TerminalKind,
+        domain: String = "AgentTerminalLauncher"
+    ) async throws {
+        switch kind {
+        case .terminalApp, .unknown:
+            try launchInTerminal(shellCommand: shellCommand, domain: domain)
+        case .iterm2:
+            try launchInITerm(shellCommand: shellCommand, domain: domain)
+        case .warp, .warpPreview:
+            try await launchInWarp(shellCommand: displayCommand, cwd: cwd, kind: kind)
+        case .ghostty:
+            try await launchInGhostty(shellCommand: displayCommand, cwd: cwd, domain: domain)
+        case .kitty:
+            try launchInKitty(shellCommand: displayCommand, cwd: cwd, domain: domain)
+        case .wezTerm:
+            try launchInWezTerm(shellCommand: displayCommand, cwd: cwd, domain: domain)
+        }
+    }
 
     static func launchInTerminal(shellCommand: String, domain: String = "AgentTerminalLauncher") throws {
         let scriptLines = [
@@ -47,6 +71,137 @@ enum AgentTerminalLauncher {
         ]
 
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
+    }
+
+    static func launchInGhostty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") async throws {
+        let bundleIdentifier = "com.mitchellh.ghostty"
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            throw NSError(
+                domain: domain,
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Ghostty is not installed."]
+            )
+        }
+
+        let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let isRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == bundleIdentifier && !$0.isTerminated
+        }
+        if !isRunning {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+        }
+
+        let scriptLines = [
+            "on run argv",
+            "set workingDirectory to item 1 of argv",
+            "set initialInput to item 2 of argv",
+            "set configuredCommand to item 3 of argv",
+            "set replaceInitialWindow to item 4 of argv",
+            "tell application id \"com.mitchellh.ghostty\"",
+            "activate",
+            "set initialWindow to missing value",
+            "if replaceInitialWindow is \"true\" and (count of windows) > 0 then set initialWindow to front window",
+            "if replaceInitialWindow is \"true\" then",
+            "set surfaceConfig to new surface configuration from {initial working directory:workingDirectory, initial input:initialInput}",
+            "else",
+            "set surfaceConfig to new surface configuration from {initial working directory:workingDirectory, command:configuredCommand}",
+            "end if",
+            "set resumeWindow to new window with configuration surfaceConfig",
+            "if initialWindow is not missing value then close window initialWindow",
+            "activate window resumeWindow",
+            "end tell",
+            "end run"
+        ]
+        try runAppleScript(
+            scriptLines,
+            arguments: [
+                directory,
+                ghosttyInitialInput(shellCommand),
+                ghosttySurfaceCommand(shellCommand),
+                isRunning ? "false" : "true"
+            ],
+            domain: domain,
+            fallbackMessage: "Ghostty launch failed."
+        )
+    }
+
+    static nonisolated func ghosttyInitialInput(_ shellCommand: String) -> String {
+        "\(shellCommand)\n"
+    }
+
+    static nonisolated func ghosttySurfaceCommand(_ shellCommand: String) -> String {
+        "/bin/zsh -lc \(ShellQuoting.quote(shellCommand))"
+    }
+
+    static func launchInKitty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") throws {
+        try launchExecutableTerminal(
+            kind: .kitty,
+            executablePath: "Contents/MacOS/kitty",
+            arguments: kittyArguments(shellCommand: shellCommand, cwd: resolvedDirectory(cwd)),
+            domain: domain
+        )
+    }
+
+    static func launchInWezTerm(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") throws {
+        try launchExecutableTerminal(
+            kind: .wezTerm,
+            executablePath: "Contents/MacOS/wezterm",
+            arguments: wezTermArguments(shellCommand: shellCommand, cwd: resolvedDirectory(cwd)),
+            domain: domain
+        )
+    }
+
+    static nonisolated func kittyArguments(shellCommand: String, cwd: String) -> [String] {
+        [
+            "--single-instance",
+            "--instance-group=agent-sessions",
+            "--directory=\(cwd)",
+            "/bin/zsh",
+            "-lc",
+            shellCommand
+        ]
+    }
+
+    static nonisolated func wezTermArguments(shellCommand: String, cwd: String) -> [String] {
+        [
+            "start",
+            "--cwd",
+            cwd,
+            "--",
+            "/bin/zsh",
+            "-lc",
+            shellCommand
+        ]
+    }
+
+    private static func launchExecutableTerminal(
+        kind: TerminalKind,
+        executablePath: String,
+        arguments: [String],
+        domain: String
+    ) throws {
+        guard let bundleIdentifier = kind.bundleIdentifier,
+              let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            throw NSError(
+                domain: domain,
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "\(kind.displayName) is not installed."]
+            )
+        }
+
+        let process = Process()
+        process.executableURL = appURL.appendingPathComponent(executablePath)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+    }
+
+    private static func resolvedDirectory(_ cwd: String?) -> String {
+        cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
     }
 
     /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.

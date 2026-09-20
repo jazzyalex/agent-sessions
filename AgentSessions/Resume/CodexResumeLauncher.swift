@@ -105,6 +105,19 @@ final class CodexResumeLauncher: ObservableObject {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warp)
     }
 
+    func launch(
+        _ package: CodexResumeCommandBuilder.CommandPackage,
+        in terminalKind: TerminalKind
+    ) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "CodexResumeLauncher"
+        )
+    }
+
     func launchInWarpPreview(_ package: CodexResumeCommandBuilder.CommandPackage) async throws {
         let cwd = package.workingDirectory?.path
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warpPreview)

@@ -13,6 +13,25 @@ final class HermesTerminalLauncher: HermesTerminalLaunching {
 }
 
 @MainActor
+final class HermesSelectedTerminalLauncher: HermesTerminalLaunching {
+    private let terminalKind: TerminalKind
+
+    init(terminalKind: TerminalKind) {
+        self.terminalKind = terminalKind
+    }
+
+    func launchInTerminal(_ package: HermesResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launch(
+            shellCommand: package.shellCommand,
+            displayCommand: package.displayCommand,
+            cwd: package.workingDirectory?.path,
+            kind: terminalKind,
+            domain: "HermesTerminalLauncher"
+        )
+    }
+}
+
+@MainActor
 final class HermesITermLauncher: HermesTerminalLaunching {
     func launchInTerminal(_ package: HermesResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "HermesITermLauncher")

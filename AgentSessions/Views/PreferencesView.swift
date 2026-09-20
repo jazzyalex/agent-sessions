@@ -802,6 +802,7 @@ struct PreferencesView: View {
 
         preferredLaunchMode = .terminal
         resumeSettings.setLaunchMode(.terminal)
+        ResumePreferenceHelpers.setTerminalKind(.terminalApp)
 
         antigravitySettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
