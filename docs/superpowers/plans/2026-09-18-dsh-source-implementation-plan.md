@@ -1,7 +1,7 @@
 # DeepSeek Harness Session Source Implementation Plan
 
 **Date:** 2026-09-18
-**Status:** Planning only; no implementation has started
+**Status:** Implementation in progress; owner decisions 1A-9A recorded 2026-09-18
 **Target repository:** `/Users/alexm/Repository/Codex-History`
 **Reference implementation inspected:** `/Users/alexm/Repository/deepseek-harness` at `ddefc45fbc7f8e46dd73185e68295696d1297887` (`dsh-v0.1.6-alpha.2`)
 **Agent Sessions authority inspected:** `e29459355123a411dedaddf17ce81db4b77d5fcf`
@@ -19,16 +19,11 @@ The first release is deliberately a history browser, not a DSH client:
 
 This is the smallest scope that can make a defensible compatibility claim. It does not turn a best-effort parse into an apparently complete transcript.
 
-## Release gate: the prompt's 5.2 target is stale
+## Release decision: ship in 5.5
 
 The PREP and planning prompt name Agent Sessions 5.2. That version has already shipped, as have 5.3 and 5.4 (`docs/CHANGELOG.md:12`, `docs/CHANGELOG.md:24`, `docs/CHANGELOG.md:75`). The project currently sets `MARKETING_VERSION = 5.4` (`AgentSessions.xcodeproj/project.pbxproj:3597`, `AgentSessions.xcodeproj/project.pbxproj:3668`), and `.cline` already uses `versionIntroduced: "5.4"` (`AgentSessions/Model/SessionSource.swift:80`). The source guide explicitly says a new source must use the real upcoming release and must never be attached to an already shipped release (`docs/adding-a-session-source.md:58-71`).
 
-Therefore:
-
-1. Use `NEXT_UNRELEASED` throughout implementation work until the owner chooses the next version.
-2. Do not add the `SessionSource` case or release-facing copy until that value is resolved.
-3. Replace every `NEXT_UNRELEASED` placeholder in one mechanical pass before the first build.
-4. Add a test that the new source's `versionIntroduced` equals the resolved upcoming version.
+The owner selected **5.5** on 2026-09-18. Use `versionIntroduced: "5.5"`, put release-facing copy under the 5.5 unreleased section, and add a metadata test that prevents the source from being attributed to an already shipped release.
 
 ## Current-source reconciliation
 
@@ -71,8 +66,8 @@ The table below is the authority for implementation. “Confirmed” means the c
 | Headless `--session-id` is a suitable Agent Sessions resume path. | Stale | option at `packages/bundle/headless/src/startup.ts:38-52`; one-shot constraints and task requirement at `packages/bundle/headless/src/index.ts:166-228` | Do not generate a headless command. It is not a general interactive resume contract. |
 | Live following can be implemented by tailing the selected file. | Stale | immutable successor generations and per-append Zstandard frames (`packages/session/session-persistence-jsonl/src/index.ts:495-665`, `packages/session/session-persistence-jsonl/src/index.ts:1206-1227`); protocol history/following at `packages/api/session-controller/src/history.ts:41-239` | V1 uses periodic discovery and complete reparse only. `supportsLiveIngestion = false`. Protocol-native live ingestion is a separate project. |
 | Attachment bytes are self-contained in the session JSONL. | Stale | message blocks carry attachment identity/metadata rather than guaranteed inline bytes (`packages/llm/llm/src/types.ts:72-101`) | No extraction, preview, or arbitrary path following. Render a placeholder with safe metadata only. |
-| The installed `dsh` binary and real private corpus have been checked. | Unresolved | The prompt forbids private DSH state and network access. | Do not claim installed-version or real-corpus compatibility. Release requires sanitized user-supplied specimens or an explicit waiver documented in the evidence manifest. |
-| A bundled Swift Zstandard decoder is already available. | Unresolved | Agent Sessions currently resolves only Sparkle and swift-markdown (`AgentSessions.xcodeproj/project.pbxproj:3825-3855`); no in-repo Zstandard implementation was found. | Complete the decoder licensing/version spike in Task 0. Do not depend on `/opt/homebrew/bin/zstd`, a subprocess, or a dynamically discovered system library. |
+| The installed `dsh` binary and real private corpus have been checked. | Owner decision | The owner selected a small opt-in sanitized specimen set plus a shape/type inventory, while explicitly withholding authorization to inspect `~/.dsh`. | Do not inspect private DSH state. Accept only specimens the owner separately supplies or exports through an approved sanitizer, and keep the evidence limitation visible until they pass. |
+| A bundled Swift Zstandard decoder is already available. | Owner decision | The owner selected official Zstandard 1.5.7 vendored source, pinned by source-archive SHA-256 under its BSD license. | Replace the temporary remote Swift package with a local C target containing only required decompression/common sources, wrap it narrowly, and support arm64 and x86_64 without Homebrew, subprocesses, or runtime library discovery. |
 
 ## V1 product contract
 
@@ -233,14 +228,14 @@ Historical packed assistant chunks are folded before disposition. A final assist
 
 ### Required decoder shape
 
-Task 0 must select and license a pinned, in-process decoder that ships inside the app. The preferred implementation shape is a small local Swift package such as `ThirdParty/DSHZstd/` with:
+The owner selected official Zstandard **1.5.7** as a pinned, in-process decoder that ships inside the app. Implement it as a small local package under `ThirdParty/DSHZstd/` with:
 
 - a C target containing the pinned upstream Zstandard decompression/common sources and license;
 - a narrow Swift wrapper that scans frame headers, returns exact frame byte ranges, decompresses one complete frame at a time, enforces the exact-one-header-line first frame, and reports the start offset of a truncated final frame;
 - explicit compressed-size, decompressed-size, frame-count, and expansion-ratio limits;
 - deterministic errors containing frame ordinal and byte offset, but no private content.
 
-The dependency decision must be recorded with upstream version, source URL, checksum, license, copied notices, supported architectures, and a reproducible update procedure. Because this planning pass was offline, no particular third-party package/version is approved here.
+Record the upstream source-archive URL and SHA-256, selected BSD license and copied notices, exact included source list, arm64/x86_64 support, and a reproducible update procedure. The temporary remote `facebook/zstd` Swift-package reference is not the approved shipping shape and must be removed.
 
 Forbidden implementations:
 
@@ -379,7 +374,7 @@ Add sanitized/generated fixtures under `AgentSessionsTests/Resources/Fixtures/st
 
 ### Existing files that need semantic edits
 
-- `AgentSessions/Model/SessionSource.swift` — add `.deepseekHarness` with durable raw value `deepseek-harness`, display name `DeepSeek Harness`, short name `DSH`, badge `DS`, and `versionIntroduced: NEXT_UNRELEASED`.
+- `AgentSessions/Model/SessionSource.swift` — add `.deepseekHarness` with durable raw value `deepseek-harness`, display name `DeepSeek Harness`, short name `DSH`, badge `DS`, and `versionIntroduced: "5.5"`.
 - `AgentSessions/Model/SessionSourceRegistry.swift` — register the descriptor in the intended source order.
 - `AgentSessions/Model/SessionSourceDescriptor.swift` — required generic expansion for directory-artifact revision/selected-URL state and source-owned archive-entry filtering; keep the new seams optional for existing sources.
 - `AgentSessions/Services/SessionDiscovery.swift` — keep physical `SessionFileStat` truthful; add a separate source-agnostic directory-artifact revision type only if it does not live beside the descriptor.
@@ -394,7 +389,7 @@ Add sanitized/generated fixtures under `AgentSessionsTests/Resources/Fixtures/st
 - `AgentSessions/Views/PreferencesView.swift` and preference navigation/bindings — add the DSH pane and reload trigger.
 - `AgentSessions/Views/Preferences/PreferencesView+General.swift` and a new `PreferencesView+DeepSeekHarness.swift` — add enablement binding and the source-specific pane.
 - `AgentSessions/Onboarding/Views/FirstRunSetupView.swift` and `AgentSessions/Onboarding/Models/WhatsNewCatalog.swift` — add availability and release teaser only after the release version is resolved.
-- `AgentSessions/Views/UnifiedSessionsView.swift`, row/badge helpers, source filters, source menus, and colors — add exhaustive DSH presentation. Brand color remains a Task 0 product decision; do not invent an “official” value without evidence.
+- `AgentSessions/Views/UnifiedSessionsView.swift`, row/badge helpers, source filters, source menus, and colors — add exhaustive DSH presentation using `#4D6BFE` through the adaptive-brand system. Treat it as a source accent, not a protocol fact or partnership claim.
 - `AgentSessions/Analytics/Models/AnalyticsDateRange.swift` and `AgentSessions/Analytics/Views/AnalyticsView.swift` — add the dedicated DSH filter and enablement binding; expose only normalized generic analytics.
 - `AgentSessions/Search/SearchIngestService.swift` and `AgentSessions/Search/SessionSearchTextBuilder.swift` — use the safe rendered-content policy, reject stale generation anchors without changing FTS, and preserve the existing internally transactional search phase rather than claiming cross-system atomicity.
 - `AgentSessions.xcodeproj/project.pbxproj` — add every Swift/test/resource file and any local package product using the repository script where applicable.
@@ -409,8 +404,8 @@ Before editing, use the guide's switch inventory (`docs/adding-a-session-source.
 ### Task 0 — Resolve release and dependency blockers
 
 - [ ] Owner selects the actual next unreleased Agent Sessions version.
-- [ ] Choose and document the bundled Zstandard decoder version, checksum, license, architecture support, and update procedure.
-- [ ] Choose a source color using current product design evidence; record that it is an Agent Sessions presentation choice, not a DSH protocol fact.
+- [ ] Vendor official Zstandard 1.5.7; document the source-archive SHA-256, BSD license/notices, exact decompression/common source list, arm64/x86_64 support, and update procedure.
+- [ ] Route `#4D6BFE` through the adaptive-brand system and document that it is a source accent, not a protocol fact or endorsement claim.
 - [ ] Decide whether sanitized real specimens can be provided. If not, record the evidence limitation in release notes and compatibility docs.
 - [ ] Freeze both repository commits in the fixture manifest and plan execution checklist.
 
@@ -497,7 +492,7 @@ Before editing, use the guide's switch inventory (`docs/adding-a-session-source.
 - [ ] Add the sessions-root override UI with resolved-path explanation.
 - [ ] Ensure source toggling cancels work and clears/rebuilds only DSH projections as current source semantics require.
 - [ ] Add accessibility labels and VoiceOver-readable failure/status text.
-- [ ] Add release copy only under `NEXT_UNRELEASED` after resolution.
+- [ ] Add release copy under the unreleased 5.5 section.
 
 **Gate:** Sentinel tests prove no source switch or user-facing picker omits DSH, while resume/live controls stay absent.
 
@@ -658,22 +653,24 @@ Ship only when all are true:
 | DSH archive-state path differs by profile | Incorrect visibility | Ignore upstream archive state in v1. |
 | Resume command targets wrong surface/profile | Failed or destructive workflow | No resume capability in v1. |
 | Cross-root duplicate session id | Row collision | Detect ambiguity and publish neither copy. |
-| Stale 5.2 instruction | False release history | `NEXT_UNRELEASED` gate and metadata test. |
+| Stale 5.2 instruction | False release history | Pinned 5.5 introduction metadata and regression test. |
 | Synthetic corpus misses real-world data | Compatibility overclaim | Narrow wording, sanitized specimen gate/waiver, tracked evidence gap. |
 
-## Unresolved questions and bounded experiments
+## Resolved owner decisions and remaining evidence gates
 
-These do not justify speculative implementation:
+The owner selected **1A through 9A** on 2026-09-18:
 
-1. **Which Agent Sessions release introduces DSH?** Owner decision. Resolve before source registration.
-2. **Which pinned Zstandard implementation ships?** Offline dependency/license spike. Compare at least memory safety, macOS architectures, API support for frame boundaries/checksums, binary size, maintenance, and license.
-3. **How broad is first-party event augmentation in representative released DSH bundles?** Generate a catalog/type inventory from the pinned build and compare it with the Swift disposition table. Any gap blocks the broad v0-v3 claim.
-4. **Do real sanitized histories expose shapes missing from synthetic fixtures?** Ask for opt-in sanitized specimens; never inspect `~/.dsh` under this authorization.
-5. **Should recovered prefixes become visible later?** First design a generic persisted integrity state and verify list, transcript, FTS, export, and archive surfaces make incompleteness unavoidable.
-6. **Should DSH archive state be mirrored later?** Test base, SDK-minimal, and a custom storage routing profile. Do not read only the default JSON path and call it universal.
-7. **Which surface can safely resume?** Run separate manual end-to-end studies for Web/API, ACP, and any documented interactive CLI/TUI profile. Headless alone does not satisfy the product contract.
-8. **Should fork lineage become generic?** Design it separately so `parentSessionID` no longer means only subagent. Do not overload the existing hierarchy.
-9. **What is the presentation color?** Choose from product design evidence; it is not part of the DSH storage contract.
+1. Ship DSH in Agent Sessions 5.5.
+2. Vendor official Zstandard 1.5.7 decompression/common C sources, pinned by archive SHA-256 under the BSD license, and support arm64 and x86_64 through a narrow local wrapper.
+3. Claim broad v0-v3 support only when the generated first-party catalog gives every event an explicit tested Swift disposition. Automatically narrow to core events if any first-party extension remains unsupported.
+4. Accept a small opt-in sanitized specimen set plus a shape/type inventory. This is not authorization to inspect `~/.dsh`; specimens must be separately supplied or exported through an approved local sanitizer.
+5. Keep recovered prefixes invisible and reject incomplete artifacts in v1.
+6. Ignore upstream DSH archive state and show every otherwise-valid session.
+7. Expose no DSH resume capability in v1.
+8. Preserve fork provenance as metadata, keep forks as roots, and do not overload `parentSessionID`.
+9. Use `#4D6BFE` through Agent Sessions' adaptive-brand system as a source accent, without implying endorsement or partnership.
+
+The remaining gates are evidence and verification work, not product decisions: complete catalog/disposition parity, verify the pinned Zstandard archive/checksum/license/source list and both architectures, and validate any separately supplied sanitized specimens before making a real-corpus compatibility claim.
 
 ## Definition of done
 

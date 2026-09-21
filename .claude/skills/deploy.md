@@ -28,7 +28,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Preferred command: `tools/release/deploy qa --version <VERSION>`. The release command requires the fresh QA stamp from this command unless `--skip-qa` or `SKIP_QA=1` is explicit. QA stamps require a clean `main` checkout synced with `origin/main`, and release/resume rejects dirty or different-HEAD checkouts.
 - QA execution order:
   1. **Scope** — `git log --oneline --decorate -n 30` and `git diff --name-only <LAST_TAG>..HEAD`; identify high-risk areas.
-  2. **Build** — `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build`
+  2. **CI-parity preflight** — select and verify the pinned Xcode toolchain, run the docs guards and committed localization catalog validation, and run the no-signing Debug build with `.deriveddata-localization`; after the build, run the localization extraction-drift validator against its `Objects-normal` output. `tools/release/deploy qa` performs these checks automatically.
   3. **Full test suite** — `./scripts/xcode_test_stable.sh`
   4. **Targeted tests** — run suites for touched high-risk areas (session parsing, usage tracking, onboarding, etc.)
   5. **Warnings sweep** — flag any new actionable warnings in build output.
@@ -36,6 +36,15 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - In Codex Desktop, run Swift/Xcode build and test commands with approved Xcode cache access up front when they will touch DerivedData, ModuleCache, SourcePackages, simulator caches, SwiftPM diagnostics, or `~/.cache/clang`. If a first run fails only because sandboxing blocked one of those paths, rerun the exact same command with approved Xcode access and report it as a sandbox access retry, not as a code or test failure.
 - If automated gates fail → stop, report failure, do not proceed to bump/release.
 - If user says "skip QA" or "no QA" → proceed without running, note it was skipped.
+
+### CI parity rule
+
+- A green XCTest run is not sufficient for release QA. The QA stamp is invalid unless the same localization extraction-drift gate used by `.github/workflows/ci.yml` passes.
+- The local QA toolchain must match `tools/release/ci-xcode-version.txt`; CI selects that same Xcode version on the pinned `macos-26` image.
+- When user-facing SwiftUI copy changes, update `AgentSessions/Resources/Localizable.xcstrings` in the same change. Use `Text(verbatim:)` for intentional raw paths, commands, identifiers, or examples; add a string to the validator's verbatim set only after reviewing why it must remain outside the catalog.
+- If the extraction gate fails, stop and repair the catalog/source classification, then rerun `tools/release/deploy qa --version <VERSION>` before pushing or releasing. Do not solve it by repeatedly retrying CI.
+- `tools/release/deploy bump` requires a passing QA stamp for the calculated target version before it changes release metadata. After the bump commit is pushed, rerun exact-commit QA before `release`.
+- The manual deployment fallback is valid only after the exact-HEAD QA gate has passed; it must not bypass a failed or omitted QA/extraction check.
 
 ## Before Starting (Ask the User)
 

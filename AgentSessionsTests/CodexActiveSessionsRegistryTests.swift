@@ -2902,7 +2902,10 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         window.contentView = NSView(frame: window.frame)
         window.contentView?.addSubview(host)
 
-        drainMainRunLoop()
+        let deadline = Date().addingTimeInterval(1)
+        while !window.isRestorable && Date() < deadline {
+            RunLoop.main.run(mode: .default, before: deadline)
+        }
         XCTAssertTrue(window.isRestorable)
     }
 

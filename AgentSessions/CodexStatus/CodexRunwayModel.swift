@@ -1785,6 +1785,22 @@ enum CodexRunwayRecentSessionScanner {
     static let maximumFiles = 12
     static let maximumMetadataFiles = 80
 
+    /// Resolve the configured Codex session directory through the same discovery
+    /// rules used by the session list. The runway used to hard-code
+    /// `~/.codex/sessions`, which made a non-default CODEX_HOME invisible here.
+    static func defaultRoot(
+        defaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        let configuredRoot = defaults.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride)
+        return CodexSessionDiscovery(
+            customRoot: configuredRoot,
+            environment: environment,
+            homeDirectory: homeDirectory
+        ).sessionsRoot()
+    }
+
     static func identities(root: URL? = nil,
                            now: Date = Date(),
                            activeSampleAge: TimeInterval = maximumActiveSampleAge,
@@ -1799,8 +1815,7 @@ enum CodexRunwayRecentSessionScanner {
                      activeSampleAge: TimeInterval = maximumActiveSampleAge,
                      completionGrace: TimeInterval = maximumGoalCompletionGrace,
                      fileManager: FileManager = .default) -> CodexRunwayRecentSessionScan {
-        let rootURL = root ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".codex/sessions", isDirectory: true)
+        let rootURL = root ?? defaultRoot()
         let cutoff = now.addingTimeInterval(-maximumFileAge)
         var candidates: [(url: URL, modifiedAt: Date, signature: RunwayFileSignature)] = []
 

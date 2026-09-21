@@ -92,7 +92,11 @@ stamp = {
     "completed_at": os.environ["COMPLETED_AT_VALUE"],
     "checks": [
         "git scope review",
-        "Debug xcodebuild",
+        "CI docs guards",
+        "Xcode toolchain parity",
+        "localization catalog validation",
+        "CI-parity Debug xcodebuild",
+        "CI-parity localization extraction drift",
         "stable XCTest wrapper",
         "Python release tests",
         "warning sweep",
@@ -101,6 +105,13 @@ stamp = {
 path = Path(os.environ["STAMP_PATH_VALUE"])
 path.write_text(json.dumps(stamp, indent=2) + "\n")
 PYEOF
+}
+
+invalidate_qa_stamp() {
+  if [[ -f "$QA_STAMP_FILE" ]]; then
+    rm -f "$QA_STAMP_FILE"
+    yellow "Invalidated the previous release QA stamp before rerunning QA"
+  fi
 }
 
 qa_stamp_head() {
@@ -443,6 +454,10 @@ else:
 PYEOF
 )
 
+  echo ""
+  echo "==> Required pre-bump QA"
+  require_qa_stamp "$NEW_VERSION"
+
   # Auto-increment build number
   local NEW_BUILD=$((CURR_BUILD + 1))
 
@@ -542,7 +557,8 @@ Why: Version bump for $NEW_VERSION release"
   echo "Next steps:"
   echo "  1. Review commit: git show HEAD"
   echo "  2. Push to GitHub: git push origin main"
-  echo "  3. Deploy: tools/release/deploy release $NEW_VERSION"
+  echo "  3. Re-run exact-commit QA: tools/release/deploy qa --version $NEW_VERSION"
+  echo "  4. Deploy: tools/release/deploy release $NEW_VERSION"
 }
 
 # ============================================================================
@@ -606,6 +622,7 @@ run_release_qa_core() {
     exit 2
   fi
   green "✓ Clean main synced with origin/main"
+  invalidate_qa_stamp
 
   local started_at
   started_at=$(date -Iseconds)
@@ -629,9 +646,37 @@ run_release_qa_core() {
   fi
 
   echo ""
-  echo "==> Debug build"
+  echo "==> Xcode toolchain parity"
+  python3 scripts/check_xcode_version.py
+
+  echo ""
+  echo "==> CI docs guards"
+  scripts/check_deploy_drift.sh
+  python3 scripts/check_docs_publish.py
+
+  echo ""
+  echo "==> Localization catalog validation"
+  python3 -m unittest scripts.tests.test_validate_localization_catalogs
+  python3 scripts/validate_localization_catalogs.py
+
+  echo ""
+  echo "==> Debug build (CI parity)"
+  local localization_derived_data=".deriveddata-localization"
+  local localization_extraction_root="$localization_derived_data/Build/Intermediates.noindex/AgentSessions.build/Debug/AgentSessions.build/Objects-normal"
   local build_log="/tmp/agent-sessions-qa-build-$(date +%s).log"
-  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build 2>&1 | tee "$build_log"
+  xcodebuild \
+    -project AgentSessions.xcodeproj \
+    -scheme AgentSessions \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "$localization_derived_data" \
+    CODE_SIGNING_ALLOWED=NO \
+    clean build 2>&1 | tee "$build_log"
+
+  echo ""
+  echo "==> Localization extraction drift (CI parity)"
+  python3 scripts/validate_localization_catalogs.py \
+    --extraction-root "$localization_extraction_root"
 
   echo ""
   echo "==> Stable XCTest"

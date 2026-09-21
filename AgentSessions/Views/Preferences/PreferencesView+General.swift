@@ -474,6 +474,7 @@ private extension PreferencesView {
         case .devin:       return $devinAgentEnabled
         case .fx:          return $fxAgentEnabled
         case .cline:       return $clineAgentEnabled
+        case .deepseekHarness: return $deepSeekHarnessAgentEnabled
         }
     }
 

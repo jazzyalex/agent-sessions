@@ -38,13 +38,45 @@ Run from repo root.
 
 ### 2.1 Build
 
-- [ ] App build succeeds:
+- [ ] The pinned Xcode toolchain is selected and verified:
 
 ```bash
-xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build
+python3 scripts/check_xcode_version.py
 ```
 
-### 2.2 Test Suite
+- [ ] CI-parity app build succeeds with a fresh localization-derived-data path:
+
+```bash
+xcodebuild \
+  -project AgentSessions.xcodeproj \
+  -scheme AgentSessions \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  -derivedDataPath .deriveddata-localization \
+  CODE_SIGNING_ALLOWED=NO \
+  clean build
+```
+
+### 2.2 Localization Catalog and Extraction Drift
+
+- [ ] Committed catalogs pass their unit and structural checks:
+
+```bash
+python3 -m unittest scripts.tests.test_validate_localization_catalogs
+python3 scripts/validate_localization_catalogs.py
+```
+
+- [ ] The built `.stringsdata` extraction matches the reviewed catalog/verbatim set:
+
+```bash
+python3 scripts/validate_localization_catalogs.py \
+  --extraction-root \
+  .deriveddata-localization/Build/Intermediates.noindex/AgentSessions.build/Debug/AgentSessions.build/Objects-normal
+```
+
+`tools/release/deploy qa --version <VERSION>` runs this section automatically. A release QA stamp must not be written when this gate fails.
+
+### 2.3 Test Suite
 
 - [ ] Full stable suite passes:
 

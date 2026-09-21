@@ -1259,6 +1259,209 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertNotEqual(failedRead, authoritativeEmpty,
                           "nil-to-empty identity recovery must kick ingest so stale rows are reconciled")
     }
+
+    // MARK: - Path-backed live authority (DSH)
+
+    /// Same id/count/size/end but a v2->v3 selected-generation move must compare
+    /// unequal: the fingerprint carries sorted standardized path identity for
+    /// ordinary/path-backed sessions.
+    func testFingerprintChangesWhenDSHSelectedPathChanges() {
+        let end = Date(timeIntervalSince1970: 1_000_000)
+        func makeDSHSession(path: String) -> Session {
+            Session(id: "dsh-1", source: .deepseekHarness, startTime: nil, endTime: end,
+                    model: nil, filePath: path, fileSizeBytes: 100, eventCount: 1, events: [],
+                    cwd: nil, repoName: nil, lightweightTitle: "dsh-1")
+        }
+        let v2 = makeDSHSession(path: "/tmp/dsh-live/proj/sess/session.v2.jsonl")
+        let v3 = makeDSHSession(path: "/tmp/dsh-live/proj/sess/session.v3.jsonl")
+
+        let fpV2 = UnifiedSessionIndexer.SessionListFingerprint(sessions: [v2])
+        let fpV3 = UnifiedSessionIndexer.SessionListFingerprint(sessions: [v3])
+        XCTAssertNotEqual(fpV2, fpV3,
+                          "same id/count/size/end with a v2->v3 selected path change must compare unequal")
+    }
+
+    /// Unknown (nil) vs authoritative-empty live snapshots must compare unequal so
+    /// nil->empty recovery kicks ingest and reconciles stale live rows.
+    func testFingerprintChangesWhenLivePathReadRecoversToAuthoritativeEmpty() {
+        let failedRead = UnifiedSessionIndexer.SessionListFingerprint(
+            sessions: [],
+            livePathSnapshot: nil
+        )
+        let authoritativeEmpty = UnifiedSessionIndexer.SessionListFingerprint(
+            sessions: [],
+            livePathSnapshot: []
+        )
+
+        XCTAssertNotEqual(failedRead, authoritativeEmpty,
+                          "nil-to-empty live-path recovery must kick ingest so stale live rows are reconciled")
+    }
+
+    /// Ingest a live path with authoritative {live}, then authoritative empty:
+    /// the live session's files/meta/search rows must be removed.
+    func testAuthoritativeEmptyLivePathsRemoveLiveRows() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "live.jsonl", userText: "live content wombatquartz", assistantText: "ack wombatquartz", in: ingestTempDir)
+        let ref = try fileRef(for: url)
+        let live: Set<String> = [ref.path]
+
+        let service = SearchIngestService(db: db)
+        let first = try await service.ingest(
+            source: .codex,
+            files: [ref],
+            toolIOEnabled: false,
+            quietSeconds: 0,
+            reingestCooldownOverride: 0,
+            livePathAuthority: .authoritative(live)
+        )
+        XCTAssertEqual(first.processed, 1)
+        let hasDataAfterFirst = try await db.hasSearchData(sources: ["codex"])
+        XCTAssertTrue(hasDataAfterFirst, "sanity: live ingest must populate search rows")
+        let ownedAfterFirst = try await db.searchLivePaths(source: "codex")
+        XCTAssertEqual(ownedAfterFirst, live)
+
+        _ = try await service.ingest(
+            source: .codex,
+            files: [],
+            toolIOEnabled: false,
+            livePathAuthority: .authoritative([])
+        )
+
+        let hasDataAfterEmpty = try await db.hasSearchData(sources: ["codex"])
+        XCTAssertFalse(hasDataAfterEmpty,
+                       "authoritative empty must remove the live session's search rows")
+        let filesCount = try await db.rowCountForTesting(table: "files", source: "codex")
+        XCTAssertEqual(filesCount, 0)
+        let metaCount = try await db.rowCountForTesting(table: "session_meta", source: "codex")
+        XCTAssertEqual(metaCount, 0)
+        let ownedAfterEmpty = try await db.searchLivePaths(source: "codex")
+        XCTAssertEqual(ownedAfterEmpty, [],
+                       "authoritative empty must be persisted as the new ownership")
+    }
+
+    /// Unknown authority may run but must preserve rows and ownership state and
+    /// delete nothing.
+    func testUnknownLivePathAuthorityPreservesRows() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "live.jsonl", userText: "live content quokkafeldspar", assistantText: "ack quokkafeldspar", in: ingestTempDir)
+        let ref = try fileRef(for: url)
+        let live: Set<String> = [ref.path]
+
+        let service = SearchIngestService(db: db)
+        let first = try await service.ingest(
+            source: .codex,
+            files: [ref],
+            toolIOEnabled: false,
+            quietSeconds: 0,
+            reingestCooldownOverride: 0,
+            livePathAuthority: .authoritative(live)
+        )
+        XCTAssertEqual(first.processed, 1)
+
+        _ = try await service.ingest(
+            source: .codex,
+            files: [],
+            toolIOEnabled: false,
+            livePathAuthority: .unknown
+        )
+
+        let hasDataAfterUnknown = try await db.hasSearchData(sources: ["codex"])
+        XCTAssertTrue(hasDataAfterUnknown,
+                      "unknown authority must preserve rows")
+        let unknownFilesCount = try await db.rowCountForTesting(table: "files", source: "codex")
+        XCTAssertEqual(unknownFilesCount, 1)
+        let unknownMetaCount = try await db.rowCountForTesting(table: "session_meta", source: "codex")
+        XCTAssertEqual(unknownMetaCount, 1)
+        let ownedAfterUnknown = try await db.searchLivePaths(source: "codex")
+        XCTAssertEqual(ownedAfterUnknown, live,
+                       "unknown authority must preserve ownership state")
+    }
+
+    /// The same session re-ingested at an archive path while the authoritative live
+    /// set still owns the old live path: authoritative empty must remove the old
+    /// live file ownership but preserve the archive files/meta/search rows.
+    func testAuthoritativeEmptyPreservesArchiveRows() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "live.jsonl", userText: "live content archivesable wombatquartz", assistantText: "ack wombatquartz", in: ingestTempDir)
+        let ref = try fileRef(for: url)
+        let live: Set<String> = [ref.path]
+        let sessionID = try XCTUnwrap(SessionIndexer().parseFileFull(at: url)?.id)
+
+        let service = SearchIngestService(db: db)
+        let first = try await service.ingest(
+            source: .codex,
+            files: [ref],
+            toolIOEnabled: false,
+            quietSeconds: 0,
+            reingestCooldownOverride: 0,
+            livePathAuthority: .authoritative(live)
+        )
+        XCTAssertEqual(first.processed, 1)
+
+        // Simulate the archive pin re-ingest: the same session now lives at an
+        // archive path (archive FileRefs are never members of the authoritative
+        // live set). The meta row is re-keyed to the archive path while the old
+        // live `files` row is still owned by the live set.
+        let archivePath = ingestTempDir.appendingPathComponent("archive-s1.jsonl").path
+        let allMeta = try await db.fetchSessionMeta(for: "codex")
+        let stored = try XCTUnwrap(allMeta.first { $0.sessionID == sessionID })
+        let archivedMeta = SessionMetaRow(
+            sessionID: stored.sessionID,
+            source: stored.source,
+            path: archivePath,
+            mtime: stored.mtime,
+            size: stored.size,
+            startTS: stored.startTS,
+            endTS: stored.endTS,
+            model: stored.model,
+            cwd: stored.cwd,
+            repo: stored.repo,
+            title: stored.title,
+            codexInternalSessionID: stored.codexInternalSessionID,
+            isHousekeeping: stored.isHousekeeping,
+            messages: stored.messages,
+            commands: stored.commands,
+            parentSessionID: stored.parentSessionID,
+            subagentType: stored.subagentType,
+            customTitle: stored.customTitle
+        )
+        try await db.begin()
+        try await db.upsertFile(path: archivePath, mtime: ref.mtime, size: ref.size, source: "codex")
+        try await db.upsertSessionMeta(archivedMeta)
+        try await db.upsertSessionSearch(sessionID: sessionID, source: "codex",
+                                         mtime: ref.mtime, size: ref.size,
+                                         text: "archived needle wombatquartz")
+        try await db.commit()
+
+        _ = try await service.ingest(
+            source: .codex,
+            files: [],
+            toolIOEnabled: false,
+            livePathAuthority: .authoritative([])
+        )
+
+        let remainingFiles = Set(try await db.fetchIndexedFiles(for: "codex").map(\.path))
+        XCTAssertFalse(remainingFiles.contains(ref.path),
+                       "authoritative empty must remove the old live file ownership")
+        XCTAssertTrue(remainingFiles.contains(archivePath),
+                      "the archive file row must survive removal of the old live path")
+        let remainingAllMeta = try await db.fetchSessionMeta(for: "codex")
+        let remainingMeta = remainingAllMeta.first { $0.sessionID == sessionID }
+        XCTAssertEqual(remainingMeta?.path, archivePath,
+                       "the archive meta row must survive removal of the old live path")
+        let matches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "wombatquartz", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(matches, [sessionID],
+                       "the archive search row must survive removal of the old live path")
+    }
     // MARK: - Provenance survives a write that does not carry it
 
     /// Search ingest omitted the codex_* provenance fields, and `upsertSessionMeta`

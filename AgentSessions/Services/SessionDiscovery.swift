@@ -9,7 +9,7 @@ protocol SessionDiscovery {
     func discoverSessionFiles() -> [URL]
 }
 
-struct SessionFileStat: Equatable {
+struct SessionFileStat: Equatable, Sendable {
     let mtime: Int64
     let size: Int64
 }
@@ -61,19 +61,40 @@ extension SessionFileStat {
 
 final class CodexSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
+    private let environment: [String: String]
+    private let homeDirectory: URL
 
-    init(customRoot: String? = nil) {
-        self.customRoot = customRoot
+    init(customRoot: String? = nil,
+         environment: [String: String] = ProcessInfo.processInfo.environment,
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        let trimmedCustomRoot = customRoot?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.customRoot = trimmedCustomRoot?.isEmpty == true ? nil : trimmedCustomRoot
+        self.environment = environment
+        self.homeDirectory = homeDirectory
+    }
+
+    /// Resolve the Codex configuration root, excluding the session-directory
+    /// preference override. The override can point at imported history, so it
+    /// must not change which auth file belongs to the active Codex account.
+    static func codexHome(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        if let rawEnvironmentRoot = environment["CODEX_HOME"] {
+            let environmentRoot = rawEnvironmentRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !environmentRoot.isEmpty {
+                return URL(fileURLWithPath: environmentRoot)
+            }
+        }
+        return homeDirectory.appendingPathComponent(".codex", isDirectory: true)
     }
 
     func sessionsRoot() -> URL {
         if let custom = customRoot, !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], !env.isEmpty {
-            return URL(fileURLWithPath: env).appendingPathComponent("sessions")
-        }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
+        return Self.codexHome(environment: environment, homeDirectory: homeDirectory)
+            .appendingPathComponent("sessions", isDirectory: true)
     }
 
     func discoverSessionFiles() -> [URL] {

@@ -473,6 +473,8 @@ private extension AgentUpdateService {
             // distribution; no stable package-manager mapping was verified,
             // so no update channel is claimed.
             return nil
+        case .deepseekHarness:
+            return nil
         }
     }
 

@@ -837,7 +837,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             }
             return !meaningfulUser
         case .antigravity, .opencode, .hermes, .copilot, .droid,
-             .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline:
+             .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .cline,
+             .deepseekHarness:
             // Old `default: return false`: only Codex and Claude write the preamble /
             // local-command shapes this classifier recognizes, so no other provider has
             // ever been marked housekeeping. Written out per source so a new one
@@ -935,7 +936,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     private var storesAuthoritativeLightweightCwd: Bool {
         switch source {
         case .antigravity, .opencode, .copilot, .openclaw, .hermes,
-             .pi, .kimi, .grok, .qwen, .devin, .cursor, .claude, .droid, .fx, .cline:
+             .pi, .kimi, .grok, .qwen, .devin, .cursor, .claude, .droid, .fx, .cline,
+             .deepseekHarness:
             return true
         case .codex:
             return false
@@ -963,7 +965,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             // Cline's metadata.title is likewise the CLI/Desktop session name.
             return true
         case .codex, .claude, .antigravity, .opencode, .hermes,
-             .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .qwen:
+             .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .qwen, .deepseekHarness:
             return false
         }
     }
