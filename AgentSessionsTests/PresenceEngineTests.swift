@@ -250,25 +250,85 @@ final class PresenceEngineTests: XCTestCase {
         var roots = FixedPresenceRootsResolver.hermetic()
         roots.codexSessions = [root]
         let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
-        await engine.debugSetEnvironment(PresenceEnvironment())
+        var environment = PresenceEnvironment()
+        environment.hasVisibleConsumer = true
+        environment.isCockpitVisible = true
+        await engine.debugSetEnvironment(environment)
         let first = await engine.debugRefreshOnce()
-        XCTAssertEqual(first.presences.count, 2)
+        XCTAssertEqual(first.presences.count, 1)
         let workingPresence = try XCTUnwrap(first.presences.first { $0.sessionId == workingID })
-        let idlePresence = try XCTUnwrap(first.presences.first { $0.sessionId == idleID })
         let workingKey = CodexActiveSessionsModel.presenceKey(for: workingPresence)
-        let idleKey = CodexActiveSessionsModel.presenceKey(for: idlePresence)
         XCTAssertEqual(first.liveStateByPresenceKey[workingKey], .activeWorking)
-        XCTAssertEqual(first.liveStateByPresenceKey[idleKey], .openIdle)
+        let idleSessionKey = CodexActiveSessionsModel.sessionLookupKey(source: .codex, sessionId: idleID)
+        XCTAssertNil(first.bySessionID[idleSessionKey], "a retained idle rollout does not prove a visible conversation")
         XCTAssertNotNil(first.bySessionID[CodexActiveSessionsModel.sessionLookupKey(source: .codex, sessionId: workingID)])
+        let concurrentHandle = try FileHandle(forWritingTo: idle)
+        try concurrentHandle.seekToEnd()
+        try concurrentHandle.write(contentsOf: Data(start.utf8))
+        let concurrent = await engine.debugRefreshOnce()
+        XCTAssertEqual(concurrent.presences.count, 2)
+        XCTAssertTrue(concurrent.liveStateByPresenceKey.values.allSatisfy { $0 == .activeWorking })
+        try concurrentHandle.write(contentsOf: Data(complete.utf8))
+        try concurrentHandle.close()
+        let oneRemaining = await engine.debugRefreshOnce()
+        XCTAssertEqual(oneRemaining.presences.count, 1)
+        XCTAssertNotNil(oneRemaining.liveStateByPresenceKey[workingKey])
         // The process-presence cache must not also cache a stale working hint.
         let handle = try FileHandle(forWritingTo: working)
         try handle.seekToEnd()
         try handle.write(contentsOf: Data(complete.utf8))
         try handle.close()
         let second = await engine.debugRefreshOnce()
-        XCTAssertEqual(second.liveStateByPresenceKey[workingKey], .openIdle)
-        XCTAssertEqual(second.liveStateByPresenceKey[idleKey], .openIdle)
-        XCTAssertEqual(second.presences.count, 2)
+        XCTAssertNil(second.liveStateByPresenceKey[workingKey])
+        XCTAssertTrue(second.presences.isEmpty, "explicit completion must clear even the visible cockpit")
+        XCTAssertTrue(second.byLogPath.isEmpty)
+        XCTAssertTrue(second.bySessionID.isEmpty)
+        // Keep discovery candidates cached, so a new turn in a retained thread
+        // can appear before another process scan runs.
+        let idleHandle = try FileHandle(forWritingTo: idle)
+        try idleHandle.seekToEnd()
+        try idleHandle.write(contentsOf: Data(start.utf8))
+        try idleHandle.close()
+        let third = await engine.debugRefreshOnce()
+        XCTAssertEqual(third.presences.count, 1)
+        XCTAssertNotNil(third.bySessionID[idleSessionKey])
+    }
+
+    func testRetainedDesktopHistoryDoesNotPublishIdleOrMTimeBasedActivity() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let types = ["task_complete", "turn_aborted", "thread_settings_applied"]
+        var blob = "p42\nfcwd\ntDIR\nn/tmp\n"
+        for (index, type) in types.enumerated() {
+            let id = String(format: "00000000-0000-4000-8000-%012d", index + 1)
+            let log = root.appendingPathComponent("rollout-2026-09-21T10-00-00-\(id).jsonl")
+            // All three files have a recent mtime. None represents ongoing work.
+            try Data("{\"type\":\"event_msg\",\"payload\":{\"type\":\"\(type)\"}}\n".utf8).write(to: log)
+            blob += "f\(37 + index)\nau\ntREG\nn\(log.path)\n"
+        }
+        // An actual CLI terminal remains open/idle under the existing rules.
+        blob += "p43\nfcwd\ntDIR\nn/tmp\nf0\ntCHR\nn/dev/ttys044\n"
+        let lsofBlob = blob
+        let runner = FakeProbeRunner(responders: [.init { executable, arguments in
+            if executable == "ps", arguments.contains("pid=,tty=,command=") {
+                return Data("42 ?? /Applications/ChatGPT.app/Contents/Resources/codex app-server\n43 ttys044 codex\n".utf8)
+            }
+            if executable == "lsof", arguments.contains("codex") { return Data(lsofBlob.utf8) }
+            return Data()
+        }])
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.codexSessions = [root]
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
+        await engine.debugSetEnvironment(PresenceEnvironment())
+        let snapshot = await engine.debugRefreshOnce()
+        XCTAssertEqual(snapshot.presences.count, 1)
+        let cli = try XCTUnwrap(snapshot.presences.first)
+        XCTAssertEqual(cli.pid, 43)
+        XCTAssertEqual(cli.kind, "interactive")
+        XCTAssertEqual(snapshot.liveStateByPresenceKey[CodexActiveSessionsModel.presenceKey(for: cli)], .openIdle)
+        XCTAssertTrue(snapshot.byLogPath.isEmpty)
+        XCTAssertTrue(snapshot.bySessionID.isEmpty)
     }
 
     func testRefreshOnce_discoversCodexPresenceViaProcessProbe_andPublishesMembership() async {

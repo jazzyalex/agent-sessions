@@ -1,8 +1,8 @@
 import Foundation
 
 /// A bounded, cached tail read for each thread owned by the desktop backend.
-/// Completion wins over mtime: reading a thread or changing its settings must
-/// not make an idle conversation appear to be generating a response.
+/// File handles outlive the visible conversation. Only an unfinished turn is
+/// evidence of desktop activity; idle/unknown threads must not become presences.
 struct CodexDesktopTurnStateReader {
     private struct Entry {
         let pid: Int
@@ -775,9 +775,25 @@ actor PresenceEngine {
         let latestProcessProbe = CodexActiveSessionsModel.filterSupportedPresences(
             probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
         )
-        let loaded = CodexActiveSessionsModel.coalescePresencesByTTY(
-            CodexActiveSessionsModel.filterSupportedPresences(probeResult.loaded)
-        )
+        let discovered = CodexActiveSessionsModel.filterSupportedPresences(probeResult.loaded)
+        codexDesktopTurnStates.retain(paths: Set(discovered.compactMap {
+            $0.source == .codex && $0.kind == "desktop" ? $0.sessionLogPath : nil
+        }))
+        var completedDesktopKeys: Set<String> = []
+        let loaded = CodexActiveSessionsModel.coalescePresencesByTTY(discovered.compactMap { presence in
+            guard presence.source == .codex, presence.kind == "desktop" else { return presence }
+            guard let path = presence.sessionLogPath, let pid = presence.pid else { return nil }
+            let state = codexDesktopTurnStates.state(path: path, pid: pid)
+            if state == .openIdle {
+                completedDesktopKeys.insert(CodexActiveSessionsModel.presenceKey(for: presence))
+            }
+            // A writable rollout can stay open for hours after a task finishes.
+            // It does not establish which conversation is visible in Codex App.
+            guard state == .activeWorking else { return nil }
+            var working = presence
+            working.liveStateHint = .activeWorking
+            return working
+        })
 
         if probeResult.didProbeITerm {
             cachedITermPresences = probeResult.itermPresences
@@ -889,7 +905,14 @@ actor PresenceEngine {
             cockpitIsOrWasVisible: cockpitIsOrWasVisible,
             consecutiveSuppressedCycles: consecutiveEmptySuppressedCycles
         )
-        let shouldSuppressEmptyPublish = baseSuppressEmptyPublish || shouldSuppressRecentTransition
+        // An explicit completion is not a transient discovery failure. In
+        // particular, the cockpit must drop the last finished desktop task.
+        let allPreviousPresencesCompleted = !latestSnapshot.presences.isEmpty
+            && latestSnapshot.presences.allSatisfy {
+                completedDesktopKeys.contains(CodexActiveSessionsModel.presenceKey(for: $0))
+            }
+        let shouldSuppressEmptyPublish = (baseSuppressEmptyPublish || shouldSuppressRecentTransition)
+            && !allPreviousPresencesCompleted
         if shouldSuppressEmptyPublish, ui.isEmpty {
             consecutiveEmptySuppressedCycles += 1
         } else {
@@ -1428,19 +1451,8 @@ actor PresenceEngine {
 #if DEBUG
         let _classifySpan = Perf.begin("refreshClassify", thresholdMs: 4)
 #endif
-        codexDesktopTurnStates.retain(paths: Set(presences.compactMap {
-            $0.source == .codex && $0.kind == "desktop" ? $0.sessionLogPath : nil
-        }))
-        let classifiedPresences = presences.map { presence in
-            var presence = presence
-            if presence.source == .codex, presence.kind == "desktop",
-               let path = presence.sessionLogPath, let pid = presence.pid {
-                presence.liveStateHint = codexDesktopTurnStates.state(path: path, pid: pid)
-            }
-            return presence
-        }
         let result = CodexActiveSessionsModel.classifyLiveStates(
-            for: classifiedPresences,
+            for: presences,
             now: now,
             probeITerm: probeITerm,
             previousLiveStates: previousLiveStates,
