@@ -3451,7 +3451,9 @@ final class CodexActiveSessionsModel {
         for pid in eligiblePIDs.sorted() {
             guard let info = infos[pid] else { continue }
             for path in Set(info.openSessionLogPaths).sorted() {
-                guard let id = extractSessionID(fromLogPath: path, source: .codex) else { continue }
+                let basename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                let id = String(basename.suffix(36))
+                guard basename.hasPrefix("rollout-"), UUID(uuidString: id) != nil else { continue }
                 var presence = CodexActivePresence()
                 presence.schemaVersion = 1
                 presence.publisher = "agent-sessions-process"

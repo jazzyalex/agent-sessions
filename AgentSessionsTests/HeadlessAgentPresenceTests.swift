@@ -57,6 +57,10 @@ final class CodexDesktopPresenceTests: XCTestCase {
         au
         tREG
         n\(root)-other/rollout-2026-09-21T10-00-03-00000000-0000-4000-8000-000000000004.jsonl
+        f55
+        au
+        tREG
+        n\(root)/rollout-without-a-thread-uuid.jsonl
         """
         XCTAssertTrue(CodexActiveSessionsModel.parseLsofMachineOutput(blob, sessionsRoots: [root]).isEmpty)
         let infos = CodexActiveSessionsModel.parseLsofMachineOutput(
