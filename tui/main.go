@@ -34,6 +34,7 @@ type (
 	rowsMsg struct {
 		rows  []SessionRow
 		query string
+		gen   int // which user-chosen view (sort, source, search) this answers
 		err   error
 	}
 	indexMsg struct {
@@ -74,8 +75,6 @@ type (
 // a large Codex rollout; wait until the cursor stops instead of parsing every row passed.
 const previewDelay = 150 * time.Millisecond
 
-const ageWidth = 6
-
 // While the index builds, re-read the list this often. The engine commits session by
 // session, so a first run over gigabytes of history fills the list instead of showing an
 // empty screen until the whole pass ends.
@@ -86,15 +85,21 @@ func refreshTick() tea.Cmd {
 }
 
 type model struct {
-	core     Core
-	rows     []SessionRow
-	cursor   int
-	offset   int
-	focus    focus
-	search   textinput.Model
-	query    string // active search; "" means the plain newest-first list
-	sources  []string
-	srcIdx   int // index into sources; 0 = all
+	core    Core
+	rows    []SessionRow
+	cursor  int
+	offset  int
+	focus   focus
+	search  textinput.Model
+	query   string // active search; "" means the plain newest-first list
+	sources []string
+	srcIdx  int // index into sources; 0 = all
+	sortIdx int // index into sortModes; 0 = date, newest first
+	// gen counts changes the user made to what the list shows (sort, source, search). Rows
+	// answering an older view are dropped, and the first answer to the new one starts at
+	// the top instead of following the old selection, which a background refresh keeps.
+	gen      int
+	jumpTop  bool
 	preview  viewport.Model
 	cache    map[string][]Event
 	stats    map[string]statsState
@@ -124,7 +129,22 @@ func newModel(core Core) model {
 	}
 }
 
-func (m model) source() string { return m.sources[m.srcIdx] }
+// changeView records that the user changed what the list shows.
+func (m *model) changeView() {
+	m.gen++
+	m.jumpTop = true
+}
+
+func (m model) source() string   { return m.sources[m.srcIdx] }
+func (m model) sortMode() string { return sortModes[m.sortIdx] }
+
+// listRows is how many session rows fit: the body minus the column-header line.
+func (m model) listRows() int {
+	if n := m.bodyHeight() - 1; n > 1 {
+		return n
+	}
+	return 1
+}
 
 func (m model) Init() tea.Cmd {
 	// Show what the index already has right away, then refresh it in the background.
@@ -132,16 +152,16 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) loadRows() tea.Cmd {
-	core, query, source := m.core, m.query, m.source()
+	core, query, source, sortMode, gen := m.core, m.query, m.source(), m.sortMode(), m.gen
 	return func() tea.Msg {
 		var rows []SessionRow
 		var err error
 		if query == "" {
-			rows, err = core.List(source, listLimit)
+			rows, err = core.List(source, sortMode, listLimit)
 		} else {
-			rows, err = core.Search(query, source, listLimit)
+			rows, err = core.Search(query, source, sortMode, listLimit)
 		}
-		return rowsMsg{rows: rows, query: query, err: err}
+		return rowsMsg{rows: rows, query: query, gen: gen, err: err}
 	}
 }
 
@@ -167,7 +187,8 @@ func (m model) schedulePreview() tea.Cmd {
 	}
 	id := m.rows[m.cursor].ID
 	_, haveEvents := m.cache[id]
-	if haveEvents && m.stats[id].loaded {
+	needStats := m.rows[m.cursor].UsageState == "pending" && !m.stats[id].loaded
+	if haveEvents && !needStats {
 		return nil
 	}
 	return tea.Tick(previewDelay, func(time.Time) tea.Msg { return previewDueMsg{id: id} })
@@ -179,7 +200,8 @@ func (m model) loadStats() tea.Cmd {
 		return nil
 	}
 	row := m.rows[m.cursor]
-	if m.stats[row.ID].loaded {
+	// The list row already carries the figures unless it is still being counted.
+	if row.UsageState != "pending" || m.stats[row.ID].loaded {
 		return nil
 	}
 	core := m.core
@@ -261,7 +283,7 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 	if m.cursor >= len(m.rows) {
 		m.cursor = len(m.rows) - 1
 	}
-	h := m.bodyHeight()
+	h := m.listRows()
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
@@ -282,8 +304,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case rowsMsg:
-		if msg.query != m.query {
-			return m, nil // stale result from an earlier query
+		if msg.query != m.query || msg.gen != m.gen {
+			return m, nil // stale result from an earlier view
 		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -296,6 +318,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rows = msg.rows
 		m.cursor, m.offset = 0, 0
 		for i, r := range m.rows {
+			if m.jumpTop {
+				break
+			}
 			if r.ID == prevID {
 				// Same session still there: keep it selected and the view where it was, so a
 				// background refresh does not make the list jump.
@@ -303,6 +328,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.jumpTop = false
 		m.shownID = ""
 		cmd := m.moveCursor(0)
 		if m.indexing {
@@ -406,6 +432,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.query != "" {
 				m.query = ""
+				m.changeView()
 				return m, m.loadRows()
 			}
 		case "tab":
@@ -428,6 +455,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "s":
 			m.srcIdx = (m.srcIdx + 1) % len(m.sources)
+			m.changeView()
+			return m, m.loadRows()
+		case "S":
+			m.sortIdx = (m.sortIdx + 1) % len(sortModes)
+			m.status = "sorted by " + sortLabel(m.sortMode())
+			m.changeView()
 			return m, m.loadRows()
 		case "y":
 			if len(m.rows) > 0 {
@@ -470,9 +503,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			return m, m.moveCursor(1)
 		case "pgup":
-			return m, m.moveCursor(-m.bodyHeight())
+			return m, m.moveCursor(-m.listRows())
 		case "pgdown":
-			return m, m.moveCursor(m.bodyHeight())
+			return m, m.moveCursor(m.listRows())
 		case "home", "g":
 			return m, m.moveCursor(-len(m.rows))
 		case "end", "G":
@@ -491,6 +524,7 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusList
 		m.search.Blur()
 		m.status = "searching…"
+		m.changeView()
 		return m, m.loadRows()
 	case "esc":
 		m.focus = focusList
@@ -522,27 +556,37 @@ func (m model) View() string {
 	listW := m.listWidth()
 	h := m.bodyHeight()
 	now := time.Now()
+	showTokens := listW >= minWidthForTokens
+	sortMode := m.sortMode()
 
 	filter := "all sources"
 	if m.source() != "" {
 		filter = m.source()
 	}
-	header := styleHeader.Render("Agent Sessions") + styleDim.Render("  ·  "+filter)
+	header := styleHeader.Render("Agent Sessions") + styleDim.Render("  ·  "+filter+"  ·  sorted by "+sortLabel(m.sortMode()))
 	if m.query != "" {
 		header += styleDim.Render("  ·  search: ") + m.query
 	}
 
 	var list strings.Builder
-	for i := m.offset; i < len(m.rows) && i < m.offset+h; i++ {
+	list.WriteString(styleDim.Render(columnHeader(listW, sortMode, showTokens)) + "\n")
+	for i := m.offset; i < len(m.rows) && i < m.offset+m.listRows(); i++ {
 		r := m.rows[i]
-		age := fmt.Sprintf("%*s", ageWidth, relativeTime(r.ActivityTime(), now))
-		titleW := listW - 8 - 1 - ageWidth - 2
+		last := fmt.Sprintf("%*s", lastWidth, lastCell(r, sortMode, now))
+		right := styleDim.Render(last)
+		reserved := lastWidth + 1
+		if showTokens {
+			tokens := fmt.Sprintf("%*s", tokensWidth, tokensCell(r))
+			right = styleDim.Render(tokens) + " " + right
+			reserved += tokensWidth + 1
+		}
+		titleW := listW - 8 - 1 - reserved
 		line := sourceBadge(r.Source) + " " + truncate(r.DisplayTitle(), titleW)
-		pad := listW - lipgloss.Width(line) - lipgloss.Width(age)
+		pad := listW - lipgloss.Width(line) - lipgloss.Width(right)
 		if pad < 1 {
 			pad = 1
 		}
-		line += strings.Repeat(" ", pad) + styleDim.Render(age)
+		line += strings.Repeat(" ", pad) + right
 		if i == m.cursor {
 			if m.focus == focusList {
 				line = styleSelected.Render(lipgloss.NewStyle().Width(listW).Render(line))
@@ -563,7 +607,8 @@ func (m model) View() string {
 	sep := styleBorder.Render(strings.Repeat("│\n", h-1) + "│")
 	right := m.preview.View()
 	if len(m.rows) > 0 {
-		header := sessionHeader(m.rows[m.cursor], m.stats[m.rows[m.cursor].ID], m.preview.Width)
+		row := m.rows[m.cursor]
+		header := sessionHeader(row, rowStats(row, m.stats[row.ID]), m.preview.Width)
 		right = strings.Join(header, "\n") + "\n" + right
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", sep, " ", right)
@@ -575,7 +620,7 @@ func (m model) View() string {
 	if m.focus == focusSearch {
 		status = m.search.View()
 	}
-	footer := styleDim.Render("↑↓ move · enter/→ read · o open · y copy command · Y copy path · / search · s source · r reindex · q quit")
+	footer := styleDim.Render("↑↓ move · enter/→ read · o open · y copy command · Y copy path · / search · s source · S sort · r reindex · q quit")
 	if m.focus == focusPreview {
 		footer = styleDim.Render("↑↓/PgUp/PgDn scroll · ←/Shift+Tab/Esc back to list · o open · y copy command · Y copy path · q quit")
 	}
@@ -589,7 +634,7 @@ const usage = `agent-sessions - browse, search, read and resume local coding-age
 usage: agent-sessions [--core-path | --help]
 
 keys:  up/down move   enter or right read   left, shift+tab or esc back to the list
-       / search   esc clear search   s source   r reindex
+       / search   esc clear search   s source   S sort (date, duration, tokens)   r reindex
        o open in agent   y copy resume command   Y copy path   q quit
 
 The engine (agent-sessions-core) is found next to this program, in ../libexec/agent-sessions

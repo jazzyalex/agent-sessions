@@ -46,6 +46,7 @@ The program is called `agent-sessions`, not `as`, because `as` is the GNU assemb
 | Left, Shift+Tab, Esc, Tab | back to the list (while reading, up, down, PgUp and PgDn scroll the text) |
 | `/` | full-text search; Enter runs it, Esc cancels; Esc in the list clears it |
 | `s` | cycle the source filter |
+| `S` | cycle the sort: date (newest first, the default), duration (longest first), tokens (most first) |
 | `o` | open the session in its agent: the UI exits and runs the agent's resume command in the session's project directory |
 | `y` / `Y` | copy the resume command / the session file path to the clipboard |
 | `r` | refresh the index |
@@ -61,11 +62,19 @@ agents do not record usage in their files, and the header says so. The cost is a
 at published API prices bundled with the build (no network); a session on a subscription is
 not billed that amount, and a model missing from the bundled table is reported as unpriced.
 
+The list has a column of token totals beside the age. The column header marks the one that
+drives the order, and when the list is sorted by duration the last column shows the
+duration instead of the age. A dash means the agent does not record usage, and "…" means
+the session is still being counted. Sorting starts from the top of the list. In search
+results the default order is best match first; the other sorts apply to the matches found.
+
 Notes:
 
 - The list shows top-level sessions. Subagent runs, such as Codex auto-review, are hidden.
 - The first start indexes your history, which can take minutes for gigabytes of Codex
-  rollouts. The list fills in as sessions are found (the status line counts them), and
+  rollouts, and then counts tokens for every session, which re-reads them once more (about as
+  long again). Sessions appear first and the token column fills in afterwards; changed files
+  are recounted on later starts, unchanged ones never. The list fills in as sessions are found (the status line counts them), and
   quitting stops the indexer; what it already stored is kept and the next start continues.
   Later starts only read what changed and take well under a second.
 - Resume works for Claude Code, Codex, OpenCode and Copilot CLI. For other sources `o` and
@@ -89,13 +98,19 @@ costs a re-index. It is separate from the macOS app's index. Set `$AS_CORE_DB` t
 
     agent-sessions-core sources                       sources this build can read
     agent-sessions-core index [--source s]            build or refresh the index
-    agent-sessions-core list [--source s] [--limit n] [--include-subagents]
-    agent-sessions-core search <query> [--source s] [--limit n]
+    agent-sessions-core list [--source s] [--limit n] [--sort date|duration|tokens] [--include-subagents]
+    agent-sessions-core search <query> [--source s] [--limit n] [--sort date|duration|tokens]
     agent-sessions-core show <source> <file> [--id id]      header plus every event
     agent-sessions-core resume <source> <file> [--id id]    the command that reopens it
     agent-sessions-core stats <source> <file>         token totals and API-rate cost
     agent-sessions-core parse <source> <file>         one-file summary, no index
     agent-sessions-core scan [--source s] [--light]   discover and parse, no index
+
+`index` prints `type: "index"` lines while it ingests, then `type: "usage"` lines while it
+counts tokens. Every `list` and `search` row carries `durationSeconds`, `usageState` (`ready`,
+`none`, `pending` or `unsupported`) and, when ready, a `usage` object with the token split and
+the cost at API rates. Counts are stored in a table of the engine's own database, next to the
+search index, and never touch the macOS app's index.
 
 Common option: `--db <path>`. Database-backed sources (OpenCode, Hermes, Devin) share one
 storage path, so `show` and `resume` take `--id`.

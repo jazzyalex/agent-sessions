@@ -18,6 +18,7 @@ func TestFormatDuration(t *testing.T) {
 		-time.Minute:                    "0s",
 		23*time.Hour + 59*time.Minute:   "23h 59m",
 		24*time.Hour + 30*time.Minute:   "1d",
+		107*24*time.Hour + 8*time.Hour:  "107d",
 	}
 	for d, want := range cases {
 		if got := formatDuration(d); got != want {
@@ -30,7 +31,7 @@ func TestCompactCount(t *testing.T) {
 	cases := map[int]string{
 		0: "0", 950: "950", 1_000: "1k", 12_345: "12.3k", 99_999: "100k", 410_000: "410k",
 		1_528: "1.5k", 1_240_000: "1.24M", 217_555_118: "218M", 221_738_768: "222M",
-		34_047_415: "34.05M", 2_100_000_000: "2.1B",
+		34_047_415: "34.05M", 2_100_000_000: "2.1B", 5_545_482_155: "5.55B", 12_345_678_901: "12.3B", 123_456_789_012: "123B",
 	}
 	for n, want := range cases {
 		if got := compactCount(n); got != want {

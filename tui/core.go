@@ -34,6 +34,19 @@ type SessionRow struct {
 	Modified *string `json:"modified"`
 	Messages int     `json:"messages"`
 	Commands int     `json:"commands"`
+	// DurationSeconds is first-to-last event wall clock; nil when the file has no timestamps.
+	DurationSeconds *int `json:"durationSeconds"`
+	// UsageState is ready, none (read, nothing recorded), pending (not counted yet) or
+	// unsupported (this agent records no usage). Usage is set only when ready.
+	UsageState string    `json:"usageState"`
+	Usage      *RowUsage `json:"usage"`
+}
+
+// RowUsage is the usage object of a list or search row.
+type RowUsage struct {
+	TokenStats
+	CostUSD        *float64 `json:"costUSD"`
+	UnpricedModels []string `json:"unpricedModels"`
 }
 
 func (r SessionRow) DisplayTitle() string {
@@ -214,13 +227,13 @@ func sourceArgs(source string) []string {
 	return []string{"--source", source}
 }
 
-func (c Core) List(source string, limit int) ([]SessionRow, error) {
-	args := append([]string{"list", "--limit", fmt.Sprint(limit)}, sourceArgs(source)...)
+func (c Core) List(source, sort string, limit int) ([]SessionRow, error) {
+	args := append([]string{"list", "--limit", fmt.Sprint(limit), "--sort", sort}, sourceArgs(source)...)
 	return run[SessionRow](c, args...)
 }
 
-func (c Core) Search(query, source string, limit int) ([]SessionRow, error) {
-	args := append([]string{"search", query, "--limit", fmt.Sprint(limit)}, sourceArgs(source)...)
+func (c Core) Search(query, source, sort string, limit int) ([]SessionRow, error) {
+	args := append([]string{"search", query, "--limit", fmt.Sprint(limit), "--sort", sort}, sourceArgs(source)...)
 	return run[SessionRow](c, args...)
 }
 

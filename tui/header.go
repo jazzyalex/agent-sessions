@@ -41,7 +41,8 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	default:
 		days, h := int(d.Hours())/24, int(d.Hours())%24
-		if h == 0 {
+		// Past a hundred days the hours are noise, and the shorter text keeps list columns tidy.
+		if h == 0 || days >= 100 {
 			return fmt.Sprintf("%dd", days)
 		}
 		return fmt.Sprintf("%dd %dh", days, h)
@@ -61,8 +62,12 @@ func compactCount(n int) string {
 		return trimZero(fmt.Sprintf("%.2f", float64(n)/1e6)) + "M"
 	case n < 1_000_000_000:
 		return fmt.Sprintf("%dM", (n+500_000)/1_000_000)
-	default:
+	case n < 10_000_000_000:
 		return trimZero(fmt.Sprintf("%.2f", float64(n)/1e9)) + "B"
+	case n < 100_000_000_000:
+		return trimZero(fmt.Sprintf("%.1f", float64(n)/1e9)) + "B"
+	default:
+		return fmt.Sprintf("%dB", (n+500_000_000)/1_000_000_000)
 	}
 }
 

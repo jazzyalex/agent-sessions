@@ -8,6 +8,7 @@ struct Options {
     var limit = 50
     var light = false
     var includeSubagents = false
+    var sort = SortKey.date
     var sessionID: String?
     var databaseURL = Options.defaultDatabaseURL()
 
@@ -43,6 +44,11 @@ struct Options {
                 light = true
             case "--include-subagents":
                 includeSubagents = true
+            case "--sort":
+                guard let raw = it.next(), let key = SortKey(rawValue: raw) else {
+                    fail("--sort needs one of: \(SortKey.allCases.map(\.rawValue).joined(separator: ", "))", code: 2)
+                }
+                sort = key
             case "--id":
                 guard let id = it.next() else { fail("--id needs a session ID", code: 2) }
                 sessionID = id
@@ -217,10 +223,39 @@ func runIndex(_ options: Options) async {
             emit(["type": "index", "source": d.source.rawValue, "error": "\(error)"])
         }
     }
+
+    // Second pass, after every source is indexed so the list is complete as early as
+    // possible: token totals, which re-read the session files that are new or changed.
+    // Rows are stored as they are computed, so a reader sees them fill in.
+    if let store = UsageStore(path: options.databaseURL.path) {
+        for d in options.sources where supportsUsage(d.source) {
+            let started = Date()
+            let counts = await refreshUsage(db: db, store: store, source: d.source)
+            emit([
+                "type": "usage",
+                "source": d.source.rawValue,
+                "computed": counts.computed,
+                "current": counts.current,
+                "ms": Int(Date().timeIntervalSince(started) * 1000),
+            ])
+        }
+    }
 }
 
-func metaSummary(_ row: SessionMetaRow) -> [String: Any] {
-    [
+/// How `list` and `search` order sessions.
+enum SortKey: String, CaseIterable {
+    case date      // newest activity first; in search results, best match first
+    case duration  // longest first
+    case tokens    // most tokens first; sessions without a count last
+}
+
+func durationSeconds(_ row: SessionMetaRow) -> Int? {
+    row.startTS > 0 && row.endTS >= row.startTS ? Int(row.endTS - row.startTS) : nil
+}
+
+func metaSummary(_ row: SessionMetaRow, usage: StoredUsage?) -> [String: Any] {
+    let state = usageState(source: row.source, stored: usage)
+    var fields: [String: Any] = [
         "type": "session",
         "id": row.sessionID,
         "source": row.source,
@@ -237,7 +272,35 @@ func metaSummary(_ row: SessionMetaRow) -> [String: Any] {
         "commands": row.commands,
         "parentSessionID": orNull(row.parentSessionID),
         "subagentType": orNull(row.subagentType),
+        "durationSeconds": orNull(durationSeconds(row)),
+        "usageState": state.rawValue,
     ]
+    if state == .ready, let result = usage?.result { fields["usage"] = usageJSON(result) }
+    return fields
+}
+
+/// Orders rows for `list`; ties fall back to the newest activity so the order is stable.
+func ordered(_ rows: [SessionMetaRow], by key: SortKey, usage: [String: StoredUsage]) -> [SessionMetaRow] {
+    func activity(_ r: SessionMetaRow) -> Int64 { max(r.endTS, r.mtime) }
+    func tokens(_ r: SessionMetaRow) -> Int { usage["\(r.source)/\(r.sessionID)"]?.result?.total ?? -1 }
+    switch key {
+    case .date:
+        return rows.sorted { activity($0) > activity($1) }
+    case .duration:
+        return rows.sorted {
+            let a = durationSeconds($0) ?? -1, b = durationSeconds($1) ?? -1
+            return a != b ? a > b : activity($0) > activity($1)
+        }
+    case .tokens:
+        return rows.sorted {
+            let a = tokens($0), b = tokens($1)
+            return a != b ? a > b : activity($0) > activity($1)
+        }
+    }
+}
+
+func loadUsage(_ options: Options) -> [String: StoredUsage] {
+    UsageStore(path: options.databaseURL.path)?.loadAll() ?? [:]
 }
 
 /// Subagent runs (Codex guardian approval reviews, explorer/general workers, Claude
@@ -258,10 +321,13 @@ func indexedRows(_ db: IndexDB, _ options: Options) async -> [SessionMetaRow] {
 /// `list [--source s] [--limit n]`: newest indexed sessions first.
 func runList(_ options: Options) async {
     let db = openIndex(options)
-    let rows = await indexedRows(db, options)
-        .filter { !$0.isHousekeeping && (options.includeSubagents || !isSubagent($0)) }
-        .sorted { max($0.endTS, $0.mtime) > max($1.endTS, $1.mtime) }
-    for row in rows.prefix(options.limit) { emit(metaSummary(row)) }
+    let usage = loadUsage(options)
+    let rows = ordered(await indexedRows(db, options)
+        .filter { !$0.isHousekeeping && (options.includeSubagents || !isSubagent($0)) },
+                       by: options.sort, usage: usage)
+    for row in rows.prefix(options.limit) {
+        emit(metaSummary(row, usage: usage["\(row.source)/\(row.sessionID)"]))
+    }
 }
 
 /// `search <query> [--source s] [--limit n]`: full-text search, best match first.
@@ -288,8 +354,11 @@ func runSearch(_ options: Options) async {
         fail("search failed: \(error)", code: 1)
     }
     let byID = Dictionary(rows.map { ($0.sessionID, $0) }, uniquingKeysWith: { first, _ in first })
-    for id in ids {
-        guard let row = byID[id] else { continue }
-        emit(metaSummary(row))
+    var matches = ids.compactMap { byID[$0] }
+    let usage = loadUsage(options)
+    // Best match first unless asked otherwise; the sort applies to the matches found.
+    if options.sort != .date { matches = ordered(matches, by: options.sort, usage: usage) }
+    for row in matches {
+        emit(metaSummary(row, usage: usage["\(row.source)/\(row.sessionID)"]))
     }
 }

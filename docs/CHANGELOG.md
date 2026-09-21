@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- **Experimental Linux console version.** `agent-sessions` is a terminal UI to browse, search, read, copy, and resume local sessions from all supported agents, with duration, directory, token and API-rate cost figures above each transcript; `agent-sessions-core` is the JSON engine behind it, built from the same Swift parsers and search index as the Mac app, with SQLite linked in. `linux/package.sh arm64|amd64` builds a tarball, `.deb`, and `.rpm`; `scripts/build_unsigned_dmg.sh` builds an unsigned Mac DMG for forks. Nothing is published yet, and the Mac app is unchanged.
+- **Experimental Linux console version.** `agent-sessions` is a terminal UI to browse, search, read, copy, and resume local sessions from all supported agents, with a token column, sorting by date, duration or tokens, and duration, directory, token and API-rate cost figures above each transcript; `agent-sessions-core` is the JSON engine behind it, built from the same Swift parsers and search index as the Mac app, with SQLite linked in. `linux/package.sh arm64|amd64` builds a tarball, `.deb`, and `.rpm`; `scripts/build_unsigned_dmg.sh` builds an unsigned Mac DMG for forks. Nothing is published yet, and the Mac app is unchanged.
 
 ### Bug Fixes
 - **Codex sessions that record a bare tier name are priced.** Some Codex builds write `sol`, `terra`, `luna` or `astra` instead of the full model name, so Session Info and the Quota Meter left those sessions unpriced. The bare names now price like the verified generation they stand for (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`); the mapping is explicit, so a future generation never inherits an older tier's price silently.

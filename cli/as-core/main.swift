@@ -5,8 +5,9 @@ import Foundation
 //
 //   as-core sources                               sources this build can read
 //   as-core index  [--source s]...                build or refresh the search index
-//   as-core list   [--source s]... [--limit n]    newest indexed sessions
-//   as-core search <query> [--source s]... [--limit n]
+//   as-core list   [--source s]... [--limit n] [--sort date|duration|tokens]
+//                                                 indexed sessions, newest first by default
+//   as-core search <query> [--source s]... [--limit n] [--sort date|duration|tokens]
 //   as-core show   <source> <file> [--id id]      session header + every event
 //   as-core resume <source> <file> [--id id]      shell command that reopens the session
 //   as-core stats  <source> <file>                token totals and API-equivalent cost
