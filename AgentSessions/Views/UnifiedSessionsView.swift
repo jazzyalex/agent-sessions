@@ -1176,9 +1176,9 @@ struct UnifiedSessionsView: View {
 	                // Derive Antigravity conversation ID once to avoid repeated disk reads
 	                let antigravityCLISessionID = (s.source == .antigravity) ? AntigravitySessionIDHelper.deriveSessionID(from: s) : nil
                     if s.source == .codex, !s.isSideChat {
-                        Button("Open in Codex App") { openInCodexApp(s) }
+                        Button("Continue in Codex Desk") { openInCodexApp(s) }
                             .disabled(CodexResumeCoordinator.appSessionID(for: s) == nil)
-                            .help("Open this session in the local Codex App. Codex App must use the same session storage.")
+                            .help("Continue this session in the local Codex Desk. Codex Desk must use the same session storage.")
                         Divider()
                     }
 	                if canResumeSession(s, antigravityCLISessionID: antigravityCLISessionID) {
@@ -1989,7 +1989,7 @@ struct UnifiedSessionsView: View {
 
             if let s = selectedSession, s.source == .codex, !s.isSideChat {
                 ToolbarIconButton(
-                    help: String(localized: "Open this session in the local Codex App. Codex App must use the same session storage.",
+                    help: String(localized: "Continue this session in the local Codex Desk. Codex Desk must use the same session storage.",
                                  comment: "Tooltip for opening the selected local thread in the separate Codex desktop app.")
                 ) { _ in
                     ToolbarIcon(systemName: "macwindow")
@@ -1997,7 +1997,7 @@ struct UnifiedSessionsView: View {
                     openInCodexApp(s)
                 }
                 .disabled(CodexResumeCoordinator.appSessionID(for: s) == nil)
-                .accessibilityLabel(Text("Open in Codex App"))
+                .accessibilityLabel(Text("Continue in Codex Desk"))
             }
 
             ToolbarIconButton(help: imagesToolbarHelpText) { _ in
@@ -3219,19 +3219,6 @@ struct UnifiedSessionsView: View {
             CodexSurfacePill(
                 label: "desk",
                 accessibilityLabel: isArchived ? "Codex Desktop archived session" : "Desktop app",
-                usesFullAccessibilityLabel: isArchived,
-                isArchived: isArchived
-            )
-        }
-
-        /// Codex Desktop's sandboxed per-task workspaces. Labelled "work" after
-        /// Codex's own `codex_work_desktop` originator rather than reusing
-        /// Claude's "cowork": Cowork is Anthropic branding, and applying it to an
-        /// OpenAI surface would invent a product name OpenAI does not use.
-        static func work(isArchived: Bool = false) -> CodexSurfacePill {
-            CodexSurfacePill(
-                label: "work",
-                accessibilityLabel: isArchived ? "Codex work archived session" : "Codex work session",
                 usesFullAccessibilityLabel: isArchived,
                 isArchived: isArchived
             )

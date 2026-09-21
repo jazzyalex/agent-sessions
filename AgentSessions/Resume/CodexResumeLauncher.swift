@@ -170,10 +170,10 @@ final class CodexDesktopAppLauncher {
         var errorDescription: String? {
             switch self {
             case .invalidSessionID:
-                return String(localized: "A valid Codex session ID is required to open this session in Codex App.",
+                return String(localized: "A valid Codex session ID is required to continue this session in Codex Desk.",
                               comment: "Error when a local Codex thread has no valid UUID for a desktop deep link.")
             case .appNotInstalled:
-                return String(localized: "Codex App is not installed. Install it, then try opening this session again.",
+                return String(localized: "Codex Desk is not installed. Install it, then try continuing this session again.",
                               comment: "Desktop app launch error; installing the Codex CLI alone is not sufficient.")
             }
         }

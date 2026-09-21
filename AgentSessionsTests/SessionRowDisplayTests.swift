@@ -239,8 +239,8 @@ final class SessionRowDisplayTests: XCTestCase {
     }
 
     func testApplyingLiveClaudeArchiveStateNoOpForNonClaudeSession() {
-        // A Codex desktop session's "desk" pill must never be patched by the
-        // Claude-archive flag, even though the label matches.
+        // Even an explicitly supplied desktop pill must not be patched by the
+        // Claude-archive flag when the session belongs to Codex.
         let s = Session(
             id: "codex-desktop-1",
             source: .codex,
@@ -256,7 +256,7 @@ final class SessionRowDisplayTests: XCTestCase {
             codexOriginator: "Codex Desktop",
             codexSurface: .desktop
         )
-        let staticPills = UnifiedSessionsView.staticSurfacePills(for: s)
+        let staticPills = [UnifiedSessionsView.CodexSurfacePill.desktop()]
         XCTAssertEqual(staticPills.map(\.isArchived), [false])
         let patched = UnifiedSessionsView.applyingLiveClaudeArchiveState(
             to: staticPills,
@@ -432,62 +432,53 @@ final class SessionRowDisplayTests: XCTestCase {
         XCTAssertFalse(s.isCodexWorkSession)
     }
 
-    // MARK: - Codex work surface pill
+    // MARK: - Codex rows omit producer-surface pills
 
-    func testCodexWorkSessionGetsWorkPillNotDeskPill() {
-        // Freshly-parsed shape: Codex reports originator "Codex Desktop" and the
-        // surface classifier resolves .desktop — the cwd check must win.
+    func testCodexWorkSessionHasNoSurfacePill() {
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             codexOriginator: "Codex Desktop",
             codexSurface: .desktop
         )
-        let pills = UnifiedSessionsView.surfacePills(for: s)
-        XCTAssertEqual(pills.map(\.label), ["work"])
-        XCTAssertEqual(pills.map(\.isArchived), [false])
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testHydratedCodexWorkSessionWithNilMetadataGetsWorkPill() {
-        // Hydrated-from-DB shape: codexOriginator/codexSurface are NULL, and cwd
-        // is the only surviving signal.
+    func testHydratedCodexWorkSessionWithNilMetadataHasNoSurfacePill() {
+        // Hydrated-from-DB shape: codexOriginator/codexSurface are NULL.
         let s = makeCodexSession(cwd: Self.codexWorkCwd)
-        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testArchivedCodexWorkSessionGetsArchivedWorkPill() {
+    func testArchivedCodexWorkSessionHasNoSurfacePill() {
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             filePath: "/Users/test/.codex/archived_sessions/rollout-2026-07-14T11-18-02-abc.jsonl"
         )
-        let pills = UnifiedSessionsView.surfacePills(for: s)
-        XCTAssertEqual(pills.map(\.label), ["work"])
-        XCTAssertEqual(pills.map(\.isArchived), [true])
+        XCTAssertTrue(s.isArchivedCodexDesktopSession)
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testOrdinaryCodexDesktopSessionKeepsDeskPill() {
-        let s = makeCodexSession(
-            cwd: "/Users/test/Repository/Codex-History",
-            codexOriginator: "Codex Desktop",
-            codexSurface: .desktop
-        )
-        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["desk"])
+    func testOrdinaryCodexSurfacesHaveNoPills() {
+        let surfaces: [CodexSessionSurface?] = [.desktop, .cli, .vscode, .unknown, nil]
+        for surface in surfaces {
+            let s = makeCodexSession(
+                cwd: "/Users/test/Repository/Codex-History",
+                codexSurface: surface
+            )
+            XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+            XCTAssertTrue(UnifiedSessionsView.staticSurfacePills(for: s).isEmpty)
+        }
     }
 
-    func testCodexWorkSubagentGetsNoWorkPill() {
-        // Guardian approval reviewer inherits the parent's work cwd; it must
-        // not duplicate the parent's work pill (hydrated shape: nil surface
-        // metadata, subagent_type restored from DB).
+    func testCodexWorkSubagentHasNoSurfacePill() {
+        // Guardian approval reviewers inherit the parent's work cwd.
         let s = makeCodexSession(cwd: Self.codexWorkCwd, subagentType: "guardian")
         XCTAssertTrue(s.isCodexWorkSession)
         XCTAssertTrue(s.isSubagent)
         XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testCodexWorkSubagentGetsNoWorkPillFreshParse() {
-        // Freshly-parsed shape: originator/surface metadata present. Must agree
-        // with the hydrated shape (no pill), not fall through to the switch's
-        // .subagent branch (which would render a desk pill off the
-        // codex_work_desktop originator).
+    func testCodexWorkSubagentHasNoSurfacePillFreshParse() {
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             codexOriginator: "codex_work_desktop",
@@ -497,9 +488,9 @@ final class SessionRowDisplayTests: XCTestCase {
         XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testCodexWorkRootSessionKeepsWorkPill() {
+    func testCodexWorkRootSessionHasNoSurfacePill() {
         let s = makeCodexSession(cwd: Self.codexWorkCwd)
-        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
     /// A side conversation is reconstructed from a log database every Codex
     /// surface writes to, CLI `/side` included, so the row must not claim
