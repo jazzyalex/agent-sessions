@@ -166,8 +166,6 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "~/.openclaw",
     "~/.pi/agent/sessions",
     "~/.qwen/projects",
-    "Cline",
-    "<1%",
     "·",
     "· %@",
     "—",
