@@ -252,7 +252,8 @@ final class PresenceEngineTests: XCTestCase {
         let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
         var environment = PresenceEnvironment()
         environment.hasVisibleConsumer = true
-        environment.isCockpitVisible = true
+        environment.hasVisibleCockpitWindow = true
+        environment.hudOpen = true
         await engine.debugSetEnvironment(environment)
         let first = await engine.debugRefreshOnce()
         XCTAssertEqual(first.presences.count, 1)
