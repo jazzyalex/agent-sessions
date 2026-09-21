@@ -150,9 +150,22 @@ struct RunwayPriceSnapshot: Sendable {
         guard let slug, !slug.isEmpty else { return nil }
         if let exact = models[slug] { return exact }
         var best: (key: String, price: RunwayModelPrice)?
+    /// Bare tier names that some Codex builds record instead of the full slug (`sol`, not
+    /// `gpt-5.6-sol`), mapped to the generation whose rates are verified in the table.
+    /// Explicit on purpose, like the Claude family versions below: a future generation
+    /// (say `gpt-5.7-sol`) must not silently inherit an older tier's price, so moving an
+    /// alias to a new generation is a deliberate edit made together with its rates.
+    static let gptTierAliases: [String: String] = [
+        "astra": "gpt-6-astra",
+        "sol": "gpt-5.6-sol",
+        "terra": "gpt-5.6-terra",
+        "luna": "gpt-5.6-luna",
+    ]
+
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) { continue }
             if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) { continue }
+        if let canonical = Self.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
             if best == nil || key.count > best!.key.count { best = (key, price) }
         }
         return best?.price
@@ -304,6 +317,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) {
                 continue
+        if let canonical = RunwayPriceSnapshot.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
             }
             if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) {
                 continue
