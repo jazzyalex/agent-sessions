@@ -12,6 +12,17 @@ protocol SessionDiscovery {
 struct SessionFileStat: Equatable, Sendable {
     let mtime: Int64
     let size: Int64
+
+    /// Optional source-specific identity/fingerprint data. Generic sources keep
+    /// this nil; composite sources can use it to distinguish same-second,
+    /// same-size rewrites without changing the display timestamp contract.
+    let fingerprint: String?
+
+    init(mtime: Int64, size: Int64, fingerprint: String? = nil) {
+        self.mtime = mtime
+        self.size = size
+        self.fingerprint = fingerprint
+    }
 }
 
 enum SessionDeltaScope {

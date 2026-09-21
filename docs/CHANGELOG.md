@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Cursor ACP-persisted sessions are now discoverable and searchable.** Agent Sessions reads the supported SQLite/protobuf turn graph, preserves ACP provenance through reload and local archives, rejects malformed or symlink-escaped stores, and keeps normal Cursor CLI resume unavailable for this persistence surface.
+
 ## [5.5] - 2026-09-19
 
 ### Features

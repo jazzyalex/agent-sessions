@@ -372,6 +372,9 @@ enum SessionRowsBuilder {
         case .cli:
             guard supportsAgentSurfacePills(session) else { return [] }
             return [.standard(label: "cli", accessibilityLabel: "CLI")]
+        case .acp:
+            // ACP is a Cursor persistence surface, not a resumable CLI mode.
+            return []
         case .subagent:
             guard session.source == .codex else { return [] }
             return codexOriginatorSurfacePill(for: session).map { [$0] } ?? []
