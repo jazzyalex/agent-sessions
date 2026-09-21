@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Which billing tier a usage record was served at.
 ///
@@ -146,10 +150,6 @@ struct RunwayPriceSnapshot: Sendable {
     /// telemetry provenance can use this when byte/content identity matters.
     let manifestFingerprint: String
 
-    func price(forModel slug: String?) -> RunwayModelPrice? {
-        guard let slug, !slug.isEmpty else { return nil }
-        if let exact = models[slug] { return exact }
-        var best: (key: String, price: RunwayModelPrice)?
     /// Bare tier names that some Codex builds record instead of the full slug (`sol`, not
     /// `gpt-5.6-sol`), mapped to the generation whose rates are verified in the table.
     /// Explicit on purpose, like the Claude family versions below: a future generation
@@ -162,10 +162,14 @@ struct RunwayPriceSnapshot: Sendable {
         "luna": "gpt-5.6-luna",
     ]
 
+    func price(forModel slug: String?) -> RunwayModelPrice? {
+        guard let slug, !slug.isEmpty else { return nil }
+        if let exact = models[slug] { return exact }
+        if let canonical = Self.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
+        var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) { continue }
             if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) { continue }
-        if let canonical = Self.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
             if best == nil || key.count > best!.key.count { best = (key, price) }
         }
         return best?.price
@@ -313,11 +317,11 @@ final class RunwayPriceTable: @unchecked Sendable {
         guard let slug, !slug.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
         if let exact = models[slug] { return exact }
+        if let canonical = RunwayPriceSnapshot.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
         var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
             if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) {
                 continue
-        if let canonical = RunwayPriceSnapshot.gptTierAliases[slug], let aliased = models[canonical] { return aliased }
             }
             if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) {
                 continue
@@ -353,6 +357,9 @@ final class RunwayPriceTable: @unchecked Sendable {
         }
         lastFetchAt = now
         lock.unlock()
+        // The Linux console prices from the bundled table only: URLSession there needs
+        // FoundationNetworking (libcurl), which the static, dependency-free build avoids.
+#if canImport(Darwin)
         var request = URLRequest(url: Self.manifestURL)
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -365,6 +372,7 @@ final class RunwayPriceTable: @unchecked Sendable {
             guard self.adopt(decoded) else { return }
             try? data.write(to: Self.cacheURL(), options: .atomic)
         }.resume()
+#endif
     }
 
     // MARK: - Decoding

@@ -9,6 +9,7 @@ import Foundation
 //   as-core search <query> [--source s]... [--limit n]
 //   as-core show   <source> <file> [--id id]      session header + every event
 //   as-core resume <source> <file> [--id id]      shell command that reopens the session
+//   as-core stats  <source> <file>                token totals and API-equivalent cost
 //   as-core parse  <source> <file>                one-file summary (no index)
 //   as-core scan   [--source s]... [--light]      discover + parse (no index)
 //
@@ -22,7 +23,7 @@ redirectLogsToStderr()
 
 let arguments = CommandLine.arguments.dropFirst()
 guard let command = arguments.first else {
-    fail("usage: as-core <sources|index|list|search|show|resume|parse|scan> [options]", code: 2)
+    fail("usage: as-core <sources|index|list|search|show|resume|stats|parse|scan> [options]", code: 2)
 }
 let options = Options(arguments.dropFirst())
 
@@ -33,6 +34,7 @@ case "list": await runList(options)
 case "search": await runSearch(options)
 case "show": runShow(options)
 case "resume": runResume(options)
+case "stats": runStats(options)
 case "parse": runParse(options)
 case "scan": runScan(options)
 default: fail("unknown command \(command)", code: 2)

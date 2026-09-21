@@ -42,13 +42,24 @@ The program is called `agent-sessions`, not `as`, because `as` is the GNU assemb
 | Key | Action |
 |---|---|
 | up, down, k, j, PgUp, PgDn, g, G | move through sessions |
-| Enter, Tab | read the session (Tab again returns to the list) |
+| Enter, Right, Tab | read the session |
+| Left, Shift+Tab, Esc, Tab | back to the list (while reading, up, down, PgUp and PgDn scroll the text) |
 | `/` | full-text search; Enter runs it, Esc cancels; Esc in the list clears it |
 | `s` | cycle the source filter |
 | `o` | open the session in its agent: the UI exits and runs the agent's resume command in the session's project directory |
 | `y` / `Y` | copy the resume command / the session file path to the clipboard |
 | `r` | refresh the index |
 | `q` | quit |
+
+The header above the transcript shows the session title, its directory (and repository when
+that differs), the wall-clock duration from first to last event, message and tool-call
+counts, and the model. For Codex, Claude Code, Pi and Copilot CLI it also shows the total
+tokens with their split (fresh input, cached, cache write, output) and what they would cost
+at API rates, the same figures as the macOS app's Session Info. The token count re-reads the
+session file, so it appears a moment after the transcript ("counting..." until then). Other
+agents do not record usage in their files, and the header says so. The cost is an estimate
+at published API prices bundled with the build (no network); a session on a subscription is
+not billed that amount, and a model missing from the bundled table is reported as unpriced.
 
 Notes:
 
@@ -82,6 +93,7 @@ costs a re-index. It is separate from the macOS app's index. Set `$AS_CORE_DB` t
     agent-sessions-core search <query> [--source s] [--limit n]
     agent-sessions-core show <source> <file> [--id id]      header plus every event
     agent-sessions-core resume <source> <file> [--id id]    the command that reopens it
+    agent-sessions-core stats <source> <file>         token totals and API-rate cost
     agent-sessions-core parse <source> <file>         one-file summary, no index
     agent-sessions-core scan [--source s] [--light]   discover and parse, no index
 

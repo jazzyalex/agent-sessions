@@ -28,6 +28,11 @@ GOLDEN = REPO / "Resources/Fixtures/stage0/as-core-contract.json"
 # plain and zstd of the same generation must agree, which also covers the bundled libzstd.
 DSH_FIXTURES = REPO / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
 
+# Sources whose files record token usage; `stats` must agree across platforms for them.
+# Dollars are not stored: they move with every bundled price-table update, so only whether a
+# session was priced is pinned. Exact cost agreement is covered by the app's own tests.
+STATS_SOURCES = {"claude", "codex", "copilot", "pi"}
+
 # Fixture directory -> source name. `gemini` holds Antigravity's Gemini-CLI layout.
 DIR_TO_SOURCE = {"gemini": "antigravity"}
 # Fields that depend on where the file lives rather than on what it contains.
@@ -45,6 +50,18 @@ def parse(binary: str, source: str, path: pathlib.Path) -> dict:
     return {k: v for k, v in sorted(row.items()) if k not in VOLATILE}
 
 
+def stats(binary: str, source: str, path: pathlib.Path) -> dict:
+    proc = subprocess.run([binary, "stats", source, str(path)], capture_output=True, text=True)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return {"error": "stats failed"}
+    row = json.loads(proc.stdout.strip().splitlines()[-1])
+    return {
+        "tokens": row.get("tokens"),
+        "priced": row.get("costUSD") is not None,
+        "unpricedModels": row.get("unpricedModels", []),
+    }
+
+
 def collect(binary: str) -> dict:
     sources = {s["name"] for s in (json.loads(line) for line in subprocess.run(
         [binary, "sources"], capture_output=True, text=True, check=True).stdout.splitlines())}
@@ -58,7 +75,10 @@ def collect(binary: str) -> dict:
         source = DIR_TO_SOURCE.get(agent_dir, agent_dir)
         if source not in sources:
             continue
-        results[str(path.relative_to(REPO))] = parse(binary, source, path)
+        row = parse(binary, source, path)
+        if source in STATS_SOURCES and "error" not in row:
+            row["stats"] = stats(binary, source, path)
+        results[str(path.relative_to(REPO))] = row
     results.update(collect_deepseek(binary, sources))
     return results
 

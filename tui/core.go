@@ -73,6 +73,24 @@ type ResumeCommand struct {
 	Cwd     *string `json:"cwd"`
 }
 
+// TokenStats is the token part of one `stats` line.
+type TokenStats struct {
+	Total        int  `json:"total"`
+	Input        int  `json:"input"`
+	CacheRead    int  `json:"cacheRead"`
+	CacheWrite   int  `json:"cacheWrite"`
+	Output       int  `json:"output"`
+	Reasoning    int  `json:"reasoning"`
+	HasBreakdown bool `json:"hasBreakdown"`
+}
+
+// Stats is one `stats` line. Tokens is nil for sources whose files do not record usage.
+type Stats struct {
+	Tokens         *TokenStats `json:"tokens"`
+	CostUSD        *float64    `json:"costUSD"`
+	UnpricedModels []string    `json:"unpricedModels"`
+}
+
 // Source is one `sources` line.
 type Source struct {
 	Name        string `json:"name"`
@@ -227,6 +245,19 @@ func (c Core) Show(row SessionRow) ([]Event, error) {
 		}
 	}
 	return events, nil
+}
+
+// Stats re-reads the session file to total its tokens and price them, so it can take
+// seconds for a large rollout; call it off the UI path.
+func (c Core) Stats(row SessionRow) (Stats, error) {
+	lines, err := run[Stats](c, "stats", row.Source, row.Path)
+	if err != nil {
+		return Stats{}, err
+	}
+	if len(lines) != 1 {
+		return Stats{}, fmt.Errorf("as-core stats: expected one line, got %d", len(lines))
+	}
+	return lines[0], nil
 }
 
 func (c Core) Resume(row SessionRow) (ResumeCommand, error) {

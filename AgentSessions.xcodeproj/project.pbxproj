@@ -544,6 +544,7 @@
 		CC825BE5C06481744A6A16D6 /* ClaudeUsageNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9894FB605C3046578ADD2EE /* ClaudeUsageNormalizerTests.swift */; };
 		CC9BA23F3F228FE47F3C2F0A /* HermesSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A71A6F3D66468A840DCEEE /* HermesSessionIndexer.swift */; };
 		CCE9103088B0E79AC1718136 /* FxIntegrationSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB2247134E326D47E02868B /* FxIntegrationSurfaceTests.swift */; };
+		CD062A3BF325C80B3A83D6A4 /* WeeklyQuotaCalibrationProvenance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00BFDE35248038895973B526 /* WeeklyQuotaCalibrationProvenance.swift */; };
 		CE0584557635EEC1CAA0FD2E /* Base64ImageDataURLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1074E2B1681C2BEB28D59B2F /* Base64ImageDataURLScanner.swift */; };
 		CE3CDACCB58D4816B31BF79A /* CursorSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7066A706386D054D06EADC1 /* CursorSettings.swift */; };
 		CE761DC9C0269A0F2C9FDEBF /* FxSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF01BB2F1DFF8D981095C8A /* FxSettings.swift */; };
@@ -719,6 +720,7 @@
 /* Begin PBXFileReference section */
 		001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSettings.swift; path = AgentSessions/Resume/CodexResumeSettings.swift; sourceTree = SOURCE_ROOT; };
 		00A916DA7EA36F4E7E9FE91C /* DeprecatedCockpitDefaultsCleanupTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/DeprecatedCockpitDefaultsCleanupTests.swift; sourceTree = SOURCE_ROOT; };
+		00BFDE35248038895973B526 /* WeeklyQuotaCalibrationProvenance.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Model/WeeklyQuotaCalibrationProvenance.swift; sourceTree = SOURCE_ROOT; };
 		00EB359188CF008B152FDA3B /* OpenCodeResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCodeResume/OpenCodeResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
 		016B85A4D38CC73EA0F47B54 /* PreferencesView+Usage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+Usage.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+Usage.swift"; sourceTree = SOURCE_ROOT; };
 		01B00401B46F260749DB02B1 /* codex_053_rate_limit.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_053_rate_limit.jsonl; path = Resources/Fixtures/codex_053_rate_limit.jsonl; sourceTree = SOURCE_ROOT; };
@@ -2281,6 +2283,7 @@
 				2D486D0D3EE72265A2E6A585 /* OpenClawSourceAdapter.swift */,
 				F2912AF76F76660ED69A0BBB /* SessionSourceAppearance.swift */,
 				E871FB3AB57F6FD31E8CD5A0 /* SessionSourceDescriptorCatalog.swift */,
+				00BFDE35248038895973B526 /* WeeklyQuotaCalibrationProvenance.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -3412,6 +3415,7 @@
 				F0208FEB40AC9BFFBBCC0B6B /* DeepSeekHarnessRelationshipValidator.swift in Sources */,
 				7D359DB741B078A1CD7B55F8 /* PreferencesView+DeepSeekHarness.swift in Sources */,
 				E8F2082B59987622C5A9264E /* DeepSeekHarnessSourceAdapter.swift in Sources */,
+				CD062A3BF325C80B3A83D6A4 /* WeeklyQuotaCalibrationProvenance.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

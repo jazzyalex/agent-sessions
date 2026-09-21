@@ -49,7 +49,13 @@ type (
 	previewDueMsg struct{ id string }
 	// refreshMsg fires while indexing so sessions show up as the engine stores them.
 	refreshMsg struct{}
-	resumeMsg  struct {
+	// statsMsg carries the token totals for the header once the engine has counted them.
+	statsMsg struct {
+		id    string
+		stats Stats
+		err   error
+	}
+	resumeMsg struct {
 		cmd ResumeCommand
 		err error
 	}
@@ -91,6 +97,7 @@ type model struct {
 	srcIdx   int // index into sources; 0 = all
 	preview  viewport.Model
 	cache    map[string][]Event
+	stats    map[string]statsState
 	shownID  string
 	status   string
 	indexing bool
@@ -111,6 +118,7 @@ func newModel(core Core) model {
 		// Replaced by the engine's own list once `sources` answers; "" means all.
 		sources:  []string{""},
 		cache:    map[string][]Event{},
+		stats:    map[string]statsState{},
 		status:   "loading…",
 		indexing: true,
 	}
@@ -158,10 +166,27 @@ func (m model) schedulePreview() tea.Cmd {
 		return nil
 	}
 	id := m.rows[m.cursor].ID
-	if _, ok := m.cache[id]; ok {
+	_, haveEvents := m.cache[id]
+	if haveEvents && m.stats[id].loaded {
 		return nil
 	}
 	return tea.Tick(previewDelay, func(time.Time) tea.Msg { return previewDueMsg{id: id} })
+}
+
+// loadStats counts tokens for the selected session, unless it already has.
+func (m model) loadStats() tea.Cmd {
+	if len(m.rows) == 0 {
+		return nil
+	}
+	row := m.rows[m.cursor]
+	if m.stats[row.ID].loaded {
+		return nil
+	}
+	core := m.core
+	return func() tea.Msg {
+		st, err := core.Stats(row)
+		return statsMsg{id: row.ID, stats: st, err: err}
+	}
 }
 
 func (m model) loadPreview() tea.Cmd {
@@ -182,7 +207,10 @@ func (m model) loadPreview() tea.Cmd {
 func (m *model) layout() {
 	listW := m.listWidth()
 	m.preview.Width = m.width - listW - 3
-	m.preview.Height = m.bodyHeight()
+	m.preview.Height = m.bodyHeight() - headerLines
+	if m.preview.Height < 3 {
+		m.preview.Height = 3
+	}
 	m.search.Width = listW - 4
 }
 
@@ -342,7 +370,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.rows) == 0 || m.rows[m.cursor].ID != msg.id {
 			return m, nil // the cursor moved on
 		}
-		return m, m.loadPreview()
+		// Transcript first: the token count re-reads the whole file, which is slow for
+		// gigabyte histories, so it fills the header in afterwards.
+		return m, tea.Batch(m.loadPreview(), m.loadStats())
+
+	case statsMsg:
+		m.stats[msg.id] = statsState{loaded: true, err: msg.err, stats: msg.stats}
+		return m, nil
 
 	case previewMsg:
 		if msg.err != nil {
@@ -365,6 +399,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search.SetValue(m.query)
 			return m, m.search.Focus()
 		case "esc":
+			// From reading, Esc goes back to the list first; a second Esc clears a search.
+			if m.focus == focusPreview {
+				m.focus = focusList
+				return m, nil
+			}
 			if m.query != "" {
 				m.query = ""
 				return m, m.loadRows()
@@ -375,6 +414,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.focus = focusList
 			}
+		case "shift+tab", "left", "h":
+			// Back to the list. Handled before the preview sees the key, so ← never scrolls
+			// the viewport sideways.
+			if m.focus == focusPreview {
+				m.focus = focusList
+			}
+			return m, nil
+		case "right", "l":
+			if m.focus == focusList && len(m.rows) > 0 {
+				m.focus = focusPreview
+			}
+			return m, nil
 		case "s":
 			m.srcIdx = (m.srcIdx + 1) % len(m.sources)
 			return m, m.loadRows()
@@ -510,7 +561,12 @@ func (m model) View() string {
 	}
 	left := lipgloss.NewStyle().Width(listW).Height(h).MaxHeight(h).Render(list.String())
 	sep := styleBorder.Render(strings.Repeat("│\n", h-1) + "│")
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", sep, " ", m.preview.View())
+	right := m.preview.View()
+	if len(m.rows) > 0 {
+		header := sessionHeader(m.rows[m.cursor], m.stats[m.rows[m.cursor].ID], m.preview.Width)
+		right = strings.Join(header, "\n") + "\n" + right
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", sep, " ", right)
 
 	status := styleDim.Render(m.status)
 	if m.indexing {
@@ -519,7 +575,10 @@ func (m model) View() string {
 	if m.focus == focusSearch {
 		status = m.search.View()
 	}
-	footer := styleDim.Render("↑↓ move · enter/tab read · o open · y copy command · Y copy path · / search · s source · r reindex · q quit")
+	footer := styleDim.Render("↑↓ move · enter/→ read · o open · y copy command · Y copy path · / search · s source · r reindex · q quit")
+	if m.focus == focusPreview {
+		footer = styleDim.Render("↑↓/PgUp/PgDn scroll · ←/Shift+Tab/Esc back to list · o open · y copy command · Y copy path · q quit")
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, status, footer)
 }
 
@@ -529,7 +588,8 @@ const usage = `agent-sessions - browse, search, read and resume local coding-age
 
 usage: agent-sessions [--core-path | --help]
 
-keys:  up/down move   enter read   / search   esc clear   s source   r reindex
+keys:  up/down move   enter or right read   left, shift+tab or esc back to the list
+       / search   esc clear search   s source   r reindex
        o open in agent   y copy resume command   Y copy path   q quit
 
 The engine (agent-sessions-core) is found next to this program, in ../libexec/agent-sessions
