@@ -28,15 +28,42 @@ final class CodexResumeCoordinator {
     private let environment: CodexCLIEnvironmentProviding
     private let commandBuilder: CodexResumeCommandBuilder
     private let terminalLauncher: CodexTerminalLaunching
+    private let desktopLauncher: CodexDesktopAppLauncher
 
     init(settings: CodexResumeSettings? = nil,
          environment: CodexCLIEnvironmentProviding? = nil,
          commandBuilder: CodexResumeCommandBuilder = CodexResumeCommandBuilder(),
-         terminalLauncher: CodexTerminalLaunching? = nil) {
+         terminalLauncher: CodexTerminalLaunching? = nil,
+         desktopLauncher: CodexDesktopAppLauncher? = nil) {
         self.settings = settings ?? CodexResumeSettings.shared
         self.environment = environment ?? CodexCLIEnvironment()
         self.commandBuilder = commandBuilder
         self.terminalLauncher = terminalLauncher ?? CodexResumeLauncher()
+        self.desktopLauncher = desktopLauncher ?? CodexDesktopAppLauncher()
+    }
+
+    static func appSessionID(for session: Session) -> String? {
+        guard session.source == .codex, !session.isSideChat,
+              let id = session.codexInternalSessionID ?? session.codexFilenameUUID,
+              UUID(uuidString: id) != nil else { return nil }
+        return id
+    }
+
+    func openInApp(session: Session) async -> QuickLaunchResult {
+        guard let sessionID = Self.appSessionID(for: session) else {
+            return .failure(CodexDesktopAppLauncher.LaunchError.invalidSessionID.localizedDescription)
+        }
+        guard FileManager.default.fileExists(atPath: session.filePath) else {
+            return .failure(String(localized: "The session log could not be found on disk.",
+                                   comment: "Error when opening a session whose local log was removed."))
+        }
+        do {
+            // Desktop opening is independent of the CLI binary, version and terminal settings.
+            try await desktopLauncher.openSession(sessionID: sessionID)
+            return .launched
+        } catch {
+            return .failure(error.localizedDescription)
+        }
     }
 
     func quickLaunchInTerminal(session: Session) async -> QuickLaunchResult {

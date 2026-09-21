@@ -136,3 +136,71 @@ final class CodexResumeLauncher: ObservableObject {
         return (path?.isEmpty == false) ? path : nil
     }
 }
+
+// MARK: - Codex desktop app
+
+@MainActor
+protocol CodexDesktopAppOpening {
+    func applicationURL() -> URL?
+    func open(_ url: URL, withApplicationAt applicationURL: URL) async throws
+}
+
+@MainActor
+struct CodexDesktopWorkspace: CodexDesktopAppOpening {
+    func applicationURL() -> URL? {
+        // Resolve by bundle identity: the installed app's display name can change.
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
+    }
+
+    func open(_ url: URL, withApplicationAt applicationURL: URL) async throws {
+        _ = try await NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: applicationURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
+}
+
+@MainActor
+final class CodexDesktopAppLauncher {
+    enum LaunchError: LocalizedError {
+        case invalidSessionID
+        case appNotInstalled
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidSessionID:
+                return String(localized: "A valid Codex session ID is required to open this session in Codex App.",
+                              comment: "Error when a local Codex thread has no valid UUID for a desktop deep link.")
+            case .appNotInstalled:
+                return String(localized: "Codex App is not installed. Install it, then try opening this session again.",
+                              comment: "Desktop app launch error; installing the Codex CLI alone is not sufficient.")
+            }
+        }
+    }
+
+    private let workspace: CodexDesktopAppOpening
+
+    init(workspace: CodexDesktopAppOpening? = nil) {
+        self.workspace = workspace ?? CodexDesktopWorkspace()
+    }
+
+    static func sessionURL(sessionID: String) throws -> URL {
+        // Accept only a thread UUID, never an Agent Sessions row ID or URL fragment.
+        guard UUID(uuidString: sessionID) != nil,
+              let url = URL(string: "codex://threads/\(sessionID)?hostId=local") else {
+            throw LaunchError.invalidSessionID
+        }
+        return url
+    }
+
+    func openSession(sessionID: String) async throws {
+        let url = try Self.sessionURL(sessionID: sessionID)
+        guard let applicationURL = workspace.applicationURL() else {
+            throw LaunchError.appNotInstalled
+        }
+        // Launch Services accepting this URL does not prove the app found the thread.
+        // The desktop app must use the same local session store as Agent Sessions.
+        try await workspace.open(url, withApplicationAt: applicationURL)
+    }
+}

@@ -213,6 +213,64 @@ final class PresenceEngineTests: XCTestCase {
 
     // MARK: - Membership publish + snapshot fields
 
+    func testDesktopThreadsPublishIndependentStatesAndObserveCompletionBetweenProcessProbes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workingID = "00000000-0000-4000-8000-000000000001"
+        let idleID = "00000000-0000-4000-8000-000000000002"
+        let working = root.appendingPathComponent("rollout-2026-09-21T10-00-00-\(workingID).jsonl")
+        let idle = root.appendingPathComponent("rollout-2026-09-21T10-00-01-\(idleID).jsonl")
+        let start = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"example\"}}\n"
+        let complete = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"example\"}}\n"
+        try Data(start.utf8).write(to: working)
+        try Data((start + complete).utf8).write(to: idle)
+        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: working.path)
+        let blob = """
+        p42
+        fcwd
+        tDIR
+        n/tmp
+        f37
+        au
+        tREG
+        n\(working.path)
+        f48
+        au
+        tREG
+        n\(idle.path)
+        """
+        let runner = FakeProbeRunner(responders: [.init { executable, arguments in
+            if executable == "ps", arguments.contains("pid=,tty=,command=") {
+                return Data("42 ?? /Applications/ChatGPT.app/Contents/Resources/codex app-server\n".utf8)
+            }
+            if executable == "lsof", arguments.contains("codex") { return Data(blob.utf8) }
+            return Data()
+        }])
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.codexSessions = [root]
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
+        await engine.debugSetEnvironment(PresenceEnvironment())
+        let first = await engine.debugRefreshOnce()
+        XCTAssertEqual(first.presences.count, 2)
+        let workingPresence = try XCTUnwrap(first.presences.first { $0.sessionId == workingID })
+        let idlePresence = try XCTUnwrap(first.presences.first { $0.sessionId == idleID })
+        let workingKey = CodexActiveSessionsModel.presenceKey(for: workingPresence)
+        let idleKey = CodexActiveSessionsModel.presenceKey(for: idlePresence)
+        XCTAssertEqual(first.liveStateByPresenceKey[workingKey], .activeWorking)
+        XCTAssertEqual(first.liveStateByPresenceKey[idleKey], .openIdle)
+        XCTAssertNotNil(first.bySessionID[CodexActiveSessionsModel.sessionLookupKey(source: .codex, sessionId: workingID)])
+        // The process-presence cache must not also cache a stale working hint.
+        let handle = try FileHandle(forWritingTo: working)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(complete.utf8))
+        try handle.close()
+        let second = await engine.debugRefreshOnce()
+        XCTAssertEqual(second.liveStateByPresenceKey[workingKey], .openIdle)
+        XCTAssertEqual(second.liveStateByPresenceKey[idleKey], .openIdle)
+        XCTAssertEqual(second.presences.count, 2)
+    }
+
     func testRefreshOnce_discoversCodexPresenceViaProcessProbe_andPublishesMembership() async {
         let runner = makeCodexPresenceRunner()
         let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())

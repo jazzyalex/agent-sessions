@@ -1,6 +1,168 @@
 import XCTest
 @testable import AgentSessions
 
+final class CodexDesktopPresenceTests: XCTestCase {
+    private let root = "/tmp/codex-desktop-presence/sessions"
+    private let firstID = "00000000-0000-4000-8000-000000000001"
+    private let secondID = "00000000-0000-4000-8000-000000000002"
+
+    func testRecognizesRenamedAndSpaceContainingDesktopBackends() {
+        let commands = [
+            "/Applications/Codex.app/Contents/Resources/codex app-server",
+            "/Applications/ChatGPT.app/Contents/Resources/codex -c features.example=true app-server --analytics-default-enabled",
+            "/Applications/My Codex.app/Contents/Resources/codex app-server",
+            "\"/Applications/My Codex.app/Contents/Resources/codex\" app-server"
+        ]
+        let infos = commands.enumerated().map {
+            CodexActiveSessionsModel.PSCommandInfo(pid: $0.offset, tty: nil, command: $0.element)
+        }
+        XCTAssertEqual(CodexActiveSessionsModel.codexDesktopPIDs(from: infos), Set(0..<4))
+    }
+
+    func testRejectsCLIHelpersAndBackendPathPassedAsAnArgument() {
+        let commands = [
+            "/opt/homebrew/bin/codex app-server",
+            "/Applications/Codex.app/Contents/MacOS/Codex",
+            "/Applications/Codex.app/Contents/Resources/codex-code-mode-host app-server",
+            "/Applications/Codex.app/Contents/Resources/codex resume example",
+            "/usr/bin/cat /Applications/Codex.app/Contents/Resources/codex app-server"
+        ]
+        let infos = commands.enumerated().map {
+            CodexActiveSessionsModel.PSCommandInfo(pid: $0.offset, tty: nil, command: $0.element)
+        }
+        XCTAssertTrue(CodexActiveSessionsModel.codexDesktopPIDs(from: infos).isEmpty)
+    }
+
+    func testDesktopWithoutTTYProducesOnePresencePerWritableThread() throws {
+        let first = "\(root)/rollout-2026-09-21T10-00-00-\(firstID).jsonl"
+        let second = "\(root)/rollout-2026-09-21T10-00-01-\(secondID).jsonl"
+        let blob = """
+        p42
+        fcwd
+        tDIR
+        n/tmp
+        f37
+        au
+        tREG
+        n\(first)
+        f48
+        aw
+        tREG
+        n\(second)
+        f53
+        ar
+        tREG
+        n\(root)/rollout-2026-09-21T10-00-02-00000000-0000-4000-8000-000000000003.jsonl
+        f54
+        au
+        tREG
+        n\(root)-other/rollout-2026-09-21T10-00-03-00000000-0000-4000-8000-000000000004.jsonl
+        """
+        XCTAssertTrue(CodexActiveSessionsModel.parseLsofMachineOutput(blob, sessionsRoots: [root]).isEmpty)
+        let infos = CodexActiveSessionsModel.parseLsofMachineOutput(
+            blob, sessionsRoots: [root], source: .codex, desktopEligiblePIDs: [42]
+        )
+        let presences = CodexActiveSessionsModel.codexDesktopPresences(from: infos, eligiblePIDs: [42], now: Date())
+        XCTAssertEqual(Set(presences.compactMap(\.sessionId)), [firstID, secondID])
+        XCTAssertEqual(presences.count, 2)
+        for presence in presences {
+            XCTAssertEqual(presence.kind, "desktop")
+            XCTAssertEqual(presence.pid, 42)
+            XCTAssertNil(presence.tty)
+            XCTAssertNil(presence.terminal)
+            XCTAssertEqual(presence.openSessionLogPaths, [try XCTUnwrap(presence.sessionLogPath)])
+        }
+    }
+
+    func testDesktopWithOnlyCwdOrReadOnlyLogIsNotPresent() {
+        let blob = """
+        p42
+        fcwd
+        tDIR
+        n/tmp
+        f37
+        ar
+        tREG
+        n\(root)/rollout-2026-09-21T10-00-00-\(firstID).jsonl
+        """
+        let infos = CodexActiveSessionsModel.parseLsofMachineOutput(
+            blob, sessionsRoots: [root], source: .codex, desktopEligiblePIDs: [42]
+        )
+        XCTAssertTrue(infos.isEmpty)
+    }
+}
+
+final class CodexDesktopTurnStateTests: XCTestCase {
+    private func event(_ type: String) -> String {
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"\(type)\",\"turn_id\":\"synthetic-turn\"}}\n"
+    }
+
+    func testStartAndProgressAreWorking() {
+        for type in ["task_started", "item_completed"] {
+            XCTAssertEqual(CodexDesktopTurnStateReader.classifyTail(Data(event(type).utf8)), .activeWorking)
+        }
+    }
+
+    func testCompleteAndAbortOverrideEarlierWorkAndLaterSettings() {
+        for type in ["task_complete", "turn_aborted"] {
+            let tail = event("task_started") + event(type) + event("thread_settings_applied")
+            XCTAssertEqual(CodexDesktopTurnStateReader.classifyTail(Data(tail.utf8)), .openIdle)
+        }
+    }
+
+    func testNewTurnOverridesEarlierCompletion() {
+        let tail = event("task_complete") + event("task_started")
+        XCTAssertEqual(CodexDesktopTurnStateReader.classifyTail(Data(tail.utf8)), .activeWorking)
+    }
+
+    func testIgnoresPartialWritesMalformedJSONAndNestedEventText() {
+        let incomplete = event("task_complete").dropLast()
+        let tail = event("task_started") + "not-json\n" + incomplete
+        XCTAssertEqual(CodexDesktopTurnStateReader.classifyTail(Data(tail.utf8)), .activeWorking)
+        XCTAssertNil(CodexDesktopTurnStateReader.classifyTail(Data("{\"type\":\"response_item\",\"payload\":{\"type\":\"task_started\"}}\n".utf8)))
+        XCTAssertNil(CodexDesktopTurnStateReader.classifyTail(Data(event("task_started").utf8), startsAtLineBoundary: false))
+        XCTAssertNil(CodexDesktopTurnStateReader.classifyTail(Data("{\"type\":\"event_msg\",\"payload\":{\"type\":\"item_completed\"}}\n".utf8)))
+    }
+
+    func testCachedTurnSurvivesQuietWorkAndLargeOutputThenCompletes() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data(event("task_started").utf8).write(to: url)
+        // A long-running tool need not modify the rollout every few seconds.
+        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: url.path)
+        var reader = CodexDesktopTurnStateReader()
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .activeWorking)
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .activeWorking)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((String(repeating: "x", count: 1024 * 1024 + 1) + "\n").utf8))
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .activeWorking)
+        try handle.write(contentsOf: Data(event("task_complete").utf8))
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .openIdle)
+    }
+
+    func testCacheDoesNotCarryStateAcrossTruncationNewOwnerOrRemoval() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var reader = CodexDesktopTurnStateReader()
+        try Data(event("task_started").utf8).write(to: url)
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .activeWorking)
+        try Data("{}\n".utf8).write(to: url)
+        XCTAssertNil(reader.state(path: url.path, pid: 42))
+        try Data(event("task_started").utf8).write(to: url)
+        XCTAssertEqual(reader.state(path: url.path, pid: 42), .activeWorking)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((String(repeating: "x", count: 1024 * 1024 + 1) + "\n").utf8))
+        XCTAssertNil(reader.state(path: url.path, pid: 99))
+        reader.retain(paths: [])
+        XCTAssertNil(reader.state(path: url.path, pid: 42))
+        XCTAssertNil(reader.state(path: url.path + ".missing", pid: 42))
+    }
+}
+
 /// Headless agent CLI runs (`claude -p` started by launchd, a script, or another app)
 /// have no controlling terminal, so the terminal-shaped presence filters used to drop
 /// them entirely. These cover the discriminators that admit them without letting the

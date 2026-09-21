@@ -1,5 +1,73 @@
 import Foundation
 
+/// A bounded, cached tail read for each thread owned by the desktop backend.
+/// Completion wins over mtime: reading a thread or changing its settings must
+/// not make an idle conversation appear to be generating a response.
+struct CodexDesktopTurnStateReader {
+    private struct Entry {
+        let pid: Int
+        let fileID: UInt64
+        let size: UInt64
+        let modified: Date
+        let state: CodexLiveState?
+    }
+    private var entries: [String: Entry] = [:]
+
+    mutating func retain(paths: Set<String>) {
+        entries = entries.filter { paths.contains($0.key) }
+    }
+
+    mutating func state(path: String, pid: Int) -> CodexLiveState? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attrs[.size] as? NSNumber)?.uint64Value,
+              let fileID = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value,
+              let modified = attrs[.modificationDate] as? Date else {
+            entries.removeValue(forKey: path)
+            return nil
+        }
+        let previous = entries[path]
+        let sameFile = previous?.pid == pid && previous?.fileID == fileID
+        if sameFile, previous?.size == size, previous?.modified == modified {
+            return previous?.state
+        }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        let maxBytes: UInt64 = 1024 * 1024
+        let offset = size > maxBytes ? size - maxBytes : 0
+        guard (try? handle.seek(toOffset: offset)) != nil,
+              let data = try? handle.read(upToCount: Int(maxBytes)) else { return nil }
+        let detected = Self.classifyTail(data, startsAtLineBoundary: offset == 0)
+        // Large tool output can push the last lifecycle event out of the tail.
+        // Preserve a known state only for an append to the same live file.
+        let state = detected ?? (sameFile && size > (previous?.size ?? size) ? previous?.state : nil)
+        entries[path] = Entry(pid: pid, fileID: fileID, size: size, modified: modified, state: state)
+        return state
+    }
+
+    static func classifyTail(_ data: Data, startsAtLineBoundary: Bool = true) -> CodexLiveState? {
+        var lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
+        if !startsAtLineBoundary, !lines.isEmpty { lines.removeFirst() }
+        // The final component is either empty or an incomplete JSONL write.
+        if !lines.isEmpty { lines.removeLast() }
+        for line in lines.reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  object["type"] as? String == "event_msg",
+                  let payload = object["payload"] as? [String: Any],
+                  let type = payload["type"] as? String else { continue }
+            switch type {
+            case "task_complete", "turn_aborted": return .openIdle
+            case "task_started": return .activeWorking
+            case "item_completed":
+                // Desktop rollouts include turn IDs on progress events even
+                // when the start event is outside the bounded tail window.
+                if let id = payload["turn_id"] as? String, !id.isEmpty { return .activeWorking }
+            default: break
+            }
+        }
+        return nil
+    }
+}
+
 /// Sendable environment pushed into the engine by the `@MainActor` facade.
 /// Mirrors the inputs `refreshOnce`/`pollIntervalSeconds` read from
 /// `CodexActiveSessionsModel` instance state (visibility sets collapsed to a
@@ -174,6 +242,7 @@ actor PresenceEngine {
     // MARK: - Per-cycle caches (ported 1:1 from CodexActiveSessionsModel private state)
 
     private var cachedProcessPresences: [CodexActivePresence] = []
+    private var codexDesktopTurnStates = CodexDesktopTurnStateReader()
     private var cachedITermPresences: [CodexActivePresence] = []
     private var cachedITermTabTitleByTTY: [String: String] = [:]
     private var cachedITermTabTitleBySessionGuid: [String: String] = [:]
@@ -1146,6 +1215,7 @@ actor PresenceEngine {
         }
 
         let commandInfos = psData.map { CodexActiveSessionsModel.parsePSCommandListOutput(String(decoding: $0, as: UTF8.self)) } ?? []
+        let codexDesktopPIDs = CodexActiveSessionsModel.codexDesktopPIDs(from: commandInfos)
         let claudeTTYPIDs = Set(
             commandInfos
                 .filter { info in
@@ -1184,10 +1254,11 @@ actor PresenceEngine {
 
         let codexInfos = await discoverLsofPIDInfos(
             generation: generation,
-            queryArguments: ["-w", "-a", "-c", "codex", "-u", user, "-nP", "-F", "pftn"],
+            queryArguments: ["-w", "-a", "-c", "codex", "-u", user, "-nP", "-F", "pftna"],
             sessionsRoots: codexSessionRoots,
             source: .codex,
-            timeout: timeout
+            timeout: timeout,
+            desktopEligiblePIDs: codexDesktopPIDs
         )
         let claudeInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
         if claudeCommandPIDs.isEmpty {
@@ -1260,10 +1331,13 @@ actor PresenceEngine {
             return []
         }
 
-        var out: [CodexActivePresence] = []
+        var out = CodexActiveSessionsModel.codexDesktopPresences(
+            from: codexInfos, eligiblePIDs: codexDesktopPIDs, now: now
+        )
         var assignedLogPaths: Set<String> = []
         for (source, infos) in pidInfoBySource {
             for var info in infos.values {
+                if source == .codex, codexDesktopPIDs.contains(info.pid) { continue }
                 if let envMeta = envByPID[info.pid] {
                     info.termProgram = envMeta.termProgram
                     info.itermSessionId = envMeta.itermSessionId
@@ -1307,7 +1381,8 @@ actor PresenceEngine {
                                       sessionsRoots: [String],
                                       source: SessionSource,
                                       timeout: TimeInterval,
-                                      headlessEligiblePIDs: Set<Int> = []) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo] {
+                                      headlessEligiblePIDs: Set<Int> = [],
+                                      desktopEligiblePIDs: Set<Int> = []) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo] {
         guard let out = await runManagedCommand(
             kind: .processDiscovery,
             generation: generation,
@@ -1322,7 +1397,8 @@ actor PresenceEngine {
             String(decoding: out, as: UTF8.self),
             sessionsRoots: roots,
             source: source,
-            headlessEligiblePIDs: headlessEligiblePIDs
+            headlessEligiblePIDs: headlessEligiblePIDs,
+            desktopEligiblePIDs: desktopEligiblePIDs
         )
     }
 
@@ -1352,8 +1428,19 @@ actor PresenceEngine {
 #if DEBUG
         let _classifySpan = Perf.begin("refreshClassify", thresholdMs: 4)
 #endif
+        codexDesktopTurnStates.retain(paths: Set(presences.compactMap {
+            $0.source == .codex && $0.kind == "desktop" ? $0.sessionLogPath : nil
+        }))
+        let classifiedPresences = presences.map { presence in
+            var presence = presence
+            if presence.source == .codex, presence.kind == "desktop",
+               let path = presence.sessionLogPath, let pid = presence.pid {
+                presence.liveStateHint = codexDesktopTurnStates.state(path: path, pid: pid)
+            }
+            return presence
+        }
         let result = CodexActiveSessionsModel.classifyLiveStates(
-            for: presences,
+            for: classifiedPresences,
             now: now,
             probeITerm: probeITerm,
             previousLiveStates: previousLiveStates,

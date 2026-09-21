@@ -3084,12 +3084,14 @@ final class CodexActiveSessionsModel {
     nonisolated static func parseLsofMachineOutput(_ text: String,
                                                    sessionsRoots: [String],
                                                    source: SessionSource,
-                                                   headlessEligiblePIDs: Set<Int> = []) -> [Int: LsofPIDInfo] {
+                                                   headlessEligiblePIDs: Set<Int> = [],
+                                                   desktopEligiblePIDs: Set<Int> = []) -> [Int: LsofPIDInfo] {
         var infos: [Int: LsofPIDInfo] = [:]
 
         var currentPID: Int? = nil
         var currentFD: String? = nil
         var currentType: String? = nil
+        var currentAccess: String? = nil
 
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let tag = rawLine.first else { continue }
@@ -3105,9 +3107,14 @@ final class CodexActiveSessionsModel {
                 }
                 currentFD = nil
                 currentType = nil
+                currentAccess = nil
 
             case "f":
                 currentFD = String(value)
+                currentAccess = nil
+
+            case "a":
+                currentAccess = String(value)
 
             case "t":
                 currentType = String(value)
@@ -3148,6 +3155,11 @@ final class CodexActiveSessionsModel {
                 // The parent session's JSONL is typically opened first (lowest FD), while
                 // subagent files get higher FDs. This makes selection deterministic.
                 if matchesSessionLogPath(name, source: source, sessionsRoots: sessionsRoots) {
+                    // A desktop backend may also read historical transcripts. Only
+                    // writable descriptors identify threads it currently owns.
+                    if desktopEligiblePIDs.contains(pid), currentAccess != "w", currentAccess != "u" {
+                        continue
+                    }
                     if !info.openSessionLogPaths.contains(name) {
                         info.openSessionLogPaths.append(name)
                     }
@@ -3174,6 +3186,9 @@ final class CodexActiveSessionsModel {
         // Headless CLI runs have no tty at all — they are admitted on the strength of the
         // caller's `ps` vetting, and still need a cwd or session log to be identifiable.
         return infos.filter { pid, v in
+            if source == .codex, desktopEligiblePIDs.contains(pid) {
+                return v.sessionLogPath != nil
+            }
             let looksLive = v.tty != nil || headlessEligiblePIDs.contains(pid)
             return looksLive && (v.sessionLogPath != nil || v.cwd != nil)
         }
@@ -3408,6 +3423,49 @@ final class CodexActiveSessionsModel {
             .filter { !isAppBundleExecutable($0.command) }
             .map(\.pid)
         return Array(Set(pids)).sorted()
+    }
+
+    /// Match the bundled backend, including installations whose app was renamed.
+    /// GUI renderers and unrelated `codex` commands are not session owners.
+    nonisolated static func codexDesktopPIDs(from infos: [PSCommandInfo]) -> Set<Int> {
+        Set(infos.compactMap { info in
+            let command = info.command.trimmingCharacters(in: .whitespacesAndNewlines)
+            // ps does not quote executable paths containing spaces.
+            guard let end = command.range(of: ".app/Contents/Resources/codex"),
+                  command.hasPrefix("/") || command.hasPrefix("\"/") || command.hasPrefix("'/") else { return nil }
+            let executable = String(command[..<end.upperBound]).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            guard !executable.contains(" /"), !executable.contains(" -") else { return nil }
+            let remainder = command[end.upperBound...].trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            guard remainder.first?.isWhitespace == true else { return nil }
+            let arguments = splitCommandTokens(remainder)
+            guard arguments.contains("app-server") else { return nil }
+            return info.pid
+        })
+    }
+
+    /// Unlike a CLI process, one desktop backend owns several independent threads.
+    nonisolated static func codexDesktopPresences(from infos: [Int: LsofPIDInfo],
+                                                 eligiblePIDs: Set<Int>,
+                                                 now: Date) -> [CodexActivePresence] {
+        var result: [CodexActivePresence] = []
+        for pid in eligiblePIDs.sorted() {
+            guard let info = infos[pid] else { continue }
+            for path in Set(info.openSessionLogPaths).sorted() {
+                guard let id = extractSessionID(fromLogPath: path, source: .codex) else { continue }
+                var presence = CodexActivePresence()
+                presence.schemaVersion = 1
+                presence.publisher = "agent-sessions-process"
+                presence.kind = "desktop"
+                presence.source = .codex
+                presence.sessionId = id
+                presence.sessionLogPath = path
+                presence.openSessionLogPaths = [path]
+                presence.pid = pid
+                presence.lastSeenAt = now
+                result.append(presence)
+            }
+        }
+        return result
     }
 
     nonisolated private static func splitCommandTokens(_ command: String) -> [String] {

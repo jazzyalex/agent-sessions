@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added **Open in Codex App** to the session context menu and toolbar. The action navigates to the existing local conversation by its thread ID, without requiring a Codex CLI installation. The app must use the same session store; side chats and records without a valid thread ID are excluded. A conversation owned by another running client remains subject to Codex's writer lock.
+- Fixed missing live status for local Codex App conversations. Writable rollouts held by the desktop backend are tracked individually, with turn progress, completion, and interruption driving the same working/idle indicators as CLI sessions. Read-only history files are excluded.
+
 ## [5.5] - 2026-09-19
 
 ### Features
