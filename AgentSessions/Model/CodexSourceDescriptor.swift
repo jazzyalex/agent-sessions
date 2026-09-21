@@ -1,7 +1,4 @@
 import Foundation
-import Combine
-import SwiftUI
-import AppKit
 
 // Codex lives in `Model/` rather than a `Codex/` folder because it has none: its parser,
 // discovery and indexer predate the per-source folder convention and sit in `Services/`.
@@ -25,10 +22,6 @@ extension SessionSourceDescriptor {
             ),
             shortLabel: "Codex",
             badgeInitials: "CX",
-            // Deep blue.
-            brandHue: .calibrated(red: 0.14, green: 0.30, blue: 0.60),
-            monochromeWhite: 0.4,
-            onboardingAccent: { $0.accentGreen },
             enablementKey: PreferencesKey.Agents.codexEnabled,
             cliAvailableKey: PreferencesKey.codexCLIAvailable,
             // Historical, un-namespaced key: "SessionsRootOverride" (K1 — frozen forever).
@@ -43,9 +36,11 @@ extension SessionSourceDescriptor {
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .always,
-            parseFullByPath: { url in SessionIndexer().parseFileFull(at: url) },
+            parseFullByPath: { url in CodexSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in CodexSessionDiscovery(customRoot: ctx.customRoot(PreferencesKey.Paths.codexSessionsRootOverride)) },
+            parseLightweightByPath: { CodexSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -64,57 +59,7 @@ extension SessionSourceDescriptor {
                 }
             ),
             supportsResume: true,
-            resumeAgentLabel: "Codex CLI",
-            otherAgentPill: nil
+            resumeAgentLabel: "Codex CLI"
         )
     }()
-}
-
-// MARK: - Adapter
-
-extension SessionSourceAdapter {
-    /// Descriptor + runtime factory for codex (SPEC §3.2). `makeRuntime` runs once,
-    /// from `SessionProviderCatalog.init`; every closure below captures only the local
-    /// `indexer`, never `self` or the catalog (SPEC §3.4 retain-cycle rule).
-    static let codex = SessionSourceAdapter(
-        descriptor: .codex,
-        makeRuntime: {
-            let indexer = SessionIndexer()
-            return SourceRuntime(
-                source: .codex,
-                indexerObject: indexer,
-                handle: UnifiedSessionIndexer.ProviderHandle(
-                    allSessions: indexer.$allSessions.eraseToAnyPublisher(),
-                    isIndexing: indexer.$isIndexing.eraseToAnyPublisher(),
-                    isProcessingTranscripts: indexer.$isProcessingTranscripts.eraseToAnyPublisher(),
-                    filesProcessed: indexer.$filesProcessed.eraseToAnyPublisher(),
-                    totalFiles: indexer.$totalFiles.eraseToAnyPublisher(),
-                    indexingError: indexer.$indexingError.eraseToAnyPublisher(),
-                    launchPhase: indexer.$launchPhase.eraseToAnyPublisher(),
-                    currentSessions: { indexer.allSessions },
-                    currentIsIndexing: { indexer.isIndexing },
-                    currentLaunchPhase: { indexer.launchPhase },
-                    searchIdentitySnapshots: .notApplicable,
-                    refresh: { mode, trigger, profile in
-                        indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
-                    },
-                    reloadFocusedSession: { id, force, trigger in
-                        let reason: SessionIndexer.ReloadReason
-                        switch trigger {
-                        case .selection: reason = .selection
-                        case .monitor: reason = .focusedSessionMonitor
-                        case .manual: reason = .manualRefresh
-                        }
-                        indexer.reloadSession(id: id, force: force, reason: reason)
-                    }
-                ),
-                // Transcribed verbatim from UnifiedSessionsView.init's adapter dictionary.
-                searchAdapter: .init(
-                    transcriptCache: indexer.searchTranscriptCache,
-                    update: { indexer.updateSession($0) },
-                    parseFull: { url, forcedID in indexer.parseFileFull(at: url, forcedID: forcedID) }
-                )
-            )
-        }
-    )
 }

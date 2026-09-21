@@ -1,7 +1,4 @@
 import Foundation
-import Combine
-import SwiftUI
-import AppKit
 
 extension SessionSourceDescriptor {
     static let droid: SessionSourceDescriptor = {
@@ -13,10 +10,6 @@ extension SessionSourceDescriptor {
             telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Droid",
             badgeInitials: "D",
-            // Green brand (disambiguation handled via styling, not hue).
-            brandHue: .calibrated(red: 0.16, green: 0.68, blue: 0.28),
-            monochromeWhite: 0.8,
-            onboardingAccent: { _ in Color(red: 0.26, green: 0.72, blue: 0.38) },
             enablementKey: PreferencesKey.Agents.droidEnabled,
             cliAvailableKey: PreferencesKey.droidCLIAvailable,
             // K3: the only source with two root-override keys. Order matters — the
@@ -45,6 +38,9 @@ extension SessionSourceDescriptor {
             parseFullByPath: { url in DroidSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            makeDiscovery: { ctx in DroidSessionDiscovery(customSessionsRoot: ctx.customRoot(PreferencesKey.Paths.droidSessionsRootOverride),
+                                      customProjectsRoot: ctx.customRoot(PreferencesKey.Paths.droidProjectsRootOverride)) },
+            parseLightweightByPath: { DroidSessionParser.parseFile(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -67,57 +63,7 @@ extension SessionSourceDescriptor {
             // Droid never resumes: `canResumeSession` leaves it to the `default: false`
             // arm, and `resumeAgentLabel` has no arm for it either.
             supportsResume: false,
-            resumeAgentLabel: nil,
-            otherAgentPill: PillSpec(color: Color.agentDroid, shortcut: "6")
+            resumeAgentLabel: nil
         )
     }()
-}
-
-// MARK: - Adapter
-
-extension SessionSourceAdapter {
-    /// Descriptor + runtime factory for droid (SPEC §3.2). `makeRuntime` runs once,
-    /// from `SessionProviderCatalog.init`; every closure below captures only the local
-    /// `indexer`, never `self` or the catalog (SPEC §3.4 retain-cycle rule).
-    static let droid = SessionSourceAdapter(
-        descriptor: .droid,
-        makeRuntime: {
-            let indexer = DroidSessionIndexer()
-            return SourceRuntime(
-                source: .droid,
-                indexerObject: indexer,
-                handle: UnifiedSessionIndexer.ProviderHandle(
-                    allSessions: indexer.$allSessions.eraseToAnyPublisher(),
-                    isIndexing: indexer.$isIndexing.eraseToAnyPublisher(),
-                    isProcessingTranscripts: indexer.$isProcessingTranscripts.eraseToAnyPublisher(),
-                    filesProcessed: indexer.$filesProcessed.eraseToAnyPublisher(),
-                    totalFiles: indexer.$totalFiles.eraseToAnyPublisher(),
-                    indexingError: indexer.$indexingError.eraseToAnyPublisher(),
-                    launchPhase: indexer.$launchPhase.eraseToAnyPublisher(),
-                    currentSessions: { indexer.allSessions },
-                    currentIsIndexing: { indexer.isIndexing },
-                    currentLaunchPhase: { indexer.launchPhase },
-                    searchIdentitySnapshots: .notApplicable,
-                    refresh: { mode, trigger, profile in
-                        indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
-                    },
-                    reloadFocusedSession: { id, force, trigger in
-                        let reason: DroidSessionIndexer.ReloadReason
-                        switch trigger {
-                        case .selection: reason = .selection
-                        case .monitor: reason = .focusedSessionMonitor
-                        case .manual: reason = .manualRefresh
-                        }
-                        indexer.reloadSession(id: id, force: force, reason: reason)
-                    }
-                ),
-                // Transcribed verbatim from UnifiedSessionsView.init's adapter dictionary.
-                searchAdapter: .init(
-                    transcriptCache: indexer.searchTranscriptCache,
-                    update: { indexer.updateSession($0) },
-                    parseFull: { url, forcedID in DroidSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-                )
-            )
-        }
-    )
 }

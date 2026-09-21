@@ -79,3 +79,22 @@ extension CodexResumeSettings {
         CodexResumeSettings(defaults: defaults)
     }
 }
+
+// MARK: - Resume command
+
+extension CodexResumeCommandBuilder {
+    /// Resolves the working directory from the user's settings (per-session override,
+    /// session cwd, then the default) and builds the command.
+    @MainActor
+    func makeCommand(for session: Session,
+                     settings: CodexResumeSettings,
+                     binaryURL: URL,
+                     fallbackPath: URL?,
+                     attemptResumeFirst: Bool) throws -> CommandPackage {
+        try makeCommand(for: session,
+                        workingDirectory: settings.effectiveWorkingDirectory(for: session),
+                        binaryURL: binaryURL,
+                        fallbackPath: fallbackPath,
+                        attemptResumeFirst: attemptResumeFirst)
+    }
+}

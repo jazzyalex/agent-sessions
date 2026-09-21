@@ -183,6 +183,58 @@ actor SearchIngestService {
         value >= 1_000_000_000_000 ? value / 1_000 : value
     }
 
+    /// Provider-neutral search FileRefs for a session list. A source declaring
+    /// `descriptor.logicalFileStat` contributes its logical unit stat, so companion-only
+    /// writes re-ingest and stay FTS-current; identity-backed storage (shared databases)
+    /// carries the session ID and a content revision instead of relying on the file stat.
+    nonisolated static func fileRefs(for sessions: [Session],
+                                     isArchivedPrimary: (Session) -> Bool = { _ in false }) -> [FileRef] {
+        sessions.compactMap { session -> FileRef? in
+            // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
+            // transcript) have no content for CursorSessionParser.parseFileFull to
+            // read: JSONLReader silently yields zero events on a non-JSONL file, so
+            // the parser returns an empty-but-non-nil Session that would otherwise get
+            // upserted as search-ready and never revisited. Skip them here (see
+            // `Session.isCursorDatabaseOnly`).
+            if session.isCursorDatabaseOnly { return nil }
+            let url = URL(fileURLWithPath: session.filePath)
+            let descriptor = SessionSourceDescriptorCatalog.descriptor(for: session.source)
+            // A source declaring `artifactRevision` anchors the FileRef to the currently
+            // selected revision (path/mtime/size) and carries the manifest revision; it
+            // never keeps an obsolete `Session.filePath` anchor, and an unresolvable
+            // artifact emits nothing.
+            if let resolveArtifact = descriptor.artifactRevision {
+                if let revision = resolveArtifact(url) {
+                    return FileRef(path: revision.selectedURL.path,
+                                   mtime: revision.physicalStat.mtime,
+                                   size: revision.physicalStat.size,
+                                   manifestRevision: revision.manifestRevision)
+                }
+                // A pinned DSH fallback points at the copied primary inside Agent
+                // Sessions' archive, outside the live canonical root. It is a stable
+                // standalone file and must still enter search after the live bundle
+                // disappears; physical stat is the correct archive revision. Whether a
+                // path is an archived primary is app state, so the caller supplies it.
+                guard session.source == .deepseekHarness,
+                      isArchivedPrimary(session),
+                      let stat = SessionFileStat.from(url) else { return nil }
+                return FileRef(path: url.path, mtime: stat.mtime, size: stat.size)
+            }
+            guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
+                return nil
+            }
+            let usesIdentity = descriptor.parseFullByIdentity != nil
+                && descriptor.searchUsesIdentityAtURL?(url) == true
+            return FileRef(path: session.filePath,
+                           mtime: stat.mtime,
+                           size: stat.size,
+                           sessionID: usesIdentity ? session.id : nil,
+                           contentRevision: usesIdentity
+                            ? contentRevision(for: session)
+                            : nil)
+        }
+    }
+
     nonisolated static func contentRevision(for session: Session) -> ContentRevision {
         let updated = session.endTime ?? session.startTime ?? Date(timeIntervalSince1970: 0)
         return ContentRevision(updatedMillis: Int64((updated.timeIntervalSince1970 * 1_000.0).rounded()),
@@ -262,7 +314,7 @@ actor SearchIngestService {
                 reingestCooldownOverride: TimeInterval? = nil,
                 livePathAuthority: LivePathAuthority = .notApplicable) async throws -> Progress {
         let sourceRaw = source.rawValue
-        let descriptor = source.descriptor
+        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
 
         // Directory-artifact early-out guard: the remembered aggregate is keyed by the
         // caller's anchor (selected path + manifest revision). If the directory has
@@ -705,7 +757,7 @@ actor SearchIngestService {
         // a successor generation may have been selected while it ran. Resolve again and
         // require the same exact anchor BEFORE any db.begin/upsert/write below.
         if file.manifestRevision != nil {
-            guard let resolveArtifact = source.descriptor.artifactRevision,
+            guard let resolveArtifact = SessionSourceDescriptorCatalog.descriptor(for: source).artifactRevision,
                   let current = resolveArtifact(url),
                   Self.artifactAnchorMatches(file: file, revision: current) else {
                 return .staleAnchor
@@ -802,7 +854,7 @@ actor SearchIngestService {
     private static func parseFileFull(url: URL,
                                       source: SessionSource,
                                       sessionID: String?) -> Session? {
-        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        let descriptor = SessionSourceDescriptorCatalog.descriptor(for: source)
         if let sessionID, let parseFullByIdentity = descriptor.parseFullByIdentity {
             return parseFullByIdentity(url, sessionID)
         }

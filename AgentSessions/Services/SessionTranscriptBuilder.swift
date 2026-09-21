@@ -1,5 +1,9 @@
 import Foundation
-import SwiftUI
+
+/// How a transcript is filtered for display. UI-free; shared with the Linux core.
+enum TranscriptFilters: Equatable {
+    case current(showTimestamps: Bool, showMeta: Bool)
+}
 
 // swiftlint:disable type_body_length
 struct SessionTranscriptBuilder {
@@ -108,32 +112,9 @@ struct SessionTranscriptBuilder {
         return out
     }
 
-    static func buildAttributed(session: Session, theme: TranscriptTheme, filters: TranscriptFilters) -> AttributedString {
-        let opts = options(from: filters, mode: .normal, source: session.source)
-        let colors = theme.colors
-        var attr = AttributedString("")
-
-        var header = AttributedString(headerLine(session: session) + "\n")
-        header.foregroundColor = colors.dim
-        header.font = .system(.body, design: .monospaced)
-        attr += header
-
-        var rule = AttributedString(String(repeating: "─", count: 80) + "\n")
-        rule.foregroundColor = colors.dim
-        rule.font = .system(.body, design: .monospaced)
-        attr += rule
-
-        for e in session.events {
-            if e.kind == .meta && !opts.showMeta { continue }
-            attr += attributedLine(for: e, colors: colors, options: opts)
-            attr += AttributedString("\n")
-        }
-        return attr
-    }
-
     // MARK: Line helpers
 
-    private static func timestampTail(_ ts: Date?, options: Options) -> String {
+    static func timestampTail(_ ts: Date?, options: Options) -> String {
         guard options.showTimestamps, let ts = ts else { return "" }
         return " @" + AppDateFormatting.transcriptTimestamp(ts)
     }
@@ -188,52 +169,9 @@ struct SessionTranscriptBuilder {
         }
     }
 
-    private static func attributedLine(for e: SessionEvent, colors: TranscriptColors, options: Options) -> AttributedString {
-        var line = AttributedString("")
-        func append(_ text: String, color: Color? = nil) {
-            var piece = AttributedString(text)
-            piece.font = .system(.body, design: .monospaced)
-            if let color { piece.foregroundColor = color }
-            line += piece
-        }
-        switch e.kind {
-        case .user:
-            append(userPrefix, color: colors.user)
-            append(e.text ?? "")
-            append(timestampTail(e.timestamp, options: options), color: colors.dim)
-        case .assistant:
-            append(e.text ?? "")
-            if !(e.text ?? "").isEmpty { append("  ") }
-            append("[assistant]", color: colors.assistant)
-            append(timestampTail(e.timestamp, options: options), color: colors.dim)
-        case .tool_call:
-            append(toolPrefix + " ", color: colors.tool)
-            append(e.toolName ?? "?")
-            if let input = e.toolInput {
-                if input.count <= 80 {
-                    append(" " + input, color: colors.dim)
-                } else {
-                    append(" (args…)", color: colors.dim)
-                }
-            }
-            append(timestampTail(e.timestamp, options: options), color: colors.dim)
-        case .tool_result:
-            append(outPrefix + " ", color: colors.dim)
-            if let output = formattedOutput(e.toolOutput) { append(output) }
-            append(timestampTail(e.timestamp, options: options), color: colors.dim)
-        case .error:
-            append(errorPrefix + " ", color: colors.error)
-            append(e.text ?? "")
-            append(timestampTail(e.timestamp, options: options), color: colors.dim)
-        case .meta:
-            append(e.text ?? e.rawJSON, color: colors.dim)
-        }
-        return line
-    }
-
     // MARK: Formatting helpers
 
-    private static func options(from filters: TranscriptFilters, mode: TranscriptRenderMode, source: SessionSource?) -> Options {
+    static func options(from filters: TranscriptFilters, mode: TranscriptRenderMode, source: SessionSource?) -> Options {
         switch filters {
         case let .current(showTimestamps, showMeta):
             return Options(showTimestamps: showTimestamps, showMeta: showMeta, renderMode: mode, sessionSource: source)
@@ -264,7 +202,7 @@ struct SessionTranscriptBuilder {
         return "\(toolPrefix) \(tool) \(compactJSONOneLine(input))"
     }
 
-    private static func headerLine(session: Session) -> String {
+    static func headerLine(session: Session) -> String {
         let short = session.shortID
         let model = session.model ?? "—"
         let branch = session.gitBranch ?? "—"
@@ -273,7 +211,7 @@ struct SessionTranscriptBuilder {
         return "Session \(short)  •  model \(model)  •  branch \(branch)  •  msgs \(msgs)  •  modified \(modified)"
     }
 
-    private static func formattedOutput(_ s: String?) -> String? {
+    static func formattedOutput(_ s: String?) -> String? {
         guard var text = s, !text.isEmpty else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if (trimmed.hasPrefix("{") && trimmed.hasSuffix("}")) || (trimmed.hasPrefix("[") && trimmed.hasSuffix("]")) {

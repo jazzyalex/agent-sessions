@@ -13,9 +13,10 @@ struct CodexResumeCommandBuilder {
         case unsupportedSurface(CodexSessionSurface)
     }
 
-    @MainActor
+    /// UI-free form (shared with the Linux core). The app's settings-aware overload in
+    /// CodexResumeSettings.swift resolves `workingDirectory` and calls this.
     func makeCommand(for session: Session,
-                     settings: CodexResumeSettings,
+                     workingDirectory workingDirPath: String?,
                      binaryURL: URL,
                      fallbackPath: URL?,
                      attemptResumeFirst: Bool) throws -> CommandPackage {
@@ -27,7 +28,6 @@ struct CodexResumeCommandBuilder {
             throw BuildError.unsupportedSurface(.vscode)
         }
 
-        let workingDirPath = settings.effectiveWorkingDirectory(for: session)
         let workingDirURL = workingDirPath.flatMap { URL(fileURLWithPath: $0) }
         let quotedSessionID = shellQuote(sessionID)
         let codexPath = shellQuote(binaryURL.path)

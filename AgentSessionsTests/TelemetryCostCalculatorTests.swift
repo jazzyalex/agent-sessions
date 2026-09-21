@@ -95,6 +95,45 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.apiEquivalentUSD), 10.0, accuracy: 0.0001)
     }
 
+    /// Some Codex builds record the bare tier name. It must price like the verified
+    /// generation it stands for, in both lookup paths (snapshot and table). These models
+    /// bill per request by context size, so the comparison uses request-level events.
+    func testBareGPTTierAliasesPriceLikeTheirVerifiedGeneration() throws {
+        let t = table()
+        let pairs = [("astra", "gpt-6-astra"), ("sol", "gpt-5.6-sol"),
+                     ("terra", "gpt-5.6-terra"), ("luna", "gpt-5.6-luna")]
+        for (alias, canonical) in pairs {
+            func cost(_ model: String) -> TelemetryCostCalculator.Result {
+                TelemetryCostCalculator.price(
+                    events: [event(model, input: 200_000, context: 200_000, output: 50_000)],
+                    fallbackSlices: [], priceTable: t)
+            }
+            let viaSlug = try XCTUnwrap(cost(canonical).estimate.apiEquivalentUSD, canonical)
+            let viaAlias = cost(alias)
+            XCTAssertEqual(try XCTUnwrap(viaAlias.estimate.apiEquivalentUSD, alias), viaSlug,
+                           accuracy: 0.000001, alias)
+            XCTAssertEqual(viaAlias.estimate.unpricedModels, [], alias)
+            XCTAssertNotNil(t.price(forModel: alias), "table lookup: \(alias)")
+            XCTAssertNotNil(t.snapshot().price(forModel: alias), "snapshot lookup: \(alias)")
+        }
+    }
+
+    /// Only the exact bare names are aliases; lookalikes stay unpriced.
+    func testGPTTierAliasesAreExactNamesOnly() {
+        let t = table()
+        for slug in ["sol-preview", "Sol", "solar", "gpt-sol", "astra-2", "terra "] {
+            XCTAssertNil(t.price(forModel: slug), slug)
+        }
+    }
+
+    /// An alias pointing at a key the table no longer has would silently stop pricing.
+    func testEveryGPTTierAliasTargetsAModelInTheBundledTable() {
+        let models = table().snapshot().models
+        for (alias, canonical) in RunwayPriceSnapshot.gptTierAliases {
+            XCTAssertNotNil(models[canonical], "\(alias) -> \(canonical) is missing from prices")
+        }
+    }
+
     func testPriceTableUpdatedIsStamped() {
         let t = table()
         let result = TelemetryCostCalculator.estimate(

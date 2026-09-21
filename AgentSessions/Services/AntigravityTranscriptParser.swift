@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Parser for Antigravity CLI JSONL transcripts.
 /// Layout: ~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl

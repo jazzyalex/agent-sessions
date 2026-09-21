@@ -1,0 +1,133 @@
+# Agent Sessions for the terminal (experimental)
+
+A terminal UI to browse, search, read, copy and resume the local sessions of your coding
+agents. It reads the same session files as the macOS app, through the same parsers and
+search index, and never sends anything off the machine.
+
+Supported sources: Codex, Claude Code, Antigravity, OpenCode, Hermes, GitHub Copilot CLI,
+Droid, OpenClaw, Cursor, Pi, Kimi Code, Grok CLI, Qwen Code, Devin, fx, Cline and DeepSeek
+Harness. A source shows up only if its session files exist for your user.
+
+Linux locations of Cursor, Cline Desktop, Antigravity and Devin have not been verified yet
+(the app's macOS paths are used). DeepSeek Harness is verified against the repository's
+fixtures only, including its zstd-compressed generations, not against a real installation.
+Codex, Claude Code and OpenCode were tested on real Linux data; the other CLI sources follow
+their documented `~/.<agent>` layouts.
+
+## Install
+
+| Format | Command | Installed files |
+|---|---|---|
+| `.deb` (Debian, Ubuntu) | `sudo apt install ./agent-sessions_<version>_<arch>.deb` | `/usr/bin/agent-sessions`, `/usr/lib/agent-sessions/agent-sessions-core` |
+| `.rpm` (Fedora, RHEL, SUSE) | `sudo rpm -i agent-sessions-<version>.<arch>.rpm` | `/usr/bin/agent-sessions`, `/usr/libexec/agent-sessions/agent-sessions-core` |
+| tarball | unpack anywhere | `agent-sessions` and `agent-sessions-core` side by side |
+
+Only `agent-sessions` goes on your `PATH`. `agent-sessions-core` is its internal engine and
+is found automatically: next to the program, then in `../libexec/agent-sessions`, then in
+`../lib/agent-sessions`, then on `PATH`. `$AS_CORE` overrides all of that. To install a
+tarball for everyone:
+
+    sudo install -m 0755 agent-sessions /usr/local/bin/
+    sudo install -m 0755 -D agent-sessions-core /usr/local/libexec/agent-sessions/agent-sessions-core
+
+Nothing else is required: the Swift runtime and SQLite are linked in, so the binaries need
+only glibc and libstdc++. Builds exist for `x86_64` (`amd64`) and `aarch64` (`arm64`).
+
+The program is called `agent-sessions`, not `as`, because `as` is the GNU assembler.
+
+## Use
+
+    agent-sessions
+
+| Key | Action |
+|---|---|
+| up, down, k, j, PgUp, PgDn, g, G | move through sessions |
+| Enter, Right, Tab | read the session |
+| Left, Shift+Tab, Esc, Tab | back to the list (while reading, up, down, PgUp and PgDn scroll the text) |
+| `/` | full-text search; Enter runs it, Esc cancels; Esc in the list clears it |
+| `s` | cycle the source filter |
+| `S` | cycle the sort: date (newest first, the default), duration (longest first), tokens (most first) |
+| `o` | open the session in its agent: the UI exits and runs the agent's resume command in the session's project directory |
+| `y` / `Y` | copy the resume command / the session file path to the clipboard |
+| `r` | refresh the index |
+| `q` | quit |
+
+The header above the transcript shows the session title, its directory (and repository when
+that differs), the wall-clock duration from first to last event, message and tool-call
+counts, and the model. For Codex, Claude Code, Pi and Copilot CLI it also shows the total
+tokens with their split (fresh input, cached, cache write, output) and what they would cost
+at API rates, the same figures as the macOS app's Session Info. The token count re-reads the
+session file, so it appears a moment after the transcript ("counting..." until then). Other
+agents do not record usage in their files, and the header says so. The cost is an estimate
+at published API prices bundled with the build (no network); a session on a subscription is
+not billed that amount, and a model missing from the bundled table is reported as unpriced.
+
+The list has a column of token totals beside the age. The column header marks the one that
+drives the order, and when the list is sorted by duration the last column shows the
+duration instead of the age. A dash means the agent does not record usage, and "…" means
+the session is still being counted. Sorting starts from the top of the list. In search
+results the default order is best match first; the other sorts apply to the matches found.
+
+Notes:
+
+- The list shows top-level sessions. Subagent runs, such as Codex auto-review, are hidden.
+- The first start indexes your history, which can take minutes for gigabytes of Codex
+  rollouts, and then counts tokens for every session, which re-reads them once more (about as
+  long again). Sessions appear first and the token column fills in afterwards; changed files
+  are recounted on later starts, unchanged ones never. The list fills in as sessions are found (the status line counts them), and
+  quitting stops the indexer; what it already stored is kept and the next start continues.
+  Later starts only read what changed and take well under a second.
+- Resume works for Claude Code, Codex, OpenCode and Copilot CLI. For other sources `o` and
+  `y` report that they cannot be resumed yet; `Y` still copies the file path.
+- Copying uses the OSC 52 terminal sequence, so it also works over SSH. Terminals that do
+  not implement it ignore it; the copied text is always shown in the status line.
+- `agent-sessions --core-path` prints which engine binary is in use, which is the first
+  thing to check if the program reports that the engine is missing.
+
+## Where data lives
+
+The index is `$XDG_DATA_HOME/agent-sessions/index.db` (default
+`~/.local/share/agent-sessions/index.db`), one per user. It is a cache: deleting it only
+costs a re-index. It is separate from the macOS app's index. Set `$AS_CORE_DB` to move it.
+
+## The engine, for scripts
+
+`agent-sessions-core` prints one JSON object per line on stdout (every object carries
+`"schema": 1`) and logs to stderr. Run it through its installed path, since it is not on
+`PATH`, for example `/usr/lib/agent-sessions/agent-sessions-core` on Debian.
+
+    agent-sessions-core sources                       sources this build can read
+    agent-sessions-core index [--source s]            build or refresh the index
+    agent-sessions-core list [--source s] [--limit n] [--sort date|duration|tokens] [--include-subagents]
+    agent-sessions-core search <query> [--source s] [--limit n] [--sort date|duration|tokens]
+    agent-sessions-core show <source> <file> [--id id]      header plus every event
+    agent-sessions-core resume <source> <file> [--id id]    the command that reopens it
+    agent-sessions-core stats <source> <file>         token totals and API-rate cost
+    agent-sessions-core parse <source> <file>         one-file summary, no index
+    agent-sessions-core scan [--source s] [--light]   discover and parse, no index
+
+`index` prints `type: "index"` lines while it ingests, then `type: "usage"` lines while it
+counts tokens. Every `list` and `search` row carries `durationSeconds`, `usageState` (`ready`,
+`none`, `pending` or `unsupported`) and, when ready, a `usage` object with the token split and
+the cost at API rates. Counts are stored in a table of the engine's own database, next to the
+search index, and never touch the macOS app's index.
+
+Common option: `--db <path>`. Database-backed sources (OpenCode, Hermes, Devin) share one
+storage path, so `show` and `resume` take `--id`.
+
+## Uninstall
+
+    sudo apt remove agent-sessions        # Debian, Ubuntu
+    sudo rpm -e agent-sessions            # Fedora, RHEL, SUSE
+
+Remove `~/.local/share/agent-sessions` to delete the index.
+
+## Build from source
+
+`./linux/package.sh arm64|amd64 [version]` builds the tarball, `.deb` and `.rpm` into
+`dist/`. It needs Docker (for the Swift engine, built in a Linux container) and Go (for the
+UI, and to cross-build `nfpm`, which writes both package formats). The other architecture is
+built under emulation, which is slow on the first run.
+
+`python3 scripts/as_core_contract.py` parses every fixture in `Resources/Fixtures` with the
+engine and compares against a committed golden, to catch parser drift between platforms.

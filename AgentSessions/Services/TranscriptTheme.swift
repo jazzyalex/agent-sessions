@@ -37,7 +37,3 @@ extension TranscriptTheme {
         }
     }
 }
-
-enum TranscriptFilters: Equatable {
-    case current(showTimestamps: Bool, showMeta: Bool)
-}

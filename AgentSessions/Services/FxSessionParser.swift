@@ -357,7 +357,14 @@ enum FxSessionParser {
     /// CFBoolean's type ID. Without this, every fx field whose honest value is
     /// exactly 1 (`history_len: 1`, `compaction_count: 1`, …) reads as absent.
     private static func isJSONBool(_ value: Any) -> Bool {
+#if canImport(Darwin)
         CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
+#else
+        // swift-corelibs-foundation has no CFType bridging; its JSON booleans are the
+        // `__NSCFBoolean` NSNumber subclass, whose objCType is "c" (JSON numbers never are).
+        guard let number = value as? NSNumber else { return false }
+        return String(cString: number.objCType) == "c"
+#endif
     }
 
     /// Reads a field fx wrote through its durable-bytes encoder: a plain JSON

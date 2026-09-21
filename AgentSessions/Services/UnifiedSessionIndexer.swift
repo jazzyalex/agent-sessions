@@ -2040,55 +2040,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// Provider-neutral search FileRefs for a session list — the same construction the
-    /// ingest kick uses. A source declaring `descriptor.artifactRevision` anchors the
-    /// FileRef to the currently selected revision (path/mtime/size) and carries the
-    /// manifest revision; it never keeps an obsolete `Session.filePath` anchor, and an
-    /// unresolvable artifact emits nothing. A source declaring
-    /// `descriptor.logicalFileStat` contributes its logical unit stat, so
-    /// companion-only writes re-ingest and stay FTS-current.
-    /// Internal so the messages-only re-ingest path is testable without a live kick.
+    /// ingest kick uses. Implemented in the core (`SearchIngestService.fileRefs(for:isArchivedPrimary:)`)
+    /// so the Linux CLI builds identical refs; the archive check is app state and is supplied
+    /// here. Internal so the messages-only re-ingest path is testable without a live kick.
     static func searchFileRefs(for sessions: [Session]) -> [SearchIngestService.FileRef] {
-        sessions.compactMap { session -> SearchIngestService.FileRef? in
-            // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
-            // transcript) have no content for CursorSessionParser.parseFileFull to
-            // read: JSONLReader silently yields zero events on a non-JSONL file, so
-            // the parser returns an empty-but-non-nil Session that would otherwise get
-            // upserted as search-ready and never revisited. Skip them here, same
-            // detection idiom as CursorSessionIndexer.isDBOnlySession.
-            if CursorSessionIndexer.isDBOnlySession(session) { return nil }
-            let url = URL(fileURLWithPath: session.filePath)
-            let descriptor = session.source.descriptor
-            if let resolveArtifact = descriptor.artifactRevision {
-                if let revision = resolveArtifact(url) {
-                    return SearchIngestService.FileRef(path: revision.selectedURL.path,
-                                                       mtime: revision.physicalStat.mtime,
-                                                       size: revision.physicalStat.size,
-                                                       manifestRevision: revision.manifestRevision)
-                }
-                // A pinned DSH fallback points at the copied primary inside Agent
-                // Sessions' archive, outside the live canonical root. It is a stable
-                // standalone file and must still enter search after the live bundle
-                // disappears; physical stat is the correct archive revision.
-                guard session.source == .deepseekHarness,
-                      SessionArchiveManager.shared.isArchivedPrimary(session: session),
-                      let stat = SessionFileStat.from(url) else { return nil }
-                return SearchIngestService.FileRef(path: url.path,
-                                                   mtime: stat.mtime,
-                                                   size: stat.size)
-            }
-            guard let stat = descriptor.logicalFileStat?(url) ?? SessionFileStat.from(url) else {
-                return nil
-            }
-            let usesIdentity = descriptor.parseFullByIdentity != nil
-                && descriptor.searchUsesIdentityAtURL?(url) == true
-            return SearchIngestService.FileRef(path: session.filePath,
-                                               mtime: stat.mtime,
-                                               size: stat.size,
-                                               sessionID: usesIdentity ? session.id : nil,
-                                               contentRevision: usesIdentity
-                                                ? SearchIngestService.contentRevision(for: session)
-                                                : nil)
-        }
+        SearchIngestService.fileRefs(for: sessions,
+                                     isArchivedPrimary: { SessionArchiveManager.shared.isArchivedPrimary(session: $0) })
     }
 
     @MainActor

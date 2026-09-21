@@ -1,0 +1,44 @@
+# Package definition for the Linux console build (nfpm builds both .deb and .rpm from it).
+# ARCH and VERSION come from linux/package.sh; the built binaries are mounted at /stage.
+#
+# Only `agent-sessions` goes on $PATH. The engine is an internal helper, so it is installed
+# where each distro keeps them (the TUI looks in ../lib/agent-sessions and
+# ../libexec/agent-sessions relative to its own location, see tui/core.go). Call it
+# directly through that path when scripting.
+name: agent-sessions
+arch: ${ARCH}
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Agent Sessions maintainers <noreply@example.com>
+description: |
+  Browse, search, read and resume local coding-agent sessions from the terminal.
+  agent-sessions is the terminal UI; its JSON engine (agent-sessions-core) is built
+  from the same parsers and search index as the macOS app and lives in a private
+  library directory.
+homepage: https://github.com/jazzyalex/agent-sessions
+license: MIT
+contents:
+  - src: /stage/agent-sessions
+    dst: /usr/bin/agent-sessions
+  - src: /stage/agent-sessions-core
+    dst: /usr/lib/agent-sessions/agent-sessions-core
+    packager: deb
+  - src: /stage/agent-sessions-core
+    dst: /usr/libexec/agent-sessions/agent-sessions-core
+    packager: rpm
+  - src: /stage/README
+    dst: /usr/share/doc/agent-sessions/README
+  # RPM only owns the directories it declares; without these, uninstalling leaves empty ones
+  # behind (dpkg removes the directories a package ships on its own).
+  - dst: /usr/libexec/agent-sessions
+    type: dir
+    packager: rpm
+  - dst: /usr/share/doc/agent-sessions
+    type: dir
+    packager: rpm
+overrides:
+  deb:
+    depends: [libc6, libstdc++6]
+  rpm:
+    depends: [glibc, libstdc++]

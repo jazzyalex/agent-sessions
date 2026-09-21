@@ -1,7 +1,9 @@
 import Foundation
-import SwiftUI
-import AppKit
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 // MARK: - SessionSourceDescriptor
 //
@@ -14,24 +16,9 @@ import CryptoKit
 // is deliberately absent: it stays on `SessionSource` itself, whose file compiles into the
 // standalone logic-test target and must not gain app-target dependencies (K15).
 //
-// Nothing in this file is wired into the app yet — Tasks 3–8 flip consumers over.
-
-// MARK: - BrandHue
-
-/// How a source's brand accent is produced by `TranscriptColorSystem.agentBrandAccent(source:)`.
-///
-/// The distinction is load-bearing (K6): ten sources use a hand-tuned, light-calibrated RGB
-/// triple that gets wrapped in `adaptiveBrand(_:)` (light value preserved, dark mode gets a
-/// brightened/desaturated variant); two sources (antigravity, opencode) pass an AppKit
-/// *system dynamic* color straight through, because system colors already adapt.
-enum BrandHue {
-    /// A system dynamic `NSColor` (e.g. `.systemTeal`), returned unwrapped.
-    case system(NSColor)
-    /// A light-mode-calibrated RGB triple. Reconstituting the real `NSColor` means passing
-    /// it through `TranscriptColorSystem.adaptiveBrand(NSColor(calibratedRed:green:blue:alpha:))`
-    /// exactly as the live switch does — see `SessionSourceRegistry.resolvedBrandAccent(for:)`.
-    case calibrated(red: CGFloat, green: CGFloat, blue: CGFloat)
-}
+// UI-free (shared with the Linux core). Palette and toolbar data — brand hue, monochrome
+// white, onboarding accent, toolbar pill — live in the app-only `SessionSourceAppearance`
+// carried by each source's `SessionSourceAdapter`.
 
 // MARK: - EnablementDefault
 
@@ -43,35 +30,6 @@ enum EnablementDefault: Equatable {
     /// Has an explicit arm returning `isAvailable(_:)` — off unless the agent is present on
     /// this machine (hermes, openclaw, cursor, pi, kimi, grok).
     case whenAvailable
-}
-
-// MARK: - PillSpec
-
-/// The toolbar "other agent" pill (K10). Codex and Claude are excluded: they always render
-/// as fixed segmented pills, never through this path.
-///
-/// `shortcut` is frozen history, not derivable — ⌘3–⌘9 were allocated in toolbar order and
-/// the range ran out, so hermes, kimi and grok have none.
-///
-/// `color` is stored as a closure and resolved on read, which is load-bearing rather than
-/// stylistic. Nine of the ten pill colors are written as `Color.agentX` (or
-/// `TranscriptColorSystem.agentBrandAccent(source:)` outright), and since Task 3 those
-/// resolve *through this registry*. Evaluating them eagerly while a descriptor's own
-/// `static let` is being initialized re-enters the `swift_once` that is already running on
-/// this thread — a hard deadlock at first palette access, not a warning. Deferring the
-/// evaluation to `.color` breaks the cycle: by the time anything reads a pill color, the
-/// registry is fully built. The `@autoclosure` keeps every call site written as a plain
-/// color expression.
-struct PillSpec {
-    private let makeColor: () -> Color
-    let shortcut: String?
-
-    var color: Color { makeColor() }
-
-    init(color: @autoclosure @escaping () -> Color, shortcut: String?) {
-        self.makeColor = color
-        self.shortcut = shortcut
-    }
 }
 
 // MARK: - ArchiveCapability
@@ -153,29 +111,6 @@ struct AvailabilityContext {
         self.detectBinary = detectBinary
     }
 
-    /// The production seams.
-    ///
-    /// NOTE: `detectBinary` forwards to `AgentEnablement.binaryDetectedInPATH(_:)` rather
-    /// than the process-wide memoized `binaryDetectedCached(_:)`, which is `private` to
-    /// `AgentEnablement`. The two agree on every answer; only the caching differs. When
-    /// Task 4 moves `AgentEnablement` onto the registry it should build its context
-    /// in-file, where the cached form is visible — which is what `AgentEnablement.availabilityContext`
-    /// now does.
-    ///
-    /// Unavailable on purpose: it has no callers, and its `detectBinary` is the *uncached*
-    /// sweep. Adopting it on a hot path would reintroduce repeated PATH scans, so misuse is
-    /// a compile error rather than a comment someone has to notice.
-    @available(*, unavailable, message: "Uncached PATH detection. Build the context in AgentEnablement, where the memoized detector is in scope.")
-    @MainActor
-    static func live(defaults: UserDefaults = .standard) -> AvailabilityContext {
-        AvailabilityContext(
-            defaults: defaults,
-            fileProbe: DefaultFileProbe(),
-            homeDirectory: FileManager.default.homeDirectoryForCurrentUser,
-            environment: ProcessInfo.processInfo.environment,
-            detectBinary: { AgentEnablement.binaryDetectedInPATH($0) }
-        )
-    }
 
     /// `defaults.string(forKey:)` with the empty string normalized to nil — the shape every
     /// `isAvailable` arm uses today (`custom.isEmpty ? nil : custom`).
@@ -272,21 +207,6 @@ struct SessionSourceDescriptor {
     /// Two letters on `AgentBadge`, except droid's single "D".
     let badgeInitials: String
 
-    // MARK: Palette
-
-    let brandHue: BrandHue
-    /// `Color(white:)` value used by Analytics' monochrome mode.
-    let monochromeWhite: Double
-    /// Onboarding accent, taken from the palette instance so appearance-dependent accents
-    /// (claude/codex/antigravity) keep reading the palette's own colorScheme.
-    ///
-    /// WARNING — this must stay a closure. Four of these bodies return `Color.agentHermes`
-    /// / `agentPi` / `agentKimi` / `agentGrok`, which resolve *through this registry*; they
-    /// are inert only because a closure defers them past registry initialization. Flattening
-    /// this field to a stored `Color` would evaluate them during descriptor init and
-    /// resurrect the `swift_once` deadlock documented on `PillSpec`.
-    let onboardingAccent: (OnboardingPalette) -> Color
-
     // MARK: UserDefaults keys (K1/K2 — named constants, never derived from rawValue)
 
     let enablementKey: String
@@ -327,6 +247,17 @@ struct SessionSourceDescriptor {
     /// a shared SQLite database.
     let searchUsesIdentityAtURL: ((URL) -> Bool)?
 
+    // MARK: Session enumeration
+
+    /// Builds this source's discovery for a context, so any host (the app's indexers, the
+    /// headless CLI) enumerates transcripts the same way. nil only for a source whose
+    /// sessions exist solely as database rows.
+    let makeDiscovery: ((AvailabilityContext) -> any SessionDiscovery)?
+    /// Metadata-only parse of one transcript file — what the app's list uses at launch.
+    let parseLightweightByPath: ((URL) -> Session?)?
+    /// Lightweight rows for sessions stored inside a shared database.
+    let listDatabaseSessions: ((AvailabilityContext) -> [Session])?
+
     // MARK: Pair-aware freshness
 
     /// Logical freshness stat for a session's primary file URL. nil (the default) stats
@@ -356,18 +287,10 @@ struct SessionSourceDescriptor {
     /// arm (droid, openclaw — which never resume).
     let resumeAgentLabel: String?
 
-    // MARK: Toolbar
-
-    /// nil for codex/claude (fixed segmented pills).
-    let otherAgentPill: PillSpec?
-
     init(source: SessionSource,
          telemetry: TelemetryCapabilities,
          shortLabel: String,
          badgeInitials: String,
-         brandHue: BrandHue,
-         monochromeWhite: Double,
-         onboardingAccent: @escaping (OnboardingPalette) -> Color,
          enablementKey: String,
          cliAvailableKey: String?,
          rootOverrideKeys: [String],
@@ -378,20 +301,19 @@ struct SessionSourceDescriptor {
          defaultEnabled: EnablementDefault,
          parseFullByPath: ((URL) -> Session?)?,
          parseFullByIdentity: ((URL, String) -> Session?)?,
-          searchUsesIdentityAtURL: ((URL) -> Bool)?,
-          logicalFileStat: ((URL) -> SessionFileStat?)? = nil,
-          artifactRevision: ((URL) -> SessionArtifactRevision?)? = nil,
-          archive: ArchiveCapability?,
+         searchUsesIdentityAtURL: ((URL) -> Bool)?,
+         makeDiscovery: ((AvailabilityContext) -> any SessionDiscovery)? = nil,
+         parseLightweightByPath: ((URL) -> Session?)? = nil,
+         listDatabaseSessions: ((AvailabilityContext) -> [Session])? = nil,
+         logicalFileStat: ((URL) -> SessionFileStat?)? = nil,
+         artifactRevision: ((URL) -> SessionArtifactRevision?)? = nil,
+         archive: ArchiveCapability?,
          supportsResume: Bool,
-         resumeAgentLabel: String?,
-         otherAgentPill: PillSpec?) {
+         resumeAgentLabel: String?) {
         self.source = source
         self.telemetry = telemetry
         self.shortLabel = shortLabel
         self.badgeInitials = badgeInitials
-        self.brandHue = brandHue
-        self.monochromeWhite = monochromeWhite
-        self.onboardingAccent = onboardingAccent
         self.enablementKey = enablementKey
         self.cliAvailableKey = cliAvailableKey
         self.rootOverrideKeys = rootOverrideKeys
@@ -403,12 +325,14 @@ struct SessionSourceDescriptor {
         self.parseFullByPath = parseFullByPath
         self.parseFullByIdentity = parseFullByIdentity
         self.searchUsesIdentityAtURL = searchUsesIdentityAtURL
+        self.makeDiscovery = makeDiscovery
+        self.parseLightweightByPath = parseLightweightByPath
+        self.listDatabaseSessions = listDatabaseSessions
         self.logicalFileStat = logicalFileStat
         self.artifactRevision = artifactRevision
         self.archive = archive
         self.supportsResume = supportsResume
         self.resumeAgentLabel = resumeAgentLabel
-        self.otherAgentPill = otherAgentPill
     }
 }
 

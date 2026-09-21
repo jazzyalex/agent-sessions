@@ -392,9 +392,9 @@ enum CodexSideChatLogReader {
         let payload = (object["payload"] as? [String: Any]) ?? object
         let originator = payload["originator"] as? String
         let source = payload["source"]
-        return (originator, SessionIndexer.classifyCodexSurface(originator: originator,
-                                                                source: source,
-                                                                sourceString: source as? String))
+        return (originator, CodexSessionParser.classifyCodexSurface(originator: originator,
+                                                                    source: source,
+                                                                    sourceString: source as? String))
     }
 
     private static func codexHome(fromLogDatabase dbURL: URL) -> URL {

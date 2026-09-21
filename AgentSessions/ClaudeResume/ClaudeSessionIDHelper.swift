@@ -1,7 +1,7 @@
 import Foundation
 
-/// Shared helpers for deriving Claude session IDs and project roots.
-/// Used by UnifiedSessionsView for resume and copy-resume-command.
+/// Shared helpers for deriving Claude session IDs. UI-free (shared with the Linux CLI);
+/// the settings-aware `projectRoot(for:settings:)` lives in ClaudeSessionIDHelper+ProjectRoot.swift.
 enum ClaudeSessionIDHelper {
 
     /// Extracts the Claude session UUID suitable for `claude --resume`.
@@ -36,13 +36,11 @@ enum ClaudeSessionIDHelper {
         return nil
     }
 
-    /// Returns the Claude project root directory for a session.
-    /// `claude --resume` only works when the cwd matches the project root,
-    /// so we read `originalPath` from the project's sessions-index.json.
-    /// Falls back to session.cwd, then to ClaudeResumeSettings.defaultWorkingDirectory.
-    @MainActor
-    static func projectRoot(for session: Session, settings: ClaudeResumeSettings? = nil) -> URL? {
-        let settings = settings ?? .shared
+    /// The project root Claude recorded for a session: `originalPath` from the project's
+    /// sessions-index.json, else the session's cwd. `claude --resume` only works when the
+    /// cwd matches the project root. The app's `projectRoot(for:settings:)` adds the
+    /// user's default working directory as a last resort.
+    static func recordedProjectRoot(for session: Session) -> URL? {
         let url = URL(fileURLWithPath: session.filePath)
         var projectDir = url.deletingLastPathComponent()
         // Strip subagent nesting to reach <projectHash>. The project dir is the
@@ -66,9 +64,6 @@ enum ClaudeSessionIDHelper {
         // Fallback chain matching effectiveWorkingDirectory behavior
         if let cwd = session.cwd, !cwd.isEmpty {
             return URL(fileURLWithPath: cwd)
-        }
-        if !settings.defaultWorkingDirectory.isEmpty {
-            return URL(fileURLWithPath: settings.defaultWorkingDirectory)
         }
         return nil
     }

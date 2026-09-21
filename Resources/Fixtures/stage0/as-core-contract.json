@@ -1,0 +1,741 @@
+{
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl.zstd": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl.zstd": {
+    "events": 5,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture assistant reply"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl.zstd": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl.zstd": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "deepseek-harness",
+    "title": "SYNTHETIC fixture direct user message"
+  },
+  "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl": {
+    "events": 3,
+    "model": null,
+    "source": "antigravity",
+    "title": "Go"
+  },
+  "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl": {
+    "events": 21,
+    "model": "Gemini 3.5 Flash (Medium)",
+    "source": "antigravity",
+    "title": "List the files."
+  },
+  "Resources/Fixtures/stage0/agents/antigravity/small.md": {
+    "events": 1,
+    "model": null,
+    "source": "antigravity",
+    "title": "# Antigravity fixture This fixture represents a local Antigravity brain markdown artifact. It can contain a local path reference such as [README](/tmp/as-antigravity-fixture/README.md). ```text hello from antigravity ```"
+  },
+  "Resources/Fixtures/stage0/agents/claude/large.jsonl": {
+    "events": 12,
+    "model": "Claude Code 2.1.80",
+    "source": "claude",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": false,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "total": 0
+      },
+      "unpricedModels": []
+    },
+    "title": "Start"
+  },
+  "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl": {
+    "events": 10,
+    "model": "Claude Code 1.9.0",
+    "source": "claude",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": false,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "total": 0
+      },
+      "unpricedModels": []
+    },
+    "title": "Open README"
+  },
+  "Resources/Fixtures/stage0/agents/claude/small.jsonl": {
+    "events": 125,
+    "model": "claude-opus-5",
+    "source": "claude",
+    "stats": {
+      "priced": true,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 10,
+        "output": 5,
+        "reasoning": 0,
+        "total": 15
+      },
+      "unpricedModels": []
+    },
+    "title": "Stage0 small fixture"
+  },
+  "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl": {
+    "events": 4,
+    "model": "Claude Code 2.1.207",
+    "source": "claude",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": false,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "total": 0
+      },
+      "unpricedModels": []
+    },
+    "title": "Delegate a repo search to a subagent"
+  },
+  "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl": {
+    "events": 5,
+    "model": "Claude Code 2.1.207",
+    "source": "claude",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": false,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "total": 0
+      },
+      "unpricedModels": []
+    },
+    "title": "Search the repo for TODO comments"
+  },
+  "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.meta.json": {
+    "events": 1,
+    "model": null,
+    "source": "claude",
+    "stats": {
+      "priced": false,
+      "tokens": null,
+      "unpricedModels": []
+    },
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.json": {
+    "events": 5,
+    "model": "poolside/laguna-s-2.1:free",
+    "source": "cline",
+    "title": "Inspect the fixture file"
+  },
+  "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.messages.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.messages.json"
+  },
+  "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.json": {
+    "events": 5,
+    "model": "gpt-5.6-terra",
+    "source": "cline",
+    "title": "Review the fixture project"
+  },
+  "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.messages.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.messages.json"
+  },
+  "Resources/Fixtures/stage0/agents/codex/large.jsonl": {
+    "events": 20,
+    "model": "gpt-5.2",
+    "source": "codex",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 10880,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 1211,
+        "output": 182,
+        "reasoning": 128,
+        "total": 12273
+      },
+      "unpricedModels": [
+        "gpt-5.2"
+      ]
+    },
+    "title": "Start"
+  },
+  "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl": {
+    "events": 5,
+    "model": "gpt-4o-mini",
+    "source": "codex",
+    "stats": {
+      "priced": false,
+      "tokens": null,
+      "unpricedModels": []
+    },
+    "title": "Translate 'hello' to Spanish"
+  },
+  "Resources/Fixtures/stage0/agents/codex/small.jsonl": {
+    "events": 153,
+    "model": "gpt-5.6-luna",
+    "source": "codex",
+    "stats": {
+      "priced": true,
+      "tokens": {
+        "cacheRead": 3584,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 12757,
+        "output": 81,
+        "reasoning": 63,
+        "total": 16422
+      },
+      "unpricedModels": []
+    },
+    "title": "List the files"
+  },
+  "Resources/Fixtures/stage0/agents/copilot/large.jsonl": {
+    "events": 18,
+    "model": "gpt-5",
+    "source": "copilot",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": false,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "total": 0
+      },
+      "unpricedModels": []
+    },
+    "title": "Step 1"
+  },
+  "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl": {
+    "events": 13,
+    "model": null,
+    "source": "copilot",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 800,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 1000,
+        "output": 50,
+        "reasoning": 0,
+        "total": 1850
+      },
+      "unpricedModels": [
+        "gpt-4.1"
+      ]
+    },
+    "title": "Finished."
+  },
+  "Resources/Fixtures/stage0/agents/copilot/small.jsonl": {
+    "events": 41,
+    "model": "gpt-5-mini",
+    "source": "copilot",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 5,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 100,
+        "output": 15,
+        "reasoning": 0,
+        "total": 120
+      },
+      "unpricedModels": [
+        "gpt-5-mini"
+      ]
+    },
+    "title": "List the files"
+  },
+  "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl": {
+    "events": 7,
+    "model": null,
+    "source": "copilot",
+    "stats": {
+      "priced": false,
+      "tokens": null,
+      "unpricedModels": []
+    },
+    "title": "List the files"
+  },
+  "Resources/Fixtures/stage0/agents/cursor/large.jsonl": {
+    "events": 12,
+    "model": null,
+    "source": "cursor",
+    "title": "What files are here?"
+  },
+  "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl": {
+    "events": 6,
+    "model": null,
+    "source": "cursor",
+    "title": "Use the repo context and explain the latest build issue."
+  },
+  "Resources/Fixtures/stage0/agents/cursor/small.jsonl": {
+    "events": 6,
+    "model": null,
+    "source": "cursor",
+    "title": "List the files."
+  },
+  "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl": {
+    "events": 3,
+    "model": null,
+    "source": "cursor",
+    "title": "Run a subagent."
+  },
+  "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl": {
+    "events": 2,
+    "model": null,
+    "source": "cursor",
+    "title": "List files"
+  },
+  "Resources/Fixtures/stage0/agents/devin/schema_drift.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/devin/schema_drift.json"
+  },
+  "Resources/Fixtures/stage0/agents/devin/small.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/devin/small.json"
+  },
+  "Resources/Fixtures/stage0/agents/droid/session_store_large.jsonl": {
+    "events": 7,
+    "model": null,
+    "source": "droid",
+    "title": "Step 1"
+  },
+  "Resources/Fixtures/stage0/agents/droid/session_store_schema_drift.jsonl": {
+    "events": 3,
+    "model": null,
+    "source": "droid",
+    "title": "Do the thing"
+  },
+  "Resources/Fixtures/stage0/agents/droid/session_store_small.jsonl": {
+    "events": 3,
+    "model": null,
+    "source": "droid",
+    "title": "Run a command"
+  },
+  "Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl": {
+    "events": 7,
+    "model": "droid-model",
+    "source": "droid",
+    "title": "Step 1"
+  },
+  "Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl": {
+    "events": 8,
+    "model": "droid-model",
+    "source": "droid",
+    "title": "List files"
+  },
+  "Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl": {
+    "events": 5,
+    "model": null,
+    "source": "droid",
+    "title": "Do thing"
+  },
+  "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json": {
+    "events": 22,
+    "model": "demo/model-1",
+    "source": "fx",
+    "title": "List the files in the current directory"
+  },
+  "Resources/Fixtures/stage0/agents/fx/small/display.json": {
+    "events": 0,
+    "model": "demo/model-1",
+    "source": "fx",
+    "title": "List the files in the current directory"
+  },
+  "Resources/Fixtures/stage0/agents/fx/small/session.json": {
+    "events": 0,
+    "model": "demo/model-1",
+    "source": "fx",
+    "title": "List the files in the current directory"
+  },
+  "Resources/Fixtures/stage0/agents/fx/unsupported/checkpoint.json": {
+    "events": 0,
+    "model": "demo/model-1",
+    "source": "fx",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/fx/unsupported/session.json": {
+    "events": 0,
+    "model": "demo/model-1",
+    "source": "fx",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/gemini/jsonl_v040.jsonl": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/gemini/jsonl_v040.jsonl"
+  },
+  "Resources/Fixtures/stage0/agents/gemini/large.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/gemini/large.json"
+  },
+  "Resources/Fixtures/stage0/agents/gemini/schema_drift.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/gemini/schema_drift.json"
+  },
+  "Resources/Fixtures/stage0/agents/gemini/small.json": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/gemini/small.json"
+  },
+  "Resources/Fixtures/stage0/agents/grok/chat_history.jsonl": {
+    "events": 14,
+    "model": "grok-4.5",
+    "source": "grok",
+    "title": "Read hello.py and summarize what it prints"
+  },
+  "Resources/Fixtures/stage0/agents/grok/subagent/chat_history.jsonl": {
+    "events": 6,
+    "model": "grok-4.5",
+    "source": "grok",
+    "title": "Count the Python files under the project root"
+  },
+  "Resources/Fixtures/stage0/agents/grok/subagent/summary.json": {
+    "events": 0,
+    "model": "grok-4.5",
+    "source": "grok",
+    "title": "Count the Python files under the project root"
+  },
+  "Resources/Fixtures/stage0/agents/grok/summary.json": {
+    "events": 0,
+    "model": "grok-4.5",
+    "source": "grok",
+    "title": "Read hello.py and summarize what it prints"
+  },
+  "Resources/Fixtures/stage0/agents/hermes/large.json": {
+    "events": 7,
+    "model": "gpt-5.2",
+    "source": "hermes",
+    "title": "Check the current directory."
+  },
+  "Resources/Fixtures/stage0/agents/hermes/schema_drift.json": {
+    "events": 5,
+    "model": "gpt-5.2",
+    "source": "hermes",
+    "title": "Exercise additive Hermes metadata."
+  },
+  "Resources/Fixtures/stage0/agents/hermes/small.json": {
+    "events": 2,
+    "model": "claude-sonnet-4-6",
+    "source": "hermes",
+    "title": "Summarize this directory."
+  },
+  "Resources/Fixtures/stage0/agents/kimi/assistant_tools.jsonl": {
+    "events": 200,
+    "model": "kimi-k2.7-code",
+    "source": "kimi",
+    "title": "hi"
+  },
+  "Resources/Fixtures/stage0/agents/kimi/assistant_tools.state.json": {
+    "events": 0,
+    "model": null,
+    "source": "kimi",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/kimi/small.jsonl": {
+    "events": 37,
+    "model": "kimi-k2.7-code",
+    "source": "kimi",
+    "title": "hi"
+  },
+  "Resources/Fixtures/stage0/agents/kimi/state.json": {
+    "events": 0,
+    "model": null,
+    "source": "kimi",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/kimi/subagent_agent-0.jsonl": {
+    "events": 28,
+    "model": "kimi-k2.7-code",
+    "source": "kimi",
+    "title": "<git-context> Working directory: /private/tmp/as-agent-lab/kimi/project Remote: https://github.com/fixture/fixture-repo.git Project: fixture/fixture-rep…[trimmed]"
+  },
+  "Resources/Fixtures/stage0/agents/openclaw/large.jsonl": {
+    "events": 13,
+    "model": "openclaw-large",
+    "source": "openclaw",
+    "title": "Open /tmp/large and run status"
+  },
+  "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl": {
+    "events": 8,
+    "model": null,
+    "source": "openclaw",
+    "title": "Need a quick diagnostic"
+  },
+  "Resources/Fixtures/stage0/agents/openclaw/small.jsonl": {
+    "events": 6,
+    "model": "openclaw-small",
+    "source": "openclaw",
+    "title": "List files"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_legacy/message/s_stage0_drift/msg_0001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_legacy/message/s_stage0_drift/msg_0002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_legacy/part/prt_0001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_legacy/part/prt_0002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json": {
+    "events": 6,
+    "model": "gpt-4o-mini",
+    "source": "opencode",
+    "title": "OpenCode Drift"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0003.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0004.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/migration": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/opencode/storage_v2/migration"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/003.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/004.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/005.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/006.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/007.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/008.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_2/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/002.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_large_1/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_large_2/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_small/001.json": {
+    "events": 0,
+    "model": null,
+    "source": "opencode",
+    "title": "No prompt"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json": {
+    "events": 16,
+    "model": "gpt-4o-mini",
+    "source": "opencode",
+    "title": "OpenCode Large"
+  },
+  "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json": {
+    "events": 6,
+    "model": "gpt-4o-mini",
+    "source": "opencode",
+    "title": "OpenCode Small"
+  },
+  "Resources/Fixtures/stage0/agents/pi/small.jsonl": {
+    "events": 8,
+    "model": "pi-fixture-model",
+    "source": "pi",
+    "stats": {
+      "priced": false,
+      "tokens": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "hasBreakdown": true,
+        "input": 24,
+        "output": 14,
+        "reasoning": 0,
+        "total": 38
+      },
+      "unpricedModels": [
+        "pi-fixture-model"
+      ]
+    },
+    "title": "Read hello.py and summarize what it prints without editing files."
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000001.jsonl": {
+    "events": 7,
+    "model": "synthetic-model",
+    "source": "qwen",
+    "title": "Inspect the synthetic fixture."
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000002.jsonl": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000002.jsonl"
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000004.jsonl": {
+    "events": 7,
+    "model": "synthetic-active-model",
+    "source": "qwen",
+    "title": "Active branch title"
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000005.jsonl": {
+    "events": 2,
+    "model": "synthetic-glued-model",
+    "source": "qwen",
+    "title": "Inspect {\"glued\": \"objects\"} safely."
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000006.jsonl": {
+    "events": 4,
+    "model": "qwen3-coder-plus",
+    "source": "qwen",
+    "title": "synthetic forked prompt"
+  },
+  "Resources/Fixtures/stage0/agents/qwen/019f0000000070008000000000000003.jsonl": {
+    "events": 1,
+    "model": null,
+    "source": "qwen",
+    "title": "Inspect a compact-ID synthetic fixture."
+  },
+  "Resources/Fixtures/stage0/agents/qwen/system_telemetry.jsonl": {
+    "error": "as-core: could not parse Resources/Fixtures/stage0/agents/qwen/system_telemetry.jsonl"
+  }
+}

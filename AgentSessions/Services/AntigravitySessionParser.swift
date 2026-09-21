@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Parser for Antigravity markdown artifacts.
 final class AntigravitySessionParser {

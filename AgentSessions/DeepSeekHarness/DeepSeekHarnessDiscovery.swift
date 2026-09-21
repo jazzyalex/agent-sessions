@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Bounded filesystem discovery for the DSH session persistence layout.
 final class DeepSeekHarnessDiscovery: SessionDiscovery {

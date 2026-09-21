@@ -26,15 +26,17 @@ Adding a source is still ~1,000 lines of genuinely source-specific work (parser,
 discovery, indexer, settings, CLI environment, resume stack). That part is honest and
 lives mostly inside your own folder. On top of it you owe eight baseline things:
 
-1. **Your source folder** — parser / discovery / indexer / settings / resume, plus one
-   `<Source>SourceDescriptor.swift` carrying the descriptor *and* the adapter.
+1. **Your source folder** — parser / discovery / indexer / settings / resume, plus
+   `<Source>SourceDescriptor.swift` (the UI-free descriptor, shared with the Linux core)
+   and `<Source>SourceAdapter.swift` (the app-only adapter: runtime factory and palette).
 2. **Source-local fixtures and tests** — at minimum positive and malformed-or-unsupported
    discovery / parser coverage, plus settings and resume eligibility tests when those capabilities
    exist. Synthetic fixtures belong under `Resources/Fixtures/stage0/agents/<source>/`.
    A single-SQLite-file source may build its schema in-test instead — see the carve-out in §5.
 3. **The `SessionSource` case** and its four metadata arms in
    [`SessionSource.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSource.swift).
-4. **One line** in `SessionSourceRegistry.ordered`.
+4. **One line each** in `SessionSourceDescriptorCatalog.ordered` and
+   `SessionSourceRegistry.ordered`, same position (`testRegistryMatchesDescriptorCatalog`).
 5. **Project membership for every new Swift file**, via one `scripts/xcode_add_file.rb`
    invocation per file. The invocations all update the same pbxproj.
 6. **The enumerated semantic switch arms** in §6 below — the ones the compiler or a test
@@ -72,8 +74,10 @@ picking it for a fake source.
 
 **Check the `AgentSessionsLogicTests` boundary (K15).** `SessionSource.swift`,
 `Session.swift`, `FilterEngine.swift` and the parsers compile into a standalone logic-test
-target that must not gain app-target dependencies. The registry, descriptors, adapters and
-the catalog are app-target only. If you find yourself wanting to `import` registry types
+target that must not gain app-target dependencies. The registry, adapters and the provider
+catalog are app-target only. Descriptors and `SessionSourceDescriptorCatalog` also build
+into the Linux core (`Package.swift`), so they must stay `Foundation`-only: no SwiftUI,
+AppKit or Combine, and no references to indexers or other app types. If you find yourself wanting to `import` registry types
 from one of those files, stop — that is the boundary, not an obstacle.
 
 ---
@@ -86,7 +90,8 @@ Standard shape, mirroring `AgentSessions/Grok/` and `AgentSessions/Kimi/`:
 AgentSessions/<Source>/
   <Source>CLIEnvironment.swift
   <Source>Settings.swift
-  <Source>SourceDescriptor.swift        ← descriptor + adapter (see §4)
+  <Source>SourceDescriptor.swift        ← UI-free descriptor (see §4)
+  <Source>SourceAdapter.swift           ← app-only adapter + palette (see §4.2, §4.5)
 AgentSessions/Services/
   <Source>SessionDiscovery.swift
   <Source>SessionIndexer.swift
@@ -170,10 +175,15 @@ keep these boundaries explicit:
 
 ## 4. The descriptor and adapter
 
-One file, in your source's folder. Start from the closest current storage shape:
-[`GrokSourceDescriptor.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Grok/GrokSourceDescriptor.swift) is a complete
-file-backed example, while `OpenCodeSourceDescriptor.swift` demonstrates identity-backed
-shared storage. Do not copy a descriptor without re-answering every capability field.
+Two files, in your source's folder. Start from the closest current storage shape:
+[`GrokSourceDescriptor.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Grok/GrokSourceDescriptor.swift) (with
+`GrokSourceAdapter.swift`) is a complete file-backed example, while
+`OpenCodeSourceDescriptor.swift` demonstrates identity-backed shared storage. Do not copy a
+descriptor without re-answering every capability field.
+
+The descriptor file imports `Foundation` only: it compiles into the Linux core as well as
+the app, so every value in it is data or a closure over parsers and discovery. Palette and
+toolbar data live on the adapter (§4.2).
 
 ### 4.1 Descriptor fields
 
@@ -184,9 +194,6 @@ extension SessionSourceDescriptor {
             source: .devin,
             shortLabel: "Devin",                 // row/legend label
             badgeInitials: "DV",                 // two letters (droid's "D" is the exception)
-            brandHue: .calibrated(red: …, green: …, blue: …),
-            monochromeWhite: 0.62,               // Analytics monochrome mode
-            onboardingAccent: { _ in … },        // MUST stay a closure — see §4.2
             enablementKey: "AgentEnabledDevin",  // literals, in THIS file — see §4.3
             cliAvailableKey: "DevinCLIAvailable",
             rootOverrideKeys: ["DevinSessionsRootOverride"],
@@ -200,8 +207,7 @@ extension SessionSourceDescriptor {
             searchUsesIdentityAtURL: nil,        // selects those shared-storage URLs
             archive: ArchiveCapability(…),       // nil for DB-backed — see §5
             supportsResume: true,
-            resumeAgentLabel: "Devin",
-            otherAgentPill: PillSpec(color: …, shortcut: nil)
+            resumeAgentLabel: "Devin"
         )
     }()
 }
@@ -212,6 +218,11 @@ is deliberately **not** here — it stays on `SessionSource` so that file keeps 
 into the logic-test target (K15). Descriptor consumers read `source.displayName`.
 
 ### 4.2 Colors: keep them lazy
+
+Colors are app-only, so they are not descriptor fields. They go in the adapter's
+`SessionSourceAppearance` (§4.5): `brandHue`, `monochromeWhite`, `onboardingAccent` and
+`otherAgentPill`. Existing call sites still read them as `descriptor.brandHue` and so on,
+through an app-side extension in `SessionSourceAppearance.swift`.
 
 `onboardingAccent` is a closure and `PillSpec.color` takes an `@autoclosure` for a
 load-bearing reason, not a stylistic one. Brand colors resolve *through the registry*
@@ -288,12 +299,18 @@ evidence of your agent, so require a home directory alongside it.
 
 ### 4.5 The adapter
 
-Below the descriptor, in the same file:
+In `<Source>SourceAdapter.swift`, which may import SwiftUI, AppKit and Combine:
 
 ```swift
 extension SessionSourceAdapter {
     static let devin = SessionSourceAdapter(
         descriptor: .devin,
+        appearance: SessionSourceAppearance(
+            brandHue: .calibrated(red: …, green: …, blue: …),
+            monochromeWhite: 0.62,               // Analytics monochrome mode
+            onboardingAccent: { _ in … },        // MUST stay a closure — see §4.2
+            otherAgentPill: PillSpec(color: …, shortcut: nil)
+        ),
         makeRuntime: {
             let indexer = DevinSessionIndexer()
             return SourceRuntime(
@@ -462,6 +479,8 @@ this table is complete.
 |---|---|---|
 | 1 | [`Model/SessionSource.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSource.swift) | the case + `displayName` / `iconName` / `versionIntroduced` / `featureDescription` |
 | 2 | [`Model/SessionSourceRegistry.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSourceRegistry.swift) | one line in `ordered`, in `allCases` position |
+| 2a | `Model/SessionSourceDescriptorCatalog.swift` | one line in `ordered`, same position as item 2 |
+| 2b | `Package.swift` | add your descriptor, parser and discovery files to `coreSources` so the Linux core picks them up |
 | 3 | [`Model/Session.swift:656`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/Session.swift) | `computeIsHousekeeping(source:events:)` |
 | 4 | `Model/Session.swift:775, 798` | `storesAuthoritativeLightweightCwd`, `storesAuthoritativeLightweightTitle` |
 | 5 | [`Utilities/CodexSessionImagePayload.swift:223, 263, 323`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Utilities/CodexSessionImagePayload.swift) | three image-scan switches |
@@ -578,6 +597,10 @@ with `usage: PROJ TARGET FILE GROUP`.
   AgentSessions/Devin/DevinSourceDescriptor.swift \
   AgentSessions/Devin
 
+./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
+  AgentSessions/Devin/DevinSourceAdapter.swift \
+  AgentSessions/Devin
+
 ./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests \
   AgentSessionsTests/DevinSqliteReaderTests.swift \
   AgentSessionsTests
@@ -630,14 +653,14 @@ Of those 26, **14 no longer need to be touched at all**:
 |---|---|
 | `AgentSessionsApp.swift` | `SessionProviderCatalog` — one `@StateObject`, not twelve |
 | `Analytics/Services/AnalyticsService.swift` | catalog + registry-ordered array folds |
-| `Analytics/Utilities/AnalyticsColors.swift` | descriptor `brandHue` / `monochromeWhite` (§4.2) |
+| `Analytics/Utilities/AnalyticsColors.swift` | adapter appearance `brandHue` / `monochromeWhite` (§4.2) |
 | `Onboarding/Components/OnboardingComponents.swift` | descriptor `badgeInitials` |
-| `Onboarding/Components/OnboardingPalette.swift` | descriptor `onboardingAccent` |
+| `Onboarding/Components/OnboardingPalette.swift` | adapter appearance `onboardingAccent` |
 | `Search/SearchCoordinator.swift` | `start(allowed: Set<SessionSource>)` (K9) — no more one `Bool` parameter per source |
 | `Search/SearchIngestService.swift` | descriptor identity parser/predicate for shared storage, otherwise `parseFullByPath` |
 | `Services/AgentEnablement.swift` | descriptor keys + `AvailabilityContext` detection + `defaultEnabled` |
 | `Services/SessionArchiveManager.swift` | descriptor `archive` |
-| `Services/TranscriptColorSystem.swift` | descriptor `brandHue` |
+| `Services/TranscriptColorSystem.swift` | adapter appearance `brandHue` |
 | `Views/SessionTerminalView.swift` | descriptor `shortLabel` |
 | `Views/Preferences/PreferencesConstants.swift` | K2 — new sources keep keys in their own descriptor |
 | `AgentSessionsTests/CodexActiveSessionsRegistryTests.swift` | K11 — aggregation structs are dictionary-keyed, so no new field per source |

@@ -35,14 +35,21 @@ actor IndexDB {
     private var handle: OpaquePointer?
 
     // MARK: - Init / Open
+    /// The app's index in Application Support.
     init() throws {
         let fm = FileManager.default
         guard let appSupport = Self.resolveApplicationSupportDirectoryURL(fileManager: fm) else {
             throw DBError.openFailed("Application Support directory unavailable")
         }
         let dir = appSupport.appendingPathComponent("AgentSessions", isDirectory: true)
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dbURL = dir.appendingPathComponent("index.db", isDirectory: false)
+        try self.init(databaseURL: dir.appendingPathComponent("index.db", isDirectory: false))
+    }
+
+    /// An index at an explicit location. The Linux `as-core` CLI keeps its own database
+    /// there rather than sharing (and migrating) the app's.
+    init(databaseURL dbURL: URL) throws {
+        try FileManager.default.createDirectory(at: dbURL.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
 
         var db: OpaquePointer?
         if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
@@ -2288,7 +2295,7 @@ actor IndexDB {
     /// explicit rather than an accident of unit mismatch; the returned set is unchanged.
     func indexedSessionIDsCurrent(sources: [String],
                                   formatVersion: Int = FeatureFlags.sessionSearchFormatVersion,
-                                  identitySources: Set<String> = SessionSourceRegistry.identityBackedSourceRawValues)
+                                  identitySources: Set<String> = SessionSourceDescriptorCatalog.identityBackedSourceRawValues)
     throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
@@ -2339,7 +2346,7 @@ actor IndexDB {
     func indexedToolIOSessionIDsCurrent(
         sources: [String],
         formatVersion: Int = FeatureFlags.sessionToolIOFormatVersion,
-        identitySources: Set<String> = SessionSourceRegistry.identityBackedSourceRawValues
+        identitySources: Set<String> = SessionSourceDescriptorCatalog.identityBackedSourceRawValues
     ) throws -> [String] {
         guard handle != nil else { throw DBError.openFailed("db closed") }
         var binds: [String] = []
