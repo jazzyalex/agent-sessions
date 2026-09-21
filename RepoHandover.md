@@ -1,3 +1,29 @@
+## 2026-09-21 15:54 · pr74-acp-clean-rebuild · ACP persistence remediation
+status: done
+
+**State:** PR #74's ACP-only remediation is fixed, independently re-reviewed as SHIP, and committed locally.
+
+**Verified:**
+- Branch `fix/acp-clean-rebuild`, HEAD `3fe65b58224f5526939c0090eb359dc00a60fe7b` (`fix: harden Cursor ACP persistence`).
+- Final Oracle GPT-5.6 Sol Extra High review returned SHIP with no confirmed production defects.
+- Stable xcresult `.deriveddata-tests/Logs/Test/Run-AgentSessions-2026.09.20_23-36-08--0700.xcresult` reports 3,132 passed, 3 skipped, 0 failed, total 3,135.
+- Test inventory versus `origin/main`: 2,977 baseline, 0 removed, 88 added. No push or external PR update was performed.
+
+**Decided / don't redo:**
+- Keep the ACP fix on the current branch and commit; do not rerun the full review suite unless source changes.
+- Do not push or update PR #74 without explicit authorization.
+
+**Ownership:**
+- `RepoHandover.md` — this handover entry is included in the cleanup commit; the remediation commit itself is already recorded separately.
+
+**Key files:**
+- `AgentSessions/Services/CursorSessionIndexer.swift` — focused ACP reload provenance, root, and stat publication guards.
+- `AgentSessions/Services/SessionArchiveManager.swift` — locked archive revalidation and first-sync staging cleanup.
+- `AgentSessionsTests/CursorSessionParserTests.swift` — ACP race regressions.
+
+**Next:**
+1. Review `3fe65b58` and push only if explicitly requested.
+
 ## 2026-09-19 19:40 · pr75-merge-pr74-review · PR #75 merge and PR #74 review checkpoint
 status: blocked
 
