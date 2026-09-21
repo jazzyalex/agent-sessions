@@ -2,6 +2,7 @@ import Foundation
 
 public enum SessionSurface: String, Codable, Sendable {
     case cli
+    case acp
     case desktop
     case vscode
     case subagent
@@ -11,6 +12,7 @@ public enum SessionSurface: String, Codable, Sendable {
     public var displayName: String {
         switch self {
         case .cli: return "CLI"
+        case .acp: return "ACP"
         case .desktop: return "Desktop"
         case .vscode: return "VS Code"
         case .subagent: return "Subagent"

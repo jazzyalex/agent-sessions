@@ -1570,7 +1570,7 @@ struct UnifiedSessionsView: View {
         case .copilot:
             return true // session.id from session.start; falls back to --continue
         case .cursor:
-            return true // session.id from transcript UUID; falls back to --continue
+            return session.surface != .acp // ACP persists through ACP session/load, not Cursor CLI resume
         case .pi:
             return true // session file path or id; falls back to --continue
         case .kimi:
@@ -1626,6 +1626,7 @@ struct UnifiedSessionsView: View {
         }
 
         guard session.source.descriptor.supportsResume else { return }
+        guard session.surface != .acp else { return }
 
         switch session.source {
         case .claude:
@@ -3392,7 +3393,7 @@ struct UnifiedSessionsView: View {
         case .claude:
             return !s.isClaudeWorkflowSubagent
         case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok, .fx:
-            return true
+            return s.source != .cursor || s.surface != .acp
         case .qwen:
             return QwenResumeEligibility.canResume(s)
         case .devin:
@@ -3415,6 +3416,7 @@ struct UnifiedSessionsView: View {
     private func resume(_ s: Session) {
         guard !s.isClaudeWorkflowSubagent else { return }
         guard s.source.descriptor.supportsResume else { return }
+        guard s.surface != .acp else { return }
         // Captured at click time, not at report time. A Warp cold start
         // activates Warp and deactivates us, so by the time a failure comes back
         // (3s later, more if Gatekeeper is verifying) `NSApp.keyWindow` is nil

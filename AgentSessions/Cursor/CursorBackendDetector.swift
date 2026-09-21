@@ -19,10 +19,25 @@ struct CursorBackendDetector {
     static func cursorRoot(customRoot: String?) -> URL {
         if let custom = customRoot, !custom.isEmpty {
             let expanded = (custom as NSString).expandingTildeInPath
-            return URL(fileURLWithPath: expanded, isDirectory: true)
+            return URL(fileURLWithPath: normalizedSystemAliasPath(expanded), isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cursor", isDirectory: true)
+    }
+
+    /// Normalize only the aliases owned by macOS. Do not resolve user-created
+    /// symlinks: configured-root authority checks must still see those.
+    static func normalizedSystemAliasPath(_ path: String) -> String {
+        let standardized = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .path
+        for (alias, canonical) in [("/var", "/private/var"), ("/tmp", "/private/tmp")] {
+            if standardized == alias { return canonical }
+            if standardized.hasPrefix(alias + "/") {
+                return canonical + String(standardized.dropFirst(alias.count))
+            }
+        }
+        return standardized
     }
 
     /// Root for project-scoped data including agent-transcripts.
@@ -37,6 +52,12 @@ struct CursorBackendDetector {
     static func chatsRoot(customRoot: String?) -> URL {
         return cursorRoot(customRoot: customRoot)
             .appendingPathComponent("chats", isDirectory: true)
+    }
+
+    /// Root for ACP-persisted Cursor sessions. Path: ~/.cursor/acp-sessions
+    static func acpSessionsRoot(customRoot: String?) -> URL {
+        cursorRoot(customRoot: customRoot)
+            .appendingPathComponent("acp-sessions", isDirectory: true)
     }
 
     /// Detect which storage surfaces are available.

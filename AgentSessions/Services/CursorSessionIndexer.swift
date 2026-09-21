@@ -53,6 +53,20 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
+    /// The configured string may change while the physical Cursor authority
+    /// remains the same (macOS exposes `/tmp` as `/private/tmp`, for example).
+    /// Projection invalidation must follow the normalized authority, not the
+    /// spelling stored in UserDefaults.
+    static func normalizedCursorAuthorityPath(for override: String) -> String {
+        CursorBackendDetector.normalizedSystemAliasPath(
+            CursorBackendDetector.cursorRoot(customRoot: override.isEmpty ? nil : override).path
+        )
+    }
+
+    private static func normalizedCursorPath(_ url: URL) -> String {
+        CursorBackendDetector.normalizedSystemAliasPath(url.path)
+    }
+
     init() {
         let initial = UserDefaults.standard.string(forKey: PreferencesKey.Paths.cursorSessionsRootOverride) ?? ""
         self.discovery = CursorSessionDiscovery(customRoot: initial.isEmpty ? nil : initial)
@@ -94,8 +108,11 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         let fm = FileManager.default
         let projects = discovery.sessionsRoot()
         let chats = discovery.chatsRoot()
+        let acp = discovery.acpSessionsRoot()
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: projects.path, isDirectory: &isDir), isDir.boolValue { return true }
+        var isDirACP: ObjCBool = false
+        if fm.fileExists(atPath: acp.path, isDirectory: &isDirACP), isDirACP.boolValue { return true }
         var isDir2: ObjCBool = false
         return fm.fileExists(atPath: chats.path, isDirectory: &isDir2) && isDir2.boolValue
     }
@@ -105,8 +122,12 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.cursor) { return }
 
-        // Update discovery if override changed
+        // Update discovery if override changed. ACP rows belong to the root
+        // that produced their paths; an explicit root transition must not
+        // carry those rows into the new authority.
         let current = UserDefaults.standard.string(forKey: PreferencesKey.Paths.cursorSessionsRootOverride) ?? ""
+        let overrideChanged = Self.normalizedCursorAuthorityPath(for: current) !=
+            Self.normalizedCursorAuthorityPath(for: lastOverride)
         if current != lastOverride {
             discovery = CursorSessionDiscovery(customRoot: current.isEmpty ? nil : current)
             lastOverride = current
@@ -131,6 +152,14 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
         let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : requestedPriority
         let capturedCustomRoot = current.isEmpty ? nil : current
+        let currentACPRoot = Self.normalizedCursorPath(discovery.acpSessionsRoot())
+        let priorACPSessions = overrideChanged
+            ? []
+            : allSessions.filter { session in
+                guard session.surface == .acp else { return false }
+                let path = Self.normalizedCursorPath(URL(fileURLWithPath: session.filePath))
+                return path == currentACPRoot || path.hasPrefix(currentACPRoot + "/")
+            }
 
         Task.detached(priority: prio) { [weak self, token] in
             guard let self else { return }
@@ -143,6 +172,10 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
                 shouldContinue: { self.refreshToken == token },
+                // ACP rows are reconciled below before archive-only fallbacks
+                // are merged. Otherwise a saved ACP placeholder can claim the
+                // namespaced ID and shadow a live store.
+                shouldMergeArchives: false,
                 workerCount: executionProfile.workerCount,
                 sliceSize: executionProfile.sliceSize,
                 interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
@@ -183,8 +216,45 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 transcriptSessions.append(dbOnlySession)
             }
 
-            // Sort by most recent first
-            let sorted = transcriptSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            // ACP persistence is a separate graph and uses namespaced IDs. An
+            // indeterminate root read is not authority to delete the previous
+            // ACP projection, while a successfully read empty root is authoritative.
+            if let acpDBs = self.discovery.discoverACPSessionDBs() {
+                var existingIDs = Set(transcriptSessions.map(\.id))
+                for db in acpDBs {
+                    switch CursorACPStoreReader.parseWithAuthorityResult(at: db) {
+                    case .valid(let session, _):
+                        if !existingIDs.contains(session.id) {
+                            transcriptSessions.append(session)
+                            existingIDs.insert(session.id)
+                        }
+                    case .unavailable:
+                        if let prior = priorACPSessions.first(where: {
+                            URL(fileURLWithPath: $0.filePath).standardizedFileURL.path == db.standardizedFileURL.path
+                        }), !existingIDs.contains(prior.id) {
+                            // Discovery proved the store still exists, but a transient
+                            // SQLite/I/O failure did not prove that its old projection
+                            // should be deleted. Preserve it until a later parse succeeds.
+                            transcriptSessions.append(prior)
+                            existingIDs.insert(prior.id)
+                        }
+                    case .invalid:
+                        // Deterministically invalid persisted data must not keep
+                        // its stale live projection alive or shadow a validated
+                        // pinned archive fallback.
+                        continue
+                    }
+                }
+            } else {
+                let existingIDs = Set(transcriptSessions.map(\.id))
+                transcriptSessions.append(contentsOf: priorACPSessions.filter { !existingIDs.contains($0.id) })
+            }
+
+            // Sort live Cursor surfaces first, then add archive-only fallbacks.
+            // A live ACP store must retain authority over the same namespaced ID.
+            let sortedLive = transcriptSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            let sorted = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedLive,
+                                                                                   source: .cursor)
 
             await MainActor.run {
                 guard self.refreshToken == token else { return }
@@ -249,16 +319,20 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         reloadingSessionIDs.insert(id)
         reloadLock.unlock()
 
-        let existingSnapshot: Session? = {
+        let reloadSnapshot: (session: Session?, refreshToken: UUID) = {
             if Thread.isMainThread {
-                return self.allSessions.first(where: { $0.id == id })
+                return (self.allSessions.first(where: { $0.id == id }), self.refreshToken)
             }
             var session: Session?
+            var token = UUID()
             DispatchQueue.main.sync {
                 session = self.allSessions.first(where: { $0.id == id })
+                token = self.refreshToken
             }
-            return session
+            return (session, token)
         }()
+        let existingSnapshot = reloadSnapshot.session
+        let reloadRefreshToken = reloadSnapshot.refreshToken
 
         let ioQueue = FeatureFlags.backgroundIngestQueue
         ioQueue.async {
@@ -272,12 +346,32 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             let hasLoadedEvents = !existing.events.isEmpty
             if hasLoadedEvents && !force { return }
 
-            // DB-only sessions (filePath = store.db) have no JSONL transcript to reload.
-            guard existing.filePath.lowercased().hasSuffix(".jsonl"),
+            let url = URL(fileURLWithPath: existing.filePath)
+            let isACP = existing.surface == .acp || CursorACPStoreReader.isACPStore(url)
+            var isArchivedACP = isACP && existing.surface == .acp &&
+                SessionArchiveManager.shared.isArchivedPrimary(session: existing)
+            let originatedFromLiveACP = isACP && !isArchivedACP
+            let reloadACPRootIdentity: String? = {
+                guard originatedFromLiveACP else { return nil }
+                let currentOverride = UserDefaults.standard.string(
+                    forKey: PreferencesKey.Paths.cursorSessionsRootOverride
+                ) ?? ""
+                let configuredDiscovery = CursorSessionDiscovery(
+                    customRoot: currentOverride.isEmpty ? nil : currentOverride
+                )
+                // Bind the reload to the configured root that actually owns
+                // the row captured above. `self.discovery` may already have
+                // advanced to a replacement root while its refresh is still
+                // publishing, so its root token alone is not sufficient.
+                guard Self.isCursorACPPath(url, under: configuredDiscovery.acpSessionsRoot()) else {
+                    return nil
+                }
+                return configuredDiscovery.acpSessionsRootIdentity()
+            }()
+            guard (isACP || existing.filePath.lowercased().hasSuffix(".jsonl")),
                   FileManager.default.fileExists(atPath: existing.filePath) else { return }
 
-            let url = URL(fileURLWithPath: existing.filePath)
-            let preParseStat = Self.fileStat(for: url)
+            let preParseStat = Self.fileStat(for: url, isACP: isACP)
             self.reloadLock.lock()
             let lastReloadStat = self.lastFullReloadFileStatsBySessionID[id]
             self.reloadLock.unlock()
@@ -299,11 +393,67 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 }
             }
 
-            let parsed = CursorSessionParser.parseFileFull(at: url, forcedID: id) ?? existing
-            let postParseStat = Self.fileStat(for: url)
+            let parsed: Session?
+            let parsedAuthorityStat: SessionFileStat?
+            let invalidLiveACP: Bool
+            if isACP {
+                if isArchivedACP {
+                    // Archive-only fallbacks are already descriptor-bound by
+                    // the archive parser. The live authority API deliberately
+                    // rejects archived paths, so do not route an archive row
+                    // through that live-only classification.
+                    parsed = CursorACPStoreReader.parse(at: url)
+                    parsedAuthorityStat = nil
+                    invalidLiveACP = false
+                } else {
+                    switch CursorACPStoreReader.parseWithAuthorityResult(at: url) {
+                    case .valid(let session, let logicalStat):
+                        parsed = session
+                        parsedAuthorityStat = logicalStat
+                        invalidLiveACP = false
+                    case .invalid:
+                        // A deterministic live-store rejection must fall back
+                        // immediately to a complete pinned archive, matching
+                        // full refresh behavior. The archive parser is used so
+                        // the fallback does not re-enter live-only authority.
+                        if let fallback = SessionArchiveManager.shared
+                            .mergePinnedArchiveFallbacks(into: [], source: .cursor)
+                            .first(where: { $0.id == id }),
+                           let parsedFallback = CursorACPStoreReader.parse(
+                            at: URL(fileURLWithPath: fallback.filePath)
+                           ) {
+                            parsed = parsedFallback
+                            parsedAuthorityStat = nil
+                            isArchivedACP = true
+                            invalidLiveACP = false
+                        } else {
+                            parsed = nil
+                            parsedAuthorityStat = nil
+                            invalidLiveACP = true
+                        }
+                    case .unavailable:
+                        parsed = nil
+                        parsedAuthorityStat = nil
+                        invalidLiveACP = false
+                    }
+                }
+            } else {
+                parsed = CursorSessionParser.parseFileFull(at: url, forcedID: id)
+                parsedAuthorityStat = nil
+                invalidLiveACP = false
+            }
+            // ACP freshness is anchored to the descriptor-bound snapshot that
+            // produced `parsedAuthorityStat`. A live pathname stat is only a
+            // post-parse churn check; it is never recorded as the stat for the
+            // parsed session.
+            let postParseStat = Self.fileStat(for: url, isACP: isACP)
             self.reloadLock.lock()
-            if let preParseStat {
-                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+            if isACP,
+               let parsedAuthorityStat,
+               parsedAuthorityStat == postParseStat {
+                self.lastFullReloadFileStatsBySessionID[id] = parsedAuthorityStat
+            } else if !isACP, parsed != nil, let preParseStat, preParseStat == postParseStat {
+                self.lastFullReloadFileStatsBySessionID[id] = postParseStat
             } else {
                 self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
             }
@@ -313,6 +463,15 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 print("ℹ️ Cursor file changed during reload; next monitor tick will retry")
                 #endif
             }
+            // A reload that began from a live ACP row remains bound to live
+            // authority even when an invalid store is hydrated from its pinned
+            // archive fallback. For a fallback, the pre-parse logical stat is
+            // the only authority token available from the rejected live read.
+            let publicationAuthorityStat = originatedFromLiveACP
+                ? (parsedAuthorityStat ?? preParseStat)
+                : nil
+            let liveAuthorityStable = !originatedFromLiveACP ||
+                (publicationAuthorityStat != nil && publicationAuthorityStat == postParseStat)
 
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -323,36 +482,103 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                     }
                 }
 
-                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                    let current = self.allSessions[idx]
-                    let merged = Session(
-                        id: parsed.id,
-                        source: parsed.source,
-                        startTime: parsed.startTime ?? current.startTime,
-                        endTime: parsed.endTime ?? current.endTime,
-                        model: parsed.model ?? current.model,
-                        filePath: parsed.filePath,
-                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, parsed.nonMetaCount),
-                        events: parsed.events,
-                        cwd: current.lightweightCwd ?? parsed.cwd,
-                        repoName: current.repoName,
-                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands,
-                        parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
-                        subagentType: parsed.subagentType ?? current.subagentType,
-                        customTitle: current.customTitle ?? parsed.customTitle
-                    )
-                    self.allSessions[idx] = merged
-
-                    let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
-                    self.transcriptCache.set(merged.id, transcript: transcript)
+                // A focused reload may outlive a refresh or configured-root
+                // transition. The refresh token rejects work started before a
+                // newer refresh, while the row provenance check below rejects
+                // the ordering where the new refresh has changed discovery but
+                // has not yet replaced the old row.
+                guard self.refreshToken == reloadRefreshToken else {
+                    self.recomputeNow()
+                    return
                 }
+
+                // Rebind the current root and compare its identity immediately
+                // before publication, so an old root can never overwrite a
+                // row produced by the new authority. A live path that cannot
+                // be rebound is indeterminate and is likewise not publishable.
+                if originatedFromLiveACP {
+                    let currentOverride = UserDefaults.standard.string(
+                        forKey: PreferencesKey.Paths.cursorSessionsRootOverride
+                    ) ?? ""
+                    let currentDiscovery = CursorSessionDiscovery(
+                        customRoot: currentOverride.isEmpty ? nil : currentOverride
+                    )
+                    let currentRoot = currentDiscovery.acpSessionsRoot()
+                    let currentRootIdentity = currentDiscovery.acpSessionsRootIdentity()
+                    let currentAuthorityStat = Self.fileStat(for: url, isACP: true)
+                    guard let reloadACPRootIdentity,
+                          currentRootIdentity == reloadACPRootIdentity,
+                          Self.isCursorACPPath(url, under: currentRoot),
+                          liveAuthorityStable,
+                          let publicationAuthorityStat,
+                          currentAuthorityStat == publicationAuthorityStat else {
+                        self.recomputeNow()
+                        return
+                    }
+                }
+
+                guard let currentIndex = self.allSessions.firstIndex(where: { $0.id == id }) else {
+                    self.recomputeNow()
+                    return
+                }
+                let current = self.allSessions[currentIndex]
+                guard current.source == existing.source,
+                      current.surface == existing.surface,
+                      current.filePath == existing.filePath else {
+                    // A refresh may have published a newer row with the same
+                    // namespaced id. Never let this reload merge its stale
+                    // snapshot into that replacement.
+                    self.recomputeNow()
+                    return
+                }
+
+                guard let parsed else {
+                    if invalidLiveACP {
+                        self.allSessions.removeAll { $0.id == id && $0.surface == .acp }
+                    }
+                    self.recomputeNow()
+                    return
+                }
+                let parsedMetadataWins = isACP
+                let currentTitleIsParsedMetadata = current.customTitle == current.lightweightTitle
+                let merged = Session(
+                    id: parsed.id,
+                    source: parsed.source,
+                    startTime: parsed.startTime ?? current.startTime,
+                    endTime: parsed.endTime ?? current.endTime,
+                    model: parsed.model ?? current.model,
+                    filePath: parsed.filePath,
+                    fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+                    eventCount: max(current.eventCount, parsed.nonMetaCount),
+                    events: parsed.events,
+                    cwd: parsedMetadataWins ? parsed.cwd : (current.lightweightCwd ?? parsed.cwd),
+                    repoName: parsedMetadataWins ? parsed.repoName : current.repoName,
+                    lightweightTitle: parsedMetadataWins ? parsed.lightweightTitle : (current.lightweightTitle ?? parsed.lightweightTitle),
+                    lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands,
+                    parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
+                    subagentType: parsed.subagentType ?? current.subagentType,
+                    customTitle: parsedMetadataWins && currentTitleIsParsedMetadata
+                        ? parsed.customTitle
+                        : (current.customTitle ?? parsed.customTitle),
+                    originator: parsed.originator ?? current.originator,
+                    originSource: parsed.originSource ?? current.originSource,
+                    surface: parsed.surface ?? current.surface
+                )
+                self.allSessions[currentIndex] = merged
+
+                let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
+                self.transcriptCache.set(merged.id, transcript: transcript)
                 self.recomputeNow()
             }
         }
     }
+
+#if DEBUG
+    func installSessionsForReloadTesting(_ sessions: [Session]) {
+        allSessions = sessions
+    }
+#endif
 
     // MARK: - Merge Helpers
 
@@ -449,15 +675,27 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     /// at the chat `store.db`. We check for the absence of `.jsonl` rather than the presence
     /// of a specific DB filename, so this survives if Cursor renames the database file.
     static func isDBOnlySession(_ session: Session) -> Bool {
-        session.source == .cursor && session.events.isEmpty && !session.filePath.hasSuffix(".jsonl")
+        session.source == .cursor
+            && session.surface != .acp
+            && session.events.isEmpty
+            && !session.filePath.hasSuffix(".jsonl")
     }
 
-    private static func fileStat(for url: URL) -> SessionFileStat? {
+    private static func fileStat(for url: URL, isACP: Bool = false) -> SessionFileStat? {
+        if isACP, let stat = CursorACPStoreReader.logicalFileStat(at: url) {
+            return stat
+        }
         guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
               let modified = values.contentModificationDate else {
             return nil
         }
         let size = Int64(values.fileSize ?? 0)
         return SessionFileStat(mtime: Int64(modified.timeIntervalSince1970), size: size)
+    }
+
+    private static func isCursorACPPath(_ url: URL, under root: URL) -> Bool {
+        let rootPath = normalizedCursorPath(root.standardizedFileURL)
+        let candidatePath = normalizedCursorPath(url.standardizedFileURL)
+        return candidatePath.hasPrefix(rootPath + "/")
     }
 }

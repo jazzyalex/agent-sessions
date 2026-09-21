@@ -419,7 +419,12 @@ struct SessionSourceDescriptor {
 /// deletes its own copies.
 enum SessionArchiveBackfill {
     /// Identical body to `SessionArchiveManager.minimalSession(source:id:url:)`.
-    static func minimalSession(source: SessionSource, id: String, url: URL) -> Session {
+    static func minimalSession(source: SessionSource,
+                               id: String,
+                               url: URL,
+                               originator: String? = nil,
+                               originSource: String? = nil,
+                               surface: SessionSurface? = nil) -> Session {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
@@ -436,7 +441,10 @@ enum SessionArchiveBackfill {
             cwd: nil,
             repoName: nil,
             lightweightTitle: nil,
-            lightweightCommands: nil
+            lightweightCommands: nil,
+            originator: originator,
+            originSource: originSource,
+            surface: surface
         )
     }
 

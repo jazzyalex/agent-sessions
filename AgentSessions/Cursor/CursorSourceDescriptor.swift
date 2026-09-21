@@ -29,13 +29,19 @@ extension SessionSourceDescriptor {
                 // Also check the chats root (DB-only sessions live there). The live switch
                 // does this before the shared sessions-root check, so the order is kept.
                 if ctx.directoryExists(disc.chatsRoot()) { return true }
+                if ctx.directoryExists(disc.acpSessionsRoot()) { return true }
                 if ctx.directoryExists(disc.sessionsRoot()) { return true }
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .whenAvailable,
-            parseFullByPath: { url in CursorSessionParser.parseFileFull(at: url) },
+            parseFullByPath: { url in
+                CursorACPStoreReader.isACPStore(url)
+                    ? CursorACPStoreReader.parse(at: url)
+                    : CursorSessionParser.parseFileFull(at: url)
+            },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,
+            logicalFileStat: { CursorACPStoreReader.logicalFileStat(at: $0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -46,12 +52,66 @@ extension SessionSourceDescriptor {
                             map[s.id] = url
                         }
                     }
+                    for url in discovery.discoverACPSessionDBs() ?? [] {
+                        // Discovery already proved the canonical UUID directory,
+                        // store, and sidecar boundary. Keep the URL even when the
+                        // SQLite graph is temporarily unreadable so the backfill
+                        // arm can publish a provenance-preserving minimal row.
+                        let folder = url.deletingLastPathComponent().lastPathComponent
+                        guard let uuid = UUID(uuidString: folder) else { continue }
+                        map["cursor-acp:" + uuid.uuidString.lowercased()] = url
+                    }
                     return map
                 },
                 sessionForBackfill: { sessionID, upstreamURL in
-                    CursorSessionParser.parseFile(at: upstreamURL)
+                    if CursorACPStoreReader.isACPStore(upstreamURL) {
+                        return CursorACPStoreReader.parse(at: upstreamURL)
+                            ?? SessionArchiveBackfill.minimalSession(
+                                source: .cursor,
+                                id: sessionID,
+                                url: upstreamURL,
+                                originator: "cursor-agent",
+                                originSource: "acp-persisted",
+                                surface: .acp
+                            )
+                    }
+                    return CursorSessionParser.parseFile(at: upstreamURL)
                         ?? SessionArchiveBackfill.minimalSession(source: .cursor, id: sessionID, url: upstreamURL)
-                }
+                },
+                archiveUnit: { url in
+                    guard CursorACPStoreReader.isACPStore(url),
+                          url.deletingLastPathComponent().lastPathComponent != "data" else { return nil }
+                    return ArchiveUnit(root: url.deletingLastPathComponent(),
+                                       isDirectory: true,
+                                       primaryRelativePath: "store.db")
+                },
+                manifestEntries: { upstream, primary in
+                    guard primary == "store.db",
+                          upstream.lastPathComponent != "store.db",
+                          CursorACPStoreReader.isACPStore(
+                              upstream.appendingPathComponent("store.db", isDirectory: false)
+                          ),
+                          let files = try? FileManager.default.contentsOfDirectory(at: upstream,
+                                                                                   includingPropertiesForKeys: [],
+                                                                                   options: [.skipsHiddenFiles]) else { return nil }
+                    // SQLite's -shm file is a rebuildable WAL index, not durable
+                    // session content. Keep it out of the archive manifest so
+                    // normal read-only opens cannot invalidate a saved session.
+                    let allowed = Set(["store.db", "meta.json", "store.db-wal"])
+                    var entries: [String] = []
+                    for file in files where allowed.contains(file.lastPathComponent) {
+                        guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                              let type = attrs[.type] as? FileAttributeType,
+                              type == .typeRegular else { return nil }
+                        entries.append(file.lastPathComponent)
+                    }
+                    guard entries.contains("store.db"), entries.contains("meta.json") else { return nil }
+                    return entries.sorted()
+                },
+                // A live SQLite store can commit into a WAL while the archive is
+                // being copied. Never replace a healthy archive with an unchecked
+                // best-effort snapshot after the bounded retry loop.
+                requiresStableSnapshot: true
             ),
             supportsResume: true,
             resumeAgentLabel: "Cursor CLI",
@@ -102,7 +162,11 @@ extension SessionSourceAdapter {
                 searchAdapter: .init(
                     transcriptCache: indexer.searchTranscriptCache,
                     update: { indexer.updateSession($0) },
-                    parseFull: { url, forcedID in CursorSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+                    parseFull: { url, forcedID in
+                        CursorACPStoreReader.isACPStore(url)
+                            ? CursorACPStoreReader.parse(at: url)
+                            : CursorSessionParser.parseFileFull(at: url, forcedID: forcedID)
+                    }
                 )
             )
         }
