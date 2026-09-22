@@ -1,36 +1,36 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "A valid Codex session ID is required to continue this session in Codex Desk.": {
+    "A valid Codex session ID is required to continue this session in Codex Desktop.": {
       "comment": "Error when a local Codex thread has no valid UUID for a desktop deep link.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A valid Codex session ID is required to continue this session in Codex Desk."
+            "value": "A valid Codex session ID is required to continue this session in Codex Desktop."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要有效的 Codex 会话 ID，才能在 Codex Desk 中继续此会话。"
+            "value": "需要有效的 Codex 会话 ID，才能在 Codex Desktop 中继续此会话。"
           }
         }
       }
     },
-    "Codex Desk is not installed. Install it, then try continuing this session again.": {
+    "Codex Desktop is not installed. Install it, then try continuing this session again.": {
       "comment": "Desktop app launch error; installing the Codex CLI alone is not sufficient.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Codex Desk is not installed. Install it, then try continuing this session again."
+            "value": "Codex Desktop is not installed. Install it, then try continuing this session again."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚未安装 Codex Desk。请安装后重试。"
+            "value": "尚未安装 Codex Desktop。请安装后重试。"
           }
         }
       }
@@ -52,36 +52,36 @@
         }
       }
     },
-    "Continue in Codex Desk": {
+    "Continue in Codex Desktop": {
       "comment": "Action to open a local thread in the separate Codex desktop app.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Continue in Codex Desk"
+            "value": "Continue in Codex Desktop"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Codex Desk 中继续"
+            "value": "在 Codex Desktop 中继续"
           }
         }
       }
     },
-    "Continue this session in the local Codex Desk. Codex Desk must use the same session storage.": {
+    "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage.": {
       "comment": "Tooltip for opening the selected local thread in the separate Codex desktop app.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Continue this session in the local Codex Desk. Codex Desk must use the same session storage."
+            "value": "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在本机的 Codex Desk 中继续此会话。Codex Desk 须使用相同的会话存储位置。"
+            "value": "在本机的 Codex Desktop 中继续此会话。Codex Desktop 须使用相同的会话存储位置。"
           }
         }
       }

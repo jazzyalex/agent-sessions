@@ -345,22 +345,40 @@ enum SessionRowsBuilder {
             // CLI/Desktop probes tracked in the backlog, not a nulled field.
             return [.standard(label: "side", accessibilityLabel: "Side chat")]
         }
-        // Codex rows omit producer-surface badges. Desktop and CLI destinations
-        // remain explicit in the context menu; relationship labels stay visible.
-        if session.source == .codex { return [] }
         if let claudeDesktopPill = claudeDesktopSurfacePill(for: session, isArchived: isClaudeArchived) {
             return [claudeDesktopPill]
+        }
+        // Before the surface switch: Codex reports these as originator
+        // "Codex Desktop", which classifies to .desktop, so the narrower
+        // cwd-shape check must win to keep sandboxed tasks distinct from
+        // ordinary Desktop coding sessions.
+        if session.isCodexWorkSession {
+            // A subagent spawned inside the work workspace (e.g. a guardian
+            // approval reviewer) inherits the parent's cwd; giving it the same
+            // work pill made it read as a duplicate of the parent row. It gets
+            // no surface pill — same as every other Codex subagent's hydrated
+            // rendering (the .none branch below) — and the hierarchy row
+            // treatment (nesting / "sub" marker) carries the semantics.
+            if session.isSubagent { return [] }
+            return [.work(isArchived: session.isArchivedCodexDesktopSession)]
         }
 
         switch session.surface ?? session.codexSurface {
         case .desktop:
             return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
-        case .vscode, .subagent:
-            return []
+        case .vscode:
+            guard session.source == .codex else { return [] }
+            return [.standard(label: "vsc", accessibilityLabel: "VS Code")]
         case .cli:
             guard supportsAgentSurfacePills(session) else { return [] }
             return [.standard(label: "cli", accessibilityLabel: "CLI")]
+        case .subagent:
+            guard session.source == .codex else { return [] }
+            return codexOriginatorSurfacePill(for: session).map { [$0] } ?? []
         case .other, .unknown, .none:
+            if session.isCodexDesktopSession {
+                return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
+            }
             guard supportsAgentSurfacePills(session) else { return [] }
             return session.isSubagent ? [] : [.standard(label: "cli", accessibilityLabel: "CLI")]
         }
@@ -381,6 +399,22 @@ enum SessionRowsBuilder {
         let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if originator == "claude desktop" {
             return .desktop(isArchived: isArchived)
+        }
+        return nil
+    }
+
+    private static func codexOriginatorSurfacePill(for session: Session) -> UnifiedSessionsView.CodexSurfacePill? {
+        let originator = session.codexOriginator?.lowercased()
+        if originator == "codex desktop" ||
+            originator?.contains("desktop") == true ||
+            originator?.contains("app") == true {
+            return .desktop(isArchived: session.isArchivedCodexDesktopSession)
+        }
+        if originator == "codex_vscode" {
+            return .standard(label: "vsc", accessibilityLabel: "VS Code")
+        }
+        if originator == "codex_cli_rs" || originator == "codex-tui" {
+            return .standard(label: "cli", accessibilityLabel: "CLI")
         }
         return nil
     }

@@ -1194,7 +1194,7 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop", "claude-desktop"])
     }
 
-    func testCodexDesktopArchiveStateIsPreservedWithoutSurfacePills() throws {
+    func testCodexDesktopSurfacePillsIncludeArchivedMarker() throws {
         let archived = Session(
             id: "archived-desktop",
             source: .codex,
@@ -1242,12 +1242,22 @@ final class SessionParserTests: XCTestCase {
             codexOriginator: "Codex Desktop"
         )
 
-        XCTAssertTrue(archived.isArchivedCodexDesktopSession)
-        XCTAssertFalse(active.isArchivedCodexDesktopSession)
-        XCTAssertTrue(archivedOriginatorOnly.isArchivedCodexDesktopSession)
-        for session in [archived, active, archivedOriginatorOnly] {
-            XCTAssertTrue(UnifiedSessionsView.surfacePills(for: session).isEmpty)
-        }
+        let archivedPills = UnifiedSessionsView.surfacePills(for: archived)
+        XCTAssertEqual(archivedPills.map(\.label), ["desk"])
+        XCTAssertEqual(archivedPills.map(\.isArchived), [true])
+        XCTAssertEqual(archivedPills.map(\.identity), ["desk-archived"])
+        XCTAssertEqual(archivedPills.map { $0.accessibilityLabel(agentLabel: "Codex") }, ["Codex Desktop archived session"])
+
+        let activePills = UnifiedSessionsView.surfacePills(for: active)
+        XCTAssertEqual(activePills.map(\.label), ["desk"])
+        XCTAssertEqual(activePills.map(\.isArchived), [false])
+        XCTAssertEqual(activePills.map(\.identity), ["desk-standard"])
+        XCTAssertEqual(activePills.map { $0.accessibilityLabel(agentLabel: "Codex") }, ["Codex Desktop app"])
+
+        let archivedOriginatorOnlyPills = UnifiedSessionsView.surfacePills(for: archivedOriginatorOnly)
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.label), ["desk"])
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.isArchived), [true])
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.identity), ["desk-archived"])
     }
 
     func testCodexDesktopProjectlessThreadsDisplayAsChatsProject() throws {

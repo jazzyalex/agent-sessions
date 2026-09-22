@@ -432,53 +432,67 @@ final class SessionRowDisplayTests: XCTestCase {
         XCTAssertFalse(s.isCodexWorkSession)
     }
 
-    // MARK: - Codex rows omit producer-surface pills
+    // MARK: - Codex producer-surface pills
 
-    func testCodexWorkSessionHasNoSurfacePill() {
+    func testCodexWorkSessionGetsWorkPillNotDeskPill() {
+        // Freshly-parsed shape: Codex reports originator "Codex Desktop" and the
+        // surface classifier resolves .desktop — the cwd check must win.
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             codexOriginator: "Codex Desktop",
             codexSurface: .desktop
         )
-        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+        let pills = UnifiedSessionsView.surfacePills(for: s)
+        XCTAssertEqual(pills.map(\.label), ["work"])
+        XCTAssertEqual(pills.map(\.isArchived), [false])
     }
 
-    func testHydratedCodexWorkSessionWithNilMetadataHasNoSurfacePill() {
-        // Hydrated-from-DB shape: codexOriginator/codexSurface are NULL.
+    func testHydratedCodexWorkSessionWithNilMetadataGetsWorkPill() {
+        // Hydrated-from-DB shape: codexOriginator/codexSurface are NULL, and cwd
+        // is the only surviving signal.
         let s = makeCodexSession(cwd: Self.codexWorkCwd)
-        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
     }
 
-    func testArchivedCodexWorkSessionHasNoSurfacePill() {
+    func testArchivedCodexWorkSessionGetsArchivedWorkPill() {
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             filePath: "/Users/test/.codex/archived_sessions/rollout-2026-07-14T11-18-02-abc.jsonl"
         )
+        let pills = UnifiedSessionsView.surfacePills(for: s)
         XCTAssertTrue(s.isArchivedCodexDesktopSession)
-        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+        XCTAssertEqual(pills.map(\.label), ["work"])
+        XCTAssertEqual(pills.map(\.isArchived), [true])
     }
 
-    func testOrdinaryCodexSurfacesHaveNoPills() {
-        let surfaces: [CodexSessionSurface?] = [.desktop, .cli, .vscode, .unknown, nil]
-        for surface in surfaces {
+    func testOrdinaryCodexSurfacesKeepTheirPills() {
+        let cases: [(CodexSessionSurface?, String)] = [
+            (.desktop, "desk"),
+            (.cli, "cli"),
+            (.vscode, "vsc"),
+            (.unknown, "cli"),
+            (nil, "cli")
+        ]
+        for (surface, expectedLabel) in cases {
             let s = makeCodexSession(
                 cwd: "/Users/test/Repository/Codex-History",
                 codexSurface: surface
             )
-            XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
-            XCTAssertTrue(UnifiedSessionsView.staticSurfacePills(for: s).isEmpty)
+            XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), [expectedLabel])
+            XCTAssertEqual(UnifiedSessionsView.staticSurfacePills(for: s).map(\.label), [expectedLabel])
         }
     }
 
-    func testCodexWorkSubagentHasNoSurfacePill() {
-        // Guardian approval reviewers inherit the parent's work cwd.
+    func testCodexWorkSubagentGetsNoWorkPill() {
+        // Guardian approval reviewer inherits the parent's work cwd; it must
+        // not duplicate the parent's work pill.
         let s = makeCodexSession(cwd: Self.codexWorkCwd, subagentType: "guardian")
         XCTAssertTrue(s.isCodexWorkSession)
         XCTAssertTrue(s.isSubagent)
         XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testCodexWorkSubagentHasNoSurfacePillFreshParse() {
+    func testCodexWorkSubagentGetsNoWorkPillFreshParse() {
         let s = makeCodexSession(
             cwd: Self.codexWorkCwd,
             codexOriginator: "codex_work_desktop",
@@ -488,9 +502,9 @@ final class SessionRowDisplayTests: XCTestCase {
         XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
     }
 
-    func testCodexWorkRootSessionHasNoSurfacePill() {
+    func testCodexWorkRootSessionKeepsWorkPill() {
         let s = makeCodexSession(cwd: Self.codexWorkCwd)
-        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
     }
     /// A side conversation is reconstructed from a log database every Codex
     /// surface writes to, CLI `/side` included, so the row must not claim

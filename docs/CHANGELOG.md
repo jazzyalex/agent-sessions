@@ -4,8 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Codex rows no longer show producer-surface badges (**work**, **desk**, **cli**, or **vsc**). Side-chat relationship labels and live status indicators remain visible. The desktop action is labeled **Continue in Codex Desk** in the context menu and toolbar, with matching English and Simplified Chinese copy.
-- Added **Continue in Codex Desk** to the session context menu and toolbar. The action navigates to the existing local conversation by its thread ID, without requiring a Codex CLI installation. The app must use the same session store; side chats and records without a valid thread ID are excluded. A conversation owned by another running client remains subject to Codex's writer lock.
+- Codex session rows retain their producer-surface badges (**work**, **desk**, **cli**, and **vsc**) alongside side-chat relationship labels and live status indicators. The desktop action is labeled **Continue in Codex Desktop** in the context menu and toolbar, with matching English and Simplified Chinese copy.
+- Added **Continue in Codex Desktop** to the session context menu and toolbar. The action navigates to the existing local conversation by its thread ID, without requiring a Codex CLI installation. The app must use the same session store; side chats and records without a valid thread ID are excluded. A conversation owned by another running client remains subject to Codex's writer lock.
 - Fixed missing working indicators for local Codex App tasks. Writable rollouts held by the desktop backend are tracked individually; an unfinished turn shows the existing green working indicator. Completed, interrupted, and unknown-state desktop threads have no live marker: retained file handles do not establish which conversation is visible. Read-only history files are excluded, and CLI working/idle indicators keep their existing behavior.
 
 ## [5.5] - 2026-09-19
