@@ -382,7 +382,9 @@ struct TranscriptTailUpdateState: Equatable {
     }
 
     mutating func jumpToLatest() {
-        bottomProximity = .nearBottom
+        // The token is an intent, not proof that the active renderer moved.
+        // The renderer must report the resulting viewport before the arrow can
+        // be hidden as reached-the-bottom state.
         hasUnseenUpdates = false
         stickyFollowEnabled = true
         scrollToBottomToken &+= 1
@@ -1422,6 +1424,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             repoRootPath: sessionRepoRootPath(for: session),
             ideTarget: transcriptPreferredIDETarget,
             ideBinaryOverridePath: transcriptIDEBinaryOverridePath,
+            scrollToBottomToken: tailUpdateState.scrollToBottomToken,
+            onBottomProximityChange: updateBottomProximity,
+            onTopProximityChange: updateTopProximity,
             firstPromptJumpToken: richFirstPromptJumpToken,
             eventJumpToken: richEventJumpToken,
             eventJumpID: richEventJumpID,

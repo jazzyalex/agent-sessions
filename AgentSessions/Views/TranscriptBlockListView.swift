@@ -177,6 +177,11 @@ struct TranscriptBlockListView: NSViewRepresentable {
     var repoRootPath: String? = nil
     var ideTarget: IDEOpener.Target = .systemDefault
     var ideBinaryOverridePath: String = ""
+    /// Shared floating-control contract: the parent owns this monotonic intent
+    /// and the controller consumes each new value exactly once.
+    var scrollToBottomToken: Int = 0
+    var onBottomProximityChange: (Bool) -> Void = { _ in }
+    var onTopProximityChange: (Bool) -> Void = { _ in }
     /// Task 8: external jump intents, token-based so a re-render (e.g. a mode
     /// switch back to Rich) never replays a stale intent — the controller only
     /// acts when the incoming token differs from the last one it consumed.
@@ -296,6 +301,9 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.seedConsumedFindTokens(
             findToken: findToken,
             unifiedFindToken: unifiedFindToken)
+        context.coordinator.seedConsumedScrollToBottomToken(scrollToBottomToken)
+        context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
 
         context.coordinator.attach(table: table, scroll: scroll)
         return scroll
@@ -305,7 +313,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
         // Read observed state HERE so SwiftUI records the dependency and reruns
         // updateNSView on snapshot change. Hand plain values to the controller.
         let snapshot = derivedState.snapshot
-        context.coordinator.apply(
+        context.coordinator.installDocumentFrameObserver(on: scroll)
+        let rowsChanged = context.coordinator.apply(
             allBlocks: snapshot.blocks,
             totalBlockCount: snapshot.totalBlockCount,
             fontSize: fontSize,
@@ -321,6 +330,17 @@ struct TranscriptBlockListView: NSViewRepresentable {
             ideTarget: ideTarget,
             ideBinaryOverridePath: ideBinaryOverridePath,
             activeRoleFilters: activeRoleFilters)
+
+        context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
+
+        let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
+        if consumedScrollIntent {
+            context.coordinator.scrollToBottomForExternalIntent()
+        }
+        if rowsChanged && !consumedScrollIntent {
+            context.coordinator.scheduleProximityUpdate()
+        }
 
         // Task 8: external jump intents. Resolved here (not stashed as raw
         // tokens on the coordinator ctor) because resolution needs the CURRENT
@@ -575,6 +595,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private var frameObserver: NSObjectProtocol?
     private var observedClipView: NSClipView?
+    private var documentFrameObserver: NSObjectProtocol?
+    private weak var observedDocumentView: NSView?
 
     // MARK: Scroll-driven windowing (Task 7)
 
@@ -585,6 +607,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// true (fresh sessions open at tail) and flipped by the bounds observer as
     /// the user scrolls away from / back to the bottom.
     private var isNearBottom: Bool = true
+    /// Last bottom-scroll intent consumed by this controller. The parent token
+    /// is monotonic and survives renderer remounts, so a fresh controller must
+    /// be seeded with the current value before it receives updateNSView.
+    private var lastConsumedScrollToBottomToken: Int = 0
+    private var lastNearTop: Bool?
+    private var lastReportedNearBottom: Bool?
+    private var proximityReportGeneration: Int = 0
+    var onBottomProximityChange: ((Bool) -> Void)?
+    var onTopProximityChange: ((Bool) -> Void)?
     /// Re-entry guard for load-older: a prepend is being applied. Blocks the
     /// bounds observer from stacking a second extension mid-flight.
     private var isPrependInFlight: Bool = false
@@ -820,10 +851,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         table.delegate = self
         installWidthObserver(on: scroll)
         installScrollObserver(on: scroll)
+        installDocumentFrameObserver(on: scroll)
         installAppearanceObserver(on: table)
+        emitProximityIfNeeded(force: true)
     }
 
     func tearDown() {
+        proximityReportGeneration &+= 1
         if let frameObserver {
             NotificationCenter.default.removeObserver(frameObserver)
             self.frameObserver = nil
@@ -832,9 +866,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             NotificationCenter.default.removeObserver(scrollObserver)
             self.scrollObserver = nil
         }
+        if let documentFrameObserver {
+            NotificationCenter.default.removeObserver(documentFrameObserver)
+            self.documentFrameObserver = nil
+        }
         appearanceObservation?.invalidate()
         appearanceObservation = nil
         observedClipView = nil
+        observedDocumentView = nil
         stopAutoScroll()
         table?.dataSource = nil
         table?.delegate = nil
@@ -870,11 +909,105 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
     }
 
-    /// Bounds observer body: refresh sticky-bottom and, when the flag allows,
-    /// consider a load-older extension.
+    /// A view-based NSTableView can finish measuring its variable-height rows
+    /// after the representable update and after the clip view's bounds settle.
+    /// Observe the document frame so the proximity contract is re-evaluated when
+    /// that late content-height change makes the true top/bottom distance known.
+    fileprivate func installDocumentFrameObserver(on scroll: NSScrollView) {
+        guard let documentView = scroll.documentView else { return }
+        guard observedDocumentView !== documentView else { return }
+
+        if let documentFrameObserver {
+            NotificationCenter.default.removeObserver(documentFrameObserver)
+            self.documentFrameObserver = nil
+        }
+
+        observedDocumentView = documentView
+        documentView.postsFrameChangedNotifications = true
+        documentFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: documentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.emitProximityIfNeeded()
+        }
+    }
+
+    /// Bounds observer body: report both floating-control proximity states and,
+    /// when the flag allows, consider a load-older extension.
     private func handleScrollPositionChanged() {
-        updateNearBottomFlag()
+        emitProximityIfNeeded()
         maybeScheduleLoadOlder()
+    }
+
+    /// Seed the remount watermark so a jump requested before Rich mounted is
+    /// not replayed as a new request merely because the table was recreated.
+    func seedConsumedScrollToBottomToken(_ token: Int) {
+        lastConsumedScrollToBottomToken = token
+    }
+
+    /// Consume a monotonic jump intent once. Kept internal for focused tests;
+    /// actual scrolling remains in `scrollToBottomForExternalIntent()`.
+    @discardableResult
+    func consumeScrollToBottomToken(_ token: Int) -> Bool {
+        guard token != lastConsumedScrollToBottomToken else { return false }
+        lastConsumedScrollToBottomToken = token
+        return true
+    }
+
+    /// Shared plain/terminal threshold for the floating transcript controls.
+    /// Rich rows have variable heights, so use viewport geometry rather than a
+    /// row-count threshold.
+    static func viewportProximity(contentHeight: CGFloat,
+                                  viewportHeight: CGFloat,
+                                  offset: CGFloat,
+                                  threshold: CGFloat = 48) -> (nearTop: Bool, nearBottom: Bool) {
+        let maxOffset = max(0, contentHeight - viewportHeight)
+        let currentOffset = max(0, min(offset, maxOffset))
+        let nearTop = currentOffset <= threshold
+        let distanceToBottom = max(0, maxOffset - currentOffset)
+        let nearBottom = distanceToBottom <= threshold
+        return (nearTop, nearBottom)
+    }
+
+    private func emitProximityIfNeeded(force: Bool = false) {
+        guard let scroll, let documentView = scroll.documentView else { return }
+        let visibleRect = scroll.contentView.documentVisibleRect
+        let contentHeight = max(documentView.bounds.height, documentView.frame.height, visibleRect.height)
+        let proximity = Self.viewportProximity(
+            contentHeight: contentHeight,
+            viewportHeight: visibleRect.height,
+            offset: visibleRect.origin.y)
+
+        isNearBottom = proximity.nearBottom
+        let shouldReportTop = force || lastNearTop != proximity.nearTop
+        let shouldReportBottom = force || lastReportedNearBottom != proximity.nearBottom
+        if shouldReportTop {
+            lastNearTop = proximity.nearTop
+        }
+        if shouldReportBottom {
+            lastReportedNearBottom = proximity.nearBottom
+        }
+
+        guard shouldReportTop || shouldReportBottom else { return }
+        let reportGeneration = proximityReportGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.proximityReportGeneration == reportGeneration else { return }
+            if shouldReportTop {
+                self.onTopProximityChange?(proximity.nearTop)
+            }
+            if shouldReportBottom {
+                self.onBottomProximityChange?(proximity.nearBottom)
+            }
+        }
+    }
+
+    func scheduleProximityUpdate() {
+        for delay in [0.0, 0.05, 0.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.emitProximityIfNeeded()
+            }
+        }
     }
 
     // MARK: Appearance change (Task 12)
@@ -905,16 +1038,6 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         heightCache.removeAll(keepingCapacity: true)
         reconfigureVisibleRows()
         noteAllHeightsChanged()
-    }
-
-    /// Sticky-bottom: within ~1 row height of the content bottom ⇒ follow tail.
-    private func updateNearBottomFlag() {
-        guard let scroll = scroll, let doc = scroll.documentView else { return }
-        let visible = scroll.contentView.bounds
-        let maxOffset = max(0, doc.bounds.height - visible.height)
-        let currentOffset = max(0, min(visible.origin.y, maxOffset))
-        let distanceToBottom = max(0, maxOffset - currentOffset)
-        isNearBottom = distanceToBottom <= (fontSize + 4)
     }
 
     // MARK: Load-older on near-top scroll (Task 7)
@@ -1065,6 +1188,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Diff the incoming windowed stream against the current rows and update the
     /// table with the cheapest correct operation.
+    @discardableResult
     func apply(allBlocks: [SessionTranscriptBuilder.LogicalBlock],
                totalBlockCount: Int,
                fontSize: CGFloat,
@@ -1079,8 +1203,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                repoRootPath: String? = nil,
                ideTarget: IDEOpener.Target = .systemDefault,
                ideBinaryOverridePath: String = "",
-               activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) {
-        guard let table else { return }
+               activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) -> Bool {
+        guard let table else { return false }
 
         let newMarkers = TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
         let markersChanged = newMarkers != telemetryMarkers
@@ -1098,6 +1222,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // session can reuse the same indices) — reset unconditionally.
         if sessionID != self.sessionID {
             self.sessionID = sessionID
+            proximityReportGeneration &+= 1
             expandedToolRowIDs.removeAll()
             showAllRowIDs.removeAll()
             autoExpandedByFind.removeAll()
@@ -1111,6 +1236,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // a session switch resets the flag AND establishes a new window below,
             // and the reset clears any pending prepend's assumptions.
             isNearBottom = true
+            lastNearTop = nil
+            lastReportedNearBottom = nil
             isPrependInFlight = false
             loadOlderDebounceToken &+= 1
             // A new session invalidates any pending intent stashed for the
@@ -1252,7 +1379,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         switch diff {
         case .identical where !fontChanged && !sourceChanged && !imagesChanged && !linkInputsChanged && !markersChanged:
-            return
+            return false
         case .identical:
             // Same rows, but font/source/image-map/link-inputs changed →
             // re-render visible cells and re-measure all heights (the image
@@ -1286,6 +1413,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 restoreScrollAnchor(anchor)
             }
         }
+        return true
     }
 
     // MARK: Window helpers
@@ -2164,6 +2292,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             guard let table, table.numberOfRows > 0 else { return }
             table.scrollRowToVisible(table.numberOfRows - 1)
         }
+    }
+
+    func scrollToBottomForExternalIntent() {
+        scrollToBottom()
+        scheduleProximityUpdate()
     }
 
     private func captureScrollAnchor() -> ScrollAnchor? {

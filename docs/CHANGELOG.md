@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Features
 - **Cursor ACP-persisted sessions are now discoverable and searchable.** Agent Sessions reads the supported SQLite/protobuf turn graph, preserves ACP provenance through reload and local archives, rejects malformed or symlink-escaped stores, and keeps normal Cursor CLI resume unavailable for this persistence surface.
 
+### Bug Fixes
+- **Transcript jump arrows now work in Rich mode.** Block transcripts report top and bottom proximity like plain and terminal transcripts, and the jump-to-latest intent is consumed by the block list before the down arrow is hidden.
+
 ## [5.5] - 2026-09-19
 
 ### Features

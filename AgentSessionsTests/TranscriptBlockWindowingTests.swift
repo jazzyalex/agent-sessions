@@ -7,6 +7,35 @@ import XCTest
 /// them is verified by owner QA, but the boundary reasoning lives here.
 final class TranscriptBlockWindowingTests: XCTestCase {
 
+    func testBlockControllerConsumesBottomScrollTokenExactlyOnce() {
+        let controller = BlockTableController()
+
+        XCTAssertTrue(controller.consumeScrollToBottomToken(1))
+        XCTAssertFalse(controller.consumeScrollToBottomToken(1))
+        XCTAssertTrue(controller.consumeScrollToBottomToken(2))
+
+        controller.seedConsumedScrollToBottomToken(7)
+        XCTAssertFalse(controller.consumeScrollToBottomToken(7))
+        XCTAssertTrue(controller.consumeScrollToBottomToken(8))
+    }
+
+    func testBlockViewportProximityUsesSharedPixelThreshold() {
+        let atTop = BlockTableController.viewportProximity(
+            contentHeight: 1_000, viewportHeight: 200, offset: 48)
+        XCTAssertTrue(atTop.nearTop)
+        XCTAssertFalse(atTop.nearBottom)
+
+        let middle = BlockTableController.viewportProximity(
+            contentHeight: 1_000, viewportHeight: 200, offset: 400)
+        XCTAssertFalse(middle.nearTop)
+        XCTAssertFalse(middle.nearBottom)
+
+        let atBottom = BlockTableController.viewportProximity(
+            contentHeight: 1_000, viewportHeight: 200, offset: 752)
+        XCTAssertFalse(atBottom.nearTop)
+        XCTAssertTrue(atBottom.nearBottom)
+    }
+
     // MARK: Fixtures
 
     private func block(_ index: Int,

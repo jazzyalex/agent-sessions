@@ -631,6 +631,20 @@ final class TranscriptTailUpdateStateTests: XCTestCase {
         XCTAssertEqual(state.scrollToBottomToken, 1)
         XCTAssertFalse(state.hasUnseenUpdates)
         XCTAssertTrue(state.stickyFollowEnabled)
+        XCTAssertTrue(state.shouldShowJumpToLatestButton,
+                      "an intent must not be treated as a confirmed bottom viewport")
+    }
+
+    func testJumpToLatestHidesOnlyAfterViewportReportsBottom() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+        state.viewportChanged(isNearBottom: false)
+
+        state.jumpToLatest()
+        XCTAssertTrue(state.shouldShowJumpToLatestButton)
+
+        state.viewportChanged(isNearBottom: true)
+        XCTAssertFalse(state.shouldShowJumpToLatestButton)
     }
 
     func testContentUpdateWhileDetachedShowsUnseenIndicator() {

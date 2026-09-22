@@ -526,7 +526,7 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ## Transcript UI
 
 ### Transcript jump arrows are disconnected from Rich/block mode
-> **open** · sev: high · urg: med · verified 2026-09-18
+> **open** · sev: high · urg: med · verified 2026-09-21
 
 - **What:** the transcript's up arrow is often absent, and the down arrow can
   disappear on click without moving the transcript. This is one regression in the
@@ -549,8 +549,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   and a consumable jump-to-latest intent, or move both modes behind one shared
   scroll-intent/proximity contract. Cover both modes and the remount/session-switch
   cases; do not infer a successful jump from the button's visibility change.
-- **Why deferred:** this turn is backlog-only; no implementation or UI validation
-  was performed.
+- **Why still open:** the implementation and validation are complete in the current
+  worktree; leave the entry open until the user records a commit/release.
 - **Risk if wrong:** transcript navigation is visibly broken, and a user can lose
   their place in a long session or mistake a hidden control for a completed jump.
 - **To close:** in plain, terminal, and Rich modes, the up arrow appears after
