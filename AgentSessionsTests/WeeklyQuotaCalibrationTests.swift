@@ -139,6 +139,26 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(once, twice, accuracy: 0.0001)
     }
 
+    func testLedgerDoesNotRebillEventsAfterNativeArchiveMove() {
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        let event = WeeklyQuotaTokenEvent(
+            logPath: "/codex/sessions/rollout-1.jsonl", eventID: "turn-1",
+            capturedAt: t0, input: 0, cachedInput: 0, output: 1_000_000,
+            cacheCreation: 0, modelSlug: "gpt-5.6")
+        ledger.recordIncremental(events: [event], priceTable: prices, now: t0)
+        let archived = WeeklyQuotaTokenEvent(
+            logPath: "/codex/archived_sessions/rollout-1.jsonl", eventID: "turn-1",
+            capturedAt: t0, input: 0, cachedInput: 0, output: 1_000_000,
+            cacheCreation: 0, modelSlug: "gpt-5.6")
+        ledger.recordIncremental(events: [archived], priceTable: prices,
+                                 now: t0.addingTimeInterval(60))
+        let once = ledger.activity(from: t0.addingTimeInterval(-1), to: t0)?.dollars ?? 0
+        let afterMove = ledger.activity(
+            from: t0.addingTimeInterval(-1), to: t0.addingTimeInterval(60))?.dollars ?? 0
+        XCTAssertEqual(afterMove, once, accuracy: 0.0001)
+    }
+
     func testIncrementalLedgerKeepsEventTimeAndMarksLateDiscovery() {
         let ledger = WeeklyQuotaActivityLedger()
         let prices = RunwayPriceTable.makeForTesting()
@@ -466,7 +486,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let end = t0.addingTimeInterval(10 * 60)
         let payload = try XCTUnwrap(
             JSONSerialization.jsonObject(with: persisted.data) as? [String: Any])
-        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 7)
+        XCTAssertEqual((payload["activityAccountingRevision"] as? NSNumber)?.intValue, 8)
         var restored = WeeklyQuotaCalibrationTracker()
         restored.restore(from: persisted.data, scope: scope(), now: end)
         XCTAssertEqual(try XCTUnwrap(restored.percentPointsPerDollar(now: end)),
@@ -607,6 +627,9 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
 
     func testAccountlessRunwayBootstrapCannotAttributeHistoricalSession() {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let suiteName = "test-accountless-runway-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
         var bootstrap = WeeklyQuotaBootstrapResult(
@@ -622,12 +645,279 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
                            resetAt: reset, observedAt: t0,
                            scope: scope(priceRevision: prices.revision, source: "oauth", shape: "weekly"),
-                           now: t0)
+                           now: t0, defaults: defaults)
 
         XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0),
                         "the live runway may use the current account quota with ordinary local activity")
+        XCTAssertEqual(store.runwayCalibration(provider: "codex", now: t0).state,
+                       .localEstimate,
+                       "historical activity may provide a provisional local rate")
         XCTAssertNil(store.attributionContext(provider: "codex", now: t0),
                      "account-less history cannot be attributed to the current account")
+    }
+
+    func testAcceptedLiveIntervalSupersedesUnverifiedBootstrapBeforeTenPoints() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let ledger = store.ledger(provider: "codex")
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/live", capturedAt: t0, input: 0, cachedInput: 0,
+            output: 0, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: t0)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0)
+        let later = t0.addingTimeInterval(10 * 60)
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/live", capturedAt: later, input: 0, cachedInput: 0,
+            output: 150_000, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: later)
+        store.observeQuota(provider: "codex", remainingPercent: 77, hasExactPercent: false,
+                           resetAt: reset, observedAt: later, scope: scoped, now: later)
+
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 70, dollars: 0.1, unpricedVolumeShare: 0,
+            windowStart: t0, resetsAt: reset, scannedAt: later)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = scoped.limitShape
+        bootstrap.sourceFamily = scoped.sourceFamily
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scoped.accountHash
+        bootstrap.accountAttributionSafe = false
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+
+        let result = store.runwayCalibration(provider: "codex", now: later)
+        XCTAssertEqual(result.state, .localEstimate)
+        XCTAssertEqual(result.provenance?.origin, .live,
+                       "unverified full-week history cannot veto a current live interval")
+        XCTAssertEqual(result.ratio ?? 0, 3.0 / 3.0, accuracy: 0.0001)
+        XCTAssertFalse(store.calibrationAbandoned(provider: "codex", now: later),
+                       "the waiting budget must honor a displayable live recovery")
+        XCTAssertNil(store.attributionContext(provider: "codex", now: later),
+                       "a live conversion must not license historical account-less attribution")
+    }
+
+    func testShortLiveIntervalWithoutBootstrapRemainsProvisional() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let ledger = store.ledger(provider: "codex")
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/live", capturedAt: t0, input: 0, cachedInput: 0,
+            output: 0, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: t0)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0)
+        for step in 1...3 {
+            let at = t0.addingTimeInterval(Double(step) * 10 * 60)
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/live", capturedAt: at, input: 0, cachedInput: 0,
+                output: Double(step) * 150_000, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: at)
+            store.observeQuota(provider: "codex", remainingPercent: 80 - Double(step),
+                               hasExactPercent: false, resetAt: reset,
+                               observedAt: at, scope: scoped, now: at)
+            if step == 1 {
+                XCTAssertEqual(store.runwayCalibration(provider: "codex", now: at).state,
+                               .measuring, "one integer tick is too noisy to display")
+            }
+        }
+        let later = t0.addingTimeInterval(30 * 60)
+        let result = store.runwayCalibration(provider: "codex", now: later)
+        XCTAssertEqual(result.state, .localEstimate)
+        XCTAssertEqual(result.provenance?.origin, .live)
+        XCTAssertFalse(store.calibrationAbandoned(provider: "codex", now: later))
+    }
+
+    func testThreeDisjointOnePointIntervalsFormRunwayEstimate() {
+        var tracker = WeeklyQuotaCalibrationTracker()
+        let ledger = WeeklyQuotaActivityLedger()
+        let prices = RunwayPriceTable.makeForTesting()
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let reset = t0.addingTimeInterval(604_800)
+        for span in 0..<3 {
+            let start = t0.addingTimeInterval(Double(span) * 7 * 3600)
+            let end = start.addingTimeInterval(10 * 60)
+            let reportedReset = reset.addingTimeInterval(Double(span) * 0.2)
+            let priorOutput = Double(span) * 150_000
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/disjoint", capturedAt: start, input: 0, cachedInput: 0,
+                output: priorOutput, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: start)
+            tracker.update(remainingPercent: 80 - Double(span), hasExactPercent: false,
+                           resetAt: reportedReset, observedAt: start, scope: scoped,
+                           ledger: ledger, now: start)
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/disjoint", capturedAt: end, input: 0, cachedInput: 0,
+                output: priorOutput + 150_000, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: end)
+            tracker.update(remainingPercent: 79 - Double(span), hasExactPercent: false,
+                           resetAt: reportedReset, observedAt: end, scope: scoped,
+                           ledger: ledger, now: end)
+            if span < 2 {
+                XCTAssertNil(tracker.latestRunwayCalibration(now: end))
+            } else {
+                XCTAssertEqual(tracker.latestRunwayCalibration(now: end)?.dropPercentPoints, 3)
+                XCTAssertEqual(tracker.latestRunwayCalibration(now: end)?.percentPointsPerDollar ?? 0,
+                               1.0 / 3.0, accuracy: 0.0001)
+            }
+        }
+        let nextStart = t0.addingTimeInterval(21 * 3600)
+        let nextEnd = nextStart.addingTimeInterval(10 * 60)
+        let nextReset = reset.addingTimeInterval(604_800)
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/disjoint", capturedAt: nextStart, input: 0, cachedInput: 0,
+            output: 450_000, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: nextStart)
+        tracker.update(remainingPercent: 99, hasExactPercent: false,
+                       resetAt: nextReset, observedAt: nextStart, scope: scoped,
+                       ledger: ledger, now: nextStart)
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/disjoint", capturedAt: nextEnd, input: 0, cachedInput: 0,
+            output: 600_000, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: nextEnd)
+        tracker.update(remainingPercent: 98, hasExactPercent: false,
+                       resetAt: nextReset, observedAt: nextEnd, scope: scoped,
+                       ledger: ledger, now: nextEnd)
+        XCTAssertEqual(tracker.latestRunwayCalibration(now: nextEnd)?.dropPercentPoints, 3,
+                       "a new one-point week must not erase the prior qualified aggregate")
+    }
+
+    func testBootstrapSuppliesProvisionalRunwayRateBeforeObservedInterval() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let suiteName = "test-bootstrap-no-live-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0, resetsAt: reset, scannedAt: t0)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = scoped.limitShape
+        bootstrap.sourceFamily = scoped.sourceFamily
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scoped.accountHash
+        bootstrap.accountAttributionSafe = true
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0,
+                           defaults: defaults)
+
+        let result = store.runwayCalibration(provider: "codex", now: t0)
+        XCTAssertEqual(result.state, .localEstimate)
+        XCTAssertEqual(result.ratio ?? 0, 20.5 / 100, accuracy: 0.0001)
+        XCTAssertEqual(result.provenance?.origin, .bootstrap)
+    }
+
+    func testObservedLiveIntervalOutranksHistoricalBootstrap() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let ledger = store.ledger(provider: "codex")
+        var output = 0.0
+        ledger.record(observations: [WeeklyQuotaTokenObservation(
+            logPath: "/qualified", capturedAt: t0, input: 0, cachedInput: 0,
+            output: output, cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: t0)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0)
+        for step in 1...4 {
+            let at = t0.addingTimeInterval(Double(step) * 10 * 60)
+            output += 150_000 // $3 per tick at $20/MTok output.
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/qualified", capturedAt: at, input: 0, cachedInput: 0,
+                output: output, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: at)
+            store.observeQuota(provider: "codex", remainingPercent: 80 - Double(step),
+                               hasExactPercent: false, resetAt: reset, observedAt: at,
+                               scope: scoped, now: at)
+        }
+        let now = t0.addingTimeInterval(40 * 60)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 70, dollars: 35, unpricedVolumeShare: 0,
+            windowStart: reset.addingTimeInterval(-604_800), resetsAt: reset,
+            scannedAt: now)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = scoped.limitShape
+        bootstrap.sourceFamily = scoped.sourceFamily
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scoped.accountHash
+        bootstrap.accountAttributionSafe = true
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: now),
+                        "the short live span must not overwrite the stored calibration")
+        XCTAssertEqual(store.runwayCalibration(provider: "codex", now: now).state,
+                       .localEstimate)
+
+        // Once the qualified live span reaches the existing 10pp selection
+        // threshold, the contradicted bootstrap is no longer the selected source.
+        for step in 5...10 {
+            let at = t0.addingTimeInterval(Double(step) * 10 * 60)
+            output += 150_000
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/qualified", capturedAt: at, input: 0, cachedInput: 0,
+                output: output, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: at)
+            store.observeQuota(provider: "codex", remainingPercent: 80 - Double(step),
+                               hasExactPercent: false, resetAt: reset, observedAt: at,
+                               scope: scoped, now: at)
+        }
+        let recovered = store.runwayCalibration(provider: "codex",
+                                                now: t0.addingTimeInterval(100 * 60))
+        XCTAssertEqual(recovered.state, .localEstimate)
+        XCTAssertEqual(recovered.provenance?.origin, .live)
+    }
+
+    func testHistoricalBootstrapSizeDoesNotOverrideObservedInterval() {
+        let prices = RunwayPriceTable.makeForTesting()
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+
+        func state(bootstrapDollars: Double) -> WeeklyRunwayCalibrationState {
+            let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+            let ledger = store.ledger(provider: "codex")
+            var output = 0.0
+            ledger.record(observations: [WeeklyQuotaTokenObservation(
+                logPath: "/qualified", capturedAt: t0, input: 0, cachedInput: 0,
+                output: output, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                priceTable: prices, now: t0)
+            store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                               resetAt: reset, observedAt: t0, scope: scoped, now: t0)
+            for step in 1...4 {
+                let at = t0.addingTimeInterval(Double(step) * 10 * 60)
+                output += 150_000 // Four points over $12.
+                ledger.record(observations: [WeeklyQuotaTokenObservation(
+                    logPath: "/qualified", capturedAt: at, input: 0, cachedInput: 0,
+                    output: output, cacheCreation: 0, modelSlug: "gpt-5.6")],
+                    priceTable: prices, now: at)
+                store.observeQuota(provider: "codex", remainingPercent: 80 - Double(step),
+                                   hasExactPercent: false, resetAt: reset, observedAt: at,
+                                   scope: scoped, now: at)
+            }
+            let at = t0.addingTimeInterval(40 * 60)
+            var bootstrap = WeeklyQuotaBootstrapResult(
+                usedPercentPoints: 70, dollars: bootstrapDollars, unpricedVolumeShare: 0,
+                windowStart: reset.addingTimeInterval(-604_800), resetsAt: reset,
+                scannedAt: at)
+            bootstrap.priceRevision = prices.revision
+            bootstrap.limitShape = scoped.limitShape
+            bootstrap.sourceFamily = scoped.sourceFamily
+            bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+            bootstrap.accountHash = scoped.accountHash
+            bootstrap.accountAttributionSafe = true
+            store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+            return store.runwayCalibration(provider: "codex", now: at).state
+        }
+
+        XCTAssertEqual(state(bootstrapDollars: 140), .localEstimate)
+        XCTAssertEqual(state(bootstrapDollars: 1_410), .localEstimate,
+                       "historical denominator size cannot override an observed interval")
     }
 
     func testCarriedBootstrapProvenanceIsSeparateFromLatestQuotaObservation() throws {
@@ -662,6 +952,44 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(context.latestSnapshot?.resetAt, currentReset)
     }
 
+    func testAccountlessLedgerFresheningCannotChangeHistoricalAttribution() throws {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let suiteName = "test-attribution-freshening-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let prices = RunwayPriceTable.makeForTesting()
+        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let reset = t0.addingTimeInterval(604_800)
+        var bootstrap = WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: t0.addingTimeInterval(-3600), resetsAt: reset, scannedAt: t0)
+        bootstrap.priceRevision = prices.revision
+        bootstrap.limitShape = scoped.limitShape
+        bootstrap.sourceFamily = scoped.sourceFamily
+        bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
+        bootstrap.accountHash = scoped.accountHash
+        bootstrap.accountAttributionSafe = true
+        store.setBootstrapForTesting(provider: "codex", result: bootstrap)
+        let ledger = store.ledger(provider: "codex")
+        ledger.recordIncremental(events: [], priceTable: prices, now: t0)
+        store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0,
+                           defaults: defaults)
+        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 20,
+                                          resetsAt: reset)
+        let later = t0.addingTimeInterval(60)
+        ledger.recordIncremental(events: [WeeklyQuotaTokenEvent(
+            logPath: "/accountless.jsonl", eventID: "new-turn", capturedAt: later,
+            input: 0, cachedInput: 0, output: 1_000_000,
+            cacheCreation: 0, modelSlug: "gpt-5.6")],
+            priceTable: prices, now: later)
+        let context = try XCTUnwrap(store.attributionContext(provider: "codex", now: later))
+        XCTAssertEqual(context.percentPointsPerDollar, 20.5 / 100, accuracy: 0.0001)
+        XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: later) ?? 0,
+                       20.5 / 120, accuracy: 0.0001,
+                       "Runway diagnostics may freshen while attribution stays immutable")
+    }
+
     /// The waiting clock must be bounded, and the budget runs from APP LAUNCH.
     /// Uses a private store: `.shared` carries a launch timestamp from whenever
     /// the first test touched it, which made an earlier version of this test pass
@@ -674,19 +1002,22 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             now: t0.addingTimeInterval(WeeklyQuotaCalibrationStore.waitingBudget + 5)))
     }
 
-    /// A bootstrap answers the question, so the budget must stop applying.
-    func testBootstrapStopsTheWaitingBudget() {
+    /// An unscoped bootstrap does not answer the Runway question, even though
+    /// its raw conversion remains available to other store consumers.
+    func testUnverifiedBootstrapDoesNotExtendWaitingBudget() {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         store.setBootstrapForTesting(provider: "codex", result: WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0, resetsAt: t0.addingTimeInterval(604_800), scannedAt: t0))
-        XCTAssertFalse(store.calibrationAbandoned(
+        XCTAssertTrue(store.calibrationAbandoned(
             provider: "codex",
             now: t0.addingTimeInterval(WeeklyQuotaCalibrationStore.waitingBudget + 600)))
         // 20.5/100, not 20/100: the reported integer is a floor, so the served
         // ratio takes the quantization midpoint on every path.
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
                        20.5 / 100, accuracy: 0.0001)
+        XCTAssertEqual(store.runwayCalibration(provider: "codex", now: t0).state,
+                       .measuring)
     }
 
     /// A frozen bootstrap drifts high: the numerator is integer-quantized and sits

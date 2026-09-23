@@ -330,6 +330,24 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(gate.checkCount, 2)
     }
 
+    func testNativeArchivedSessionIsEnumeratedWithoutDuplicate() throws {
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let sessions = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        let archived = codexHome.appendingPathComponent("archived_sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archived, withIntermediateDirectories: true)
+        let at = anchor.addingTimeInterval(-3600)
+        let archivedFile = archived.appendingPathComponent("rollout-archive.jsonl")
+        try [modelLine("gpt-5.6", at: at),
+             turn(output: 1_000_000, resetsAt: anchor, at: at)]
+            .joined(separator: "\n").write(to: archivedFile, atomically: true, encoding: .utf8)
+        try FileManager.default.copyItem(
+            at: archivedFile, to: sessions.appendingPathComponent(archivedFile.lastPathComponent))
+        let candidates = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
+            root: sessions, modifiedAfter: at.addingTimeInterval(-60))
+        XCTAssertEqual(candidates.count, 1)
+    }
+
     func testCancellationStopsDecodedLineWalk() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         try write(Array(repeating: "{}", count: 1_100) + [

@@ -2424,6 +2424,139 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNotEqual(mk(.tokensPerHour).id, mk(.weeklyPercentPerHour).id)
     }
 
+    func testDroppedFiveHourBurnChipUsesDollarRowsAndOverflow() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .dollarsPerHour)
+        let rows = [
+            RunwayPauseImpactRow(id: "a", displayName: "A", isGoal: false,
+                                 deadline: .unavailable, gainedSeconds: 0,
+                                 displayRate: 6.50, confidence: .direct),
+            RunwayPauseImpactRow(id: "b", displayName: "B", isGoal: false,
+                                 deadline: .unavailable, gainedSeconds: 0,
+                                 displayRate: 4.14, confidence: .direct)
+        ]
+        let overflow = RunwayShortBurstSummary(count: 1, deadline: .unavailable,
+                                               gainedSeconds: 0, displayRate: 1.25)
+        var dollars = CodexRunwaySnapshot(baseline: baseline, rows: rows,
+                                          burstSummary: overflow)
+        dollars.aggregateTokensPerHour = 151_000
+        XCTAssertEqual(QuotaMeterBurnChipResolver.text(snapshot: dollars), "$11.89/h",
+                       "the selected dollar unit must also govern the provider header")
+
+        dollars.dollarAggregateIncomplete = true
+        XCTAssertNil(QuotaMeterBurnChipResolver.text(snapshot: dollars),
+                     "unpriced active sessions make a dollar total incomplete")
+        let incompleteOverflow = RunwayShortBurstSummary(
+            count: 1, deadline: .unavailable, gainedSeconds: 0,
+            displayRate: 1.25, containsUnavailableActiveRate: true)
+        let dollarsWithUnknownOverflow = CodexRunwaySnapshot(
+            baseline: baseline, rows: rows, burstSummary: incompleteOverflow)
+        XCTAssertNil(QuotaMeterBurnChipResolver.text(snapshot: dollarsWithUnknownOverflow))
+
+        var tokens = CodexRunwaySnapshot(baseline: baseline.with(rateUnit: .tokensPerHour),
+                                         rows: rows, burstSummary: overflow)
+        tokens.aggregateTokensPerHour = 151_000
+        XCTAssertEqual(QuotaMeterBurnChipResolver.text(snapshot: tokens), "151K tk/h",
+                       "a snapshot-wide dollar fallback must display the token unit")
+        tokens.aggregateTokensPerHour = nil
+        XCTAssertNil(QuotaMeterBurnChipResolver.text(snapshot: tokens),
+                     "a unit transition must not reuse the previous burn")
+    }
+
+    func testUnverifiedWeeklyCalibrationReplacesNumericRowWithUnavailable() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false, logPaths: ["/tmp/session.jsonl"])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let verified = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity], now: now, maxRows: 4,
+            weeklyCalibration: .estimated(1.8))
+        let unverified = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity], now: now, maxRows: 4,
+            weeklyCalibration: WeeklyRunwayCalibration(
+                ratio: 1.8, state: .accountUnverified, provenance: nil))
+        XCTAssertNotEqual(verified.id, unverified.id,
+                          "evidence changes must refresh the row even at the same ratio")
+
+        let current = CodexRunwaySnapshot(
+            baseline: baseline,
+            rows: [RunwayPauseImpactRow(
+                id: identity.id, displayName: identity.displayName, isGoal: false,
+                deadline: .unavailable, gainedSeconds: 0, displayRate: 14,
+                confidence: .direct)], burstSummary: nil)
+        let replacement = try XCTUnwrap(RunwaySnapshotAssembly.replacementAfterRefresh(
+            current: current, candidate: nil, request: unverified))
+        XCTAssertEqual(replacement.rows.first?.confidence, .unsupported)
+        XCTAssertEqual(replacement.weeklyCalibrationState, .accountUnverified)
+        XCTAssertNil(QuotaMeterWeeklyHeaderResolver.header(
+            isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+            suspect: false, snapshot: replacement))
+        XCTAssertEqual(QuotaMeterWeeklyHeaderResolver.status(
+            isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+            suspect: false, remainingPercent: 70, snapshot: replacement), .unavailable)
+        XCTAssertEqual(QuotaMeterWeeklyHeaderResolver.unavailableHelp(
+            calibrationState: replacement.weeklyCalibrationState),
+            "Weekly burn unavailable: local activity cannot be matched to this Codex account.")
+        XCTAssertEqual(QuotaMeterWeeklyHeaderResolver.unavailableHelp(
+            calibrationState: .inconsistent),
+            "Weekly burn unavailable: recent account usage conflicts with the stored estimate.")
+    }
+
+    func testProvisionalWeeklyRateKeepsPlainNumberWithoutETA() {
+        let header = QuotaMeterWeeklyHeader(
+            aggregatePercentPerHour: 3.4, remainingPercent: 27,
+            resetAt: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(header.aggregateText, "3.4%/h")
+        XCTAssertFalse(QuotaMeterWeeklyHeaderResolver.canProjectETA(
+            calibrationState: .localEstimate))
+        XCTAssertEqual(RunwayTimeFormatting.rate(
+            3.4, unit: .weeklyPercentPerHour, confidence: .direct), "3.4%/h")
+        XCTAssertEqual(RunwayTimeFormatting.rate(
+            0, unit: .weeklyPercentPerHour, confidence: .direct), "quiet")
+        XCTAssertTrue(QuotaMeterWeeklyHeaderResolver.canProjectETA(
+            calibrationState: .estimated))
+    }
+
+    func testEmptyRefreshDoesNotRetainObsoleteWeeklyEvidence() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false,
+            logPaths: ["/tmp/session.jsonl"])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let current = CodexRunwaySnapshot(
+            baseline: baseline,
+            rows: [RunwayPauseImpactRow(
+                id: identity.id, displayName: identity.displayName, isGoal: false,
+                deadline: .unavailable, gainedSeconds: 0, displayRate: 4,
+                confidence: .direct)], burstSummary: nil,
+            weeklyCalibrationState: .estimated, weeklyCalibrationRatio: 0.5)
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity], now: now, maxRows: 4,
+            weeklyCalibration: WeeklyRunwayCalibration(
+                ratio: 0.3, state: .localEstimate, provenance: nil))
+
+        let replacement = try XCTUnwrap(RunwaySnapshotAssembly.replacementAfterRefresh(
+            current: current, candidate: nil, request: request))
+        XCTAssertEqual(replacement.rows.first?.confidence, .waiting)
+        XCTAssertEqual(replacement.weeklyCalibrationState, .localEstimate)
+        XCTAssertEqual(replacement.weeklyCalibrationRatio, 0.3)
+        XCTAssertNil(QuotaMeterWeeklyHeaderResolver.header(
+            isWeeklyLens: true, weekStale: false, fiveHourAbsent: false,
+            suspect: false, snapshot: replacement))
+    }
+
     func testRunwayRefreshReplacesStaleTokenRowsWhileWeeklySnapshotLoads() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let reset = now.addingTimeInterval(3 * 60 * 60)
@@ -2565,6 +2698,35 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             / (request?.baseline.currentRunoutAt.timeIntervalSince(request?.baseline.observedAt ?? now) ?? 1)
             * 3600
         XCTAssertEqual(rate, 4.0, accuracy: 0.001)
+    }
+
+    func testDollarPresentationKeepsWeeklyAnchorForCalibration() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let fiveReset = now.addingTimeInterval(3 * 60 * 60)
+        let weekReset = now.addingTimeInterval(5 * 24 * 60 * 60)
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [makeHUDRow(id: "active-row", project: "Alpha", name: "Active Work",
+                                    state: .active, resolvedSessionID: "active-session",
+                                    logPath: "/tmp/active.jsonl")],
+            projectedRunoutEnabled: true, codexAgentEnabled: true, codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67, fiveHourResetText: iso8601(fiveReset),
+            fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
+            windowMinutes: 300, presentation: .dollar,
+            weekRemainingPercent: 73, weekResetText: iso8601(weekReset),
+            now: now, maxRows: 5)
+        XCTAssertEqual(request?.weeklyResetAt, weekReset)
+        let relative = HUDRunwayRequestBuilder.request(
+            activeRows: [makeHUDRow(id: "active-row", project: "Alpha", name: "Active Work",
+                                    state: .active, resolvedSessionID: "active-session",
+                                    logPath: "/tmp/active.jsonl")],
+            projectedRunoutEnabled: true, codexAgentEnabled: true, codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67, fiveHourResetText: iso8601(fiveReset),
+            fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
+            windowMinutes: 300, presentation: .dollar,
+            weekRemainingPercent: 73, weekResetText: "in 5d",
+            now: now, maxRows: 5)
+        XCTAssertNil(relative?.weeklyResetAt,
+                     "a relative countdown cannot identify a calibration window")
     }
 
     /// Acceptance test 1: with no recent quota tick, Weekly STAYS in %/h. It used

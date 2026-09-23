@@ -8,17 +8,15 @@ import Foundation
 // full point of a WEEKLY quota — hours of work. A spinner that outlives the task
 // the user is watching is worse than no feature.
 //
-// But the answer is already on disk. Every Codex `token_count` line carries both
-// the turn's own token usage AND the `rate_limits` snapshot at that instant, so a
-// transcript is a complete quota trace, not just an activity log. That means the
-// conversion can be computed directly from history the moment the app launches:
+// Transcript files carry turn usage and a rate-limit snapshot. They can supply
+// a historical conversion only when the local file set covers the account's
+// spending. That completeness cannot be established from account stamps alone,
+// so the Runway display uses observed live intervals instead:
 //
-//     calibration = used_percent_since_window_start ÷ priced_activity_since_start
+//     historical ratio = account usage since reset ÷ local priced history
 //
-// No waiting, and no invented quota size — both terms are measured.
-//
-// This is strictly better-conditioned than a single live tick, too. A 1pp tick
-// carries up to ±50% quantization error; a bootstrap over 20pp carries ~±2.5%.
+// The ratio may still be useful for diagnostics and guarded attribution, but
+// even a large numerator does not repair missing local activity.
 
 struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// Percentage points of the weekly window consumed since it opened.
@@ -60,7 +58,7 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     /// historical session to the currently signed-in account.
     var accountAttributionSafe: Bool? = nil
 
-    static let codexActivityAccountingRevision = 8
+    static let codexActivityAccountingRevision = 9
 
     /// Both providers report weekly consumption as whole percentage points, so a
     /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
@@ -334,25 +332,31 @@ enum CodexWeeklyQuotaBootstrapScanner {
                                shouldCancel: @Sendable () -> Bool = { false },
                                fileManager: FileManager = .default) -> [URL] {
         guard !shouldCancel() else { return [] }
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
+        let roots = root.lastPathComponent == "sessions"
+            ? [root, root.deletingLastPathComponent()
+                .appendingPathComponent("archived_sessions", isDirectory: true)]
+            : [root]
         var result: [URL] = []
-        for case let url as URL in enumerator {
-            if shouldCancel() {
-                enumerator.skipDescendants()
-                return []
+        var seenFiles: Set<String> = []
+        for scanRoot in roots where fileManager.fileExists(atPath: scanRoot.path) {
+            guard let enumerator = fileManager.enumerator(
+                at: scanRoot,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { return [] }
+            for case let url as URL in enumerator {
+                if shouldCancel() {
+                    enumerator.skipDescendants()
+                    return []
+                }
+                guard url.pathExtension == "jsonl" else { continue }
+                guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                      values.isRegularFile == true,
+                      let modified = values.contentModificationDate,
+                      modified >= modifiedAfter,
+                      seenFiles.insert(url.lastPathComponent).inserted else { continue }
+                result.append(url)
             }
-            guard url.pathExtension == "jsonl" else { continue }
-            guard !shouldCancel() else { return [] }
-            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
-                  values.isRegularFile == true,
-                  let modified = values.contentModificationDate,
-                  modified >= modifiedAfter else { continue }
-            result.append(url)
         }
         return result
     }

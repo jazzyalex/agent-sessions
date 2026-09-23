@@ -101,6 +101,31 @@ public enum WeeklyQuotaCalibrationOrigin: String, Codable, Sendable {
     case carriedBootstrap
 }
 
+/// Evidence state for a per-session weekly Runway number. An API-equivalent
+/// price is only a weight; it does not prove how Codex charges a plan's quota.
+enum WeeklyRunwayCalibrationState: String, Equatable, Sendable {
+    case measuring
+    case estimated
+    case localEstimate
+    case accountUnverified
+    case inconsistent
+
+    var canDisplayRate: Bool { self == .estimated || self == .localEstimate }
+    var isUnavailable: Bool { self == .accountUnverified || self == .inconsistent }
+}
+
+struct WeeklyRunwayCalibration: Equatable, Sendable {
+    let ratio: Double?
+    let state: WeeklyRunwayCalibrationState
+    let provenance: WeeklyQuotaCalibrationProvenance?
+
+    static let measuring = WeeklyRunwayCalibration(ratio: nil, state: .measuring, provenance: nil)
+
+    static func estimated(_ ratio: Double) -> WeeklyRunwayCalibration {
+        WeeklyRunwayCalibration(ratio: ratio, state: .estimated, provenance: nil)
+    }
+}
+
 /// Evidence for the conversion, kept separate from the latest raw quota poll.
 /// The latter says what the provider reported most recently; this says which
 /// measurement supplied the pp-per-dollar ratio.
@@ -345,7 +370,11 @@ final class WeeklyQuotaActivityLedger {
                 event.cacheCreation1h.description, event.modelSlug ?? "",
                 event.inferenceGeo ?? ""
             ].joined(separator: "|")
-            let key = "\(event.logPath)|\(event.eventID ?? fallbackID)"
+            // Native archiving moves a session from sessions/ to the sibling
+            // archived_sessions/ directory. Its filename and event identity stay
+            // stable, so a path-key would bill every old event a second time.
+            let sessionFile = URL(fileURLWithPath: event.logPath).lastPathComponent
+            let key = "\(sessionFile)|\(event.eventID ?? fallbackID)"
             guard !seenEvents.contains(key) else { continue }
             seenEvents.insert(key)
             seenEventOrder.append((key: key, at: effectivePollAt))
@@ -504,6 +533,40 @@ struct WeeklyQuotaCalibrationTracker {
         accepted.last(where: { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge })
     }
 
+    /// A new one-point span must not erase a previously conditioned Runway
+    /// estimate after a sleep gap or reset. It can replace it once it reaches
+    /// the same three-point display threshold.
+    func latestRunwayCalibration(now: Date) -> WeeklyQuotaCalibration? {
+        let fresh = accepted.filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
+        var windows: [[WeeklyQuotaCalibration]] = []
+        for sample in fresh where sample.percentPointsPerDollar > 0 {
+            if let lastReset = windows.last?.last?.resetAt,
+               let reset = sample.resetAt,
+               abs(lastReset.timeIntervalSince(reset)) < 120 {
+                windows[windows.count - 1].append(sample)
+            } else {
+                windows.append([sample])
+            }
+        }
+        for window in windows.reversed() {
+            guard let latest = window.last else { continue }
+            let totalDrop = window.reduce(0) { $0 + $1.dropPercentPoints }
+            let totalDollars = window.reduce(0) {
+                $0 + $1.dropPercentPoints / $1.percentPointsPerDollar
+            }
+            if totalDrop >= 3, totalDollars > 0 {
+                return WeeklyQuotaCalibration(
+                    percentPointsPerDollar: totalDrop / totalDollars,
+                    acquiredAt: latest.acquiredAt,
+                    intervalSeconds: window.reduce(0) { $0 + $1.intervalSeconds },
+                    dropPercentPoints: totalDrop,
+                    resetAt: latest.resetAt,
+                    windowStart: latest.windowStart)
+            }
+        }
+        return nil
+    }
+
     var acceptedCount: Int { accepted.count }
 
     mutating func invalidate() {
@@ -608,7 +671,20 @@ struct WeeklyQuotaCalibrationTracker {
         // Keep the original anchor so later ticks expand this same live span. The
         // newest aggregate replaces the prior aggregate; overlapping tick ratios
         // are never retained as if they were independent observations.
-        accepted = [calibration]
+        let newSpanStart = calibration.acquiredAt.addingTimeInterval(-calibration.intervalSeconds)
+        if let prior = accepted.last,
+           let priorReset = prior.resetAt,
+           let currentReset = calibration.resetAt,
+           abs(priorReset.timeIntervalSince(currentReset)) < 120,
+           abs(prior.acquiredAt.addingTimeInterval(-prior.intervalSeconds)
+                .timeIntervalSince(newSpanStart)) < 1 {
+            // Consecutive integer ticks share their first endpoint. The new
+            // aggregate supersedes the old one; counting both double bills it.
+            accepted[accepted.count - 1] = calibration
+        } else {
+            accepted.append(calibration)
+        }
+        accepted = Array(accepted.suffix(16))
         return calibration
     }
 
@@ -628,7 +704,7 @@ struct WeeklyQuotaCalibrationTracker {
     /// propagation. No older denominator may survive these corrections.
     /// Claude already supplied incremental events and remains compatible with v1.
     private static let legacyActivityAccountingRevision = 1
-    private static let codexActivityAccountingRevision = 7
+    private static let codexActivityAccountingRevision = 8
 
     private static func activityAccountingRevision(for provider: String) -> Int {
         provider == "codex"
@@ -661,7 +737,7 @@ struct WeeklyQuotaCalibrationTracker {
         firstObservedAt = nil
         accepted = payload.accepted
             .filter { now.timeIntervalSince($0.acquiredAt) <= Self.maximumAge }
-            .suffix(1)
+            .suffix(16)
             .map { $0 }
     }
 }
@@ -920,6 +996,112 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         return percentPointsPerDollarLocked(provider: provider, now: now)
     }
 
+    /// The Runway display needs the evidence state, not just the conversion.
+    /// Account-unidentified history may support a rough calibration internally,
+    /// but it cannot justify a precise per-session share of this account's quota.
+    func runwayCalibration(provider: String, now: Date) -> WeeklyRunwayCalibration {
+        lock.lock(); defer { lock.unlock() }
+        return runwayCalibrationLocked(provider: provider, now: now)
+    }
+
+    /// Caller holds `lock`; also used by the waiting-budget gate so a displayable
+    /// provisional rate cannot be discarded as though calibration were absent.
+    private func runwayCalibrationLocked(provider: String, now: Date) -> WeeklyRunwayCalibration {
+        // A covered observed interval is the better conversion, but a new user
+        // should see a rate before the integer weekly counter moves three points.
+        // The historical scan is a local estimate: account usage can include work
+        // outside the available transcript set. Never offer a precise ETA from it.
+        if provider == "codex" {
+            if let tracker = trackers[provider],
+               let live = tracker.latestRunwayCalibration(now: now),
+               let scope = tracker.currentScope,
+               scope.accountHash != nil,
+               live.percentPointsPerDollar > 0 {
+                let provenance = WeeklyQuotaCalibrationProvenance(
+                    origin: .live, acquiredAt: live.acquiredAt, scannedAt: nil,
+                    sourceFamily: scope.sourceFamily, accountHash: scope.accountHash,
+                    priceRevision: scope.priceRevision, originResetAt: live.resetAt,
+                    originWindowStart: live.windowStart)
+                return WeeklyRunwayCalibration(
+                    ratio: live.percentPointsPerDollar,
+                    state: .localEstimate,
+                    provenance: provenance)
+            }
+            if let bootstrap = bestConditionedBootstrap(provider: provider, now: now),
+               compatibleBootstrap(bootstrap, for: provider),
+               let scope = trackers[provider]?.currentScope,
+               let accountHash = scope.accountHash,
+               bootstrap.accountHash == accountHash,
+               let ratio = freshenedBootstrapRatio(provider: provider,
+                                                   bootstrap: bootstrap,
+                                                   now: now)
+                    ?? bootstrap.calibratedPercentPointsPerDollar {
+                let currentReset = latestResetsAt[provider]
+                let isCurrentWindow = currentReset.map {
+                    abs($0.timeIntervalSince(bootstrap.resetsAt))
+                        < CodexWeeklyQuotaBootstrapScanner.anchorTolerance
+                } ?? true
+                let provenance = WeeklyQuotaCalibrationProvenance(
+                    origin: isCurrentWindow ? .bootstrap : .carriedBootstrap,
+                    acquiredAt: nil, scannedAt: bootstrap.scannedAt,
+                    sourceFamily: scope.sourceFamily,
+                    accountHash: accountHash,
+                    priceRevision: scope.priceRevision,
+                    originResetAt: bootstrap.resetsAt,
+                    originWindowStart: bootstrap.windowStart)
+                return WeeklyRunwayCalibration(ratio: ratio, state: .localEstimate,
+                                               provenance: provenance)
+            }
+            return .measuring
+        }
+        guard let selected = calibrationSelectionLocked(provider: provider, now: now) else {
+            if provider == "codex", qualifiedCalibrationDisagrees(provider: provider, now: now) {
+                return WeeklyRunwayCalibration(ratio: nil, state: .inconsistent, provenance: nil)
+            }
+            return .measuring
+        }
+        let shortLive = provider == "codex"
+            && selected.provenance.origin == .live
+            && (trackers[provider]?.conditioningPercentPoints(now: now) ?? 0)
+                < Self.wellConditionedPercentPoints
+        if shortLive,
+           (trackers[provider]?.conditioningPercentPoints(now: now) ?? 0) < 3 {
+            return .measuring
+        }
+        return WeeklyRunwayCalibration(ratio: selected.ratio,
+                                       state: shortLive ? .localEstimate : .estimated,
+                                       provenance: selected.provenance)
+    }
+
+    /// A short integer-percent tick must not override a well-conditioned week.
+    /// It can still prove that showing the old conversion as a precise rate is
+    /// unsafe when the two disagree beyond both quantization and a 2x margin.
+    /// Callers hold `lock`.
+    private func qualifiedCalibrationDisagrees(provider: String, now: Date) -> Bool {
+        guard let bootstrap = bestConditionedBootstrap(provider: provider, now: now),
+              compatibleBootstrap(bootstrap, for: provider),
+              bootstrap.accountAttributionSafe == true,
+              let scope = trackers[provider]?.currentScope,
+              scope.accountHash != nil,
+              let live = trackers[provider]?.latestCalibration(now: now),
+              live.dropPercentPoints >= 3,
+              let liveResetAt = live.resetAt,
+              abs(liveResetAt.timeIntervalSince(bootstrap.resetsAt))
+                < CodexWeeklyQuotaBootstrapScanner.anchorTolerance,
+              bootstrap.accountHash == scope.accountHash,
+              let bootstrapRatio = freshenedBootstrapRatio(provider: provider,
+                                                          bootstrap: bootstrap,
+                                                          now: now)
+                ?? bootstrap.calibratedPercentPointsPerDollar,
+              live.percentPointsPerDollar > 0 else { return false }
+        let intervalDollars = live.dropPercentPoints / live.percentPointsPerDollar
+        let predictedDrop = bootstrapRatio * intervalDollars
+        guard intervalDollars > 0, predictedDrop.isFinite else { return false }
+        let observedDrop = live.dropPercentPoints
+        return predictedDrop > 2 * (observedDrop + 1)
+            || predictedDrop < max(0, observedDrop - 1) / 2
+    }
+
     private struct CalibrationSelection {
         let ratio: Double
         let provenance: WeeklyQuotaCalibrationProvenance
@@ -1070,8 +1252,25 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     func attributionContext(provider: String, now: Date) -> WeeklyQuotaAttributionContext? {
         lock.lock(); defer { lock.unlock() }
         guard let selection = calibrationSelectionLocked(provider: provider, now: now),
-              provider != "codex" || selection.accountAttributionSafe,
+              provider != "codex"
+                || (selection.accountAttributionSafe
+                    && selection.provenance.origin != .live),
               let scope = trackers[provider]?.currentScope else { return nil }
+        let attributionRatio: Double
+        if provider == "codex" {
+            // The live ledger now includes accountless activity for a local
+            // Runway estimate. Freshening an account-safe bootstrap with that
+            // ledger must not promote those dollars into historical attribution.
+            guard let bootstrap = bestConditionedBootstrap(provider: provider, now: now),
+                  bootstrap.accountAttributionSafe == true,
+                  bootstrap.scannedAt == selection.provenance.scannedAt,
+                  let originalRatio = bootstrap.calibratedPercentPointsPerDollar else {
+                return nil
+            }
+            attributionRatio = originalRatio
+        } else {
+            attributionRatio = selection.ratio
+        }
         let latest = snapshots[provider]?.last.flatMap { snapshot in
             snapshot.provider == scope.provider
                 && snapshot.accountHash == scope.accountHash
@@ -1079,7 +1278,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 && snapshot.limitShape == scope.limitShape
                 && snapshot.priceRevision == scope.priceRevision ? snapshot : nil
         }
-        return WeeklyQuotaAttributionContext(percentPointsPerDollar: selection.ratio,
+        return WeeklyQuotaAttributionContext(percentPointsPerDollar: attributionRatio,
                                              scope: scope,
                                              latestSnapshot: latest,
                                              calibrationProvenance: selection.provenance)
@@ -1194,10 +1393,13 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// restart under the user and let the spinner run indefinitely in practice.
     func calibrationAbandoned(provider: String, now: Date) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        // Must consult the SAME selection the reader uses, or an incompatible
-        // source-family carry-over could suppress the waiting fallback while the
-        // attribution path correctly refuses to serve it.
-        if calibrationSelectionLocked(provider: provider, now: now) != nil { return false }
+        if provider == "codex" {
+            if runwayCalibrationLocked(provider: provider, now: now).state.canDisplayRate {
+                return false
+            }
+        } else if calibrationSelectionLocked(provider: provider, now: now) != nil {
+            return false
+        }
         // A scan still running WILL produce a number, so don't show "n/a" only to
         // contradict it seconds later. Bounded by `scanDeadline`: without that, a
         // stalled scan would pin the clock on screen forever, which is the exact

@@ -3518,6 +3518,27 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(identities.first?.displayName.hasPrefix("audit exported pricing"), true)
     }
 
+    func testRunwayScannerFindsNativeArchivedSessionOnce() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-runway-archive-\(UUID().uuidString)")
+        let sessions = home.appendingPathComponent("sessions", isDirectory: true)
+        let archive = home.appendingPathComponent("archived_sessions", isDirectory: true)
+        let now = Date()
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let log = archive.appendingPathComponent("rollout-archive-test.jsonl")
+        try """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"archive-test","cwd":"/tmp"}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """.write(to: log, atomically: true, encoding: .utf8)
+        let duplicate = sessions.appendingPathComponent(log.lastPathComponent)
+        try FileManager.default.copyItem(at: log, to: duplicate)
+        let scan = CodexRunwayRecentSessionScanner.scan(root: sessions, now: now)
+        XCTAssertTrue(scan.coverageComplete)
+        XCTAssertEqual(scan.identities.map(\.id), ["archive-test"])
+    }
+
     func testCodexRunwayRecentSessionScannerReportsTruncatedCoverage() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-scan-cap-\(UUID().uuidString)")
         let now = Date()
@@ -4036,6 +4057,17 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(row.displayName, "profile weekly runway")
         XCTAssertEqual(row.confidence, .direct)
         XCTAssertGreaterThan(row.displayRate, 0)
+
+        let unverifiedRequest = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [], now: now, maxRows: 4,
+            recentSessionsRoot: root,
+            weeklyCalibration: WeeklyRunwayCalibration(
+                ratio: 0.5, state: .accountUnverified, provenance: nil),
+            weeklyWindowAvailable: true)
+        let unverified = await CodexRunwaySnapshotLoader.snapshot(for: unverifiedRequest)
+        XCTAssertEqual(unverified?.rows.first { $0.id == "parent-session" }?.confidence,
+                       .unsupported)
+        XCTAssertEqual(unverified?.weeklyCalibrationState, .accountUnverified)
     }
 
     func testCodexRunwayRecentSessionScannerSkipsSetupContextForNames() throws {
@@ -5565,8 +5597,9 @@ final class CodexUsageParserTests: XCTestCase {
 
         let ambiguous = CodexRunwayTokenActivityParser.ledgerEventScan(
             identities: [unknown], expectedAccountHash: hash, now: now)
-        XCTAssertTrue(ambiguous.events.isEmpty)
-        XCTAssertFalse(ambiguous.coverageComplete)
+        XCTAssertEqual(ambiguous.events.map(\.logPath), unknown.logPaths)
+        XCTAssertTrue(ambiguous.coverageComplete,
+                      "accountless current activity may inform a local interval estimate")
     }
 
     /// Regression: image and tool-result records can be larger than the ordinary

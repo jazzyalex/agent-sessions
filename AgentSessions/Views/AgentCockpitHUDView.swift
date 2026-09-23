@@ -2800,16 +2800,16 @@ private struct HUDLimitsProviderEntry {
     let fiveHourProjectedRunoutAt: Date?
     let fiveHourProjectionObservedAt: Date?
     var fiveHourOnTrackObservedAt: Date? = nil
-    /// Aggregate token throughput (tk/h) for this provider's active sessions.
-    /// Shown on the 5h line when that window is dropped — an honest "burning"
-    /// signal in place of a fictitious run-out. Read by every HUD limits surface
-    /// (bar, rows panel, detail panel) so they stay consistent.
-    var aggregateTokensPerHour: Double? = nil
+    /// Unit-matched burn for the dropped 5h line, resolved from the same snapshot
+    /// as the session rows. nil when a complete rate cannot be shown.
+    var fiveHourBurnChip: String? = nil
     /// Adaptive weekly header payload, resolved from this provider's visible
     /// weekly snapshot by `QuotaMeterWeeklyHeaderResolver`. nil keeps the existing
     /// header. Carried on the entry because the resolver needs the snapshot, which
     /// only the rows panel has.
     var weeklyHeader: QuotaMeterWeeklyHeaderStatus? = nil
+    /// Carries the Runway evidence reason into the compact header tooltip.
+    var weeklyCalibrationState: WeeklyRunwayCalibrationState? = nil
     /// CLI auth status for this provider; when alarming, HUDLimitsBar swaps the
     /// meter text for an AuthRemediationBanner. Left nil by callers (e.g. the
     /// rows panel) that don't render the banner.
@@ -2934,9 +2934,8 @@ func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
         )
     }
 
-    // The memberwise init defaults `aggregateTokensPerHour` back to nil, so copy it
-    // explicitly — otherwise rebuilding the snapshot silently drops the "burning"
-    // figure the provider row reads.
+    // Rebuilding a snapshot resets its aggregate metadata. Preserve both the
+    // token burn and dollar completeness before the provider header reads it.
     // Appended, and `HUDRunwayPanel` additionally renders them below the "+N
     // sessions" summary. Array position here does not decide display order — the
     // panel partitions on `confidence == .cloud` — but appending keeps the local
@@ -2947,7 +2946,44 @@ func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
         burstSummary: snapshot.burstSummary
     )
     merged.aggregateTokensPerHour = snapshot.aggregateTokensPerHour
+    merged.dollarAggregateIncomplete = snapshot.dollarAggregateIncomplete
     return merged
+}
+
+/// The dropped 5h line has no quota deadline. Its burn chip must use the unit
+/// actually displayed by the drawer, including a snapshot-wide dollar fallback.
+enum QuotaMeterBurnChipResolver {
+    static func text(snapshot: CodexRunwaySnapshot?) -> String? {
+        guard let snapshot else { return nil }
+        switch snapshot.baseline.rateUnit {
+        case .tokensPerHour:
+            guard let rate = snapshot.aggregateTokensPerHour,
+                  rate.isFinite, rate > 0 else { return nil }
+            return formatTokenRatePerHour(rate)
+        case .dollarsPerHour:
+            guard !snapshot.dollarAggregateIncomplete else { return nil }
+            var total = 0.0
+            for row in snapshot.rows {
+                switch row.confidence {
+                case .direct, .mixed:
+                    total += row.displayRate
+                case .idle:
+                    continue
+                case .waiting, .unsupported, .cloud:
+                    return nil
+                }
+            }
+            if let overflow = snapshot.burstSummary {
+                guard !overflow.containsWaitingActiveRate,
+                      !overflow.containsUnavailableActiveRate else { return nil }
+                total += overflow.displayRate
+            }
+            guard total.isFinite, total > 0 else { return nil }
+            return RunwayTimeFormatting.rate(total, unit: .dollarsPerHour, confidence: .direct)
+        case .quotaMinutesPerHour, .weeklyPercentPerHour:
+            return nil
+        }
+    }
 }
 
 /// The aggregate weekly burn the adaptive Quota Meter header reports while the
@@ -3035,6 +3071,23 @@ enum QuotaMeterWeeklyHeaderStatus: Equatable {
 /// could be confidently wrong. nil is not an error: it means the row keeps the
 /// header it has always had.
 enum QuotaMeterWeeklyHeaderResolver {
+    static let localEstimateHelp = "Weekly burn estimated from account quota and local sessions, including archives. Concurrent work elsewhere may affect it; no ETA is shown."
+
+    static func canProjectETA(calibrationState: WeeklyRunwayCalibrationState?) -> Bool {
+        calibrationState != .localEstimate
+    }
+
+    static func unavailableHelp(calibrationState: WeeklyRunwayCalibrationState?) -> String? {
+        switch calibrationState {
+        case .accountUnverified:
+            return "Weekly burn unavailable: local activity cannot be matched to this Codex account."
+        case .inconsistent:
+            return "Weekly burn unavailable: recent account usage conflicts with the stored estimate."
+        default:
+            return nil
+        }
+    }
+
     static func status(isWeeklyLens: Bool,
                        weekStale: Bool,
                        fiveHourAbsent: Bool,
@@ -3453,9 +3506,10 @@ enum HUDRunwayRequestBuilder {
         // Resolve the user's preferred presentation against what this provider can
         // show (§5). The weekly window fields let weekly compute even while the 5h
         // window is present; `hasFiveHour` = the active window IS the 5h window.
-        // Weekly-window fields are only needed for the weekly presentation.
-        let weekResetAt = presentation == .weekly
-            ? UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now) : nil
+        // Keep the weekly anchor in every presentation: the activity ledger
+        // records each polling cycle, even while the user views $ or 5h.
+        let weekResetAt = UsageResetText.resetAnchorDate(
+            kind: "Wk", source: .codex, raw: weekResetText, now: now)
         let weeklyRunout = weekResetAt.flatMap { resetAt in
             weeklyBurnRateEstimate?.projectedRunout(
                 remainingPercent: weekRemainingPercent, resetAt: resetAt, now: now)
@@ -3504,8 +3558,8 @@ enum HUDRunwayRequestBuilder {
             expectedAccountHash: WeeklyQuotaCalibrationScope.hashAccount(
                 CodexCalibrationAccountScope.accountId(now: now)
             ),
-            weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
-                .percentPointsPerDollar(provider: "codex", now: now),
+            weeklyCalibration: WeeklyQuotaCalibrationStore.shared
+                .runwayCalibration(provider: "codex", now: now),
             weeklyWindowAvailable: weekResetAt != nil,
             weeklyCalibrationAbandoned: WeeklyQuotaCalibrationStore.shared
                 .calibrationAbandoned(provider: "codex", now: now)
@@ -3818,6 +3872,7 @@ private struct HUDLimitsRowsPanel: View {
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
         if providerShown(.codex) {
+            let codexWeeklySnapshot = weeklyHeaderSnapshot(for: .codex)
             out.append(HUDLimitsProviderEntry(
                 provider: .codex,
                 source: .codex,
@@ -3833,8 +3888,9 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
-                aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
-                weeklyHeader: QuotaMeterWeeklyHeaderResolver.status(
+                fiveHourBurnChip: QuotaMeterBurnChipResolver.text(snapshot: visibleRunwaySnapshot(for: .codex)),
+                weeklyHeader: codexWeeklySnapshot?.weeklyCalibrationState == .localEstimate
+                    ? nil : QuotaMeterWeeklyHeaderResolver.status(
                     isWeeklyLens: isWeeklyRunwayLens(
                         fiveAbsent: !codexUsageModel.hasFiveHourRateLimit,
                         weekAbsent: !codexUsageModel.hasWeekRateLimit
@@ -3844,8 +3900,9 @@ private struct HUDLimitsRowsPanel: View {
                     suspect: codexUsageModel.usageFormatSuspect,
                     remainingPercent: Double(codexUsageModel.weekRemainingPercent),
                     hasActiveSession: hasActiveRunwaySession(for: .codex),
-                    snapshot: weeklyHeaderSnapshot(for: .codex)
+                    snapshot: codexWeeklySnapshot
                 ),
+                weeklyCalibrationState: codexWeeklySnapshot?.weeklyCalibrationState,
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
                 reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption,
@@ -3865,7 +3922,7 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
-                aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
+                fiveHourBurnChip: QuotaMeterBurnChipResolver.text(snapshot: visibleRunwaySnapshot(for: .claude)),
                 weeklyHeader: QuotaMeterWeeklyHeaderResolver.status(
                     isWeeklyLens: isWeeklyRunwayLens(fiveAbsent: false, weekAbsent: false),
                     weekStale: isResetInfoUnavailable(raw: claudeUsageModel.weekAllModelsResetText),
@@ -4521,6 +4578,15 @@ private struct HUDRunwayPanel: View {
     /// same `displayRate` field regardless; this decides how it's read.
     private var rateUnit: RunwayRateUnit { snapshot.baseline.rateUnit }
 
+    private var weeklyCalibrationHelp: String {
+        if snapshot.weeklyCalibrationState == .localEstimate {
+            return QuotaMeterWeeklyHeaderResolver.localEstimateHelp
+        }
+        return QuotaMeterWeeklyHeaderResolver.unavailableHelp(
+            calibrationState: snapshot.weeklyCalibrationState)
+            ?? "Estimated weekly burn pace from the last five minutes of local activity."
+    }
+
     private var maxDisplayRate: Double {
         let rowMax = snapshot.rows.map(\.displayRate).max() ?? 0
         let summaryMax = snapshot.burstSummary?.displayRate ?? 0
@@ -4565,7 +4631,7 @@ private struct HUDRunwayPanel: View {
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(rateUnit == .weeklyPercentPerHour
-              ? "Estimated weekly burn pace from the last five minutes of local activity."
+              ? weeklyCalibrationHelp
               : "")
         .overlay(alignment: .top) {
             Rectangle()
@@ -4596,8 +4662,9 @@ private struct HUDRunwayPanel: View {
             RunwayMeasuringClock(size: runwayFontSize, reduceMotion: reduceMotion)
                 .accessibilityLabel("Measuring weekly burn")
         } else {
-            Text(RunwayTimeFormatting.rate(quota, unit: rateUnit, confidence: confidence))
-                .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
+            Text(RunwayTimeFormatting.rate(
+                quota, unit: rateUnit, confidence: confidence))
+                .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : Color.secondary)
         }
     }
 
@@ -4827,7 +4894,7 @@ private struct RunwayMeasuringClock: View {
     }
 }
 
-private enum RunwayTimeFormatting {
+enum RunwayTimeFormatting {
     /// Unit-aware runway rate text. The 5h yardstick reads "137m/h"; when the 5h
     /// window is dropped the runway reports raw token throughput ("412K tk/h")
     /// instead, so "m/h" never means two things across providers.
@@ -5416,11 +5483,10 @@ private struct HUDLimitsProviderText: View {
         )
     }
 
-    /// Honest "burning" indicator for a dropped 5h window: token throughput, not a
-    /// fictitious run-out time. Only while a session is actively burning.
+    /// The selected unit's current burn, with no invented run-out time.
     private var fiveHourBurnChip: String? {
-        guard fiveAbsent, let rate = entry.aggregateTokensPerHour, rate > 0 else { return nil }
-        return formatTokenRatePerHour(rate)
+        guard fiveAbsent else { return nil }
+        return entry.fiveHourBurnChip
     }
 
     // A fresh measured burn that projects run-out at/after reset: working, but
@@ -5546,11 +5612,16 @@ private struct HUDLimitsProviderText: View {
     private func weeklyStatusHelp(_ status: QuotaMeterWeeklyHeaderStatus) -> String {
         switch status {
         case .estimate:
+            if entry.weeklyCalibrationState == .localEstimate {
+                return QuotaMeterWeeklyHeaderResolver.localEstimateHelp
+            }
             return "Combined weekly burn across every measurable active session, with time left at that pace."
         case .measuring:
             return "Measuring an active session before the combined weekly burn and ETA can be calculated."
         case .unavailable:
-            return "Combined weekly burn is unavailable while an active session has no measurable local rate."
+            return QuotaMeterWeeklyHeaderResolver.unavailableHelp(
+                calibrationState: entry.weeklyCalibrationState)
+                ?? "Combined weekly burn is unavailable while an active session has no measurable local rate."
         case .quiet:
             return "No measurable weekly burn is active right now."
         case .exhausted:
@@ -5597,13 +5668,21 @@ private struct HUDLimitsProviderText: View {
                 // The drawer's own total, in the same unit, so the header answers
                 // "how fast is the week going" with one number instead of four rows.
                 Text(header.aggregateText)
-                    .foregroundStyle(hudProjectionColor(colorScheme))
+                    .foregroundStyle(entry.weeklyCalibrationState == .localEstimate
+                                     ? Color.secondary : hudProjectionColor(colorScheme))
                     .frame(width: HUDLimitsColumnLayout.WeeklyLens.aggregateWidth * scale, alignment: .leading)
 
                 // Nil when the aggregate outlasts the reset; the token then draws
                 // the existing on-track signal in this same slot.
-                HUDLimitsProjectionToken(projection: header.runoutText(now: now), idleMarker: true, onTrack: true)
-                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+                if !QuotaMeterWeeklyHeaderResolver.canProjectETA(
+                    calibrationState: entry.weeklyCalibrationState) {
+                    Text(verbatim: "ETA n/a")
+                        .foregroundStyle(.secondary)
+                        .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+                } else {
+                    HUDLimitsProjectionToken(projection: header.runoutText(now: now), idleMarker: true, onTrack: true)
+                        .frame(width: HUDLimitsColumnLayout.WeeklyLens.runoutWidth * scale, alignment: .leading)
+                }
             case .measuring:
                 Text(verbatim: "measuring")
                     .foregroundStyle(.secondary)

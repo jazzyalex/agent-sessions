@@ -669,14 +669,13 @@ final class CodexUsageModel: ObservableObject {
                                                             now: observedAt),
            weekResetAt > observedAt,
            let weeklyAccountHash {
-            // Historical bootstrap: derive the conversion from the activity already
-            // on disk for this weekly window, so `Wk` shows a number seconds after
-            // launch instead of waiting hours for a 1pp tick. Once per anchor, off
-            // the main thread.
+            // Historical bootstrap remains available for diagnostics and guarded
+            // attribution. Runway's displayed rate uses an observed live interval.
+            // Scan once per anchor off the main thread.
             CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource?.rawValue ?? "none")")
             WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
                 provider: "codex",
-                root: CodexWeeklyQuotaBootstrapScanner.defaultSessionsRoot,
+                root: CodexRunwayRecentSessionScanner.defaultRoot(),
                 resetsAt: weekResetAt,
                 windowMinutes: 10080,
                 usedPercentPoints: Double(100 - s.weekRemainingPercent),
