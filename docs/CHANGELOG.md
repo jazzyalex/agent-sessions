@@ -5,20 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- **Cursor ACP-persisted sessions are now discoverable and searchable.** Agent Sessions reads the supported SQLite/protobuf turn graph, preserves ACP provenance through reload and local archives, rejects malformed or symlink-escaped stores, and keeps normal Cursor CLI resume unavailable for this persistence surface.
+- **Continue existing Codex Desktop conversations.** Find local desktop sessions in history and open an eligible conversation in Codex Desktop from the row or toolbar. Work, desktop, CLI, and VS Code badges remain distinct; side chats keep their relationship labels. The action needs a valid local thread ID and the same Codex session store.
+- **Search supported Cursor ACP conversations.** Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable.
+
+### Improvements
+- **Weekly Quota Meter rates use more of your local history.** Calibration includes native archived Codex sessions and refines estimates as quota movement is observed. Active sessions show plain `%/h` rates; local estimates explain their limits and do not claim a run-out time.
+- **The dollar lens keeps the same unit in its header and rows.** When the five-hour limit is absent, the header totals priced active sessions in dollars per hour. It hides the total if an active session cannot be priced.
+- **API-equivalent estimates cover current models.** Quota Meter includes published GPT-6 Sol and Luna rates and Claude Opus 5.5 pricing, including supported cache, speed, and inference-region variants.
 
 ### Bug Fixes
-- Quota Meter's dropped five-hour header now uses dollars per hour when the dollar lens is selected, summing the priced session rows and overflow. It withholds the total when an active session cannot be priced.
-- Weekly Runway restores immediate `%/h` estimates from local history, now including native archived sessions, and refines the conversion from observed quota movement. It keeps collecting while another lens is selected, withholds ETA because concurrent work elsewhere cannot be ruled out, and explains the estimate in the selected language.
-- Claude Opus 5.5 sessions now use its published API-equivalent rates, including the lower cache-read price, fast mode, and US-only inference.
-- **Transcript jump arrows now work in Rich mode.** Block transcripts report top and bottom proximity like plain and terminal transcripts, and the jump-to-latest intent is consumed by the block list before the down arrow is hidden.
-- Restored Quota Meter's API-equivalent dollar-per-hour and weekly burn estimates for GPT-6 Sol and Luna sessions using their published model prices.
-- Weekly quota calibration now accepts quota-only notices and unchanged token counters without a rate-limit anchor, while still rejecting unanchored token growth.
-- Codex session rows retain their producer-surface badges (**work**, **desk**, **cli**, and **vsc**) alongside side-chat relationship labels and live status indicators. The desktop action is labeled **Continue in Codex Desktop** in the context menu and toolbar, with matching English and Simplified Chinese copy.
-- Added **Continue in Codex Desktop** to the session context menu and toolbar. The action navigates to the existing local conversation by its thread ID, without requiring a Codex CLI installation. The app must use the same session store; side chats and records without a valid thread ID are excluded. A conversation owned by another running client remains subject to Codex's writer lock.
-- Fixed missing working indicators for local Codex App tasks. Writable rollouts held by the desktop backend are tracked individually; an unfinished turn shows the existing green working indicator. Completed, interrupted, and unknown-state desktop threads have no live marker: retained file handles do not establish which conversation is visible. Read-only history files are excluded, and CLI working/idle indicators keep their existing behavior.
+- **Transcript jump arrows work in Rich mode.** Scrolling updates the up and down controls, and the down arrow reaches the latest row before it disappears.
+- **Codex Desktop working indicators follow the active task.** Finished or unknown-state threads no longer inherit a working marker from a retained desktop file handle; CLI status is unchanged.
 
 ## [5.5] - 2026-09-19
+
+### TL;DR
+- Browse and search supported DeepSeek Harness histories locally.
+- Follow Codex weekly quota from the configured sessions root with clearer reset and session-runway status.
 
 ### Features
 - **Browse and search DeepSeek Harness history locally.** The read-only source supports v0-v3 plain JSONL and independently framed, checksum-validated Zstandard generations, discovers immutable directory generations, and selects the highest supported generation. A checked-in 58-event v3 catalog gives every known event an explicit tested presentation disposition; unknown required events and failed historical migrations fail closed. Explicit DSH subagents retain hierarchy, while seeded forks remain roots with their fork provenance. Recovered prefixes, incomplete tails, and corrupt artifacts are not published. DSH archive state is ignored, and the source exposes no DSH resume, live activity, quota/cost telemetry, attachment dereferencing, or archive-state mirroring. The decoder uses the vendored official Zstandard 1.5.7 decompression/common sources documented with their BSD license and archive checksum in `ThirdParty/DSHZstd/README.md`. Compatibility evidence comes from checked-in sanitized fixtures, the pinned event catalog, and a local manual UI smoke test; broad real-world coverage remains unverified.

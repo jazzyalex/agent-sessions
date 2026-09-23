@@ -30,21 +30,27 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
-- **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost.
+- **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
-## What's New in 5.4
+## What's New in 5.5.1
 
-- **Cline CLI and Cline Desktop support.** Browse and search local prompts, responses, thinking, and tool activity from both Cline surfaces, with clear origin labels and Cline-specific Settings controls.
-- **More reliable session retrieval.** Project filtering distinguishes same-named clones, active searches refresh cleanly, displayed titles remain searchable, and cache hydration preserves confirmed sessions when a source is temporarily unavailable.
-- **Clearer session titles.** Claude, OpenClaw, OpenCode, and Droid keep recognizable source-aware titles after full transcript loading and search prewarming.
+- **Open existing Codex Desktop conversations.** Find a local desktop session in your history and continue it in Codex Desktop from its row or toolbar action. Surface badges distinguish work, desktop, CLI, and VS Code sessions.
+- **Search more Cursor history.** Agent Sessions reads supported ACP-persisted Cursor conversations from local SQLite/protobuf stores. This surface is for browsing and search; CLI resume remains unavailable.
+- **Weekly Quota Meter estimates.** Active sessions show weekly burn rates from local history, including archived Codex sessions. The dollar lens keeps its header in dollars per hour, and weekly local estimates do not claim a run-out time.
 
 ## What's New in 5.5
 
 - **DeepSeek Harness history browsing.** The local, read-only integration discovers immutable session directories, selects the highest supported generation, and browses/searches supported v0-v3 plain JSONL and independently framed, checksum-validated Zstandard histories. Incomplete or corrupt artifacts stay invisible. Compatibility evidence comes from checked-in sanitized fixtures, the pinned event catalog, and a local manual UI smoke test; broad real-world coverage remains unverified.
 - **A clearer weekly Session Runway.** The Quota Meter combines measurable active-session burn with an estimate of time left at that pace, keeps the weekly reset visible, and reports measuring, unavailable, or exhausted states instead of inventing a value.
 - **Codex runway follows the configured sessions root.** The meter honors the Preferences override, process-inherited `CODEX_HOME`, and the default path, with a GUI-launch caveat for shell-only environment settings.
+
+## What's New in 5.4
+
+- **Cline CLI and Cline Desktop support.** Browse and search local prompts, responses, thinking, and tool activity from both Cline surfaces, with clear origin labels and Cline-specific Settings controls.
+- **More reliable session retrieval.** Project filtering distinguishes same-named clones, active searches refresh cleanly, displayed titles remain searchable, and cache hydration preserves confirmed sessions when a source is temporarily unavailable.
+- **Clearer session titles.** Claude, OpenClaw, OpenCode, and Droid keep recognizable source-aware titles after full transcript loading and search prewarming.
 
 ## Supported sources
 
