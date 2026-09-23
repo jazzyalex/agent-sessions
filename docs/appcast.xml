@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.5</title>
-            <pubDate>Sat, 19 Sep 2026 16:24:30 -0700</pubDate>
+            <title>5.5.1</title>
+            <pubDate>Wed, 23 Sep 2026 00:28:35 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,26 +27,35 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.5</h2>
+<h2>What&#x27;s New in 5.5.1</h2>
 <h3>Features</h3>
 <ul>
-<li><strong>Browse and search DeepSeek Harness history locally.</strong> The read-only source supports v0-v3 plain JSONL and independently framed, checksum-validated Zstandard generations, discovers immutable directory generations, and selects the highest supported generation. A checked-in 58-event v3 catalog gives every known event an explicit tested presentation disposition; unknown required events and failed historical migrations fail closed. Explicit DSH subagents retain hierarchy, while seeded forks remain roots with their fork provenance. Recovered prefixes, incomplete tails, and corrupt artifacts are not published. DSH archive state is ignored, and the source exposes no DSH resume, live activity, quota/cost telemetry, attachment dereferencing, or archive-state mirroring. The decoder uses the vendored official Zstandard 1.5.7 decompression/common sources documented with their BSD license and archive checksum in <code>ThirdParty/DSHZstd/README.md</code>. Compatibility evidence comes from checked-in sanitized fixtures, the pinned event catalog, and a local manual UI smoke test; broad real-world coverage remains unverified.</li>
+<li><strong>Continue existing Codex Desktop conversations.</strong> Find local desktop sessions in history and open an eligible conversation in Codex Desktop from the row or toolbar. Work, desktop, CLI, and VS Code badges remain distinct; side chats keep their relationship labels. The action needs a valid local thread ID and the same Codex session store.</li>
+<li><strong>Search supported Cursor ACP conversations.</strong> Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li><strong>Quota Meter scans Codex sessions from the configured root.</strong> Runway discovery now follows the same <code>SessionsRootOverride</code>, process-inherited <code>CODEX_HOME</code>, and default-path resolution as the session list instead of assuming <code>~/.codex/sessions</code>. For a GUI launch that does not inherit a shell-only <code>CODEX_HOME</code>, use the Codex sessions-directory override in Preferences.</li>
-<li><strong>DeepSeek Harness histories retain their intended boundaries.</strong> Seeded v0/v1 migrations carry the rewritten seed boundary forward; Saved archives cannot regress to an older generation when re-starred. Injected plugin context stays out of search, and repaired historical turns no longer show a false trailing interruption.</li>
-<li><strong>Large session libraries avoid redundant refresh work.</strong> Live-presence lookup caching now retains a bounded large-library working set, and refresh completion no longer rebuilds the session table a second time after the published rows are already applied.</li>
-<li><strong>Quota Meter&#x27;s weekly lens now shows the combined burn rate and time left at that pace.</strong> The compact header keeps the weekly reset visible, separates hour and minute units for readability, summarizes projections longer than one day as a whole-hour lower bound, and uses <code>∞</code> consistently when Codex has no five-hour limit. Active rates still report measuring, unavailable, or exhausted states; when no session is active, the rate and ETA area stays empty instead of showing a meaningless placeholder.</li>
-<li><strong>Quota Meter values have more breathing room.</strong> The compact header now clearly separates the remaining weekly percentage from its adjacent burn rate instead of letting values such as <code>95%</code> and <code>4.9%/h</code> run together.</li>
+<li><strong>Weekly Quota Meter rates use more of your local history.</strong> Calibration includes native archived Codex sessions and refines estimates as quota movement is observed. Active sessions show plain <code>%/h</code> rates; local estimates explain their limits and do not claim a run-out time.</li>
+<li><strong>The dollar lens keeps the same unit in its header and rows.</strong> When the five-hour limit is absent, the header totals priced active sessions in dollars per hour. It hides the total if an active session cannot be priced.</li>
+<li><strong>API-equivalent estimates cover current models.</strong> Quota Meter includes published GPT-6 Sol and Luna rates and Claude Opus 5.5 pricing, including supported cache, speed, and inference-region variants.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5</a></p>
+<h3>Bug Fixes</h3>
+<ul>
+<li><strong>Transcript jump arrows work in Rich mode.</strong> Scrolling updates the up and down controls, and the down arrow reaches the latest row before it disappears.</li>
+<li><strong>Codex Desktop working indicators follow the active task.</strong> Finished or unknown-state threads no longer inherit a working marker from a retained desktop file handle; CLI status is unchanged.</li>
+</ul>
+<h3>Reminder: What You Got in 5.5</h3>
+<ul>
+<li>Browse and search supported DeepSeek Harness histories locally.</li>
+<li>Follow Codex weekly quota from the configured sessions root with clearer reset and session-runway status.</li>
+</ul>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>76</sparkle:version>
-            <sparkle:shortVersionString>5.5</sparkle:shortVersionString>
+            <sparkle:version>77</sparkle:version>
+            <sparkle:shortVersionString>5.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5/AgentSessions-5.5.dmg" length="26946632" type="application/octet-stream" sparkle:edSignature="qO43XP7H+U5C4vRwaAnjXn569Av/sQxY3OMMg/w+wdGmNRuPuEbdzF7mHrcGt02TNVu7W+pQwHg5Uc7tCdejCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg" length="27489588" type="application/octet-stream" sparkle:edSignature="NKEJ7DVl36BofWrxWj/zHk/Sb4p9RlyK4FJWomU9TukTloUqIkOIokDf90xAhCFbzsfA9Wn/cjv/P9MUKMojCQ=="/>
         </item>
     </channel>
 </rss>
