@@ -36,6 +36,14 @@ actions. `Marketing/` is gitignored and local to this machine.
 - If you can't build in your environment, say exactly why and list the file:line
   references you did verify.
 
+### Oracle reviews
+- Use Oracle only when the owner explicitly asks for **Oracle** by name in the
+  current request. A request for a review, adversarial review, or independent
+  review does not authorize an Oracle run.
+- Do not infer Oracle authorization from earlier runs, an available skill, or
+  instructions that describe how to run Oracle. Review directly unless the
+  owner explicitly requests another reviewer or tool.
+
 **When a build is mandatory before presenting:** you added/moved/renamed any Swift file;
 changed more than ~40 Swift lines or touched two or more top-level areas (say, Views +
 Services); touched concurrency (actors, Task, async/await); changed window/toolbar/layout
