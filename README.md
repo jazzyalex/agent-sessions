@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5/AgentSessions-5.5.dmg"><b>Download Agent Sessions 5.5</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg"><b>Download Agent Sessions 5.5.1</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -112,7 +112,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5/AgentSessions-5.5.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.5.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
