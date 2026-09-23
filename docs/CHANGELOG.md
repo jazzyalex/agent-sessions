@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - **Cursor ACP-persisted sessions are now discoverable and searchable.** Agent Sessions reads the supported SQLite/protobuf turn graph, preserves ACP provenance through reload and local archives, rejects malformed or symlink-escaped stores, and keeps normal Cursor CLI resume unavailable for this persistence surface.
 
 ### Bug Fixes
+- Claude Opus 5.5 sessions now use its published API-equivalent rates, including the lower cache-read price, fast mode, and US-only inference.
 - **Transcript jump arrows now work in Rich mode.** Block transcripts report top and bottom proximity like plain and terminal transcripts, and the jump-to-latest intent is consumed by the block list before the down arrow is hidden.
 - Restored Quota Meter's API-equivalent dollar-per-hour and weekly burn estimates for GPT-6 Sol and Luna sessions using their published model prices.
 - Weekly quota calibration now accepts quota-only notices and unchanged token counters without a rate-limit anchor, while still rejecting unanchored token growth.

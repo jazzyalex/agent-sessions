@@ -241,7 +241,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     private var _revision = 0
     private var _manifestFingerprint = ""
     private var lastFetchAt: Date?
-    /// `updated` of the table currently in `models`. ISO `yyyy-MM-dd` sorts
+    /// `updated` of the table currently in `models`. UTC ISO dates sort
     /// lexicographically, so a plain string compare is a correct date compare.
     private var loadedUpdated: String = ""
 
@@ -479,10 +479,9 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// (2× input). GPT cache-write columns are populated only where the provider
     /// publishes a write rate; a positive unpriced write otherwise fails closed.
     ///
-    /// `fast` is Anthropic's fast mode, a research preview on Opus 5 and Opus 4.8
-    /// only, published as $10/$50 per MTok. Its cache rates are derived off that
-    /// $10 fast input base (0.1× read, 1.25× 5m write, 2× 1h write), which is how the
-    /// multipliers are defined; only the $10/$50 pair is documented directly. The
+    /// `fast` is Anthropic's fast mode, a research preview on Opus 5.5, 5, and 4.8.
+    /// Opus 5.5 is $8/$40 per MTok with a 0.05× cache read; 5 and 4.8 are
+    /// $10/$50 with a 0.1× read. Cache writes are 1.25×/2× the fast input rate. The
     /// generic `claude-opus` key deliberately has NO fast set, so an Opus 4.6/4.7
     /// record that somehow reported `speed:"fast"` drops out of `$` instead of being
     /// billed at double. Sonnet 5's $2/$10 price is permanent; the generic Sonnet key
@@ -490,9 +489,11 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-09-22",
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-09-22 from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Fable and Mythos 5.1 cache reads are $0.25/MTok. Astra, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "updated": "2026-09-23",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-09-23 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Fable and Mythos 5.1 cache reads are $0.25/MTok. Astra, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
+        "claude-opus-5-5": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 8.0, "inferenceGeoUSMultiplier": 1.1,
+                            "fast": { "inputPerMTok": 8.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 40.0, "cacheWritePerMTok": 10.0, "cacheWrite1hPerMTok": 16.0 } },
         "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1,
                              "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
         "claude-opus-4-8": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0, "inferenceGeoUSMultiplier": 1.1,

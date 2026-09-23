@@ -4690,6 +4690,34 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(t.price(forModel: nil))
     }
 
+    func testOpus55PricingUsesPublishedCacheAndFastRates() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        let price = try XCTUnwrap(table.price(forModel: "claude-opus-5-5"))
+        XCTAssertEqual(table.price(forModel: "claude-opus-5-5-20260922"), price)
+        XCTAssertNil(table.price(forModel: "claude-opus-5-6"))
+        XCTAssertNil(table.price(forModel: "claude-opus-5-5-preview"))
+
+        let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 900_000))
+        XCTAssertEqual(standard.inputPerMTok, 4)
+        XCTAssertEqual(standard.cachedInputPerMTok, 0.2)
+        XCTAssertEqual(standard.outputPerMTok, 20)
+        XCTAssertEqual(standard.cacheWritePerMTok, 5)
+        XCTAssertEqual(standard.cacheWrite1hPerMTok, 8)
+        XCTAssertEqual(standard.dollars(input: 1_000_000, cachedInput: 1_000_000,
+                                        output: 1_000_000, cacheWrite5m: 1_000_000,
+                                        cacheWrite1h: 1_000_000), 37.2)
+
+        let fast = try XCTUnwrap(price.rates(for: .fast, inferenceGeo: "global"))
+        XCTAssertEqual(fast.inputPerMTok, 8)
+        XCTAssertEqual(fast.cachedInputPerMTok, 0.4)
+        XCTAssertEqual(fast.outputPerMTok, 40)
+        XCTAssertEqual(fast.cacheWritePerMTok, 10)
+        XCTAssertEqual(fast.cacheWrite1hPerMTok, 16)
+        let us = try XCTUnwrap(price.rates(for: .fast, inferenceGeo: "us"))
+        XCTAssertEqual(us.cachedInputPerMTok, 0.44, accuracy: 0.000_001)
+        XCTAssertEqual(us.outputPerMTok, 44, accuracy: 0.000_001)
+    }
+
     func testClaudeUSInferenceGeoMultipliesEveryPublishedRate() throws {
         let price = try XCTUnwrap(RunwayPriceTable.makeForTesting()
             .price(forModel: "claude-opus-5"))
