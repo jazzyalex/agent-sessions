@@ -57,6 +57,12 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         """
     }
 
+    private func unanchoredTurn(output: Int, at: Date) -> String {
+        """
+        {"timestamp":"\(ISO8601DateFormatter().string(from: at))","type":"token_count","payload":{"info":{"total_token_usage":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":\(output),"total_tokens":\(output)}}}}
+        """
+    }
+
     private func accountLine(_ rawAccountID: String) -> String {
         "{\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(rawAccountID)\"}}"
     }
@@ -179,6 +185,36 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertEqual(result?.dollars ?? 0, 20.0, accuracy: 0.001)
         XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
         XCTAssertEqual(result?.percentPointsPerDollar ?? 0, 5.0 / 20.0, accuracy: 0.0001)
+    }
+
+    func testQuotaOnlyAndUnanchoredUnchangedCountersDoNotBlockBootstrap() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let quotaOnly = """
+        {"timestamp":"\(ISO8601DateFormatter().string(from: at))","type":"token_count","payload":{"info":null,"rate_limits":{"primary":{"window_minutes":10080,"resets_at":\(anchor.timeIntervalSince1970)}}}}
+        """
+        try write([
+            quotaOnly,
+            modelLine("gpt-5.6", at: at),
+            turn(output: 1_000_000, resetsAt: anchor, at: at.addingTimeInterval(1)),
+            unanchoredTurn(output: 1_000_000, at: at.addingTimeInterval(2)),
+            turn(output: 2_000_000, lastOutput: 1_000_000,
+                 resetsAt: anchor, at: at.addingTimeInterval(3))
+        ], name: "zero-spend-heartbeats.jsonl")
+
+        XCTAssertEqual(scan()?.dollars ?? 0, 40, accuracy: 0.001)
+    }
+
+    func testUnanchoredTokenGrowthStillRejectsBootstrap() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([
+            modelLine("gpt-5.6", at: at),
+            turn(output: 1_000_000, resetsAt: anchor, at: at),
+            unanchoredTurn(output: 1_500_000, at: at.addingTimeInterval(1)),
+            turn(output: 2_000_000, lastOutput: 500_000,
+                 resetsAt: anchor, at: at.addingTimeInterval(2))
+        ], name: "unanchored-spend.jsonl")
+
+        XCTAssertNil(scan(), "unknown-window spend cannot enter a weekly calibration")
     }
 
     func testCumulativeCountersRemainAuthorityWhenLastUsageDisagrees() throws {

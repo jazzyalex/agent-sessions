@@ -1175,6 +1175,12 @@ struct UnifiedSessionsView: View {
 			                Divider()
 	                // Derive Antigravity conversation ID once to avoid repeated disk reads
 	                let antigravityCLISessionID = (s.source == .antigravity) ? AntigravitySessionIDHelper.deriveSessionID(from: s) : nil
+                    if s.source == .codex, !s.isSideChat {
+                        Button("Continue in Codex Desktop") { openInCodexApp(s) }
+                            .disabled(CodexResumeCoordinator.appSessionID(for: s) == nil)
+                            .help("Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage.")
+                        Divider()
+                    }
 	                if canResumeSession(s, antigravityCLISessionID: antigravityCLISessionID) {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
@@ -1981,6 +1987,19 @@ struct UnifiedSessionsView: View {
             .keyboardShortcut("r", modifiers: [.command, .control])
             .disabled(!canResumeSelectedSession)
             .accessibilityLabel(Text("Resume"))
+
+            if let s = selectedSession, s.source == .codex, !s.isSideChat {
+                ToolbarIconButton(
+                    help: String(localized: "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage.",
+                                 comment: "Tooltip for opening the selected local thread in the separate Codex desktop app.")
+                ) { _ in
+                    ToolbarIcon(systemName: "macwindow")
+                } action: {
+                    openInCodexApp(s)
+                }
+                .disabled(CodexResumeCoordinator.appSessionID(for: s) == nil)
+                .accessibilityLabel(Text("Continue in Codex Desktop"))
+            }
 
             ToolbarIconButton(help: imagesToolbarHelpText) { _ in
                 ToolbarIcon(systemName: "photo.on.rectangle")
@@ -3411,6 +3430,18 @@ struct UnifiedSessionsView: View {
 
     private func canResumeCodexInCLI(_ session: Session) -> Bool {
         !session.isSideChat && session.codexSurface != .vscode
+    }
+
+    private func openInCodexApp(_ session: Session) {
+        let presentingWindow = NSApp.keyWindow ?? NSApp.mainWindow
+        Task { @MainActor in
+            switch await CodexResumeCoordinator.shared.openInApp(session: session) {
+            case .launched:
+                break
+            case .needsConfiguration(let message), .failure(let message):
+                showActionAlert(message: message, in: presentingWindow)
+            }
+        }
     }
 
     private func resume(_ s: Session) {

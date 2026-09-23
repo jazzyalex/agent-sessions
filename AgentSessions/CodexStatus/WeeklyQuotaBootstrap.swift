@@ -422,10 +422,19 @@ enum CodexWeeklyQuotaBootstrapScanner {
                 break
             }
         }
+        // Codex also emits quota-only token_count records with info:null. They
+        // contain no token evidence, so they must not invalidate a priced scan.
+        if payload["info"] is NSNull,
+           payload["rate_limits"] is [String: Any],
+           payload["total_token_usage"] == nil,
+           payload["last_token_usage"] == nil {
+            return true
+        }
         let info = (payload["info"] as? [String: Any]) ?? payload
         guard let total = info["total_token_usage"] as? [String: Any],
               let timestamp = timestamp(object: object, payload: payload) else { return false }
         let sample = CumulativeCounters.Sample(usage: total)
+        let previousTotal = cumulative.lastTotal
         if cumulative.isReset(by: sample) { cumulative = CumulativeCounters() }
         var delta = cumulative.advance(to: sample)
         if let last = info["last_token_usage"] as? [String: Any] {
@@ -446,6 +455,14 @@ enum CodexWeeklyQuotaBootstrapScanner {
         // the quota observation cannot enter this denominator. Normalization
         // still advanced above so a later matching record cannot import it.
         if let a = currentAnchor { seenAnchors.insert(Int(a.timeIntervalSince1970)) }
+        if currentAnchor == nil {
+            previousTokenAnchor = nil
+            // A resumed session can repeat unchanged cumulative counters before
+            // its next quota-bearing record. No spend is lost by skipping that
+            // heartbeat. Any unanchored growth still invalidates the scan.
+            return delta.topLine == 0 && delta.reasoning == 0
+                && sample.total == previousTotal
+        }
         guard let anchor = currentAnchor,
               abs(anchor.timeIntervalSince(resetsAt)) < anchorTolerance,
               timestamp >= windowStart,

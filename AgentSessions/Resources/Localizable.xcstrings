@@ -1,6 +1,91 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A valid Codex session ID is required to continue this session in Codex Desktop.": {
+      "comment": "Error when a local Codex thread has no valid UUID for a desktop deep link.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A valid Codex session ID is required to continue this session in Codex Desktop."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要有效的 Codex 会话 ID，才能在 Codex Desktop 中继续此会话。"
+          }
+        }
+      }
+    },
+    "Codex Desktop is not installed. Install it, then try continuing this session again.": {
+      "comment": "Desktop app launch error; installing the Codex CLI alone is not sufficient.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex Desktop is not installed. Install it, then try continuing this session again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未安装 Codex Desktop。请安装后重试。"
+          }
+        }
+      }
+    },
+    "The session log could not be found on disk.": {
+      "comment": "Error when opening a session whose local log was removed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session log could not be found on disk."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁盘上找不到此会话的日志。"
+          }
+        }
+      }
+    },
+    "Continue in Codex Desktop": {
+      "comment": "Action to open a local thread in the separate Codex desktop app.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue in Codex Desktop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Codex Desktop 中继续"
+          }
+        }
+      }
+    },
+    "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage.": {
+      "comment": "Tooltip for opening the selected local thread in the separate Codex desktop app.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue this session in the local Codex Desktop. Codex Desktop must use the same session storage."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在本机的 Codex Desktop 中继续此会话。Codex Desktop 须使用相同的会话存储位置。"
+          }
+        }
+      }
+    },
     "<1%": {
       "comment": "Small token-share percentage shown when the value is below one percent.",
       "localizations": {
