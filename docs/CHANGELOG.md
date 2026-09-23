@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Restored Quota Meter's API-equivalent dollar-per-hour and weekly burn estimates for GPT-6 Sol and Luna sessions using their published model prices.
+- Weekly quota calibration now accepts quota-only notices and unchanged token counters without a rate-limit anchor, while still rejecting unanchored token growth.
 - Codex session rows retain their producer-surface badges (**work**, **desk**, **cli**, and **vsc**) alongside side-chat relationship labels and live status indicators. The desktop action is labeled **Continue in Codex Desktop** in the context menu and toolbar, with matching English and Simplified Chinese copy.
 - Added **Continue in Codex Desktop** to the session context menu and toolbar. The action navigates to the existing local conversation by its thread ID, without requiring a Codex CLI installation. The app must use the same session store; side chats and records without a valid thread ID are excluded. A conversation owned by another running client remains subject to Codex's writer lock.
 - Fixed missing working indicators for local Codex App tasks. Writable rollouts held by the desktop backend are tracked individually; an unfinished turn shows the existing green working indicator. Completed, interrupted, and unknown-state desktop threads have no live marker: retained file handles do not establish which conversation is visible. Read-only history files are excluded, and CLI working/idle indicators keep their existing behavior.

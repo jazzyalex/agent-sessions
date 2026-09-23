@@ -4620,6 +4620,36 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(table.price(forModel: "gpt-6-astra"), price)
     }
 
+    func testGPT6SolAndLunaRunwayPricing() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        for (model, input, cached, output, write, expectedPerHour) in [
+            ("gpt-6-sol", 2.0, 0.2, 10.0, 2.5, 0.504),
+            ("gpt-6-luna", 0.1, 0.01, 0.5, 0.125, 0.0252)
+        ] {
+            let price = try XCTUnwrap(table.price(forModel: model))
+            XCTAssertEqual(table.price(forModel: model + "-2026-09-22"), price)
+            let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))
+            XCTAssertEqual(standard.inputPerMTok, input)
+            XCTAssertEqual(standard.cachedInputPerMTok, cached)
+            XCTAssertEqual(standard.outputPerMTok, output)
+            XCTAssertEqual(try XCTUnwrap(standard.cacheWritePerMTok), write)
+            let fastLong = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_001))
+            XCTAssertEqual(fastLong.inputPerMTok, input * 4)
+            XCTAssertEqual(fastLong.cachedInputPerMTok, cached * 4)
+            XCTAssertEqual(fastLong.outputPerMTok, output * 3)
+            XCTAssertEqual(try XCTUnwrap(fastLong.cacheWritePerMTok), write * 4)
+            let now = Date(timeIntervalSince1970: 2_000_000)
+            let activity = RunwaySessionActivity(
+                identity: .init(id: model, displayName: model, isGoal: false, logPaths: ["/" + model]),
+                tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+                inputPerSecond: 10, cachedInputPerSecond: 100, outputPerSecond: 10,
+                modelSlug: model, contextInputTokens: 200_000)
+            XCTAssertEqual(try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(
+                for: activity, priceTable: table)), expectedPerHour, accuracy: 0.000_001)
+        }
+        XCTAssertNil(table.price(forModel: "gpt-6-luna-preview"))
+    }
+
     func testPriceTableBundledAndPrefixMatch() {
         let t = RunwayPriceTable.makeForTesting()
         XCTAssertFalse(t.isEmpty)
