@@ -23216,6 +23216,54 @@
         }
       }
     },
+    "Weekly burn estimated from account quota and local sessions, including archives. Concurrent work elsewhere may affect it; no ETA is shown.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly burn estimated from account quota and local sessions, including archives. Concurrent work elsewhere may affect it; no ETA is shown."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周消耗速率根据账户配额和本地会话（包括归档会话）估算。其他位置的并行活动可能影响结果，因此不显示预计耗尽时间。"
+          }
+        }
+      }
+    },
+    "Weekly burn unavailable: local activity cannot be matched to this Codex account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly burn unavailable: local activity cannot be matched to this Codex account."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周消耗速率不可用：无法将本地活动匹配到此 Codex 账户。"
+          }
+        }
+      }
+    },
+    "Weekly burn unavailable: recent account usage conflicts with the stored estimate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly burn unavailable: recent account usage conflicts with the stored estimate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每周消耗速率不可用：近期账户用量与保存的估算值不一致。"
+          }
+        }
+      }
+    },
     "Weekly only": {
       "localizations": {
         "en": {

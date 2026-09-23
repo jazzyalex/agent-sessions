@@ -3071,7 +3071,9 @@ enum QuotaMeterWeeklyHeaderStatus: Equatable {
 /// could be confidently wrong. nil is not an error: it means the row keeps the
 /// header it has always had.
 enum QuotaMeterWeeklyHeaderResolver {
-    static let localEstimateHelp = "Weekly burn estimated from account quota and local sessions, including archives. Concurrent work elsewhere may affect it; no ETA is shown."
+    static var localEstimateHelp: String {
+        String(localized: "Weekly burn estimated from account quota and local sessions, including archives. Concurrent work elsewhere may affect it; no ETA is shown.")
+    }
 
     static func canProjectETA(calibrationState: WeeklyRunwayCalibrationState?) -> Bool {
         calibrationState != .localEstimate
@@ -3080,9 +3082,9 @@ enum QuotaMeterWeeklyHeaderResolver {
     static func unavailableHelp(calibrationState: WeeklyRunwayCalibrationState?) -> String? {
         switch calibrationState {
         case .accountUnverified:
-            return "Weekly burn unavailable: local activity cannot be matched to this Codex account."
+            return String(localized: "Weekly burn unavailable: local activity cannot be matched to this Codex account.")
         case .inconsistent:
-            return "Weekly burn unavailable: recent account usage conflicts with the stored estimate."
+            return String(localized: "Weekly burn unavailable: recent account usage conflicts with the stored estimate.")
         default:
             return nil
         }
@@ -4584,7 +4586,7 @@ private struct HUDRunwayPanel: View {
         }
         return QuotaMeterWeeklyHeaderResolver.unavailableHelp(
             calibrationState: snapshot.weeklyCalibrationState)
-            ?? "Estimated weekly burn pace from the last five minutes of local activity."
+            ?? String(localized: "Estimated weekly burn pace from the last five minutes of local activity.")
     }
 
     private var maxDisplayRate: Double {
