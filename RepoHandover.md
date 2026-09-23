@@ -1,3 +1,25 @@
+## 2026-09-21 17:29 · transcript-rich-jump-controls · Rich transcript jump controls fixed and pushed
+status: done
+
+**State:** Rich/block transcript jump controls now share viewport proximity reporting and a consumable jump-to-latest intent; the fix is committed and pushed.
+
+**Verified:**
+- `main` and `origin/main` are synchronized at `1b0459384f6aee3114ed8c71b5a91a4d12154c4f` (`fix(transcript): restore Rich jump controls`).
+- Stable xcresult reports 3,135 passed, 3 skipped, 0 failed, 3,138 total; the Debug build succeeded.
+- Oracle GPT-5.6 Sol Extra High returned SHIP with no confirmed defects; the user confirmed the Rich arrows work in the running build.
+
+**Decided / don't redo:**
+- Do not rerun the full suite or review unless source changes; the pushed source is unchanged after validation.
+- Legacy Terminal is not UI-reachable in this checkout; persisted `.terminal` resolves to Rich, so it was not independently click-tested.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — this user-authorized checkpoint; intentionally remains uncommitted and unpushed.
+
+**Key files:**
+- `AgentSessions/Views/TranscriptBlockListView.swift` — Rich proximity callbacks, token consumption, layout deferral, and generation guards.
+- `AgentSessions/Views/TranscriptPlainView.swift` — shared parent state and Rich wiring.
+- `AgentSessionsTests/TranscriptBlockWindowingTests.swift` and `AgentSessionsTests/TranscriptRenderGenerationGateTests.swift` — focused contract coverage.
+
 ## 2026-09-21 15:54 · pr74-acp-clean-rebuild · ACP persistence remediation
 status: done
 
