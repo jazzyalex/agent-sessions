@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.1] - 2026-09-23
+
 ### Features
 - **Continue existing Codex Desktop conversations.** Find local desktop sessions in history and open an eligible conversation in Codex Desktop from the row or toolbar. Work, desktop, CLI, and VS Code badges remain distinct; side chats keep their relationship labels. The action needs a valid local thread ID and the same Codex session store.
 - **Search supported Cursor ACP conversations.** Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable.
