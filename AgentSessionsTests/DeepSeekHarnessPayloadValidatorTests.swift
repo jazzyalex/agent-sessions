@@ -450,6 +450,23 @@ final class DeepSeekHarnessPayloadValidatorTests: XCTestCase {
             v3("tool/code-dispatch", 4, data: ["note": "old"], ignorable: true))
     }
 
+    func testV3AdmitsAgentInstructionSourceChangeRecords() throws {
+        let data = userMessageData(source: [
+            "kind": "agent-instructions",
+            "form": "instructions",
+            "baseline": true,
+            "baselineIdentity": "synthetic-baseline",
+            "changes": [[
+                "action": "replace",
+                "scope": "synthetic-scope",
+                "path": "synthetic-path",
+                "digest": "synthetic-digest",
+            ] as [String: Any]],
+        ])
+        try DeepSeekHarnessPayloadValidator.assertV3EventPostMigration(
+            v3("user/message", 0, data: data, surfaceOp: .append))
+    }
+
     func testV3RejectsStructuralAndCanonicalViolations() throws {
         // System message without source/content.
         XCTAssertThrowsError(

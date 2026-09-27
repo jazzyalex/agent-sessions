@@ -49,6 +49,13 @@ final class CursorSessionParser {
                 if role == "user" || role == "assistant" {
                     eventCount += 1
                     sawRole = true
+                } else if role.isEmpty,
+                          obj["type"] as? String == "turn_ended",
+                          obj["status"] as? String == "error",
+                          let error = obj["error"] as? String,
+                          !error.isEmpty {
+                    eventCount += 1
+                    sawRole = true
                 }
 
                 // Format sniff: if the first few lines have no recognizable role,
@@ -187,6 +194,29 @@ final class CursorSessionParser {
 
         // Cursor lines have role at top level
         let roleRaw = (obj["role"] as? String)?.lowercased() ?? ""
+        if roleRaw.isEmpty,
+           obj["type"] as? String == "turn_ended",
+           obj["status"] as? String == "error",
+           let error = obj["error"] as? String,
+           !error.isEmpty {
+            return [
+                SessionEvent(
+                    id: baseEventID,
+                    timestamp: nil,
+                    kind: .error,
+                    role: nil,
+                    text: error,
+                    toolName: nil,
+                    toolInput: nil,
+                    toolOutput: nil,
+                    messageID: nil,
+                    parentID: nil,
+                    isDelta: false,
+                    rawJSON: rawJSON
+                )
+            ]
+        }
+
         let role: String
         switch roleRaw {
         case "user", "human": role = "user"

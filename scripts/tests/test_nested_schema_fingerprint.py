@@ -5,6 +5,7 @@ Each test here pins a rule that was added because its absence produced a real,
 silent wrong answer during the 2026-08-03 format check.
 """
 import json
+import os
 from pathlib import Path
 
 import agent_watch
@@ -79,6 +80,128 @@ def test_qwen_function_args_is_named_but_never_walked(tmp_path):
     assert not [k for k in keys if "/Users/" in k]
 
 
+def test_pi_detects_nested_content_type_and_usage_key_without_values(tmp_path):
+    baseline = _write(tmp_path, [{
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "baseline-private-value"}],
+            "usage": {"input": 1, "output": 2},
+        },
+    }], name="pi-baseline.jsonl")
+    observed = _write(tmp_path, [{
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "futureBlock",
+                "futureSchemaKey": "pi-private-value-sentinel",
+            }],
+            "usage": {
+                "input": 1,
+                "output": 2,
+                "futureUsageKey": "pi-private-usage-sentinel",
+            },
+        },
+    }], name="pi-observed.jsonl")
+
+    baseline_fp = agent_watch._schema_fingerprint_for_agent("pi", baseline, max_lines=100)
+    observed_fp = agent_watch._schema_fingerprint_for_agent("pi", observed, max_lines=100)
+    diff = agent_watch._schema_diff(
+        observed_type_keys=observed_fp["type_keys"],
+        baseline_type_keys=baseline_fp["type_keys"],
+    )
+
+    assert "message.message.content:futureBlock" in diff["unknown_types"]
+    assert diff["unknown_keys"]["message.message.usage"] == ["futureUsageKey"]
+    assert "pi-private-value-sentinel" not in repr(observed_fp)
+    assert "pi-private-usage-sentinel" not in repr(observed_fp)
+
+
+def test_openclaw_detects_nested_content_type_but_hides_tool_arguments(tmp_path):
+    baseline = _write(tmp_path, [{
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "baseline-private-value"}],
+        },
+    }], name="openclaw-baseline.jsonl")
+    observed = _write(tmp_path, [{
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "futureToolCall",
+                "futureSchemaKey": "openclaw-private-value-sentinel",
+                "arguments": {
+                    "openclaw_private_argument_sentinel": "/Users/private/project",
+                },
+                "input": {
+                    "openclaw_private_input_sentinel": "/Users/private/input",
+                },
+            }],
+        },
+    }], name="openclaw-observed.jsonl")
+
+    baseline_fp = agent_watch._schema_fingerprint_for_agent(
+        "openclaw", baseline, max_lines=100
+    )
+    observed_fp = agent_watch._schema_fingerprint_for_agent(
+        "openclaw", observed, max_lines=100
+    )
+    diff = agent_watch._schema_diff(
+        observed_type_keys=observed_fp["type_keys"],
+        baseline_type_keys=baseline_fp["type_keys"],
+    )
+
+    bucket = "message.message.content:futureToolCall"
+    assert bucket in diff["unknown_types"]
+    assert "futureSchemaKey" in observed_fp["type_keys"][bucket]
+    assert f"{bucket}.arguments" not in observed_fp["type_keys"]
+    assert "input" in observed_fp["type_keys"][bucket]
+    assert f"{bucket}.input" not in observed_fp["type_keys"]
+    assert "openclaw-private-value-sentinel" not in repr(observed_fp)
+    assert "openclaw_private_argument_sentinel" not in repr(observed_fp)
+    assert "openclaw_private_input_sentinel" not in repr(observed_fp)
+    assert "/Users/private/project" not in repr(observed_fp)
+    assert "/Users/private/input" not in repr(observed_fp)
+
+
+def test_antigravity_detects_nested_tool_call_key_but_hides_args(tmp_path):
+    baseline = _write(tmp_path, [{
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [{"name": "Read", "args": {"path": "private"}}],
+    }], name="antigravity-baseline.jsonl")
+    observed = _write(tmp_path, [{
+        "type": "PLANNER_RESPONSE",
+        "tool_calls": [{
+            "name": "Read",
+            "futureToolMetadata": "antigravity-private-value-sentinel",
+            "args": {
+                "antigravity_private_argument_sentinel": "/Users/private/project",
+            },
+        }],
+    }], name="antigravity-observed.jsonl")
+
+    baseline_fp = agent_watch._schema_fingerprint_for_agent(
+        "antigravity", baseline, max_lines=100
+    )
+    observed_fp = agent_watch._schema_fingerprint_for_agent(
+        "antigravity", observed, max_lines=100
+    )
+    diff = agent_watch._schema_diff(
+        observed_type_keys=observed_fp["type_keys"],
+        baseline_type_keys=baseline_fp["type_keys"],
+    )
+
+    bucket = "PLANNER_RESPONSE.tool_calls"
+    assert diff["unknown_keys"][bucket] == ["futureToolMetadata"]
+    assert f"{bucket}.args" not in observed_fp["type_keys"]
+    assert "antigravity-private-value-sentinel" not in repr(observed_fp)
+    assert "antigravity_private_argument_sentinel" not in repr(observed_fp)
+    assert "/Users/private/project" not in repr(observed_fp)
+
+
 def test_claude_input_schema_is_named_but_never_walked(tmp_path):
     p = _write(tmp_path, [{
         "type": "attachment",
@@ -97,6 +220,146 @@ def test_claude_input_schema_is_named_but_never_walked(tmp_path):
     assert "input_schema" in keys[entries]
     assert f"{entries}.input_schema" not in keys
     assert not [bucket for bucket in keys if "future_parameter" in bucket]
+
+
+def test_claude_tool_id_maps_are_named_but_never_walked(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "assistant",
+        "wireIngestContext": {
+            "toolu_private_ingest_id": {"input": {"private_file_path": "/Users/private/file"}},
+        },
+        "wireToolInputs": {
+            "toolu_private_tool_id": {"input": {"private_argument": "value"}},
+        },
+    }])
+    keys = agent_watch._schema_fingerprint_for_agent("claude", p, max_lines=100)["type_keys"]
+
+    assert "wireIngestContext" in keys["assistant"]
+    assert "wireToolInputs" in keys["assistant"]
+    assert "assistant.wireIngestContext" not in keys
+    assert "assistant.wireToolInputs" not in keys
+    assert not [bucket for bucket in keys if "toolu_private" in bucket]
+    assert not [bucket for bucket in keys if "private_file_path" in bucket]
+    assert not [bucket for bucket in keys if "private_argument" in bucket]
+
+
+def test_claude_file_backup_map_does_not_expose_path_keys(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "file-history-snapshot",
+        "snapshot": {
+            "trackedFileBackups": {
+                "/Users/private/project/Secret.swift": {
+                    "backupFileName": "private-backup",
+                    "version": 1,
+                },
+            },
+        },
+    }])
+
+    keys = agent_watch._schema_fingerprint_for_agent("claude", p, max_lines=100)["type_keys"]
+
+    assert "trackedFileBackups" in keys["file-history-snapshot.snapshot"]
+    assert not [bucket for bucket in keys if "Secret.swift" in bucket]
+    assert "file-history-snapshot.snapshot.trackedFileBackups" not in keys
+
+
+def test_codex_agent_state_map_does_not_expose_agent_ids(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "event_msg",
+        "payload": {
+            "type": "item_completed",
+            "item": {"agents_states": {"agent-private-id": {"state": "completed"}}},
+        },
+    }])
+
+    keys = agent_watch._schema_fingerprint_for_agent("codex", p, max_lines=100)["type_keys"]
+
+    assert "agents_states" in keys["event_msg.payload:item_completed.item"]
+    assert not [bucket for bucket in keys if "agent-private-id" in bucket]
+    assert "event_msg.payload:item_completed.item.agents_states" not in keys
+
+
+def test_codex_recent_response_metadata_is_fingerprinted_without_values(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+        },
+        "metadata": {
+            "user_input_order": 7,
+            "mcp_attribution": {"status": "private-status-sentinel"},
+        },
+    }])
+
+    fingerprint = agent_watch._schema_fingerprint_for_agent("codex", p, max_lines=100)
+    keys = fingerprint["type_keys"]
+
+    assert "user_input_order" in keys["response_item.metadata"]
+    assert "mcp_attribution" in keys["response_item.metadata"]
+    assert keys["response_item.metadata.mcp_attribution"] == ["status"]
+    assert "private-status-sentinel" not in repr(fingerprint)
+
+
+def test_copilot_recent_tool_metadata_is_fingerprinted_without_values(tmp_path):
+    p = _write(tmp_path, [
+        {"type": "assistant.message", "data": {"originatingMessageId": "private-id-sentinel"}},
+        {"type": "tool.execution_complete", "data": {"shellExecution": {"exitCode": 0}}},
+    ])
+
+    fingerprint = agent_watch._schema_fingerprint_for_agent("copilot", p, max_lines=100)
+    keys = fingerprint["type_keys"]
+
+    assert "originatingMessageId" in keys["assistant.message.data"]
+    assert "shellExecution" in keys["tool.execution_complete.data"]
+    assert keys["tool.execution_complete.data.shellExecution"] == ["exitCode"]
+    assert "private-id-sentinel" not in repr(fingerprint)
+
+
+def test_cursor_roleless_turn_events_have_a_typed_bucket(tmp_path):
+    p = _write(tmp_path, [{
+        "type": "turn_ended",
+        "status": "error",
+        "error": "upstream request failed",
+    }])
+
+    fingerprint = agent_watch._cursor_transcript_schema_fingerprint(p, max_lines=100)
+
+    assert fingerprint["type_counts"] == {"type.turn_ended": 1}
+    assert fingerprint["type_keys"]["type.turn_ended"] == ["error", "status", "type"]
+
+
+def test_cursor_recent_schema_union_covers_five_newest_transcripts(tmp_path):
+    files = []
+    for i in range(6):
+        rows = [{"role": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}]
+        if i == 1:
+            rows = [
+                {"role": "assistant", "message": {"content": [{"type": "thinking", "thinking": "reasoning"}]}},
+                {"role": "assistant", "message": {"content": [{"type": "tool_result", "content": "done"}]}},
+                {"role": "assistant", "future_monitor_test_key": True},
+            ]
+        if i == 0:
+            rows = [{"role": "assistant", "message": {"content": [{"type": "excluded_old", "text": "old"}]}}]
+        path = _write(tmp_path, rows, name=f"chat-{i}.jsonl")
+        path.touch()
+        # chat-5 is newest; chat-0 is the sixth-newest and must fall outside the cap.
+        path_mtime = 100 + i
+        os.utime(path, (path_mtime, path_mtime))
+        files.append(path)
+
+    fingerprint = agent_watch._cursor_recent_schema_fingerprint(
+        [str(tmp_path)], "*.jsonl", max_lines=100
+    )
+
+    assert fingerprint is not None
+    assert fingerprint["sampled_files"] == [str(path) for path in reversed(files[1:])]
+    assert fingerprint["sampled_sessions"] == 5
+    assert "content.thinking" in fingerprint["type_keys"]
+    assert "content.tool_result" in fingerprint["type_keys"]
+    assert "future_monitor_test_key" in fingerprint["type_keys"]["assistant"]
+    assert "content.excluded_old" not in fingerprint["type_keys"]
+    assert fingerprint["type_counts"]["assistant"] == 7
 
 
 def test_lists_union_every_element_not_just_the_first(tmp_path):
@@ -150,7 +413,9 @@ def test_shipped_fixtures_cover_their_own_nested_baseline():
     # A fixture that cannot fingerprint itself cleanly is not a baseline.
     for agent, rel in (("codex", "codex/small.jsonl"),
                        ("copilot", "copilot/small.jsonl"),
-                       ("claude", "claude/small.jsonl")):
+                       ("claude", "claude/small.jsonl"),
+                       ("antigravity", "antigravity/cli_small.jsonl"),
+                       ("openclaw", "openclaw/small.jsonl")):
         path = REPO / "Resources/Fixtures/stage0/agents" / rel
         fp = agent_watch._schema_fingerprint_for_agent(agent, path, max_lines=5000)
         assert fp["parse_errors"] == 0, f"{rel} has unparseable lines"

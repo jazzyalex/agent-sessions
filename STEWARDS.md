@@ -96,6 +96,7 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 | Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
 | Cline CLI and Desktop | steward wanted | 2026-09-15 · CLI 3.0.62 / Desktop 0.0.28 | Best-effort |
+| DeepSeek Harness | steward wanted | 2026-09-25 · installed 0.1.5-rc.2 real-session sample; matrix ceiling 0.1.6-alpha.2 | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),

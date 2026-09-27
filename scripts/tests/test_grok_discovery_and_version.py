@@ -578,3 +578,29 @@ def test_agents_without_a_declaring_probe_report_source_provenance(tmp_path, mon
     codex = report["results"]["codex"]
     assert codex["upstream"]["parsed_version_provenance"] == "upstream_source"
     assert codex["upstream"]["reconciliation"] is None
+
+
+def test_github_latest_release_can_read_semver_from_release_name(monkeypatch):
+    monkeypatch.setattr(
+        agent_watch,
+        "_http_get_json",
+        lambda _url, timeout: {
+            "tag_name": "v2026.9.14",
+            "name": "Hermes Agent v0.21.3 (v2026.9.14)",
+            "body": "release notes",
+            "published_at": "2026-09-14T00:00:00Z",
+        },
+    )
+
+    result = agent_watch._fetch_upstream(
+        {
+            "kind": "github_latest_release",
+            "repo": "NousResearch/hermes-agent",
+            "version_source": "name",
+        },
+        timeout=5,
+    )
+
+    assert result["ok"] is True
+    assert result["version"] == "0.21.3"
+    assert result["tag_name"] == "v2026.9.14"

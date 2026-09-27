@@ -80,7 +80,7 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   unparsed families so a new vendor path cannot disappear silently.
 
 ### Claude cross-root joins and deduplication were never certified
-> **open** · sev: low · urg: low · verified 2026-08-18
+> **open** · sev: low · urg: low · verified 2026-09-25
 
 - **What:** Claude writes to three roots — standard transcripts under
   `~/.claude/projects`, Desktop Code metadata under
@@ -90,7 +90,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   scanned. What has never been certified is the contract *between* them: whether a
   transcript plus its Desktop sidecar reliably becomes one session, what happens when
   the sidecar is missing, and whether a Cowork session stays independently discoverable
-  when the standard root is absent.
+  when the standard root is absent. The weekly monitor currently fingerprints only
+  `~/.claude/projects`, so Desktop/Cowork transcripts are outside its format-drift
+  evidence even though app discovery scans them.
 - **Where:** `ClaudeSessionIndexer` already repairs surface and originator for sessions
   that arrive without them
   ([:671](../AgentSessions/Services/ClaudeSessionIndexer.swift:671)), which is the
@@ -192,8 +194,53 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
+### Codex MCP attribution sources are preserved but never shown
+> **open** · sev: low · urg: low · verified 2026-09-26
+
+- **What:** Codex 0.157.1 adds `response_item.metadata.mcp_attribution.sources`, with
+  `plugin_id`, `server_name`, `tool_name`, and `first_turn_id`. The nested monitor now
+  detects the shape and the normal fixture covers it with synthetic placeholders, but
+  Agent Sessions does not use these fields to explain which connector or plugin supplied
+  an answer.
+- **Where:** the weekly report
+  `scripts/probe_scan_output/agent_watch/20260926-172847-815216Z-p76575/report.json`,
+  [small.jsonl](../Resources/Fixtures/stage0/agents/codex/small.jsonl), and the generic
+  Codex response-item parsing path.
+- **Fix shape:** measure how often attribution appears and whether one response can name
+  several sources, then expose a compact source label in transcript details while keeping
+  internal turn IDs out of the visible UI.
+- **Why deferred:** this sweep proves the schema and preserves it, but one local record
+  does not establish the right grouping or wording for a user-facing attribution.
+- **Risk if wrong:** connector-backed answers remain anonymous even though Codex records
+  their plugin, server, and tool provenance.
+- **To close:** a redacted fixture with one and multiple sources, parser behavior tests,
+  and a UI decision for source labels and disclosure details.
+
+### OpenClaw message provenance is richer than the current origin inference
+> **open** · sev: low · urg: low · verified 2026-09-26
+
+- **What:** current OpenClaw messages add `sourceChannel` and an `__openclaw` object with
+  `mirrorOrigin`, `mirrorIdentity`, and `senderIsOwner`. The app still infers origins
+  from user prompt prefixes and separate conversation metadata, so this direct message
+  provenance is retained only in raw JSON.
+- **Where:** the weekly report
+  `scripts/probe_scan_output/agent_watch/20260926-172847-815216Z-p76575/report.json`,
+  [OpenClawSessionParser.swift](../AgentSessions/Services/OpenClawSessionParser.swift),
+  and the synthetic current-shape row in
+  [small.jsonl](../Resources/Fixtures/stage0/agents/openclaw/small.jsonl).
+- **Fix shape:** measure the fields across Telegram, cron, TUI, and mirrored sessions;
+  establish precedence against existing conversation metadata and prompt-prefix rules;
+  then use the proven source for `repoName` and origin labels.
+- **Why deferred:** field presence alone does not establish whether mirror identifiers
+  are stable labels, private account IDs, or transport internals. The sweep records only
+  key shapes and cannot safely choose a visible value.
+- **Risk if wrong:** the app can continue relying on brittle text-prefix inference even
+  when OpenClaw supplies direct channel provenance.
+- **To close:** privacy-reviewed value classes, precedence tests for all four origins,
+  and a parser change that never displays private mirror identifiers.
+
 ### Telemetry: Kimi, Qwen and OpenClaw all carry token telemetry — build the accumulators
-> **open** · sev: med · urg: med · verified 2026-08-31
+> **open** · sev: med · urg: med · verified 2026-09-26
 
 - **What:** `SessionTelemetry` covers Codex, Claude, Pi and Copilot. These three were
   deferred on a fixture key scan that found "a model name and no token counts at all".
@@ -227,12 +274,13 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   total}` (total to $0.5225). A second, Codex-shaped layer sits on 316 records —
   `payload.info.{last,total}_token_usage.*` — because OpenClaw proxies an OpenAI provider
   (`systemPromptReport.model` = `gpt-5.4`). Decide which layer is authoritative first.
-  Fixture carries no token fields at all, so it needs refreshing too.
+  The normal fixture now carries this shape with synthetic zero-cost values; the
+  accumulator and overlap decision remain open.
 - **OpenClaw convention: Claude-style, measured.** Over all 133 records with a nonzero
   `cacheRead`, `totalTokens == input + output + cacheRead + cacheWrite` holds **133/133**;
   the Codex reading (input already includes cache) matches **0/133**. Same shape as the
   resolved Pi entry below — pin it with the same kind of test.
-- **To close:** refresh the Kimi and OpenClaw fixtures, add an accumulator per
+- **To close:** refresh the Kimi fixture, add an accumulator per
   `AgentSessions/Telemetry/PiTelemetryAccumulator.swift`, and flip each descriptor's
   `TelemetryCapabilities`. OpenClaw can declare `cost: .available` without a price table;
   Kimi and Qwen cannot.
@@ -475,6 +523,71 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   `runtime.set_binding`.
 - **To close:** each line is either promoted to its own entry on a second sighting, or
   deleted as settled noise.
+
+### Codex retained-context completeness is not visible
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** the 2026-09-25 sweep found `compacted.payload.retained_context` on eight
+  compaction records, including `incomplete` and `user_messages_incomplete` flags. The
+  current parser preserves the records as metadata but does not expose whether the
+  retained context is complete.
+- **Where:** the fields are present in the redacted Codex normal fixture. Codex event
+  parsing retains the raw record, but no model or transcript view consumes these keys.
+- **Fix shape:** determine how retained messages and verified answers relate to the
+  visible transcript, then show an explicit completeness state without implying that
+  omitted history is available locally.
+- **Risk if wrong:** presenting the snapshot as complete could mislead a user when the
+  source marks its retained context incomplete.
+- **To close:** fixtures cover complete and incomplete retained context, and the session
+  detail view explains which records are present and which are omitted.
+
+### Codex session roots are not represented in the session scope
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** current Codex sessions can record `runtime_workspace_roots` on both session
+  metadata and thread settings. The sampled values include multiple roots, while the
+  session model currently presents a single working directory.
+- **Where:** the additive fields are covered by the redacted normal fixture. No session
+  model or view consumes these arrays.
+- **Fix shape:** establish precedence and deduplication across session metadata and
+  thread settings, then expose the roots as session scope while preserving the existing
+  primary working directory.
+- **Risk if wrong:** treating every listed root as the primary working directory could
+  misstate the session's scope.
+  - **To close:** a real multi-root session displays the correct primary root and full
+  workspace scope, with duplicate and missing roots handled explicitly.
+
+### Weekly Codex monitoring omits archived transcript roots
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** app discovery scans both `sessions` and the sibling `archived_sessions`
+  directory, but weekly format monitoring samples only the active `sessions` roots.
+  An archived rollout with a new schema could therefore be absent from the monitored
+  union.
+- **Where:** `AgentSessions/Services/SessionDiscovery.swift:136-147` adds archived roots;
+  `docs/agent-support/agent-watch-config.json:17-21` configures only active roots.
+- **Fix shape:** include `$CODEX_HOME/archived_sessions` and
+  `~/.codex/archived_sessions` in the weekly sample roots and allow their date-folder
+  layout in the discovery contract, deduplicating overlapping configured roots.
+- **Risk if wrong:** an archived format change is missed until a matching active session
+  appears, or overlapping roots count the same rollout twice.
+- **To close:** add active/archive synthetic discovery fixtures, prove the path contract
+  accepts both layouts, and verify overlapping roots contribute each file once.
+
+### Codex recorded questions are preserved but not presented
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** one sampled `item_completed` record contains a `questions` array with a
+  title and options. The app preserves the record as metadata but does not render the
+  question as an interactive or historical transcript item.
+- **Where:** the redacted Codex fixture covers the question shape; the generic event
+  parser retains it in `rawJSON` without interpreting it.
+- **Fix shape:** decide whether these records are pending user input, a historical
+  approval prompt, or another task-control item before choosing a transcript treatment.
+- **Risk if wrong:** showing stale options as an actionable prompt could invite a reply
+  that the original task can no longer accept.
+- **To close:** a current example establishes lifecycle semantics, and the app either
+  renders a clearly historical question or safely links to the live task state.
 
 ### Grok session sidecars are neither watched nor read
 > **open** · sev: low · urg: low · verified 2026-08-17
@@ -767,6 +880,88 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **To close:** Codex tool rows show a parsed label where one exists and fall back
   cleanly where it does not.
 
+The 2026-09-25 sweep also found `item_completed.item.delivery` and recorded questions;
+the latter is tracked separately above until its lifecycle semantics are known.
+
+### Codex completed tool outputs contain nested execution details
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** five sampled `function_call_output` records contain an `executed_tool_calls`
+  array and a `tool_calls_complete` flag. Those nested executions may describe work that
+  is not represented by the outer tool-result event.
+- **Where:** the keys are covered in the redacted Codex fixture. The parser keeps the
+  complete event as raw metadata; it does not create transcript rows from the nested
+  calls.
+- **Fix shape:** compare nested calls with the visible outer call/result pair and expose
+  only activity that is otherwise missing. Keep tool-defined `arguments` opaque and
+  preserve the completeness flag.
+- **Risk if wrong:** rendering both the nested and outer calls could duplicate activity
+  or expose tool input that the transcript intentionally omits.
+- **To close:** a real nested execution is mapped to its outer call, and tests prove
+  there are no duplicate rows and no argument leakage.
+
+### Claude generated-turn provenance is preserved but ignored
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** five sampled user records include `turnOrigin`, which matched `promptSource`
+  in this sample. Claude's local format distinguishes additional generated-turn origins,
+  but no non-human origin was present in the inspected records.
+- **Where:** the key survives in `rawJSON`; the parser assigns every top-level `user`
+  record the user role without consulting provenance.
+- **Fix shape:** collect a sanitized count by provenance category and a real non-human
+  example before adding explicit provenance to the event model or a transcript badge.
+- **Risk if wrong:** silently changing role assignment could hide a real user message or
+  present generated content as user-authored.
+- **To close:** a non-human example establishes its rendering semantics, and a fixture
+  pins both human and generated turns without silently reclassifying either.
+
+### Claude structured API errors are not classified
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** one sampled assistant record contains `apiError` and `apiErrorCode`, alongside
+  a status, an error marker, details, and normal message content. The available shape
+  does not prove that field presence means the assistant response failed.
+- **Where:** all keys survive in the assistant event's `rawJSON`; role selection currently
+  follows the message role and does not inspect API-error metadata.
+- **Fix shape:** correlate the structured fields with the existing error marker and
+  message content across ordinary and failed requests before changing event kind or UI.
+- **Risk if wrong:** treating an incidental or retried API error as a failed assistant
+  response could hide valid text or create a false error row.
+- **To close:** fixtures cover a confirmed failure and a non-failure/retry case, and the
+  parser classifies each without hiding assistant content.
+
+### Claude context-stripping attachments are not visible
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** one sampled `thinking_stripped` attachment carries a type discriminator and
+  a scope. The parser keeps the attachment as raw metadata but does not show that the
+  source removed context from the turn history.
+- **Where:** the redacted fixture covers the attachment; attachment records without text
+  currently resolve to metadata.
+- **Fix shape:** determine whether the scope identifies the affected history and whether
+  the event can be shown as a compact context-change marker without exposing stripped
+  content.
+- **Risk if wrong:** a marker that implies a specific amount or category of removed
+  reasoning when the source only identifies a scope.
+- **To close:** a second real example establishes the scope semantics and a fixture proves
+  the marker does not render hidden content.
+
+### Codex and Claude secondary format findings from the 2026-09-25 sweep
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **Codex:** `replacement_history_metadata` and `client_authored` describe compaction
+  provenance; `user_messages` and `verified_answers` were empty; `delivery`,
+  `cyber_access_program`, and `disabled_plugin_ids` are preserved without interpretation.
+- **Claude:** `message.input_transformations` was empty in every observed record; promote
+  only after a non-empty transformation is seen. `advisorModel` duplicates
+  `message.model` in the inspected sample. Dynamic `wireIngestContext` and
+  `wireToolInputs` maps are intentionally opaque. The `session_context.changed` and
+  `reason` pair remains watch-only after one observation; `system.error.noResponse` was
+  null, so promote it only after a non-null example. `prompt_snapshot.tools.server` is
+  declaration provenance and is classified as noise.
+- **To close:** promote only a field with demonstrated user-facing meaning; remove settled
+  noise from this watch entry after its classification is recorded in the tracker.
+
 ### OpenCode parent sessions are unsearchable for their own subagent reports
 > **open** · sev: low · urg: low · verified 2026-08-21
 
@@ -845,6 +1040,23 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Agent Source Plumbing
+
+### OpenClaw monitoring unions roots that app discovery selects by precedence
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** weekly monitoring unions `OPENCLAW_STATE_DIR`, `~/.openclaw`, and
+  `~/.clawdbot`, while app discovery selects a custom root first, then the environment
+  root, then the first valid canonical or legacy root. When multiple roots contain
+  sessions, monitoring may inspect transcripts the app does not discover.
+- **Where:** `AgentSessions/Services/OpenClawSessionDiscovery.swift:18-40`;
+  `docs/agent-support/agent-watch-config.json:344-367`.
+- **Fix shape:** represent the app's root precedence in the monitor and constrain
+  discovery to `agents/<id>/sessions/*.jsonl`, including the documented environment
+  override.
+- **Risk if wrong:** an ignored sibling store can raise false schema drift, while a
+  selected environment/custom root can be missed.
+- **To close:** tests cover simultaneous canonical/legacy roots, an environment override,
+  and a transcript outside `agents/<id>/sessions`.
 
 ### Four Sendable warnings, one of them new in 5.1.1
 > **open** · sev: low · urg: low · verified 2026-08-31
@@ -1037,6 +1249,28 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 ---
 
 ## Kimi Code
+
+### Kimi 2.0.2 agent messages may be hidden by the legacy transcript projection
+> **closed 2026-09-27** · commit: this commit · test: `KimiSessionParserTests.testAgentMessageProjectionDoesNotDuplicateVisibleTranscript`
+
+Fresh 2.0.2 Bash evidence proved parity for user, assistant, tool-call, and tool-result rows; sanitized fixture coverage keeps the duplicate projection as metadata.
+
+### Kimi reports provider-blocked time on step completion
+> **open** · sev: low · urg: low · verified 2026-09-25
+
+- **What:** Kimi 2.0.2 adds `event.step.end.llmClientBlockedMs`, a source-reported
+  duration for time the LLM client was blocked. The installed local projection reads it
+  into step timing, but Agent Sessions currently keeps the event as metadata.
+- **Where:** `scripts/probe_scan_output/agent_watch/20260925-181536-476753Z-p13847-prebump/report.json`;
+  installed Kimi `main.mjs`; [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift).
+- **Fix shape:** measure its occurrence and compare it with existing turn/step timing
+  before deciding whether it belongs in transcript details or Analytics.
+- **Why deferred:** it appeared in one fresh validation session; one observation does not
+  establish how it relates to elapsed step duration or whether it should be aggregated.
+- **Risk if wrong:** presenting it as wall-clock latency could label provider wait time
+  incorrectly or double-count time already represented by the step timestamps.
+- **To close:** measure across ordinary sessions, establish its semantics, then add a
+  focused fixture and behavior test if the UI can explain the distinction.
 
 ### `agentId` now attributes every event to an agent and nothing reads it
 > **open** · sev: low · urg: low · verified 2026-08-21
@@ -1343,20 +1577,33 @@ this. The entry sat `verified —` and read as open work for two weeks.
 - **To close:** Analytics shows per-source byte totals, largest sessions, and
   per-source reclaimable-by-rule figures traceable to the bench manifest.
 
-### Kimi reports measured token counts per turn and nothing reads them
-> **open** · sev: low · urg: low · verified 2026-08-21
+### Kimi and DeepSeek Harness report measured token counts that nothing surfaces
+> **open** · sev: low · urg: low · verified 2026-09-24
 
 - **What:** Kimi 0.38.0 added `token_counting.measured` and
   `token_counting.turn_recorded`, carrying `tokens`, `length`, `turnId` and `time`. This
   is source-measured accounting, not an estimate derived from a per-model table.
-- **Where:** `token_counting` appears nowhere in `AgentSessions/`; both types fall to
+  DeepSeek Harness also writes `assistant/message.data.usage` with input, output, total,
+  cache-read, cache-write, and reasoning token counts. Its assistant stream also carries
+  `stream.chunk.type=usage` with the same token-count field family. In the 2026-09-24
+  weekly sample, all 4 sessions had message usage on all 137 sampled assistant messages.
+  Only field names and occurrence counts were inspected; token values were not copied.
+- **Where:** `token_counting` appears nowhere in `AgentSessions/`; both Kimi types fall to
   `.meta` in [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift).
+  DSH's [DeepSeekHarnessPayloadValidator.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessPayloadValidator.swift)
+  validates `usage`, while [DeepSeekHarnessSessionParser.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessSessionParser.swift)
+  does not read it into Analytics.
 - **Fix shape:** the same shape as the Qwen entry below — a source that states its own
-  usage. Build one path that serves both rather than two single-source paths.
-- **Why deferred:** pairs with the Qwen usage entry; neither justifies a bespoke surface
-  alone.
-- **To close:** at least one source's self-reported token usage is displayed, covering
-  Kimi and Qwen through the same path.
+  usage. Build one path that serves Qwen, Kimi, and DSH rather than separate
+  single-source paths.
+- **Why deferred:** pairs with the Qwen usage entry; these sources should use one shared
+  Analytics path rather than each gaining bespoke handling.
+- **Risk if wrong:** message-level usage and stream usage may describe the same accounting
+  point, and `totalTokens`, cache counts, and reasoning counts may overlap with input/output
+  totals; confirm semantics and deduplication before aggregating.
+- **To close:** Qwen, Kimi, and DSH source-reported token usage appears in Analytics through
+  the shared path, and the matrix describes the distinction between emitted and surfaced
+  usage accurately.
 
 ### Qwen already reports its own token usage and we discard it
 > **open** · sev: med · urg: low · verified 2026-08-17

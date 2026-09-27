@@ -17,8 +17,9 @@ This is intentionally **non-destructive**:
 
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 15 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, `qwen`, `devin`, `fx`, `cline` (release watch + local schema fingerprints; minimal probes where configured). Cline release/version comparison covers the CLI; Desktop currently contributes shared-format evidence but has no automated upstream version channel.
+- Weekly: all 16 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, `qwen`, `devin`, `fx`, `cline`, `deepseek_harness` (release watch + local schema fingerprints; minimal probes where configured). Cline release/version comparison covers the CLI; Desktop currently contributes shared-format evidence but has no automated upstream version channel.
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
+- DeepSeek Harness inspects bounded headers under `$DSH_HOME/sessions` or `~/.dsh/sessions`, selects up to five canonical sessions by source-reported `createdAt`, then parses every validated row in those sessions. It supports plain JSONL and independently framed Zstandard, checks generation/header paths and dense event sequences, and fingerprints nested event data. Artifact mtime is recorded for diagnostics; each session's freshness is checked separately using its header timestamp against the installed CLI mtime and freshness window. That source-reported timestamp is not authenticated. The sample union remains useful for detecting drift, but only individually fresh sessions contribute to positive compatibility evidence. Catalog-known but unbaselined event shapes and unknown ignorable v3 events are reported separately; new keys and unsupported required event types remain drift findings. Known v3 surface records are checked against the app's envelope and reference rules, while legacy v0-v2 surface forms keep their existing validation. Prompt and tool payload values stay out of the report; sample paths and schema keys are written only to the ignored private report folder.
 - A contract may declare `required_companion_files` — sidecars that must sit beside the sampled
   transcript for the app to discover the session at all. Entries are relative to the transcript's
   own directory and are either a bare path (existence) or `{path, must_parse: "json_object", note}`.
@@ -59,10 +60,10 @@ Each verdict separates version scope from evidence quality:
 | Verdict | Meaning | Required next action |
 |---------|---------|----------------------|
 | `supports_latest` | Latest known build is covered by a freshly generated real-session prebump report whose schema/probes match baseline. | None, unless bumping docs/matrix. |
-| `supports_installed_only` | Installed build is covered by a non-stale real local session, but latest is newer, unknown, or lacks fresh real-session proof. | Run the real-session driver before claiming full latest support. |
+| `supports_installed_only` | Installed build is covered by a non-stale real local session, but latest is newer, unknown, or lacks fresh real-session proof. | Run the configured real-session driver before claiming latest support. If there is no driver, capture a fresh native session or add a driver; do not emit an impossible prebump command. |
 | `latest_unknown` | No configured or reachable latest-version source, or no real-session driver exists for proving latest. | Add/fix latest source or driver, or record a scoped exception. |
-| `blocked_stale_sample` | The newest sample predates the installed CLI or freshness window. | Run prebump for that agent. |
-| `blocked_no_fresh_evidence` | A version changed, but no fresh sample proves format compatibility. | Generate a fresh sample and compare against baseline. |
+| `blocked_stale_sample` | The newest sample predates the installed CLI or freshness window. | Run prebump only when a driver is configured; otherwise capture a fresh native session or add a driver. |
+| `blocked_no_fresh_evidence` | A version changed, but no fresh sample proves format compatibility. | Generate a fresh sample with the configured driver, or capture a native session when no driver exists. |
 | `format_drift_detected` | Unknown schema/storage/usage fields or types appeared. | Triage parser/fixture impact before any bump. |
 | `monitoring_broken` | Latest source, usage probe, or discovery contract failed. | Fix monitoring before making support claims. |
 
@@ -107,7 +108,10 @@ or `blocked_no_fresh_evidence` as verified latest support. For active agents,
 "latest_prebump_report"` and `compatibility.latest_real_session_evidence ==
 true` with `compatibility.latest_status == "current_fetch_known"`; ordinary
 weekly newest-on-disk samples and `cached_latest` only prove installed/local
-scope.
+scope. `latest_real_session_evidence` is true only when the current upstream version is
+known from this run and equals the installed version that produced the fresh prebump.
+The separate `fresh_schema_evidence` field can still prove installed-build compatibility
+when upstream is unknown or newer.
 If a real-session driver ran but failed, inspect
 `compatibility.latest_real_session_failure`. Auth failures surface as
 `real_session_auth_failed` blockers and require re-auth before rerunning
@@ -207,11 +211,13 @@ local session predates the currently installed CLI binary. Fields:
 - `mode_context` — `normal` or `skip_update`.
 
 When `installed > verified`, `schema_matches_baseline == true`, and
-`is_stale == true`, severity is `medium` and the recommendation is
-`run_prebump_validator`. Fresh samples retain the existing
-`bump_verified_version` auto-downgrade, but it is not enough to claim
-`supports_latest` unless paired with a fresh prebump report for that active
-agent.
+`is_stale == true`, severity is `medium`. The recommendation is
+`run_prebump_validator` only when that agent has a configured driver; otherwise
+it is `monitor` and `compatibility.next_action` explains how to collect native
+evidence. A weekly clean sample may still suggest `bump_verified_version`, but
+the final recommendation is changed to `run_prebump_validator` until a fresh
+prebump report exists. A prebump proves the installed build; it proves latest
+support only when that build equals the current known upstream version.
 
 ### Gating a matrix bump on prebump
 
@@ -232,12 +238,15 @@ Auth notes:
 - Cursor latest-source monitoring uses the official `https://cursor.com/install`
   installer script and a Homebrew `cursor-cli` cask fallback. The unrelated npm
   package named `cursor-agent` is not an official Cursor CLI source.
-- Cursor Desktop agent-window sessions are covered through the same
-  `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` transcripts plus
-  `~/.cursor/chats/*/*/store.db` metadata. The weekly `cursor_sqlite_probe`
-  records the newest Desktop chat DB's `agentId`, `createdAt`, mode/model fields,
-  mtime, and meta-key schema so fresh Desktop-only windows remain visible even
-  when the JSONL transcript is absent or older.
+- Cursor Desktop agent-window sessions are covered through
+  `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` transcripts,
+  `~/.cursor/chats/*/*/store.db` metadata, and persisted ACP stores under
+  `~/.cursor/acp-sessions/<UUID>/store.db`. The weekly `cursor_sqlite_probe`
+  fingerprints chat metadata keys/types and validates up to five newest ACP
+  stores against the app's sidecar, SQLite table/column, content-addressed blob,
+  and protobuf wire contracts. Its output contains schema names, wire field/type
+  pairs, and counts only; it does not emit paths, IDs, metadata values,
+  transcript text, or blob contents.
 - Pi prebump runs `pi --print --mode json` with sandboxed `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`, copying `~/.pi/agent/auth.json` and `settings.json` when env-var auth is not used. The fresh session must land under `.pi/agent/sessions/**/*.jsonl` and include `session` and `message` events.
 
 Exit 0 is required. Exit 2 means the fresh session does not match baseline.

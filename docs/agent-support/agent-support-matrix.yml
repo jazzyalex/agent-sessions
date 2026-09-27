@@ -1,8 +1,11 @@
-agent_sessions_version: "5.4-unreleased"
-as_of_commit: "00dd21de+working-tree"
-as_of_date: 2026-09-15
+agent_sessions_version: "5.5.1-unreleased"
+as_of_commit: "5c359a7f+working-tree"
+as_of_date: 2026-09-27
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-09-27 Kimi follow-up: a fresh 2.0.2 Bash turn proved agent.message.appended user, assistant, tool-call, and tool-result rows duplicate the legacy context projection. Sanitized normal-fixture coverage and a no-duplicate parser regression preserve the legacy projection as canonical; the strengthened prebump now requires tool traffic and matches baseline. Kimi advances to verified 2.0.2; upstream 2.1.1 remains unverified. Prebump report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json. Final weekly report: scripts/probe_scan_output/agent_watch/20260927-045502-543478Z-p15724/report.json."
+  - "2026-09-26 final 16-agent format check: report scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json. Codex 0.157.0, Claude 2.1.278, and Copilot 1.0.87 retain ceilings established by fresh, schema-clean prebump sessions; current Codex/Claude usage and status probes pass. Codex compaction/resume and MCP-attribution shapes are fixture-covered after an all-session sweep of 1,406 local sessions found no remaining bucket/key gap. OpenClaw's current nested toolCall/input and toolResult/content forms are fixture-covered, and the parser now preserves their arguments and result text; its ceiling remains 2026.7.1 because a pending local state migration blocks fresh evidence. Pi's thinking/signature/reasoning shapes are fixture-covered and thinking renders as metadata, but 0.86.1 remains blocked on text-only tool-gate runs. Hermes latest-release monitoring now reads the official release-name semver and reports installed-only at 0.21.1 versus upstream 0.21.5. DSH's five fresh 0.1.5-rc.2 sessions remain clean; its 0.1.6-alpha.2 ceiling is unchanged without an upstream driver. Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin/fx remain steward-owned."
+  - "2026-09-25 model-price check: local slugs from recent Codex and Claude sessions resolve to existing table entries (apart from Claude <synthetic>, whose observed usage is zero). The two local tables remain identical at 31 keys, updated 2026-09-23. Current official pricing pages showed no rate change in the rows they publish; legacy Claude 3 and GPT-5.6 Terra/Luna, GPT-5.5, GPT-5.4, and GPT-5 rates were not freshly confirmed from those rendered pages."
   - "2026-09-15: added Cline CLI 3.0.62 and Cline Desktop 0.0.28 shared local-session support from a 13-session schema survey (12 CLI, 1 Desktop), redacted manifest/messages fixtures, 44 focused Cline tests, a clean Debug build, and a clean 2,873-test full xcresult (2,870 passed, 3 skipped, 0 failed). Weekly agent_watch monitoring fingerprints both files and enforces their v1 identity-matched companion contract using logical pair freshness. Resume, live status, images, subagent hierarchy, and telemetry remain unsupported. This matrix line describes the uncommitted working tree based on 00dd21de."
   - "2026-09-10 transcript telemetry follow-up: verified installed Codex 0.154.0 (scripts/probe_scan_output/agent_watch/20260910-202530-842309Z-p61010-prebump/report.json) and Claude 2.1.267 (scripts/probe_scan_output/agent_watch/20260910-202431-895555Z-p60050-prebump/report.json) from fresh prebump sessions. Their last current upstream checks named the same versions; the final weekly pass was conservatively installed-only because those latest-version reads came from cache. Claude assistant.perTurnEffort now drives the effective effort timeline when populated; six additive attachment records are internal metadata/noise. Codex's additive task_complete.error.codex_error_info.http_connection_failed flag is internal error metadata/noise. Normal fixture coverage for both agents was refreshed from all local sessions. Final weekly report: scripts/probe_scan_output/agent_watch/20260910-202619-049835Z-p61272/report.json."
   - "Snapshot taken at the 2026-08-21 format check. Qwen Code support (ef4e9253) shipped in v5.0 and is recorded in the 2026-08-17 ledger entry; the 2026-08-21 check is recorded under agent_sessions_version 5.0.1."
@@ -48,14 +51,14 @@ notes:
   - "2026-09-08 full format check: fresh native evidence verified Codex 0.153.4, Claude 2.1.263, Copilot 1.0.83, Kimi 0.41.0, Antigravity 1.1.27, OpenCode 1.18.29, Hermes 0.21.1, Cursor 2026.9.8, Pi 0.85.1, and Grok 1.0.24 after additive fixture refreshes. No parser behavior change was required. Claude remains installed-only because its updater advertised 2.1.266 but declined to replace 2.1.263; the separate usage capture was repaired and live-verified. Held: OpenClaw 2026.7.1 (vendor workspace migration blocks a fresh run), Qwen 0.14.3 (no modern native session), Devin 3000.6.7 (steward cadence), and fx 0.0.7 pending the requested steward check of 0.0.8. Final weekly report: scripts/probe_scan_output/agent_watch/20260908-235525-879296Z-p58511/report.json."
 agents:
   codex_cli:
-    max_verified_version: "0.154.0"
+    max_verified_version: "0.157.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.267"
+    max_verified_version: "2.1.278"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -71,7 +74,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.83"
+    max_verified_version: "1.0.87"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -115,9 +118,12 @@ agents:
     # NOT apply here: the LaunchAgent is not loaded and no openclaw process is up, and the
     # migration is still dropped - which matches #133962 (preflight builds the step list
     # with a hardcoded mode and silently drops doctor-only migrations). The fix is not in
-    # stable: npm dist-tags latest == 2026.8.1, and the first build carrying it is
-    # 2026.9.1-beta.1. RETRY CONDITION: when npm `latest` moves past 2026.8.1, update and
-    # re-run `agent_watch.py --mode prebump --agent openclaw --allow-real-home`. Do not
+    # stable when last checked on 2026-08-31: npm dist-tags latest was 2026.8.1, and the
+    # first build carrying the migration fix was 2026.9.1-beta.1. The 2026-09-25 source
+    # reports 2026.9.6, past the retry trigger. A real-home prebump on 2026-09-25 failed
+    # before writing a session because local state migrations are pending and the agent
+    # requested `openclaw doctor --fix` (report 20260925-182844-238155Z-p15894). Keep this
+    # ceiling unchanged until the local profile is repaired and a fresh session matches. Do not
     # hand-migrate openclaw state to clear this - the migration also covers
     # ~/.openclaw/workspace-attestations/, so moving the workspace-state file achieves
     # nothing (tried and reverted 2026-08-31).
@@ -130,20 +136,27 @@ agents:
   cursor:
     max_verified_version: "2026.9.8"
     version_field: "not_logged"
+    notes:
+      - "Weekly SQLite monitoring covers both legacy chat metadata and up to five newest persisted ACP stores. ACP validation mirrors the app-required meta.json schema version, exact meta/blobs column names, typed root metadata, content-addressed blob references, and protobuf graph field/wire structure without reporting paths, IDs, metadata values, transcript text, or blob contents."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/large.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
+    evidence_tests:
+      - "AgentSessionsTests/CursorSessionParserTests.swift"
+      - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
     max_verified_version: "0.85.1"
     version_field: "not_logged"
-    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, analytics, and weekly session-format monitoring"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
-      - "usage/rate-limit tracking"
+      - "account-level quota/rate-limit feed"
       - "subagent hierarchy"
+    notes:
+      - "Pi session transcripts provide token and API-equivalent cost telemetry; the unsupported quota surface is an account-level feed. The 2026-09-25 0.86.1 prebump initially matched the five-type baseline with only six events from a one-line greeting. The driver now enables only read-only `ls` and requires an assistant `toolCall`; two retries still returned no tool turn (`pi_tool_turn_missing`), so weekly reports `blocked_stale_sample`. Keep the 0.85.1 ceiling until a rich tool-using sample matches. Reports: scripts/probe_scan_output/agent_watch/20260925-181536-476753Z-p13847-prebump/report.json, 20260925-210650-245130Z-p21689-prebump/report.json, and 20260925-210737-797132Z-p21734-prebump/report.json."
     evidence_docs:
       - "https://pi.dev/docs/latest/quickstart"
       - "https://pi.dev/docs/latest/usage"
@@ -158,13 +171,15 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "0.41.0"
+    max_verified_version: "2.0.2"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
       - "quota/rate-limit tracking (Kimi publishes no limit or quota endpoint). NOT the same as token accounting: Kimi 0.38.0 writes per-turn `token_counting.measured` and `token_counting.turn_recorded` records carrying tokens, length, turnId and time. That data is on disk in every session and Agent Sessions does not yet read it — the gap is a missing surface, not a missing source."
       - "subagent hierarchy"
+    notes:
+      - "A fresh 2026-09-27 Kimi 2.0.2 Bash turn proved `agent.message.appended` user, assistant, tool-call, and tool-result rows duplicate `context.append_message` / `context.append_loop_event` content. The parser intentionally keeps the appended projection as metadata to prevent duplicate transcript rows. Sanitized normal-fixture coverage includes the agent lifecycle, projection, `llmClientBlockedMs`, `reasoningKey`, and `turnId` shapes; the strengthened tool-bearing prebump matches baseline. Upstream 2.1.1 remains unverified. Report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json."
     evidence_docs:
       - "https://github.com/MoonshotAI/kimi-code"
       - "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html"
@@ -333,12 +348,16 @@ agents:
       - "resume and live ingestion"
       - "DSH archive-state mirroring"
       - "partial recovery publication"
-      - "telemetry, usage, quota, and image extraction"
+      - "source-reported per-message usage in Analytics (usage is present and validated, but not surfaced)"
+      - "live quota and rate-limit status"
+      - "image extraction"
       - "custom required event extensions outside the pinned 58-event catalog"
     notes:
-      - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout; an opt-in local UI smoke test opened real sessions, but this is not a representative compatibility corpus."
-      - "Weekly monitoring compares upstream releases, fingerprints the checked-in v0-v3 plain fixtures against a non-empty baseline, and verifies every plain/Zstandard fixture hash. It deliberately does not read ~/.dsh without separate owner authorization."
+      - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout. The weekly monitor reads bounded headers, selects up to five canonical sessions by source-reported createdAt, then fingerprints every validated row in each selected session. The bounded sample is not a representative compatibility corpus."
+      - "Weekly monitoring compares upstream releases, fingerprints canonical sessions under $DSH_HOME/sessions (or ~/.dsh/sessions) across plain/Zstandard encodings, and verifies every fixture hash. The private report records event types, schema keys, counts, and sample paths, not prompt or tool payload values."
+      - "Freshness is assessed per session from the unauthenticated header createdAt against the installed CLI mtime and freshness window; artifact mtime is diagnostic only. The all-sample union detects drift, but only individually fresh sessions support a positive compatibility claim. Known v3 surface envelopes and references follow the app admission rules; legacy v0-v2 surface forms retain their validation."
       - "Fork provenance is retained as metadata while forks remain roots; DSH archive flags are ignored; incomplete or corrupt artifacts remain invisible."
+      - "2026-09-25 weekly verification: the authorized headless CLI run produced a real installed 0.1.5-rc.2 session newer than the binary. Five individually fresh sessions contributed 1,139 validated events with no unknown event types or keys; per-session freshness uses source-reported createdAt, not artifact mtime. Upstream 0.1.7-rc.2 is newer and remains unverified because DSH has no prebump driver. The 0.1.6-alpha.2 app ceiling is unchanged. Report: scripts/probe_scan_output/agent_watch/20260925-161641-619599Z-p136/report.json."
     evidence_docs:
       - "docs/superpowers/plans/2026-09-18-dsh-source-implementation-plan.md"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/manifest.json"
@@ -347,6 +366,7 @@ agents:
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_agent_instructions_source.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl.zstd"

@@ -14,6 +14,9 @@ import Foundation
 ///   `content.part` (assistant `text`, plus `think` reasoning), `tool.call`,
 ///   and `tool.result`. Ignoring it renders Kimi sessions as user turns only
 ///   and undercounts every message statistic.
+/// Kimi 2.x also appends `agent.message.appended` projections of those same
+/// user, assistant, tool-call, and tool-result records. They intentionally stay
+/// metadata here so the transcript does not render or count every message twice.
 enum KimiSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
     private static let previewLineLimit = 200
@@ -204,8 +207,8 @@ enum KimiSessionParser {
             out.append(SessionEvent(id: "\(index)-u", timestamp: time, kind: .user, role: role, text: text,
                                     toolName: nil, toolInput: nil, toolOutput: nil,
                                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
-        // No observed Kimi journal emits an assistant or tool *message* — that
-        // content arrives as loop events instead. These two branches are a
+        // No observed legacy context message emits assistant or tool content —
+        // that content arrives as loop events instead. These two branches are a
         // defensive fallback for a future format that materialises them; do not
         // read them as the live assistant path.
         case "assistant":

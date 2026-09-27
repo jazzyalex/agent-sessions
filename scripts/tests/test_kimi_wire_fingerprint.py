@@ -26,6 +26,21 @@ def _text_part(text, *, uuid, turn="2", step=1, step_uuid="s1"):
     })
 
 
+def _agent_message(role, content, *, tool_calls=None, meta=None):
+    message = {"role": role, "content": content}
+    if tool_calls is not None:
+        message["toolCalls"] = tool_calls
+    entry = {"message": message}
+    if meta is not None:
+        entry["meta"] = meta
+    return {
+        "type": "agent.message.appended",
+        "kind": "event",
+        "message": entry,
+        "time": 1785613801103,
+    }
+
+
 def _write(tmp_path, lines, name="wire.jsonl"):
     path = tmp_path / name
     path.write_text("".join(json.dumps(obj) + "\n" for obj in lines), encoding="utf-8")
@@ -64,6 +79,38 @@ BASELINE_LINES = [
 ]
 
 
+AGENT_MESSAGE_LINES = [
+    _agent_message(
+        "user",
+        [{"type": "text", "text": "PRIVATE_USER_TEXT_SENTINEL"}],
+        meta={
+            "userMessageId": "PRIVATE_USER_ID_SENTINEL",
+            "origin": {"kind": "PRIVATE_ORIGIN_SENTINEL"},
+            "source": "PRIVATE_SOURCE_SENTINEL",
+            "tracked": True,
+        },
+    ),
+    _agent_message(
+        "assistant",
+        [
+            {"type": "think", "think": "PRIVATE_REASONING_SENTINEL", "reasoningKey": "PRIVATE_KEY_SENTINEL"},
+            {"type": "text", "text": "PRIVATE_TEXT_SENTINEL"},
+        ],
+        tool_calls=[{
+            "id": "PRIVATE_ID_SENTINEL",
+            "name": "PRIVATE_TOOL_SENTINEL",
+            "arguments": {"PRIVATE_ARGUMENT_KEY_SENTINEL": "PRIVATE_ARGUMENT_VALUE_SENTINEL"},
+        }],
+        meta={
+            "messageId": "PRIVATE_MESSAGE_ID_SENTINEL",
+            "finish": {"finishReason": "PRIVATE_FINISH_SENTINEL"},
+            "model": {"model": "PRIVATE_MODEL_SENTINEL", "provider": "PRIVATE_PROVIDER_SENTINEL"},
+            "usage": {"inputOther": 1, "output": 2},
+        },
+    ),
+]
+
+
 def test_nested_loop_event_vocabulary_is_recorded(tmp_path):
     fp = _fingerprint(tmp_path, BASELINE_LINES)
 
@@ -94,6 +141,80 @@ def test_nested_loop_event_vocabulary_is_recorded(tmp_path):
     assert fp["parse_errors"] == 0
 
 
+def test_agent_message_nested_schema_is_recorded_without_scalar_values(tmp_path):
+    fp = _fingerprint(tmp_path, AGENT_MESSAGE_LINES)
+
+    assert fp["type_keys"]["agent.message.appended"] == ["kind", "message", "time", "type"]
+    assert fp["type_keys"]["agent.message.appended.entry"] == ["message", "meta"]
+    assert fp["type_keys"]["agent.message.appended.message.assistant"] == [
+        "content", "role", "toolCalls",
+    ]
+    assert fp["type_keys"]["agent.message.appended.message.user"] == ["content", "role"]
+    assert fp["type_keys"]["agent.message.appended.content.think"] == [
+        "reasoningKey", "think", "type",
+    ]
+    assert fp["type_keys"]["agent.message.appended.content.text"] == ["text", "type"]
+    assert fp["type_keys"]["agent.message.appended.tool_call"] == [
+        "arguments", "id", "name",
+    ]
+    assert fp["type_keys"]["agent.message.appended.meta"] == [
+        "finish", "messageId", "model", "origin", "source", "tracked", "usage", "userMessageId",
+    ]
+    assert fp["type_keys"]["agent.message.appended.meta.finish"] == ["finishReason"]
+    assert fp["type_keys"]["agent.message.appended.meta.model"] == ["model", "provider"]
+    assert fp["type_keys"]["agent.message.appended.meta.origin"] == ["kind"]
+    assert fp["type_keys"]["agent.message.appended.meta.usage"] == ["inputOther", "output"]
+
+    encoded = json.dumps(fp, sort_keys=True)
+    for sentinel in (
+        "PRIVATE_REASONING_SENTINEL", "PRIVATE_KEY_SENTINEL", "PRIVATE_TEXT_SENTINEL",
+        "PRIVATE_ID_SENTINEL", "PRIVATE_TOOL_SENTINEL", "PRIVATE_ARGUMENT_KEY_SENTINEL",
+        "PRIVATE_ARGUMENT_VALUE_SENTINEL", "PRIVATE_MESSAGE_ID_SENTINEL",
+        "PRIVATE_FINISH_SENTINEL", "PRIVATE_MODEL_SENTINEL", "PRIVATE_PROVIDER_SENTINEL",
+        "PRIVATE_USER_TEXT_SENTINEL", "PRIVATE_USER_ID_SENTINEL", "PRIVATE_ORIGIN_SENTINEL",
+        "PRIVATE_SOURCE_SENTINEL",
+    ):
+        assert sentinel not in encoded
+
+
+def test_agent_message_new_content_type_surfaces_as_drift(tmp_path):
+    baseline = _fingerprint(tmp_path, AGENT_MESSAGE_LINES)
+    drifted = AGENT_MESSAGE_LINES + [
+        _agent_message("assistant", [{"type": "citation", "url": "PRIVATE_URL_SENTINEL"}])
+    ]
+
+    diff = _drift(_fingerprint(tmp_path, drifted), baseline)
+
+    assert diff["unknown_types"] == ["agent.message.appended.content.citation"]
+    assert diff["unknown_keys"]["agent.message.appended.content.citation"] == ["type", "url"]
+    assert "PRIVATE_URL_SENTINEL" not in json.dumps(diff, sort_keys=True)
+
+
+def test_agent_message_nested_key_and_tool_call_drift_are_visible(tmp_path):
+    baseline = _fingerprint(tmp_path, AGENT_MESSAGE_LINES)
+    drifted = [
+        _agent_message(
+            "assistant",
+            [{"type": "text", "text": "PRIVATE_TEXT_SENTINEL", "annotations": []}],
+            tool_calls=[{
+                "id": "PRIVATE_ID_SENTINEL",
+                "name": "PRIVATE_TOOL_SENTINEL",
+                "arguments": {"PRIVATE_ARGUMENT_KEY_SENTINEL": "PRIVATE_ARGUMENT_VALUE_SENTINEL"},
+                "status": "PRIVATE_STATUS_SENTINEL",
+            }],
+        )
+    ]
+
+    diff = _drift(_fingerprint(tmp_path, drifted), baseline)
+
+    assert diff["unknown_keys"]["agent.message.appended.content.text"] == ["annotations"]
+    assert diff["unknown_keys"]["agent.message.appended.tool_call"] == ["status"]
+    encoded = json.dumps(diff, sort_keys=True)
+    assert "PRIVATE_ARGUMENT_KEY_SENTINEL" not in encoded
+    assert "PRIVATE_ARGUMENT_VALUE_SENTINEL" not in encoded
+    assert "PRIVATE_STATUS_SENTINEL" not in encoded
+
+
 def test_identical_journal_reports_no_drift(tmp_path):
     baseline = _fingerprint(tmp_path, BASELINE_LINES)
     observed = agent_watch._kimi_wire_schema_fingerprint(
@@ -103,6 +224,30 @@ def test_identical_journal_reports_no_drift(tmp_path):
     assert diff["unknown_types"] == []
     assert diff["unknown_keys"] == {}
     assert diff["is_empty"]
+
+
+def test_kimi_prebump_requires_real_tool_traffic():
+    config = json.loads(
+        (Path(__file__).parents[2] / "docs/agent-support/agent-watch-config.json").read_text()
+    )
+    prebump = config["agents"]["kimi"]["prebump"]
+
+    assert "Bash tool" in prebump["prompt"]
+    assert prebump["required_schema_buckets"] == [
+        "event.tool.call", "event.tool.result",
+    ]
+
+
+def test_observed_event_count_prefers_physical_rows_over_nested_buckets():
+    kimi = {"parsed_lines": 34, "type_counts": {"top": 34, "nested": 38}}
+    cursor = {
+        "sampled_total_parsed_lines": 11,
+        "parsed_lines": 5,
+        "type_counts": {"assistant": 5, "content.text": 6},
+    }
+
+    assert agent_watch._observed_event_count(kimi) == 34
+    assert agent_watch._observed_event_count(cursor) == 11
 
 
 def test_new_part_type_surfaces_as_drift(tmp_path):

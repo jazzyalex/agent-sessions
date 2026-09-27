@@ -11,6 +11,7 @@ reusing the weekly helpers.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -925,6 +926,41 @@ DRIVERS["hermes_oneshot"] = HermesOneshotDriver()
 class PiPromptDriver:
     name = "pi_prompt"
 
+    @staticmethod
+    def _session_contains_tool_call(session_path: Path) -> bool:
+        """Require the fresh Pi transcript to contain a real assistant tool call."""
+        def normalized_block_type(value) -> str:
+            if not isinstance(value, str):
+                return ""
+            return value.strip().lower().replace("_", "").replace("-", "")
+
+        try:
+            with session_path.open("r", encoding="utf-8", errors="replace") as handle:
+                for index, raw in enumerate(handle):
+                    if index >= 5000:
+                        break
+                    if len(raw) > 4 * 1024 * 1024:
+                        continue
+                    try:
+                        record = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict) or record.get("type") != "message":
+                        continue
+                    message = record.get("message")
+                    if not isinstance(message, dict) or message.get("role") != "assistant":
+                        continue
+                    content = message.get("content")
+                    if isinstance(content, list) and any(
+                        isinstance(block, dict)
+                        and normalized_block_type(block.get("type")) == "toolcall"
+                        for block in content
+                    ):
+                        return True
+        except OSError:
+            return False
+        return False
+
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
         pi_home = sandbox / ".pi" / "agent"
         sessions_root = pi_home / "sessions"
@@ -948,7 +984,7 @@ class PiPromptDriver:
                     "--no-prompt-templates",
                     "--no-themes",
                     "--no-context-files",
-                    "--no-tools",
+                    "--tools", "ls",
                     prompt,
                 ],
                 env=env,
@@ -983,6 +1019,8 @@ class PiPromptDriver:
 
         if rc != 0 or newest is None:
             return DriverResult(False, newest, stdout_file, stderr_file, rc, f"pi_prompt_failed rc={rc}")
+        if not self._session_contains_tool_call(newest):
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, "pi_tool_turn_missing")
         return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
 
 
@@ -1063,8 +1101,8 @@ class KimiPromptDriver:
         # Discover the newest main-agent wire.jsonl under the sandboxed
         # KIMI_CODE_HOME. Restricted to agents/main/ (not agents/<subagent>/)
         # to match the weekly local_schema glob
-        # (sessions/**/agents/main/wire.jsonl) -- a "say hello" prompt has no
-        # subagents, but a stray agents/agent-0/wire.jsonl must never win.
+        # (sessions/**/agents/main/wire.jsonl). A stray
+        # agents/agent-0/wire.jsonl must never win.
         newest: Path | None = None
         newest_m = -1.0
         if sessions_root.exists():

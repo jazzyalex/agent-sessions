@@ -27,10 +27,15 @@ final class PiSessionParserTests: XCTestCase {
     func testParseFileFullBuildsUserAssistantAndMetaEvents() throws {
         let session = try XCTUnwrap(PiSessionParser.parseFileFull(at: fixtureURL()))
 
-        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 2)
-        XCTAssertEqual(session.events.filter { $0.kind == .assistant }.count, 2)
+        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 3)
+        XCTAssertEqual(session.events.filter { $0.kind == .assistant }.count, 3)
         XCTAssertGreaterThanOrEqual(session.events.filter { $0.kind == .meta }.count, 3)
         XCTAssertTrue(session.events.contains { $0.text?.contains("hello.py prints a fixture greeting.") == true })
+        XCTAssertTrue(session.events.contains {
+            $0.kind == .meta && $0.role == "thinking" && $0.text == "[thinking] [trimmed for fixture]"
+        })
+        XCTAssertTrue(session.events.contains { $0.kind == .tool_call && $0.toolName == "ls" })
+        XCTAssertTrue(session.events.contains { $0.kind == .tool_result && $0.toolName == "ls" })
     }
 
     func testParseFileFullSkipsOversizedPiFileUnlessExplicitlyAllowed() throws {

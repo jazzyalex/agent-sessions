@@ -9,6 +9,153 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.5.1-unreleased"
+    as_of_date_utc: "2026-09-27"
+    as_of_commit: "5c359a7f+working-tree"
+    note: "Kimi 2.0.2 follow-up. A fresh Bash turn proved the appended message projection duplicates legacy user, assistant, call, and result records. Sanitized fixture coverage and a no-duplicate parser test establish the metadata-only contract. Upstream 2.1.1 remains unverified. Prebump report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json. Final weekly report: scripts/probe_scan_output/agent_watch/20260927-045502-543478Z-p15724/report.json."
+    verified:
+      kimi:
+        sessions:
+          max_verified_version: "2.0.2"
+          scope: "installed; upstream 2.1.1 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json", "Resources/Fixtures/stage0/agents/kimi/small.jsonl", "AgentSessionsTests/KimiSessionParserTests.swift"]
+          notes: "The strengthened driver requires a Bash call and result. Projected user, assistant, tool-call, and tool-result content matched the legacy context projection; appended rows remain metadata to prevent duplicates."
+  - agent_sessions_version: "5.5.1-unreleased"
+    as_of_date_utc: "2026-09-26"
+    as_of_commit: "5c359a7f+working-tree"
+    note: "Final 16-agent format check after nested-schema and parser follow-up. Current baselines are clean except for intentionally held Kimi 2.0.2 drift; OpenClaw, Pi, Cline, and Qwen remain blocked on fresh evidence. Devin and fx remain steward-owned. Final weekly report: scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.157.0"
+          scope: "installed; upstream 0.157.1 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182529-893120Z-p15150-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh 0.157.0 prebump matched. An all-session sweep of 1,406 local sessions confirms fixture coverage for current compaction, resume, retained-context, and MCP-attribution buckets. Codex status probe passes."
+      claude:
+        sessions:
+          max_verified_version: "2.1.278"
+          scope: "installed; upstream 2.1.283 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182844-238155Z-p15894-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json"]
+          notes: "Fresh 2.1.278 session included a Bash tool turn and matched baseline. Claude status and authenticated usage probes pass."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.87"
+          scope: "installed; upstream 1.0.88 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182529-893120Z-p15150-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json"]
+          notes: "Fresh 1.0.87 session matched all required schema buckets."
+      deepseek_harness:
+        sessions:
+          max_verified_version: "0.1.6-alpha.2"
+          scope: "existing app ceiling retained; five fresh installed-version sessions checked"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json", "scripts/tests/test_deepseek_harness_monitoring.py"]
+          notes: "Five fresh 0.1.5-rc.2 sessions contributed 1,139 validated events with no unknown event types or keys. Upstream 0.1.7-rc.2 remains unverified without a driver."
+      hermes:
+        sessions:
+          max_verified_version: "0.21.1"
+          scope: "installed; upstream 0.21.5 remains unverified"
+          evidence: ["docs/agent-support/agent-watch-config.json", "scripts/agent_watch.py", "scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json"]
+          notes: "Latest monitoring now reads the official GitHub release-name semantic version instead of the calendar tag."
+    not_verified:
+      antigravity: {sessions: {held_at_version: "1.1.27", installed_version: "1.1.27", upstream_version: "1.2.11", reason: "No fresh session from upstream 1.2.11."}}
+      cline: {sessions: {held_at_version: "3.0.62", installed_version: "3.0.65", upstream_version: "3.0.65", reason: "Newest sample predates the installed CLI and no driver is configured."}}
+      cursor: {sessions: {held_at_version: "2026.9.8", installed_version: "2026.9.10", upstream_version: "2026.9.26", reason: "Driver authentication failed; current local schema remains clean."}}
+      grok: {sessions: {held_at_version: "1.0.24", installed_version: "1.0.24", upstream_version: "1.0.41", reason: "No fresh session from upstream 1.0.41."}}
+      kimi: {sessions: {held_at_version: "0.41.0", installed_version: "2.0.2", upstream_version: "2.1.1", reason: "Fresh prebump found unresolved agent.message.appended and lifecycle drift; message parity is not proven."}}
+      openclaw: {sessions: {held_at_version: "2026.7.1", installed_version: "2026.9.5", upstream_version: "2026.9.6", reason: "Nested current formats are parser- and fixture-covered, but a pending local migration blocked fresh session generation."}}
+      opencode: {sessions: {held_at_version: "1.18.29", installed_version: "1.18.31", upstream_version: "1.18.32", reason: "Driver failed; current local schema remains clean."}}
+      pi: {sessions: {held_at_version: "0.85.1", installed_version: "0.86.1", upstream_version: "0.87.1", reason: "Nested thinking/reasoning shapes are covered, but strengthened fresh runs remained text-only and did not prove tool traffic."}}
+      qwen: {sessions: {held_at_version: "0.14.3", installed_version: "0.24.3", upstream_version: "0.24.6", reason: "Newest native session predates installed CLI; no driver is available."}}
+  - agent_sessions_version: "5.5.1-unreleased"
+    as_of_date_utc: "2026-09-25"
+    as_of_commit: "5c359a7f+working-tree"
+    note: "Full 16-agent format check and value pass. Codex, Claude, and Copilot ceilings advanced from clean fresh prebump evidence; Kimi drift, thin Pi evidence, and failed Cursor/OpenClaw/OpenCode drivers remain held. Devin and fx remain steward-owned. Final weekly report: scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.157.0"
+          scope: "latest; installed version matches current upstream"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182529-893120Z-p15150-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh 0.157.0 session matched the refreshed fixture after redacted coverage for user_input_order and mcp_attribution.status; 22 events, zero parse errors or unknown schema. Codex status probe passed. Current upstream is 0.157.0."
+      claude:
+        sessions:
+          max_verified_version: "2.1.278"
+          scope: "installed; upstream 2.1.282 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182844-238155Z-p15894-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json"]
+          notes: "Fresh 2.1.278 session matched baseline with a Bash tool turn, 34 events, and zero parse errors or unknown schema. Claude status and usage probes both passed."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.87"
+          scope: "installed; upstream 1.0.88 remains unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-182529-893120Z-p15150-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
+          notes: "Fresh 1.0.87 session matched baseline with all five required start/message/tool execution buckets, 14 events, and zero parse errors or unknown schema."
+      deepseek_harness:
+        sessions:
+          max_verified_version: "0.1.6-alpha.2"
+          scope: "existing app ceiling retained; weekly monitor checked against a fresh installed-version session"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json", "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_agent_instructions_source.jsonl", "scripts/tests/test_deepseek_harness_monitoring.py"]
+          notes: "The explicitly authorized headless run wrote a real 0.1.5-rc.2 session after the installed binary mtime. Five individually fresh sessions contributed 1,139 validated events with zero unknown event types or keys. Upstream 0.1.7-rc.2 remains unverified because no DSH prebump driver exists; the 0.1.6-alpha.2 ceiling did not change."
+    not_verified:
+      antigravity:
+        sessions:
+          held_at_version: "1.1.27"
+          installed_version: "1.1.27"
+          upstream_version: "1.2.11"
+          reason: "No fresh session from upstream 1.2.11; retain installed-only scope."
+      cline:
+        sessions:
+          held_at_version: "3.0.62"
+          installed_version: "3.0.65"
+          upstream_version: "3.0.65"
+          reason: "Current sample predates the installed CLI, and no prebump driver is configured."
+      cursor:
+        sessions:
+          held_at_version: "2026.9.8"
+          installed_version: "2026.9.10"
+          upstream_version: "2026.9.23"
+          reason: "Prebump failed before writing a session because the CLI requires authentication; upstream 2026.9.23 is also newer than installed."
+      grok:
+        sessions:
+          held_at_version: "1.0.24"
+          installed_version: "1.0.24"
+          upstream_version: "1.0.41"
+          reason: "No fresh session from the newer upstream build; retain installed-only scope."
+      hermes:
+        sessions:
+          held_at_version: "0.21.1"
+          installed_version: "unknown"
+          upstream_version: "unknown"
+          reason: "The latest source exposes rejected placeholder 0.0.0; monitoring remains broken until the source is repaired."
+      kimi:
+        sessions:
+          held_at_version: "0.41.0"
+          installed_version: "2.0.2"
+          upstream_version: "2.1.1"
+          reason: "Fresh prebump found three unbaselined agent event types and additional keys. The appended-message projection may contain unique transcript content; keep the ceiling unchanged pending parity/deduplication evidence."
+      openclaw:
+        sessions:
+          held_at_version: "2026.7.1"
+          installed_version: "2026.9.5"
+          upstream_version: "2026.9.6"
+          reason: "Real-home prebump failed before writing a session because local state migrations are pending; keep blocked until the profile is repaired and recaptured."
+      opencode:
+        sessions:
+          held_at_version: "1.18.29"
+          installed_version: "1.18.31"
+          upstream_version: "1.18.32"
+          reason: "Prebump driver failed; do not advance the ceiling until a fresh installed-build session matches."
+      pi:
+        sessions:
+          held_at_version: "0.85.1"
+          installed_version: "0.86.1"
+          upstream_version: "0.87.1"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260925-181536-476753Z-p13847-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210650-245130Z-p21689-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210737-797132Z-p21734-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260925-210925-507498Z-p22051/report.json"]
+          reason: "The initial fresh session was only six events from a one-line greeting. The tightened driver now enables only read-only ls and requires an assistant toolCall; two retries returned no tool turn, so there is no rich 0.86.1 evidence."
+      qwen:
+        sessions:
+          held_at_version: "0.14.3"
+          installed_version: "0.24.3"
+          upstream_version: "0.24.5"
+          reason: "Newest native session predates installed CLI and there is no prebump driver."
   - agent_sessions_version: "5.4-unreleased"
     as_of_date_utc: "2026-09-15"
     as_of_commit: "00dd21de+working-tree"

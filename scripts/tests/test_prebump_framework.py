@@ -254,6 +254,59 @@ def test_exit_code_for_prebump_results():
     ]) == 4
 
 
+def test_prebump_schema_check_requires_valid_nonempty_evidence_and_required_buckets():
+    baseline = {
+        "assistant": ["message", "role"],
+        "content.tool_use": ["id", "type"],
+    }
+    fingerprint = {
+        "type_counts": {"assistant": 1, "content.tool_use": 1},
+        "type_keys": {
+            "assistant": ["message", "role"],
+            "content.tool_use": ["id", "type"],
+        },
+        "parsed_lines": 2,
+        "parse_errors": 0,
+    }
+
+    diff, matches = agent_watch._prebump_schema_check(
+        fingerprint=fingerprint,
+        baseline_type_keys=baseline,
+        required_schema_buckets=["content.tool_use"],
+    )
+    assert matches is True
+    assert diff["missing_required_schema_buckets"] == []
+
+    malformed = dict(fingerprint, parse_errors=1)
+    _diff, malformed_matches = agent_watch._prebump_schema_check(
+        fingerprint=malformed,
+        baseline_type_keys=baseline,
+        required_schema_buckets=["content.tool_use"],
+    )
+    assert malformed_matches is False
+
+    no_tool_use = dict(
+        fingerprint,
+        type_counts={"assistant": 1},
+        type_keys={"assistant": ["message", "role"]},
+    )
+    no_tool_diff, no_tool_matches = agent_watch._prebump_schema_check(
+        fingerprint=no_tool_use,
+        baseline_type_keys=baseline,
+        required_schema_buckets=["content.tool_use"],
+    )
+    assert no_tool_matches is False
+    assert no_tool_diff["unknown_only_is_empty"] is True
+    assert no_tool_diff["missing_required_schema_buckets"] == ["content.tool_use"]
+
+    _empty_baseline_diff, empty_baseline_matches = agent_watch._prebump_schema_check(
+        fingerprint=fingerprint,
+        baseline_type_keys={},
+        required_schema_buckets=["content.tool_use"],
+    )
+    assert empty_baseline_matches is False
+
+
 def _make_codex_cfg(tmp_path, *, timeout_cfg=10, required_types=("session_meta",)):
     return {
         "report_root": str(tmp_path / "out"),
@@ -334,6 +387,28 @@ def test_run_prebump_uses_registered_driver_and_writes_report(tmp_path, monkeypa
     # F2: env was constructed by prepare_auth and passed in.
     assert "HOME" in fake.last_env
     assert fake.last_env["HOME"] != os.environ.get("HOME", "")
+
+
+def test_run_prebump_applies_root_required_schema_buckets(tmp_path, monkeypatch):
+    import agent_watch
+    import agent_watch_prebump_drivers as drv_mod
+
+    monkeypatch.setitem(drv_mod.DRIVERS, "fake", _FakeGoodDriver())
+    cfg = _make_codex_cfg(tmp_path)
+    cfg["agents"]["codex"]["prebump"]["required_schema_buckets"] = ["tool.call"]
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.chdir(REPO)
+
+    rc = agent_watch.main([
+        "--mode", "prebump", "--config", str(cfg_path),
+        "--agent", "codex", "--keep-sandbox",
+    ])
+
+    assert rc == 2
+    report_path = next((tmp_path / "out").glob("*-prebump/report.json"))
+    evidence = json.loads(report_path.read_text())["results"]["codex"]["evidence"]
+    assert evidence["schema_diff"]["missing_required_schema_buckets"] == ["tool.call"]
 
 
 def test_run_prebump_preserves_sandbox_when_fresh_schema_drifts(tmp_path, monkeypatch):

@@ -37,6 +37,25 @@ def test_upstream_fetch_rate_limit_is_degraded_not_monitoring_failure():
     ])
 
 
+def test_url_regex_upstream_can_reject_placeholder_versions(monkeypatch):
+    monkeypatch.setattr(
+        agent_watch,
+        "_http_get_text",
+        lambda _url, timeout: '[project]\nversion = "0.0.0"\n',
+    )
+
+    result = agent_watch._fetch_upstream({
+        "kind": "url_regex_semver_max",
+        "url": "https://example.invalid/pyproject.toml",
+        "pattern": r'version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"',
+        "reject_versions": ["0.0.0"],
+    }, timeout=1)
+
+    assert result["ok"] is False
+    assert result["error"] == "rejected_version"
+    assert "0.0.0" in result["detail"]
+
+
 def test_http_get_text_uses_github_token_for_api(monkeypatch):
     # The token is deliberately NOT an argv element — it goes into a mode-0600 curl
     # config file so it never shows up in `ps`. Assert that contract, and read the
@@ -684,6 +703,20 @@ def test_compatibility_supports_latest_with_fresh_matching_evidence():
     assert result["supports_latest"] is True
     assert result["confidence"] == "high"
     assert result["latest_status"] == "current_fetch_known"
+    assert result["latest_real_session_evidence"] is True
+
+
+def test_compatibility_does_not_claim_support_when_installed_version_is_unknown():
+    result = _compat(
+        installed=None,
+        fresh_evidence_source="latest_prebump_report",
+    )
+
+    assert result["verdict"] == "blocked_no_fresh_evidence"
+    assert result["scope"] == "none"
+    assert result["supports_installed"] is None
+    assert result["supports_latest"] is False
+    assert "installed_version_unknown" in result["blockers"]
 
 
 def test_current_weekly_drift_overrides_older_clean_prebump():
@@ -760,6 +793,7 @@ def test_compatibility_does_not_support_latest_when_installed_lags_upstream():
     assert result["verdict"] == "supports_installed_only"
     assert result["scope"] == "installed"
     assert result["supports_latest"] is False
+    assert result["latest_real_session_evidence"] is False
 
 
 def test_compatibility_installed_equals_latest_without_prebump_is_installed_only():
@@ -776,6 +810,87 @@ def test_compatibility_installed_equals_latest_without_prebump_is_installed_only
     assert result["supports_installed"] is True
     assert result["supports_latest"] is False
     assert result["latest_real_session_evidence"] is False
+
+
+def test_compatibility_does_not_call_prebump_latest_evidence_when_upstream_is_unknown():
+    result = _compat(
+        upstream=None,
+        upstream_sources_configured=True,
+        upstream_errors=[{"error": "fetch_failed"}],
+        monitoring_failed=True,
+        fresh_evidence_source="latest_prebump_report",
+    )
+
+    assert result["verdict"] == "monitoring_broken"
+    assert result["fresh_schema_evidence"] is True
+    assert result["latest_real_session_evidence"] is False
+
+
+def test_compatibility_does_not_claim_latest_evidence_when_source_monitoring_failed():
+    result = _compat(
+        upstream="1.0.0",
+        monitoring_failed=True,
+        fresh_evidence_source="latest_prebump_report",
+    )
+
+    assert result["verdict"] == "monitoring_broken"
+    assert result["latest_real_session_evidence"] is False
+
+
+def test_legacy_bump_recommendation_requires_prebump_evidence():
+    weekly = _compat(
+        verified="0.135.0",
+        installed="0.136.0",
+        upstream="0.136.0",
+        installed_newer_than_verified=True,
+        upstream_newer_than_verified=True,
+        fresh_evidence_source=None,
+    )
+    severity, recommendation = agent_watch._apply_compatibility_to_legacy_status(
+        severity="low",
+        recommendation="bump_verified_version",
+        compatibility=weekly,
+    )
+    assert weekly["verdict"] == "supports_installed_only"
+    assert recommendation == "run_prebump_validator"
+
+    prebump = _compat(
+        verified="0.135.0",
+        installed="0.136.0",
+        upstream="0.136.0",
+        installed_newer_than_verified=True,
+        upstream_newer_than_verified=True,
+        fresh_evidence_source="latest_prebump_report",
+    )
+    severity, recommendation = agent_watch._apply_compatibility_to_legacy_status(
+        severity="low",
+        recommendation="bump_verified_version",
+        compatibility=prebump,
+    )
+    assert prebump["verdict"] == "supports_latest"
+    assert recommendation == "bump_verified_version"
+
+
+def test_driverless_blocked_agent_does_not_get_prebump_recommendation():
+    result = _compat(
+        verified="0.76.0",
+        installed="0.78.0",
+        upstream=None,
+        upstream_sources_configured=False,
+        installed_newer_than_verified=True,
+        sample_freshness={"is_stale": True, "stale_reason": "sample_older_than_cli"},
+        real_session_driver_configured=False,
+    )
+    severity, recommendation = agent_watch._apply_compatibility_to_legacy_status(
+        severity="medium",
+        recommendation="run_prebump_validator",
+        compatibility=result,
+    )
+
+    assert result["verdict"] == "blocked_stale_sample"
+    assert "configure a prebump driver" in result["next_action"]
+    assert severity == "medium"
+    assert recommendation == "monitor"
 
 
 def test_compatibility_records_missing_real_session_driver_for_latest_source():
@@ -890,6 +1005,22 @@ def test_compatibility_stale_changed_installed_blocks_support_claim():
     assert result["scope"] == "none"
     assert result["supports_installed"] is False
     assert result["next_action"] == "run prebump validator for the affected agent"
+
+
+def test_driverless_stale_sample_has_an_action_it_can_take():
+    result = _compat(
+        verified="0.76.0",
+        installed="0.78.0",
+        upstream=None,
+        upstream_sources_configured=False,
+        installed_newer_than_verified=True,
+        sample_freshness={"is_stale": True, "stale_reason": "sample_older_than_cli"},
+        real_session_driver_configured=False,
+    )
+
+    assert result["verdict"] == "blocked_stale_sample"
+    assert "capture a fresh native session" in result["next_action"]
+    assert "configure a prebump driver" in result["next_action"]
 
 
 def test_legacy_status_tracks_format_drift_blocker():

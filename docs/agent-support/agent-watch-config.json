@@ -177,9 +177,10 @@
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.hermes.max_verified_version",
       "upstream": [
         {
-          "kind": "url_regex_semver_max",
-          "url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/pyproject.toml",
-          "pattern": "version\\s*=\\s*\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
+          "kind": "github_latest_release",
+          "repo": "NousResearch/hermes-agent",
+          "version_source": "name",
+          "note": "Hermes tags use calendar versions (v2026.x.y); the release name carries the CLI semver."
         }
       ],
       "risk_keywords": {
@@ -307,10 +308,17 @@
       "prebump": {
         "driver": "copilot_prompt",
         "sandbox": {"mode": "home_override", "subdir": "copilot_sandbox"},
-        "prompt": "Run ls.",
+        "prompt": "Use your terminal tool to list file names in the current directory. Do not open or modify any files.",
         "model": "auto",
         "real_home_session": true,
         "timeout_seconds": 180,
+        "required_schema_buckets": [
+          "session.start",
+          "user.message",
+          "assistant.message",
+          "tool.execution_start",
+          "tool.execution_complete"
+        ],
         "env_vars": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
         "_credential_note": "Copilot no longer writes ~/.copilot/hosts.json, so there is no credential file to copy. Auth is env-var-first (env_vars above); when none is set the copilot_prompt driver falls back to `gh auth token`.",
         "credential_files": [],
@@ -442,9 +450,10 @@
       "prebump": {
         "driver": "cursor_agent_print",
         "sandbox": {"mode": "home_override", "subdir": "cursor_sandbox"},
-        "prompt": "Say hi, then list the files in the current directory using your tools.",
+        "prompt": "Use your terminal tool only to list file names in the current directory. Do not open or modify files. Then say what you found.",
         "real_home_session": true,
         "timeout_seconds": 180,
+        "required_schema_buckets": ["content.tool_use"],
         "env_vars": ["CURSOR_API_KEY"],
         "credential_files": [],
         "discover_session": {
@@ -486,7 +495,7 @@
       "prebump": {
         "driver": "pi_prompt",
         "sandbox": {"mode": "home_override", "subdir": "pi_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Call the ls tool now with path '.'. Do not answer before making that tool call. List filenames only; do not open, read, or modify files.",
         "timeout_seconds": 180,
         "env_vars": [
           "ANTHROPIC_API_KEY",
@@ -550,7 +559,7 @@
       "prebump": {
         "driver": "kimi_prompt",
         "sandbox": {"mode": "home_override", "subdir": "kimi_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Use the Bash tool to run pwd. Do not read or modify any files. Then say one sentence confirming the directory.",
         "model": "kimi-k2.7-code",
         "model_provider_type": "kimi",
         "model_base_url": "https://api.moonshot.ai/v1",
@@ -558,6 +567,7 @@
         "env_vars": ["KIMI_API_KEY", "KIMI_MODEL_API_KEY"],
         "credential_files": ["~/.kimi-code/config.toml"],
         "_credential_note": "config.toml inlines providers.<name>.api_key alongside non-secret default_model/models routing, so it is declared as a credential_file (strict 0600-mode hygiene gate applies) rather than a support_file. Prefer exporting KIMI_API_KEY (or KIMI_MODEL_API_KEY): kimi-code's moonshot-ai/\"kimi\" provider requires providerConfig.apiKey in the *loaded* config (AuthTokenMissingError otherwise -- verified against dist/main.mjs, packages/agent-core-v2/src/app/auth/auth.ts), so the kimi_prompt driver normalizes a forwarded env-var key into kimi-code's own in-memory-only KIMI_MODEL_NAME/KIMI_MODEL_API_KEY provider-synthesis contract, which the CLI itself guarantees is never written back to config.toml.",
+        "required_schema_buckets": ["event.tool.call", "event.tool.result"],
         "discover_session": {
           "kind": "kimi_wire_newest",
           "roots": [".kimi-code/sessions"],
@@ -764,11 +774,19 @@
         "usage": []
       },
       "weekly": {
+        "freshness_window_days": 14,
         "local_schema": {
-          "kind": "jsonl_newest",
-          "roots": ["AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"],
-          "glob": "*.jsonl",
+          "kind": "deepseek_harness_sessions",
+          "roots": ["~/.dsh/sessions"],
+          "root_env": "DSH_HOME",
+          "default_root": "~/.dsh/sessions",
+          "glob": "**/session[.vN].jsonl[.zstd]",
+          "sample_count": 5,
           "max_lines": 5000
+        },
+        "discovery_path_contract": {
+          "patterns": ["(?:^|/)session(?:\\.v[1-9][0-9]*)?\\.jsonl(?:\\.zstd)?$"],
+          "description": "Selected canonical DSH generation under <root>/<project-key>/<encoded-session-id>; checks generation/header paths, duplicate selections, and root-wide compression consistency."
         },
         "probes": [
           {
@@ -778,7 +796,7 @@
             "timeout_seconds": 15
           }
         ],
-        "_privacy_note": "Monitoring verifies the committed sanitized corpus and upstream releases only. It does not inspect ~/.dsh without separate owner authorization."
+        "_privacy_note": "Weekly monitoring reads headers and up to five recent real DSH session generations under $DSH_HOME/sessions (or ~/.dsh/sessions), validates their JSONL/zstd record structure, and records only schema keys, event types, counts, and private report paths. Prompt and tool payload values are not written to reports."
       }
     }
   }

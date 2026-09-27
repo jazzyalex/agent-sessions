@@ -47,7 +47,8 @@ enum StewardAskEligibility {
         StewardAgent(source: .openclaw, stewardName: "OpenClaw"),
         StewardAgent(source: .hermes, stewardName: "Hermes"),
         StewardAgent(source: .qwen, stewardName: "Qwen Code"),
-        StewardAgent(source: .cline, stewardName: "Cline CLI and Desktop")
+        StewardAgent(source: .cline, stewardName: "Cline CLI and Desktop"),
+        StewardAgent(source: .deepseekHarness, stewardName: "DeepSeek Harness")
     ]
 
     /// The sources worth counting while scanning the index — everything else can

@@ -326,7 +326,7 @@ final class OpenClawSessionParser {
                                     if firstToolName == nil, let toolName, !toolName.isEmpty {
                                         firstToolName = toolName
                                     }
-                                    let args = block["arguments"]
+                                    let args = block["arguments"] ?? block["input"]
                                     events.append(SessionEvent(
                                         id: baseID + String(format: "-t%02d", blockIndex),
                                         timestamp: ts,
@@ -614,7 +614,16 @@ final class OpenClawSessionParser {
         texts.reserveCapacity(min(arr.count, 8))
         for item in arr {
             guard let d = item as? [String: Any] else { continue }
-            if (d["type"] as? String) == "text", let t = d["text"] as? String {
+            let blockType = canonicalBlockType(d["type"])
+            let blockText: String?
+            if blockType == "text" {
+                blockText = d["text"] as? String
+            } else if blockType == "toolresult" {
+                blockText = (d["text"] as? String) ?? (d["content"] as? String)
+            } else {
+                blockText = nil
+            }
+            if let t = blockText {
                 let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty { continue }
                 // Telegram attachments: Clawdbot injects a verbose "[media attached: ...]" hint string.

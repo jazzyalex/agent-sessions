@@ -5318,6 +5318,52 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(full.listTitle, light.listTitle)
     }
 
+    func testOpenClawFullParserReadsInputWhenToolCallArgumentsAreAbsent() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ToolInput-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-tool-input","timestamp":"2026-09-25T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let assistant = #"{"type":"message","id":"m1","timestamp":"2026-09-25T00:01:00Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"exec","input":{"command":"pwd"}}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("tool-input.jsonl")
+        try (header + assistant).write(to: url, atomically: true, encoding: .utf8)
+
+        let session = try XCTUnwrap(OpenClawSessionParser.parseFileFull(at: url))
+        let toolCall = try XCTUnwrap(session.events.first(where: { $0.kind == .tool_call }))
+        let toolInput = try XCTUnwrap(toolCall.toolInput)
+        let toolInputData = try XCTUnwrap(toolInput.data(using: .utf8))
+        let toolInputObject = try XCTUnwrap(JSONSerialization.jsonObject(with: toolInputData) as? [String: String])
+
+        XCTAssertEqual(toolCall.toolName, "exec")
+        XCTAssertEqual(toolInputObject["command"], "pwd")
+    }
+
+    func testOpenClawFullParserReadsNestedToolResultContent() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-NestedToolResult-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-tool-result","timestamp":"2026-09-25T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let toolResult = #"{"type":"message","id":"m1","timestamp":"2026-09-25T00:01:00Z","message":{"role":"toolResult","toolCallId":"call-1","toolName":"exec","isError":true,"content":[{"type":"toolResult","id":"call-1","toolCallId":"call-1","toolUseId":"call-1","tool_use_id":"call-1","name":"exec","toolName":"exec","text":"permission denied","content":"permission denied"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("nested-tool-result.jsonl")
+        try (header + toolResult).write(to: url, atomically: true, encoding: .utf8)
+
+        let session = try XCTUnwrap(OpenClawSessionParser.parseFileFull(at: url))
+        let event = try XCTUnwrap(session.events.first(where: { $0.kind == .error }))
+
+        XCTAssertEqual(event.messageID, "call-1")
+        XCTAssertEqual(event.toolName, "exec")
+        XCTAssertEqual(event.toolOutput, "permission denied")
+    }
+
     func testOpenClawParserUsesCronPrefixAsProjectOrigin() throws {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Cron-\(UUID().uuidString)", isDirectory: true)

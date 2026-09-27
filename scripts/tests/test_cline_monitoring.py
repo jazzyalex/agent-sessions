@@ -48,6 +48,22 @@ def test_cline_fingerprint_covers_manifest_and_adjacent_transcript(tmp_path):
     assert result["contract_errors"] == []
 
 
+def test_cline_fingerprint_preserves_null_valued_keys(tmp_path):
+    manifest = _cline_pair(tmp_path)
+    manifest_data = json.loads(manifest.read_text())
+    manifest_data["team_name"] = None
+    manifest.write_text(json.dumps(manifest_data))
+    transcript_path = manifest.with_name("sess-1.messages.json")
+    transcript_data = json.loads(transcript_path.read_text())
+    transcript_data["agent"] = None
+    transcript_path.write_text(json.dumps(transcript_data))
+
+    result = agent_watch._cline_session_schema_fingerprint(manifest)
+
+    assert "team_name" in result["type_keys"]["manifest"]
+    assert "agent" in result["type_keys"]["transcript"]
+
+
 def test_cline_contract_expands_stem_and_requires_companion(tmp_path):
     manifest = _cline_pair(tmp_path)
     contract = {

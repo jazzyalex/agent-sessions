@@ -26,7 +26,8 @@ def test_pi_driver_runs_and_returns_session(tmp_path):
         assert "--mode" in argv and "json" in argv
         assert "--session-dir" in argv and str(sessions_root) in argv
         assert "--session-id" in argv
-        assert "--no-tools" in argv
+        assert "--tools" in argv and argv[argv.index("--tools") + 1] == "ls"
+        assert "--no-tools" not in argv
 
         sess_dir = sessions_root / "--tmp-project--"
         sess_dir.mkdir(parents=True, exist_ok=True)
@@ -34,7 +35,7 @@ def test_pi_driver_runs_and_returns_session(tmp_path):
         out.write_text(
             '{"type":"session","version":3,"id":"fake","timestamp":"2026-05-28T22:00:00.000Z","cwd":"/tmp/project"}\n'
             '{"type":"message","id":"u1","parentId":null,"timestamp":"2026-05-28T22:00:00.001Z","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n'
-            '{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-05-28T22:00:00.002Z","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}\n'
+            '{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-05-28T22:00:00.002Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call1","name":"ls","arguments":{"path":"."}}]}}\n'
         )
 
         import subprocess as _sp
@@ -51,6 +52,54 @@ def test_pi_driver_runs_and_returns_session(tmp_path):
     assert res.session_path.suffix == ".jsonl"
 
 
+def test_pi_driver_rejects_session_without_tool_call(tmp_path):
+    sb = tmp_path / "sb"
+    sb.mkdir()
+
+    def fake_run(argv, *, env=None, **kwargs):
+        sessions_root = Path(env["PI_CODING_AGENT_SESSION_DIR"])
+        sess_dir = sessions_root / "--tmp-project--"
+        sess_dir.mkdir(parents=True, exist_ok=True)
+        out = sess_dir / "2026-05-28T22-00-00-000Z_fake.jsonl"
+        out.write_text(
+            '{"type":"session","version":3,"id":"fake"}\n'
+            '{"type":"message","id":"u1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}\n'
+            '{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}\n'
+        )
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
+
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        res = drv_mod.DRIVERS["pi_prompt"].run(sb, {"HOME": str(sb)}, "Use ls.", timeout=30)
+
+    assert res.ok is False
+    assert res.error == "pi_tool_turn_missing"
+
+
+def test_pi_driver_accepts_parser_normalized_tool_call_type(tmp_path):
+    sb = tmp_path / "sb"
+    sb.mkdir()
+
+    def fake_run(argv, *, env=None, **kwargs):
+        sessions_root = Path(env["PI_CODING_AGENT_SESSION_DIR"])
+        sess_dir = sessions_root / "--tmp-project--"
+        sess_dir.mkdir(parents=True, exist_ok=True)
+        out = sess_dir / "2026-05-28T22-00-00-000Z_fake.jsonl"
+        out.write_text(
+            '{"type":"session","version":3,"id":"fake"}\n'
+            '{"type":"message","id":"a1","message":{"role":"assistant","content":[{"type":"tool_call","id":"call1","name":"ls","arguments":{}}]}}\n'
+        )
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
+
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        res = drv_mod.DRIVERS["pi_prompt"].run(
+            sb, {"HOME": str(sb)}, "Use ls.", timeout=30
+        )
+
+    assert res.ok is True
+
+
 def test_pi_config_has_prebump_block():
     cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
     pb = cfg["agents"]["pi"]["prebump"]
@@ -61,6 +110,7 @@ def test_pi_config_has_prebump_block():
     assert pb["discover_session"]["roots"] == [".pi/agent/sessions"]
     assert pb["discover_session"]["globs"] == ["**/*.jsonl"]
     assert pb["discover_session"]["required_types"] == ["session", "message"]
+    assert "ls tool" in pb["prompt"]
 
 
 def test_pi_discovery_contract_accepts_sandbox_session(tmp_path):

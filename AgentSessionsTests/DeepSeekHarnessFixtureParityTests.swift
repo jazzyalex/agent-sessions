@@ -242,6 +242,24 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         XCTAssertTrue(retained[0].diagnosticOnly)
     }
 
+    func testMonitorOnlyAgentInstructionSourceFixtureIsAdmitted() throws {
+        let dir = try fixtureDir()
+        let file = "v3_agent_instructions_source.jsonl"
+        let manifest = try manifest(in: dir)
+        let entry = try manifestEntry(file, in: manifestEntries(manifest))
+        XCTAssertTrue((entry["expectedOutcome"] as? String)?.hasPrefix("monitor-only:") == true)
+
+        let result = try DeepSeekHarnessArtifactReader.read(
+            url: dir.appendingPathComponent(file), compression: .plain)
+        XCTAssertEqual(result.header.version, 3)
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(result)
+        let userMessage = try XCTUnwrap(normalized.first { $0.canonicalType == "user/message" })
+        let source = try XCTUnwrap(userMessage.data["source"] as? [String: Any])
+        XCTAssertEqual(source["kind"] as? String, "agent-instructions")
+        let changes = try XCTUnwrap(source["changes"] as? [[String: Any]])
+        XCTAssertEqual(Set(changes[0].keys), ["action", "scope", "path", "digest"])
+    }
+
     func testFutureVersionRejectsAtPhysicalRead() throws {
         let dir = try fixtureDir()
         do {

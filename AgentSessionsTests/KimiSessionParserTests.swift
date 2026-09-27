@@ -80,8 +80,8 @@ final class KimiSessionParserTests: XCTestCase {
         let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
 
         let users = session.events.filter { $0.kind == .user }
-        XCTAssertEqual(users.count, 3, "fixture has exactly 3 context.append_message user ops")
-        XCTAssertEqual(users.compactMap(\.text), ["hi", "hi", "stop"])
+        XCTAssertEqual(users.count, 4, "fixture has 3 captured and 1 synthetic parity user op")
+        XCTAssertEqual(users.compactMap(\.text), ["hi", "hi", "stop", "SYNTHETIC KIMI PARITY PROMPT"])
     }
 
     /// `turn.prompt` duplicates the text of its `context.append_message`. It must
@@ -90,7 +90,7 @@ final class KimiSessionParserTests: XCTestCase {
         let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
 
         let prompts = session.events.filter { $0.rawJSON.contains("\"type\":\"turn.prompt\"") }
-        XCTAssertEqual(prompts.count, 2)
+        XCTAssertEqual(prompts.count, 3)
         XCTAssertTrue(prompts.allSatisfy { $0.kind == .meta })
     }
 
@@ -105,11 +105,37 @@ final class KimiSessionParserTests: XCTestCase {
 
         for family in ["metadata", "tools.set_active_tools", "llm.request",
                        "llm.tools_snapshot", "turn.steer", "turn.cancel",
-                       "context.append_loop_event", "permission.set_mode"] {
+                       "permission.set_mode"] {
             let matches = session.events.filter { $0.rawJSON.contains("\"type\":\"\(family)\"") }
             XCTAssertFalse(matches.isEmpty, "fixture should contain \(family)")
             XCTAssertTrue(matches.allSatisfy { $0.kind == .meta }, "\(family) must resolve to .meta")
         }
+    }
+
+    /// Kimi 2.x writes a second projected copy of the same user, assistant,
+    /// tool-call, and tool-result history. The legacy context records remain the
+    /// canonical transcript source; projected rows must survive only as metadata.
+    func testAgentMessageProjectionDoesNotDuplicateVisibleTranscript() throws {
+        let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
+
+        let projections = session.events.filter {
+            $0.rawJSON.contains("\"type\":\"agent.message.appended\"")
+        }
+        XCTAssertEqual(projections.count, 3)
+        XCTAssertTrue(projections.allSatisfy { $0.kind == .meta })
+
+        XCTAssertEqual(session.events.filter {
+            $0.kind == .user && $0.text == "SYNTHETIC KIMI PARITY PROMPT"
+        }.count, 1)
+        XCTAssertEqual(session.events.filter {
+            $0.kind == .assistant && $0.text == "SYNTHETIC ASSISTANT TEXT"
+        }.count, 1)
+        XCTAssertEqual(session.events.filter {
+            $0.kind == .tool_call && $0.messageID == "synthetic-tool"
+        }.count, 1)
+        XCTAssertEqual(session.events.filter {
+            $0.kind == .tool_result && $0.messageID == "synthetic-tool"
+        }.count, 1)
     }
 
     func testUnknownFutureOpTypeSurvivesAsMeta() throws {
@@ -130,7 +156,8 @@ final class KimiSessionParserTests: XCTestCase {
     func testEventCountExcludesMetaOps() throws {
         let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
 
-        XCTAssertEqual(session.eventCount, 3, "only the 3 user messages are non-meta")
+        XCTAssertEqual(session.eventCount, 7,
+                       "4 user + 1 assistant + 1 tool call + 1 tool result are non-meta")
     }
 
     /// The preview pass discards its events, so `lightweightCommands` is the only
@@ -151,7 +178,17 @@ final class KimiSessionParserTests: XCTestCase {
     /// nil rather than 0 because the preview only reads the first
     /// `previewLineLimit` lines — "none found so far" is not "none".
     func testPreviewParseReportsNoCommandsForAToolFreeCapture() throws {
-        let session = try XCTUnwrap(KimiSessionParser.parseFile(at: stagedFixture()))
+        let wire = try stagedFixture()
+        let original = try String(contentsOf: wire, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        let toolFree = original.prefix {
+            !$0.contains("\"promptId\":\"synthetic-prompt\"")
+        }
+        try toolFree.joined(separator: "\n").appending("\n")
+            .write(to: wire, atomically: true, encoding: .utf8)
+
+        let session = try XCTUnwrap(KimiSessionParser.parseFile(at: wire))
 
         XCTAssertNil(session.lightweightCommands)
         XCTAssertFalse(UnifiedSessionIndexer.passesHasCommandsFilter(session))

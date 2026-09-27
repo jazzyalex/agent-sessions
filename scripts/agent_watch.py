@@ -14,11 +14,16 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.util
+import io
 import json
+import math
 import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -426,6 +431,50 @@ def _compute_sample_freshness(
             block["stale_reason"] = "cli_binary_unresolved"
             block["is_stale"] = False
 
+    return block
+
+
+def _dsh_source_sample_freshness(
+    sample: dict[str, Any],
+    *,
+    cli_binary_path: str | None,
+    cli_binary_mtime: float | None,
+    freshness_window_seconds: int,
+    now_epoch: float,
+) -> dict[str, Any]:
+    source_created_at = sample.get("source_created_at_epoch")
+    source_time = (
+        float(source_created_at)
+        if isinstance(source_created_at, (int, float))
+        else None
+    )
+    block = _compute_sample_freshness(
+        sample_mtime=source_time,
+        cli_binary_path=cli_binary_path,
+        cli_binary_mtime=cli_binary_mtime,
+        freshness_window_seconds=freshness_window_seconds,
+        now_epoch=now_epoch,
+        mode_context="dsh_source_reported_created_at",
+        force_fresh=False,
+    )
+    block["evidence_basis"] = "source_reported_header_createdAt"
+    block["source_timestamp_authenticated"] = False
+    block["source_reported_created_at_utc"] = _epoch_to_utc_iso(source_time)
+    block["artifact_mtime_utc"] = sample.get("artifact_mtime_utc")
+    block["artifact_mtime_epoch"] = sample.get("artifact_mtime_epoch")
+    if source_time is not None and source_time > now_epoch + 300:
+        block["is_stale"] = True
+        block["stale_reason"] = "source_timestamp_in_future"
+    has_binary_identity = cli_binary_path is not None and cli_binary_mtime is not None
+    if not has_binary_identity and block.get("is_stale") is not True:
+        block["stale_reason"] = "cli_binary_unresolved"
+    block["fresh_for_compatibility"] = (
+        source_time is not None
+        and has_binary_identity
+        and block.get("is_stale") is False
+        and block.get("sample_older_than_cli") is False
+        and block.get("sample_older_than_window") is False
+    )
     return block
 
 
@@ -985,8 +1034,23 @@ _MIN_SAMPLE_EVENT_COUNT = 25
 # {data,id,parentId,timestamp,type} — almost nothing. Claude's envelope is genuinely
 # informative (18 keys), but `.message` hid its content-block types and the entire
 # `usage` struct, so it belongs here too. Qwen has the same `.message.parts` shape as
-# Claude, so it belongs here for the same reason.
-_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude", "grok", "qwen"}
+# Claude, so it belongs here for the same reason. Pi and OpenClaw keep renderable
+# content and usage under `.message`; Antigravity keeps tool calls under
+# `.tool_calls` on its `PLANNER_RESPONSE` records.
+_NESTED_PAYLOAD_AGENTS = {
+    "antigravity", "codex", "copilot", "claude", "deepseek_harness", "grok",
+    "openclaw", "pi", "qwen",
+}
+
+# These list fields are parser-defined tagged unions below the top-level payload.
+# Their `type` strings are schema discriminators, so keep separate buckets for new
+# block kinds. Other nested `type` values remain collapsed to avoid treating user
+# configuration variants as format drift.
+_NESTED_TYPED_LIST_KEYS: dict[str, set[str]] = {
+    "antigravity": {"tool_calls"},
+    "openclaw": {"content"},
+    "pi": {"content"},
+}
 
 # Keys whose values are open-ended maps rather than fixed structs. Descending into
 # these turns ordinary content into permanent phantom drift — a new model name, tool
@@ -1018,7 +1082,7 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # no reachable path exposes it.
     "codex": {
         "changes", "statuses", "arguments", "parameters", "inputSchema", "_meta",
-        "structuredContent",
+        "structuredContent", "agents_states",
     },
     # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
     # but `.message` was opaque — hiding content-block types and the whole `usage`
@@ -1041,13 +1105,18 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # matches UUID-shaped keys, so a slug-keyed map like this one slips past it.
     "claude": {
         "input", "input_schema", "toolUseResult", "headers", "mcpMeta", "artifacts",
-        "modelUsage",
+        "modelUsage", "wireIngestContext", "wireToolInputs", "trackedFileBackups",
     },
     # Grok's transcript nests the parts that matter (content blocks, tool_calls,
     # reasoning summaries, backend_tool_call kinds), so it is worth walking. The one
     # exclusion is `arguments` — a tool's own parameter object, where every new tool
     # parameter would otherwise read as Grok schema drift.
     "grok": {"arguments"},
+    # Tool-call inputs are open-ended user/tool payloads. Their containing blocks
+    # remain fingerprinted, while argument key names and values stay out of reports.
+    "antigravity": {"args"},
+    "openclaw": {"arguments", "input"},
+    "pi": {"arguments"},
     # Qwen's renderable surface (text, functionCall, functionResponse) sits inside
     # `message.parts`, so flat fingerprinting would miss part-type drift the same way
     # it did for Claude. `args` is a tool's own parameter object (functionCall.args);
@@ -1070,6 +1139,7 @@ def _nested_bucket_walk(
     depth: int,
     max_depth: int,
     opaque_keys: frozenset[str] = frozenset(),
+    typed_list_keys: frozenset[str] = frozenset(),
 ) -> None:
     """Record `obj`'s keys under `bucket`, then recurse into dict-valued children.
 
@@ -1097,17 +1167,18 @@ def _nested_bucket_walk(
         )
         for child in children:
             sub = f"{bucket}.{k}"
-            # Split by `type` ONLY at the payload wrapper (depth 0 -> 1). That is where
-            # the real event union lives (event_msg.payload:token_count). Deeper down,
-            # `type` tags enum-like config variants — sandbox_policy:read-only vs
+            # Split by `type` at the payload wrapper (depth 0 -> 1), plus the narrowly
+            # configured parser-defined tagged-union lists. Elsewhere nested `type`
+            # tags enum-like config variants — sandbox_policy:read-only vs
             # :danger-full-access, permission_profile:managed vs :disabled — and
-            # splitting on those makes an ordinary settings change look like a new
-            # schema bucket.
-            if depth == 0:
+            # splitting on those makes an ordinary settings change look like drift.
+            if depth == 0 or (isinstance(v, list) and k in typed_list_keys):
                 child_type = child.get("type")
                 if isinstance(child_type, str) and child_type:
                     sub = f"{sub}:{child_type}"
-            _nested_bucket_walk(sub, child, out, depth + 1, max_depth, opaque_keys)
+            _nested_bucket_walk(
+                sub, child, out, depth + 1, max_depth, opaque_keys, typed_list_keys
+            )
 
 
 def _nested_jsonl_schema_fingerprint(
@@ -1115,6 +1186,7 @@ def _nested_jsonl_schema_fingerprint(
     max_lines: int,
     max_depth: int = _NESTED_FINGERPRINT_MAX_DEPTH,
     opaque_keys: frozenset[str] = frozenset(),
+    typed_list_keys: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Like `_jsonl_schema_fingerprint`, but walks into nested payload wrappers.
 
@@ -1141,7 +1213,9 @@ def _nested_jsonl_schema_fingerprint(
         t = obj.get("type")
         event_type = t if isinstance(t, str) and t else "<missing-type>"
         type_counts[event_type] = type_counts.get(event_type, 0) + 1
-        _nested_bucket_walk(event_type, obj, type_keys, 0, max_depth, opaque_keys)
+        _nested_bucket_walk(
+            event_type, obj, type_keys, 0, max_depth, opaque_keys, typed_list_keys
+        )
 
     return {
         "file": str(path),
@@ -1151,13 +1225,1640 @@ def _nested_jsonl_schema_fingerprint(
         "parse_errors": parse_errors,
         "nested_depth": max_depth,
         "nested_opaque_keys": sorted(opaque_keys),
+        "nested_typed_list_keys": sorted(typed_list_keys),
     }
 
 
+_DSH_MAX_COMPRESSED_BYTES = 128 * 1024 * 1024
+_DSH_MAX_DECODED_BYTES = 128 * 1024 * 1024
+_DSH_MAX_FRAMES = 100_000
+_DSH_MAX_EXPANSION_RATIO = 1_000
+_DSH_MAX_RECORDS = 1_000_000
+_DSH_MAX_SESSIONS_TO_INSPECT = 10_000
+_DSH_MAX_DISCOVERY_ENTRIES = 100_000
+_DSH_MAX_HEADER_SCAN_BYTES = 512 * 1024 * 1024
+_DSH_MAX_HEADER_BYTES = 1024 * 1024
+_DSH_HEADER_READ_CHUNK_BYTES = 4096
+_DSH_SAFE_INTEGER = 9_007_199_254_740_991
+_DSH_FRAME_MAGIC = b"\x28\xb5\x2f\xfd"
+_DSH_PACKED_TYPES = {"text-chunks", "reasoning-chunks", "tool-call-chunks"}
+_DSH_SURFACE_V3 = {"system/message", "user/message", "assistant/message", "tool/result"}
+_DSH_ZSTD_LIBRARY: Any | None = None
+_DSH_ZSTD_LOAD_ATTEMPTED = False
+_DSH_APP_EVENT_CATALOG: dict[int, set[str]] | None = None
+
+# These are exact shapes already accepted by the app or fixed envelope shapes
+# for app-known events that are not represented in the minimal fixture corpus.
+# They only suppress matching unbaselined keys; a new key or nested bucket still
+# appears as drift. Opaque payloads (notably tool results) are not fingerprinted.
+_DSH_SUPPORTED_UNBASELINED_KEYS: dict[str, set[str]] = {
+    "session": {
+        "type", "version", "id", "createdAt", "delegationDepth", "cwd",
+        "parentSession", "seedLength", "origin", "agentPreset", "isSeeded",
+    },
+    "agent/inbox/spliced": {"type", "seq", "time", "data"},
+    "agent/inbox/spliced.data": {"inserted", "outcome", "removedCount", "start", "target"},
+    "agent/inbox/spliced.data.inserted": {"content", "id", "role", "source"},
+    "agent/inbox/spliced.data.inserted.content": {"text", "type"},
+    "agent/inbox/spliced.data.inserted.source": {
+        "clientTimeZone", "form", "kind", "plugin", "rpcId", "senderSessionId", "summary",
+    },
+    "approval/policy": {"type", "seq", "time", "data"},
+    "approval/policy.data": {"policy", "source"},
+    "assistant/message.data": {"usage"},
+    "assistant/message.data.message.content": {"arguments", "id", "name"},
+    "assistant/message.data.message.source": {"replayState"},
+    "assistant/message.data.message.source.replayState": {"blocks", "response"},
+    "assistant/message.data.stream": {
+        "args", "chunk", "dt", "id", "index", "name", "texts", "time", "time0", "type",
+    },
+    "assistant/message.data.stream.chunk": {
+        "block", "blockType", "index", "reason", "replayState", "type", "usage",
+    },
+    "assistant/message.data.stream.chunk.block": {"arguments", "id", "name", "text", "type"},
+    "assistant/message.data.stream.chunk.reason": {"kind"},
+    "assistant/message.data.stream.chunk.replayState": {"blocks", "response"},
+    "assistant/message.data.stream.chunk.usage": {
+        "cacheReadTokens", "cacheWriteTokens", "inputTokens", "outputTokens",
+        "reasoningTokens", "totalTokens",
+    },
+    "assistant/message.data.usage": {
+        "cacheReadTokens", "cacheWriteTokens", "inputTokens", "outputTokens",
+        "reasoningTokens", "totalTokens",
+    },
+    "deliverables/presented": {"type", "seq", "time", "data"},
+    "deliverables/presented.data": {"callId", "files", "turn"},
+    "deliverables/presented.data.files": {"description", "path"},
+    "permission/preset": {"type", "seq", "time", "data"},
+    "permission/preset.data": {"preset"},
+    "request/context": {"type", "seq", "time", "data"},
+    "request/context.data": {"contextWindow", "model", "provider", "systemPromptUpdate"},
+    "sandbox/mode": {"type", "seq", "time", "data"},
+    "sandbox/mode.data": {"mode", "source"},
+    "session-log-deepseek/delivery-accepted": {"type", "seq", "time", "data"},
+    "session-log-deepseek/delivery-accepted.data": {"sessionFormatVersion", "sessionId", "throughSeq"},
+    "session/end-seed": {"type", "seq", "time", "data"},
+    "session/end-seed.data": set(),
+    "session/title": {"type", "seq", "time", "data"},
+    "session/title.data": {"messageSeqs", "source", "title"},
+    "session/title.data.source": {"kind", "model", "provider"},
+    "session/title.data.source.model": {"model", "provider"},
+    "session/title-llm-request": {"type", "seq", "time", "data"},
+    "session/title-llm-request.data": {
+        "maxTokens", "messageSeqs", "messages", "route", "system", "titleProvider",
+    },
+    "session/title-llm-request.data.messages": {"content", "id", "role", "source"},
+    "session/title-llm-request.data.messages.content": {"text", "type"},
+    "session/title-llm-request.data.messages.source": {"kind", "plugin"},
+    "session/title-llm-request.data.route": {"model", "provider"},
+    "subagent/catalog": {"type", "seq", "time", "data"},
+    "subagent/catalog.data": {"childCreatedAt", "childId", "label", "mode", "version"},
+    "subagent/descriptor": {"type", "seq", "time", "data"},
+    "subagent/descriptor.data": {
+        "agentModel", "agentProvider", "agentReasoningEffort", "label", "mode", "provider", "version",
+    },
+    "todo/write": {"type", "seq", "time", "data"},
+    "todo/write.data": {"todos"},
+    "todo/write.data.todos": {"content", "status"},
+    "tool/call": {"type", "seq", "time", "data"},
+    "tool/call.data": {"arguments", "callId", "name", "step", "turn"},
+    "user/message": {"type", "seq", "time", "data", "surfaceOp", "sourceEventSeqs"},
+    "user/message.data": {"content", "id", "role", "source"},
+    "tool/result": {"type", "seq", "time", "data", "sourceEventSeqs", "surfaceOp"},
+    "tool/result.data": {"message", "meta", "step", "turn"},
+    "tool/result.surfaceOp": {"op", "startSeq", "endSeq", "start", "end"},
+    "user/message.data.source": {
+        "baseline", "baselineIdentity", "changes", "clientTimeZone", "entries", "form",
+        "kind", "plugin", "rpcId", "sections", "senderSessionId", "summary",
+    },
+    "user/message.data.source.changes": {"action", "digest", "path", "scope"},
+    "user/message.data.source.entries": {"description", "name"},
+    "user/message.data.source.sections": {"name", "text"},
+    "workspace/changes": {"type", "seq", "time", "data"},
+    "workspace/changes.data": {"turn"},
+}
+
+
+class _DeepSeekHarnessMonitorError(Exception):
+    """A sanitized DSH monitoring error code; never carries session content."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class _ZstdInBuffer(ctypes.Structure):
+    _fields_ = [("src", ctypes.c_void_p), ("size", ctypes.c_size_t), ("pos", ctypes.c_size_t)]
+
+
+class _ZstdOutBuffer(ctypes.Structure):
+    _fields_ = [("dst", ctypes.c_void_p), ("size", ctypes.c_size_t), ("pos", ctypes.c_size_t)]
+
+
+def _dsh_zstd_library() -> Any:
+    """Load the system Zstandard streaming API without a Python package dependency."""
+    global _DSH_ZSTD_LIBRARY, _DSH_ZSTD_LOAD_ATTEMPTED
+    if _DSH_ZSTD_LOAD_ATTEMPTED:
+        if _DSH_ZSTD_LIBRARY is None:
+            raise _DeepSeekHarnessMonitorError("zstd_library_unavailable")
+        return _DSH_ZSTD_LIBRARY
+    _DSH_ZSTD_LOAD_ATTEMPTED = True
+    library_name = ctypes.util.find_library("zstd")
+    if not library_name:
+        raise _DeepSeekHarnessMonitorError("zstd_library_unavailable")
+    try:
+        library = ctypes.CDLL(library_name)
+        library.ZSTD_createDStream.argtypes = []
+        library.ZSTD_createDStream.restype = ctypes.c_void_p
+        library.ZSTD_freeDStream.argtypes = [ctypes.c_void_p]
+        library.ZSTD_freeDStream.restype = ctypes.c_size_t
+        library.ZSTD_initDStream.argtypes = [ctypes.c_void_p]
+        library.ZSTD_initDStream.restype = ctypes.c_size_t
+        library.ZSTD_decompressStream.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(_ZstdOutBuffer),
+            ctypes.POINTER(_ZstdInBuffer),
+        ]
+        library.ZSTD_decompressStream.restype = ctypes.c_size_t
+        library.ZSTD_isError.argtypes = [ctypes.c_size_t]
+        library.ZSTD_isError.restype = ctypes.c_uint
+    except (AttributeError, OSError):
+        raise _DeepSeekHarnessMonitorError("zstd_library_unavailable") from None
+    _DSH_ZSTD_LIBRARY = library
+    return library
+
+
+def _dsh_decode_zstd_frame(
+    raw: bytes, offset: int, source: Any | None = None
+) -> tuple[bytes, int]:
+    if offset < 0 or offset + len(_DSH_FRAME_MAGIC) > len(raw):
+        raise _DeepSeekHarnessMonitorError("incomplete_zstd_frame")
+    if raw[offset : offset + len(_DSH_FRAME_MAGIC)] != _DSH_FRAME_MAGIC:
+        raise _DeepSeekHarnessMonitorError("invalid_zstd_frame_header")
+
+    library = _dsh_zstd_library()
+    if source is None:
+        source = ctypes.create_string_buffer(raw, len(raw))
+    stream = library.ZSTD_createDStream()
+    if not stream:
+        raise _DeepSeekHarnessMonitorError("zstd_decoder_unavailable")
+    try:
+        if library.ZSTD_isError(library.ZSTD_initDStream(stream)):
+            raise _DeepSeekHarnessMonitorError("zstd_decoder_unavailable")
+        input_buffer = _ZstdInBuffer(
+            ctypes.addressof(source) + offset,
+            len(raw) - offset,
+            0,
+        )
+        decoded = bytearray()
+        while True:
+            output_storage = (ctypes.c_ubyte * (64 * 1024))()
+            output_buffer = _ZstdOutBuffer(
+                ctypes.addressof(output_storage),
+                ctypes.sizeof(output_storage),
+                0,
+            )
+            previous_input = input_buffer.pos
+            result = library.ZSTD_decompressStream(
+                stream, ctypes.byref(output_buffer), ctypes.byref(input_buffer)
+            )
+            if library.ZSTD_isError(result):
+                raise _DeepSeekHarnessMonitorError("corrupt_zstd_frame")
+            if output_buffer.pos:
+                decoded.extend(bytes(output_storage[: output_buffer.pos]))
+                if len(decoded) > _DSH_MAX_DECODED_BYTES:
+                    raise _DeepSeekHarnessMonitorError("decoded_size_limit")
+            consumed = int(input_buffer.pos)
+            if consumed and len(decoded) > consumed * _DSH_MAX_EXPANSION_RATIO:
+                raise _DeepSeekHarnessMonitorError("decoded_expansion_limit")
+            if result == 0:
+                if consumed <= 0:
+                    raise _DeepSeekHarnessMonitorError("zstd_decoder_no_progress")
+                return bytes(decoded), consumed
+            if input_buffer.pos >= input_buffer.size:
+                raise _DeepSeekHarnessMonitorError("incomplete_zstd_frame")
+            if input_buffer.pos == previous_input and output_buffer.pos == 0:
+                raise _DeepSeekHarnessMonitorError("zstd_decoder_no_progress")
+    finally:
+        library.ZSTD_freeDStream(stream)
+
+
+def _dsh_zstd_frames(raw: bytes):
+    if not raw:
+        raise _DeepSeekHarnessMonitorError("empty_zstd_artifact")
+    if len(raw) > _DSH_MAX_COMPRESSED_BYTES:
+        raise _DeepSeekHarnessMonitorError("compressed_size_limit")
+    offset = 0
+    frame_count = 0
+    decoded_total = 0
+    source = ctypes.create_string_buffer(raw, len(raw))
+    while offset < len(raw):
+        if frame_count >= _DSH_MAX_FRAMES:
+            raise _DeepSeekHarnessMonitorError("zstd_frame_count_limit")
+        decoded, consumed = _dsh_decode_zstd_frame(raw, offset, source)
+        decoded_total += len(decoded)
+        if decoded_total > _DSH_MAX_DECODED_BYTES:
+            raise _DeepSeekHarnessMonitorError("decoded_size_limit")
+        yield decoded
+        offset += consumed
+        frame_count += 1
+
+
+def _dsh_read_stable_bytes(path: Path) -> tuple[bytes, os.stat_result]:
+    for attempt in range(2):
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(path, os.O_RDONLY)
+            before = os.fstat(descriptor)
+            if before.st_size < 0 or before.st_size > _DSH_MAX_COMPRESSED_BYTES:
+                raise _DeepSeekHarnessMonitorError("compressed_size_limit")
+            raw = bytearray()
+            while True:
+                remaining = _DSH_MAX_COMPRESSED_BYTES + 1 - len(raw)
+                chunk = os.read(descriptor, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+                if len(raw) > _DSH_MAX_COMPRESSED_BYTES:
+                    raise _DeepSeekHarnessMonitorError("compressed_size_limit")
+            after_descriptor = os.fstat(descriptor)
+            after_path = path.stat()
+        except _DeepSeekHarnessMonitorError:
+            raise
+        except OSError:
+            raise _DeepSeekHarnessMonitorError("unreadable_artifact") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        stable = (
+            (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            == (
+                after_descriptor.st_dev,
+                after_descriptor.st_ino,
+                after_descriptor.st_size,
+                after_descriptor.st_mtime_ns,
+                after_descriptor.st_ctime_ns,
+            )
+            == (
+                after_path.st_dev,
+                after_path.st_ino,
+                after_path.st_size,
+                after_path.st_mtime_ns,
+                after_path.st_ctime_ns,
+            )
+            and len(raw) == after_descriptor.st_size
+        )
+        if stable:
+            return bytes(raw), after_path
+        if attempt == 1:
+            raise _DeepSeekHarnessMonitorError("artifact_changed_during_read")
+    raise _DeepSeekHarnessMonitorError("artifact_changed_during_read")
+
+
+def _dsh_read_plain_header_line(descriptor: int) -> tuple[bytes, int]:
+    line = bytearray()
+    bytes_read = 0
+    while bytes_read <= _DSH_MAX_HEADER_BYTES:
+        amount = min(
+            _DSH_HEADER_READ_CHUNK_BYTES,
+            _DSH_MAX_HEADER_BYTES + 1 - bytes_read,
+        )
+        chunk = os.read(descriptor, amount)
+        if not chunk:
+            if not line:
+                raise _DeepSeekHarnessMonitorError("missing_session_header")
+            raise _DeepSeekHarnessMonitorError("torn_jsonl_record")
+        bytes_read += len(chunk)
+        newline = chunk.find(b"\n")
+        if newline >= 0:
+            line_length = len(line) + newline + 1
+            if line_length > _DSH_MAX_HEADER_BYTES:
+                raise _DeepSeekHarnessMonitorError("header_size_limit")
+            line.extend(chunk[: newline + 1])
+            return bytes(line), bytes_read
+        line.extend(chunk)
+        if len(line) > _DSH_MAX_HEADER_BYTES:
+            raise _DeepSeekHarnessMonitorError("header_size_limit")
+    raise _DeepSeekHarnessMonitorError("header_size_limit")
+
+
+def _dsh_read_first_zstd_frame(descriptor: int) -> tuple[bytes, int]:
+    library = _dsh_zstd_library()
+    stream = library.ZSTD_createDStream()
+    if not stream:
+        raise _DeepSeekHarnessMonitorError("zstd_decoder_unavailable")
+    decoded = bytearray()
+    bytes_read = 0
+    try:
+        if library.ZSTD_isError(library.ZSTD_initDStream(stream)):
+            raise _DeepSeekHarnessMonitorError("zstd_decoder_unavailable")
+        while bytes_read <= _DSH_MAX_HEADER_BYTES:
+            amount = min(
+                _DSH_HEADER_READ_CHUNK_BYTES,
+                _DSH_MAX_HEADER_BYTES + 1 - bytes_read,
+            )
+            chunk = os.read(descriptor, amount)
+            if not chunk:
+                if bytes_read == 0:
+                    raise _DeepSeekHarnessMonitorError("missing_session_header")
+                raise _DeepSeekHarnessMonitorError("incomplete_zstd_frame")
+            bytes_read += len(chunk)
+            source = ctypes.create_string_buffer(chunk, len(chunk))
+            input_buffer = _ZstdInBuffer(ctypes.addressof(source), len(chunk), 0)
+            while input_buffer.pos < input_buffer.size:
+                output_storage = (ctypes.c_ubyte * (64 * 1024))()
+                output_buffer = _ZstdOutBuffer(
+                    ctypes.addressof(output_storage),
+                    ctypes.sizeof(output_storage),
+                    0,
+                )
+                previous_input = input_buffer.pos
+                result = library.ZSTD_decompressStream(
+                    stream, ctypes.byref(output_buffer), ctypes.byref(input_buffer)
+                )
+                if library.ZSTD_isError(result):
+                    raise _DeepSeekHarnessMonitorError("corrupt_zstd_frame")
+                if output_buffer.pos:
+                    decoded.extend(bytes(output_storage[: output_buffer.pos]))
+                    if len(decoded) > _DSH_MAX_HEADER_BYTES:
+                        raise _DeepSeekHarnessMonitorError("header_size_limit")
+                    consumed = int(input_buffer.pos)
+                    if consumed and len(decoded) > consumed * _DSH_MAX_EXPANSION_RATIO:
+                        raise _DeepSeekHarnessMonitorError("decoded_expansion_limit")
+                if result == 0:
+                    return bytes(decoded), bytes_read
+                if input_buffer.pos == previous_input and output_buffer.pos == 0:
+                    raise _DeepSeekHarnessMonitorError("zstd_decoder_no_progress")
+        raise _DeepSeekHarnessMonitorError("header_scan_size_limit")
+    finally:
+        library.ZSTD_freeDStream(stream)
+
+
+def _dsh_read_stable_header(
+    path: Path, *, compressed: bool
+) -> tuple[bytes, os.stat_result, int]:
+    for attempt in range(2):
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(path, os.O_RDONLY)
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode):
+                raise _DeepSeekHarnessMonitorError("unreadable_artifact")
+            raw, bytes_read = (
+                _dsh_read_first_zstd_frame(descriptor)
+                if compressed
+                else _dsh_read_plain_header_line(descriptor)
+            )
+            after_descriptor = os.fstat(descriptor)
+            after_path = path.stat()
+        except _DeepSeekHarnessMonitorError:
+            raise
+        except OSError:
+            raise _DeepSeekHarnessMonitorError("unreadable_artifact") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        stable = (
+            (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            == (
+                after_descriptor.st_dev,
+                after_descriptor.st_ino,
+                after_descriptor.st_size,
+                after_descriptor.st_mtime_ns,
+                after_descriptor.st_ctime_ns,
+            )
+            == (
+                after_path.st_dev,
+                after_path.st_ino,
+                after_path.st_size,
+                after_path.st_mtime_ns,
+                after_path.st_ctime_ns,
+            )
+        )
+        if stable:
+            return raw, after_path, bytes_read
+        if attempt == 1:
+            raise _DeepSeekHarnessMonitorError("artifact_changed_during_read")
+    raise _DeepSeekHarnessMonitorError("artifact_changed_during_read")
+
+
+def _dsh_nonnegative_integer(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value <= _DSH_SAFE_INTEGER
+    return isinstance(value, float) and math.isfinite(value) and value.is_integer() and 0 <= value <= _DSH_SAFE_INTEGER
+
+
+def _dsh_safe_integer(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return -_DSH_SAFE_INTEGER <= value <= _DSH_SAFE_INTEGER
+    return isinstance(value, float) and math.isfinite(value) and value.is_integer() and -_DSH_SAFE_INTEGER <= value <= _DSH_SAFE_INTEGER
+
+
+def _dsh_validate_header(obj: dict[str, Any], filename_generation: int | None = None) -> dict[str, Any]:
+    version = obj.get("version")
+    if not _dsh_nonnegative_integer(version) or version > 3 or obj.get("type") != "session":
+        raise _DeepSeekHarnessMonitorError("invalid_or_unsupported_header")
+    if filename_generation is not None and filename_generation != version:
+        raise _DeepSeekHarnessMonitorError("generation_header_mismatch")
+    if version <= 1:
+        required = {"type", "version", "id", "createdAt", "delegationDepth"}
+        optional = {"cwd", "parentSession", "seedLength", "origin", "agentPreset"}
+    else:
+        required = {"type", "version", "id", "createdAt", "isSeeded", "delegationDepth"}
+        optional = {"cwd", "parentSession", "origin", "agentPreset"}
+    if not required.issubset(obj) or not set(obj).issubset(required | optional):
+        raise _DeepSeekHarnessMonitorError("invalid_header_fields")
+    if (
+        not isinstance(obj.get("id"), str)
+        or not obj["id"]
+        or not _dsh_nonnegative_integer(obj.get("createdAt"))
+        or not _dsh_nonnegative_integer(obj.get("delegationDepth"))
+    ):
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    if version <= 1:
+        if "seedLength" in obj and not _dsh_nonnegative_integer(obj["seedLength"]):
+            raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    elif not isinstance(obj.get("isSeeded"), bool):
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    if "cwd" in obj and (not isinstance(obj["cwd"], str) or not obj["cwd"].startswith("/")):
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    if "parentSession" in obj and not isinstance(obj["parentSession"], str):
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    if "agentPreset" in obj and not isinstance(obj["agentPreset"], str):
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    if "origin" in obj and obj["origin"] != "subagent":
+        raise _DeepSeekHarnessMonitorError("invalid_header_values")
+    return obj
+
+
+def _dsh_validate_surface_op(value: Any) -> bool:
+    if value == "append":
+        return True
+    if not isinstance(value, dict) or value.get("op") != "replace":
+        return False
+    if set(value) == {"op", "startSeq", "endSeq"}:
+        return _dsh_nonnegative_integer(value.get("startSeq")) and _dsh_nonnegative_integer(value.get("endSeq"))
+    if set(value) == {"op", "start", "end"}:
+        return _dsh_nonnegative_integer(value.get("start")) and _dsh_nonnegative_integer(value.get("end"))
+    return False
+
+
+def _dsh_validate_source_sequences(value: Any, seq: int) -> bool:
+    if not isinstance(value, list):
+        return False
+    flattened_count = 0
+    previous = -1
+    strictly_increasing = True
+    has_range = False
+    for item in value:
+        if isinstance(item, list):
+            if len(item) != 2 or not all(_dsh_nonnegative_integer(part) for part in item):
+                return False
+            start, end = item
+            if end < start or end >= seq or end - start + 1 > seq - flattened_count:
+                return False
+            if flattened_count and start <= previous:
+                strictly_increasing = False
+            previous = end
+            flattened_count += end - start + 1
+            has_range = True
+        else:
+            if not _dsh_nonnegative_integer(item) or flattened_count >= seq or item >= seq:
+                return False
+            if flattened_count and item <= previous:
+                strictly_increasing = False
+            previous = item
+            flattened_count += 1
+    return not has_range or strictly_increasing
+
+
+def _dsh_decode_v3_source_sequences(value: Any, seq: int) -> list[int] | None:
+    if not isinstance(value, list):
+        return None
+    flattened: list[int] = []
+    has_range = False
+    for item in value:
+        if isinstance(item, list):
+            if len(item) != 2 or not all(_dsh_nonnegative_integer(part) for part in item):
+                return None
+            start, end = item
+            if end < start or end - start + 1 > seq - len(flattened):
+                return None
+            flattened.extend(range(start, end + 1))
+            has_range = True
+            continue
+        if not _dsh_nonnegative_integer(item) or len(flattened) >= seq:
+            return None
+        flattened.append(item)
+    if has_range and any(
+        flattened[index] <= flattened[index - 1]
+        for index in range(1, len(flattened))
+    ):
+        return None
+    return flattened
+
+
+def _dsh_validate_v3_surface_operation(value: Any, seq: int) -> bool:
+    if value == "append":
+        return True
+    if not isinstance(value, dict) or set(value) != {"op", "startSeq", "endSeq"}:
+        return False
+    if value.get("op") != "replace":
+        return False
+    return (
+        _dsh_nonnegative_integer(value.get("startSeq"))
+        and _dsh_nonnegative_integer(value.get("endSeq"))
+        and value["startSeq"] < seq
+        and value["endSeq"] < seq
+    )
+
+
+def _dsh_validate_v3_surface_message(
+    value: Any, expected_role: str
+) -> bool:
+    if not isinstance(value, dict) or not {
+        "id", "role", "content", "source"
+    }.issubset(value):
+        return False
+    if (
+        not isinstance(value.get("id"), str)
+        or not value["id"]
+        # The app's released `messageValue(expected: "tool")` path constrains
+        # the envelope role to "user"; tool identity lives in source.kind and
+        # the matching tool-result block's toolCallId.
+        or value.get("role") != ("user" if expected_role == "tool" else expected_role)
+        or not isinstance(value.get("content"), list)
+        or not all(
+            isinstance(block, dict)
+            and isinstance(block.get("type"), str)
+            and bool(block["type"])
+            for block in value["content"]
+        )
+    ):
+        return False
+    source = value.get("source")
+    if not isinstance(source, dict) or not isinstance(source.get("kind"), str) or not source["kind"]:
+        return False
+    if expected_role == "assistant":
+        return (
+            source.get("kind") == "model"
+            and isinstance(source.get("provider"), str)
+            and bool(source["provider"])
+            and isinstance(source.get("model"), str)
+            and bool(source["model"])
+        )
+    if expected_role == "system":
+        return source.get("kind") == "plugin" and isinstance(source.get("plugin"), str) and bool(source["plugin"])
+    if expected_role == "tool":
+        if source.get("kind") != "tool" or not isinstance(source.get("callId"), str):
+            return False
+        content = value["content"]
+        return (
+            len(content) == 1
+            and content[0].get("type") == "tool-result"
+            and content[0].get("toolCallId") == source.get("callId")
+        )
+    return True
+
+
+def _dsh_validate_v3_content_blocks(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        blocks = pending.pop()
+        if not isinstance(blocks, list):
+            return False
+        for block in blocks:
+            if not isinstance(block, dict) or not isinstance(block.get("type"), str):
+                return False
+            block_type = block["type"]
+            if block_type in {"text", "reasoning"}:
+                if set(block) != {"type", "text"} or not isinstance(block.get("text"), str):
+                    return False
+            elif block_type == "image":
+                if set(block) != {"type", "attachment"}:
+                    return False
+                attachment = block.get("attachment")
+                if not isinstance(attachment, dict):
+                    return False
+                required = {"attachmentId", "mediaType", "bytes", "width", "height"}
+                optional = {"name", "originalDimensions"}
+                if not required.issubset(attachment) or not set(attachment).issubset(required | optional):
+                    return False
+                if (
+                    not isinstance(attachment.get("attachmentId"), str)
+                    or not attachment["attachmentId"]
+                    or attachment.get("mediaType") not in {
+                        "image/png", "image/jpeg", "image/webp", "image/gif"
+                    }
+                    or not _dsh_nonnegative_integer(attachment.get("bytes"))
+                    or not _dsh_nonnegative_integer(attachment.get("width"))
+                    or attachment["width"] <= 0
+                    or not _dsh_nonnegative_integer(attachment.get("height"))
+                    or attachment["height"] <= 0
+                    or ("name" in attachment and not isinstance(attachment["name"], str))
+                ):
+                    return False
+                if "originalDimensions" in attachment:
+                    dimensions = attachment["originalDimensions"]
+                    if (
+                        not isinstance(dimensions, dict)
+                        or set(dimensions) != {"width", "height"}
+                        or not _dsh_nonnegative_integer(dimensions.get("width"))
+                        or dimensions["width"] <= 0
+                        or not _dsh_nonnegative_integer(dimensions.get("height"))
+                        or dimensions["height"] <= 0
+                    ):
+                        return False
+            elif block_type == "tool-call":
+                if (
+                    set(block) != {"type", "id", "name", "arguments"}
+                    or not isinstance(block.get("id"), str)
+                    or not block["id"]
+                    or not isinstance(block.get("name"), str)
+                    or not block["name"]
+                    or not isinstance(block.get("arguments"), str)
+                ):
+                    return False
+            elif block_type == "tool-result":
+                required = {"type", "toolCallId", "content"}
+                optional = {"isError"}
+                if not required.issubset(block) or not set(block).issubset(required | optional):
+                    return False
+                if not isinstance(block.get("toolCallId"), str) or not block["toolCallId"]:
+                    return False
+                if "isError" in block and not isinstance(block["isError"], bool):
+                    return False
+                pending.append(block["content"])
+            # Unknown non-empty block types are intentionally admitted by the
+            # app validator so future content can pass through losslessly.
+    return True
+
+
+def _dsh_validate_v3_plugin_source(value: Any) -> bool:
+    if not isinstance(value, dict) or value.get("kind") != "plugin":
+        return False
+    plugin = value.get("plugin")
+    if not isinstance(plugin, str) or not plugin:
+        return False
+    allowed = {"kind", "plugin", "form", "sections", "summary"}
+    if plugin == "compact":
+        allowed.update({"compactionId", "sourceCommandId"})
+        if not isinstance(value.get("compactionId"), str) or not value["compactionId"]:
+            return False
+        if "sourceCommandId" in value and (
+            not isinstance(value["sourceCommandId"], str) or not value["sourceCommandId"]
+        ):
+            return False
+    if not set(value).issubset(allowed):
+        return False
+    form = value.get("form")
+    if "form" in value and form not in {
+        "instructions", "catalog", "snapshot", "notice", "relay", "recall"
+    }:
+        return False
+    if form == "snapshot":
+        sections = value.get("sections")
+        if not isinstance(sections, list):
+            return False
+        for section in sections:
+            if (
+                not isinstance(section, dict)
+                or set(section) != {"name", "text"}
+                or not isinstance(section.get("name"), str)
+                or not section["name"]
+                or not isinstance(section.get("text"), str)
+            ):
+                return False
+    elif "sections" in value:
+        return False
+    if form == "notice":
+        if not isinstance(value.get("summary"), str):
+            return False
+    elif "summary" in value:
+        return False
+    return True
+
+
+def _dsh_validate_v3_system_payload(data: dict[str, Any]) -> bool:
+    if (
+        set(data) != {"turn", "step", "message"}
+        or not _dsh_nonnegative_integer(data.get("turn"))
+        or data["turn"] <= 0
+        or not _dsh_nonnegative_integer(data.get("step"))
+        or data["step"] <= 0
+    ):
+        return False
+    message = data.get("message")
+    if (
+        not isinstance(message, dict)
+        or set(message) != {"id", "role", "source", "content"}
+        or not isinstance(message.get("id"), str)
+        or not message["id"]
+        or message.get("role") != "system"
+        or not _dsh_validate_v3_plugin_source(message.get("source"))
+    ):
+        return False
+    return _dsh_validate_v3_content_blocks(message.get("content"))
+
+
+def _dsh_validate_v3_surface_payload(
+    event_type: str, data: dict[str, Any]
+) -> bool:
+    if event_type == "user/message":
+        return _dsh_validate_v3_surface_message(data, "user")
+    if event_type == "system/message":
+        return _dsh_validate_v3_system_payload(data)
+    if event_type == "assistant/message":
+        return (
+            {"turn", "step", "message", "stream"}.issubset(data)
+            and _dsh_nonnegative_integer(data.get("turn"))
+            and _dsh_nonnegative_integer(data.get("step"))
+            and isinstance(data.get("stream"), list)
+            and _dsh_validate_v3_surface_message(data.get("message"), "assistant")
+            and ("interrupted" not in data or data["interrupted"] is True)
+        )
+    if event_type == "tool/result":
+        return (
+            {"turn", "step", "message"}.issubset(data)
+            and _dsh_nonnegative_integer(data.get("turn"))
+            and _dsh_nonnegative_integer(data.get("step"))
+            and _dsh_validate_v3_surface_message(data.get("message"), "tool")
+            and (
+                "error" not in data
+                or (
+                    isinstance(data["message"].get("content"), list)
+                    and len(data["message"]["content"]) == 1
+                    and isinstance(data["message"]["content"][0], dict)
+                    and data["message"]["content"][0].get("type") == "tool-result"
+                    and data["message"]["content"][0].get("isError") is True
+                )
+            )
+        )
+    return False
+
+
+def _dsh_exact_keys(
+    value: Any, required: set[str], optional: set[str] | frozenset[str] = frozenset()
+) -> bool:
+    return (
+        isinstance(value, dict)
+        and required.issubset(value)
+        and set(value).issubset(required | optional)
+    )
+
+
+def _dsh_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _dsh_validate_legacy_payload(
+    event_type: str, data: dict[str, Any], generation: int
+) -> bool | None:
+    """Validate only legacy families fully mirrored from the app.
+
+    `None` preserves app-supported families outside this bounded subset; their
+    keys and nested types still participate in the schema fingerprint.
+    """
+    if event_type == "agent-preset/selected":
+        return _dsh_exact_keys(data, {"agentPreset"}) and isinstance(
+            data.get("agentPreset"), str
+        )
+    if event_type == "approval/policy":
+        return (
+            _dsh_exact_keys(data, {"policy"}, {"source"})
+            and data.get("policy") in {"ask", "never"}
+            and ("source" not in data or data["source"] == "delegation")
+        )
+    if event_type == "model/selection":
+        return (
+            _dsh_exact_keys(data, {"provider", "model"}, {"reasoningEffort"})
+            and _dsh_nonempty_string(data.get("provider"))
+            and _dsh_nonempty_string(data.get("model"))
+            and (
+                "reasoningEffort" not in data
+                or _dsh_nonempty_string(data["reasoningEffort"])
+            )
+        )
+    if event_type == "permission/preset":
+        return _dsh_exact_keys(data, {"preset"}) and _dsh_nonempty_string(
+            data.get("preset")
+        )
+    if event_type == "plan/mode":
+        return _dsh_exact_keys(data, {"active"}) and isinstance(
+            data.get("active"), bool
+        )
+    if event_type == "sandbox/mode":
+        return (
+            _dsh_exact_keys(data, {"mode"}, {"source"})
+            and data.get("mode")
+            in {"read-only", "workspace-write", "danger-full-access"}
+            and ("source" not in data or data["source"] == "delegation")
+        )
+    if event_type == "turn/start":
+        return _dsh_exact_keys(data, {"turn"}) and _dsh_nonnegative_integer(
+            data.get("turn")
+        )
+    if event_type in {"step/start", "step/end"}:
+        return (
+            _dsh_exact_keys(data, {"turn", "step"})
+            and _dsh_nonnegative_integer(data.get("turn"))
+            and _dsh_nonnegative_integer(data.get("step"))
+        )
+    if event_type == "request/context":
+        return (
+            _dsh_exact_keys(data, {"provider", "model"}, {"contextWindow"})
+            and _dsh_nonempty_string(data.get("provider"))
+            and _dsh_nonempty_string(data.get("model"))
+            and (
+                "contextWindow" not in data
+                or (
+                    _dsh_nonnegative_integer(data["contextWindow"])
+                    and data["contextWindow"] > 0
+                )
+            )
+        )
+    return None
+
+
+def _dsh_validate_row(obj: dict[str, Any], generation: int, expected_seq: int) -> int:
+    event_type = obj.get("type")
+    if isinstance(event_type, str) and event_type in _DSH_PACKED_TYPES:
+        if generation > 1 or set(obj) != {"type", "seq0", "time0", "data"}:
+            raise _DeepSeekHarnessMonitorError("invalid_packed_event")
+        data = obj.get("data")
+        is_tool = event_type == "tool-call-chunks"
+        required = {"turn", "step", "index", "dt", "id" if is_tool else "texts"}
+        if is_tool:
+            required.add("args")
+        optional = {"name"} if is_tool else set()
+        values = data.get("args" if is_tool else "texts") if isinstance(data, dict) else None
+        gaps = data.get("dt") if isinstance(data, dict) else None
+        if (
+            not isinstance(data, dict)
+            or set(data) not in (required, required | optional)
+            or not all(_dsh_nonnegative_integer(data.get(key)) for key in ("turn", "step", "index"))
+            or not isinstance(values, list)
+            or not values
+            or not all(isinstance(value, str) for value in values)
+            or not isinstance(gaps, list)
+            or len(gaps) != len(values) - 1
+            or not all(_dsh_safe_integer(value) for value in gaps)
+            or not _dsh_nonnegative_integer(obj.get("seq0"))
+            or not _dsh_safe_integer(obj.get("time0"))
+            or (is_tool and (not isinstance(data.get("id"), str) or not data.get("id")))
+            or (is_tool and "name" in data and not isinstance(data["name"], str))
+        ):
+            raise _DeepSeekHarnessMonitorError("invalid_packed_event")
+        first_seq = obj["seq0"]
+        if first_seq != expected_seq:
+            raise _DeepSeekHarnessMonitorError("sequence_gap")
+        if first_seq + len(values) - 1 > _DSH_SAFE_INTEGER:
+            raise _DeepSeekHarnessMonitorError("sequence_range_limit")
+        if first_seq + len(values) > _DSH_MAX_RECORDS:
+            raise _DeepSeekHarnessMonitorError("record_count_limit")
+        return len(values)
+
+    allowed = {"type", "seq", "time", "data", "ignorable", "sourceEventSeqs", "surfaceOp"}
+    if (
+        not isinstance(event_type, str)
+        or not event_type
+        or not set(obj).issubset(allowed)
+        or not _dsh_nonnegative_integer(obj.get("seq"))
+        or not _dsh_safe_integer(obj.get("time"))
+        or not isinstance(obj.get("data"), dict)
+    ):
+        raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+    if obj["seq"] != expected_seq:
+        raise _DeepSeekHarnessMonitorError("sequence_gap")
+    if expected_seq >= _DSH_MAX_RECORDS:
+        raise _DeepSeekHarnessMonitorError("record_count_limit")
+    if "ignorable" in obj and obj["ignorable"] is not True:
+        raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+    if generation == 3:
+        decoded_sources = None
+        if "sourceEventSeqs" in obj:
+            decoded_sources = _dsh_decode_v3_source_sequences(
+                obj["sourceEventSeqs"], expected_seq
+            )
+            if decoded_sources is None:
+                raise _DeepSeekHarnessMonitorError("invalid_event_reference")
+        if "surfaceOp" in obj and not _dsh_validate_surface_op(obj["surfaceOp"]):
+            raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+        known_types = _dsh_app_event_catalog().get(3, set())
+        known = event_type in known_types
+        surface = event_type in _DSH_SURFACE_V3
+        if known and not surface and (
+            "surfaceOp" in obj or "sourceEventSeqs" in obj
+        ):
+            raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+        if known and surface:
+            if "surfaceOp" not in obj or not _dsh_validate_v3_surface_operation(
+                obj["surfaceOp"], expected_seq
+            ):
+                raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+            if event_type == "assistant/message" and "sourceEventSeqs" in obj:
+                raise _DeepSeekHarnessMonitorError("invalid_event_reference")
+            if "sourceEventSeqs" in obj and (
+                not decoded_sources
+                or len(decoded_sources) != len(set(decoded_sources))
+                or any(source >= expected_seq for source in decoded_sources)
+            ):
+                raise _DeepSeekHarnessMonitorError("invalid_event_reference")
+            if not _dsh_validate_v3_surface_payload(event_type, obj["data"]):
+                raise _DeepSeekHarnessMonitorError("invalid_surface_payload")
+    else:
+        if "sourceEventSeqs" in obj and not _dsh_validate_source_sequences(
+            obj["sourceEventSeqs"], expected_seq
+        ):
+            raise _DeepSeekHarnessMonitorError("invalid_event_reference")
+        if "surfaceOp" in obj and not _dsh_validate_surface_op(obj["surfaceOp"]):
+            raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
+        payload_valid = _dsh_validate_legacy_payload(event_type, obj["data"], generation)
+        if payload_valid is False:
+            raise _DeepSeekHarnessMonitorError("invalid_legacy_payload")
+    return 1
+
+
+def _dsh_record_lines(frame: bytes):
+    if not frame:
+        return
+    stream = io.BytesIO(frame)
+    while True:
+        line = stream.readline()
+        if not line:
+            return
+        if not line.endswith(b"\n"):
+            raise _DeepSeekHarnessMonitorError("torn_jsonl_record")
+        payload = line[:-1]
+        if not payload:
+            raise _DeepSeekHarnessMonitorError("empty_jsonl_record")
+        try:
+            obj = json.loads(payload)
+        except (UnicodeDecodeError, ValueError):
+            raise _DeepSeekHarnessMonitorError("invalid_json_record") from None
+        if not isinstance(obj, dict):
+            raise _DeepSeekHarnessMonitorError("record_not_object")
+        yield obj
+
+
+def _dsh_parse_artifact(path: Path, max_lines: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw, metadata = _dsh_read_stable_bytes(path)
+    compressed = path.name.endswith(".jsonl.zstd")
+    filename_generation, _ = _dsh_parse_generation_filename(path.name)
+    if compressed:
+        frame_iterator = _dsh_zstd_frames(raw)
+        try:
+            first_frame = next(frame_iterator)
+        except StopIteration:
+            raise _DeepSeekHarnessMonitorError("missing_session_header") from None
+        header_rows = list(_dsh_record_lines(first_frame))
+        if len(header_rows) != 1:
+            raise _DeepSeekHarnessMonitorError("first_frame_header_violation")
+        event_frames = frame_iterator
+    else:
+        frame_iterator = iter((raw,))
+        try:
+            first_frame = next(frame_iterator)
+        except StopIteration:
+            raise _DeepSeekHarnessMonitorError("missing_session_header") from None
+        all_rows = _dsh_record_lines(first_frame)
+        try:
+            header = _dsh_validate_header(next(all_rows), filename_generation)
+        except StopIteration:
+            raise _DeepSeekHarnessMonitorError("missing_session_header") from None
+        state = _dsh_new_fingerprint_state(header)
+        expected_seq = 0
+        record_count = 1
+        for row in all_rows:
+            expected_seq += _dsh_validate_row(row, header["version"], expected_seq)
+            record_count += 1
+            _dsh_add_fingerprint_row(header, row, state)
+            if record_count > _DSH_MAX_RECORDS + 1:
+                raise _DeepSeekHarnessMonitorError("record_count_limit")
+        return _dsh_finish_fingerprint(
+            path, header, state, record_count, metadata, compressed
+        ), header
+
+    header = _dsh_validate_header(header_rows[0], filename_generation)
+    state = _dsh_new_fingerprint_state(header)
+    expected_seq = 0
+    record_count = 1
+    for frame in event_frames:
+        for row in _dsh_record_lines(frame):
+            expected_seq += _dsh_validate_row(row, header["version"], expected_seq)
+            record_count += 1
+            _dsh_add_fingerprint_row(header, row, state)
+            if record_count > _DSH_MAX_RECORDS + 1:
+                raise _DeepSeekHarnessMonitorError("record_count_limit")
+    return _dsh_finish_fingerprint(
+        path, header, state, record_count, metadata, compressed
+    ), header
+
+
+def _dsh_new_fingerprint_state(header: dict[str, Any]) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "type_keys": {},
+        "type_counts": {},
+        "catalog_known_event_types": set(),
+        "accepted_unknown_ignorable_types": set(),
+        "unsupported_required_event_types": set(),
+        "catalog": _dsh_app_event_catalog(),
+    }
+    _dsh_add_fingerprint_row(header, header, state)
+    return state
+
+
+def _dsh_add_fingerprint_row(
+    header: dict[str, Any], row: dict[str, Any], state: dict[str, Any]
+) -> None:
+    type_keys: dict[str, set[str]] = state["type_keys"]
+    type_counts: dict[str, int] = state["type_counts"]
+    catalog_known_types: set[str] = state["catalog_known_event_types"]
+    accepted_unknown_ignorable_types: set[str] = state[
+        "accepted_unknown_ignorable_types"
+    ]
+    unsupported_required_event_types: set[str] = state[
+        "unsupported_required_event_types"
+    ]
+    event_type = (
+        row.get("type")
+        if isinstance(row.get("type"), str) and row.get("type")
+        else "<missing-type>"
+    )
+    type_counts[event_type] = type_counts.get(event_type, 0) + 1
+    if event_type == "session":
+        _dsh_nested_bucket_walk(event_type, row, type_keys, 0, 4)
+        return
+    generation = header["version"]
+    known_types = state["catalog"].get(generation, set())
+    if event_type in known_types:
+        catalog_known_types.add(event_type)
+    elif generation == 3 and row.get("ignorable") is True:
+        accepted_unknown_ignorable_types.add(event_type)
+        # Unknown v3 ignorable data remains opaque in the app. Retain only
+        # envelope keys so dynamic or sensitive payload keys never enter a report.
+        type_keys.setdefault(event_type, set()).update(row.keys())
+        return
+    else:
+        unsupported_required_event_types.add(event_type)
+        # Unsupported payloads have no known schema, so retain only envelope
+        # keys. The event type itself remains a drift finding below.
+        type_keys.setdefault(event_type, set()).update(row.keys())
+        return
+    _dsh_nested_bucket_walk(event_type, row, type_keys, 0, 4)
+
+
+def _dsh_finish_fingerprint(
+    path: Path,
+    header: dict[str, Any],
+    state: dict[str, Any],
+    record_count: int,
+    metadata: os.stat_result,
+    compressed: bool,
+) -> dict[str, Any]:
+    source_created_at_epoch = header["createdAt"] / 1000.0
+    type_keys: dict[str, set[str]] = state["type_keys"]
+    type_counts: dict[str, int] = state["type_counts"]
+    catalog_known_types: set[str] = state["catalog_known_event_types"]
+    accepted_unknown_ignorable_types: set[str] = state[
+        "accepted_unknown_ignorable_types"
+    ]
+    unsupported_required_event_types: set[str] = state[
+        "unsupported_required_event_types"
+    ]
+    fingerprint = {
+        "file": str(path),
+        "encoding": "zstd" if compressed else "plain",
+        "generation": header["version"],
+        "type_counts": {key: type_counts[key] for key in sorted(type_counts)},
+        "type_keys": {key: sorted(type_keys[key]) for key in sorted(type_keys)},
+        "catalog_known_event_types": sorted(catalog_known_types),
+        "accepted_unknown_ignorable_types": sorted(accepted_unknown_ignorable_types),
+        "unsupported_required_event_types": sorted(unsupported_required_event_types),
+        "parsed_lines": record_count,
+        "parse_errors": 0,
+        "nested_depth": 4,
+        "nested_opaque_paths": [
+            "tool/call.data.arguments",
+            "tool/code-dispatch.data.arguments",
+            "tool/code-dispatch-start.data.arguments",
+            "tool/result.data.message",
+            "tool/result.data.meta",
+            "request/context.data.systemPromptUpdate",
+            "request/header.data.header",
+        ],
+        "source_created_at_epoch": source_created_at_epoch,
+        "source_created_at_utc": _epoch_to_utc_iso(source_created_at_epoch),
+        "logical_mtime_epoch": source_created_at_epoch,
+        "artifact_mtime_epoch": metadata.st_mtime,
+        "artifact_mtime_utc": _epoch_to_utc_iso(metadata.st_mtime),
+        "logical_size": metadata.st_size,
+    }
+    return fingerprint
+
+
+def _dsh_nested_bucket_walk(
+    bucket: str,
+    obj: dict[str, Any],
+    out: dict[str, set[str]],
+    depth: int,
+    max_depth: int,
+) -> None:
+    keys = out.setdefault(bucket, set())
+    keys.update(obj.keys())
+    if depth >= max_depth:
+        return
+    event_type = bucket.split(".", 1)[0]
+    for key, value in obj.items():
+        child_bucket = f"{bucket}.{key}"
+        if key == "arguments":
+            continue
+        if event_type == "tool/result" and bucket == "tool/result.data" and key == "message":
+            continue
+        if event_type == "tool/result" and bucket == "tool/result.data" and key == "meta":
+            continue
+        if event_type == "request/context" and bucket == "request/context.data" and key == "systemPromptUpdate":
+            continue
+        if event_type == "request/header" and bucket == "request/header.data" and key == "header":
+            continue
+        children = (
+            [entry for entry in value[:_NESTED_LIST_SAMPLE_LIMIT] if isinstance(entry, dict)]
+            if isinstance(value, list)
+            else ([value] if isinstance(value, dict) else [])
+        )
+        for child in children:
+            _dsh_nested_bucket_walk(child_bucket, child, out, depth + 1, max_depth)
+
+
+def _dsh_parse_generation_filename(filename: str) -> tuple[int | None, bool]:
+    compressed = filename.endswith(".jsonl.zstd")
+    if compressed:
+        raw_name = filename[: -len(".zstd")]
+    elif filename.endswith(".jsonl"):
+        raw_name = filename
+    else:
+        return None, False
+    if raw_name == "session.jsonl":
+        return 0, compressed
+    match = re.fullmatch(r"session\.v([1-9][0-9]*)\.jsonl", raw_name)
+    if not match:
+        return None, compressed
+    try:
+        generation = int(match.group(1))
+    except ValueError:
+        return None, compressed
+    if generation > sys.maxsize:
+        return None, compressed
+    return generation, compressed
+
+
+def _dsh_swift_string_inventory(source: str, name: str) -> set[str]:
+    match = re.search(
+        rf"static\s+let\s+{re.escape(name)}\s*:\s*Set<String>\s*=\s*\[(.*?)^\s*\]",
+        source,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return set()
+    return set(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', match.group(1)))
+
+
+def _dsh_swift_disposition_inventory(source: str, name: str) -> set[str]:
+    match = re.search(
+        rf"static\s+let\s+{re.escape(name)}\s*:\s*\[String:\s*Disposition\]\s*=\s*\[(.*?)^\s*\]",
+        source,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return set()
+    return set(re.findall(r'^\s*"([^"\\]+)"\s*:\s*Disposition\b', match.group(1), re.MULTILINE))
+
+
+def _dsh_app_event_catalog() -> dict[int, set[str]]:
+    """Read the app's checked-in event inventories as the monitoring authority."""
+    global _DSH_APP_EVENT_CATALOG
+    if _DSH_APP_EVENT_CATALOG is not None:
+        return _DSH_APP_EVENT_CATALOG
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        format_source = (repo / "AgentSessions/DeepSeekHarness/DeepSeekHarnessFormatTypes.swift").read_text(encoding="utf-8")
+        validator_source = (repo / "AgentSessions/DeepSeekHarness/DeepSeekHarnessPayloadValidator.swift").read_text(encoding="utf-8")
+    except OSError:
+        _DSH_APP_EVENT_CATALOG = {}
+        return _DSH_APP_EVENT_CATALOG
+
+    packed = _dsh_swift_string_inventory(format_source, "packedTypes")
+    legacy = _dsh_swift_string_inventory(format_source, "legacySourceTypes")
+    generations_0_1 = (
+        _dsh_swift_string_inventory(format_source, "v0Events")
+        | _dsh_swift_disposition_inventory(validator_source, "v0Dispositions")
+        | packed
+        | legacy
+    )
+    generations_2 = (
+        _dsh_swift_disposition_inventory(validator_source, "v2Dispositions")
+        | {"feedback/message-put", "feedback/message-delete"}
+        | packed
+        | legacy
+    )
+    generations_3 = _dsh_swift_string_inventory(format_source, "v3Known")
+    _DSH_APP_EVENT_CATALOG = {0: generations_0_1, 1: generations_0_1, 2: generations_2, 3: generations_3}
+    return _DSH_APP_EVENT_CATALOG
+
+
+def _dsh_encode_path_segment(text: str) -> str:
+    if text == ".":
+        return "~002E"
+    if text == "..":
+        return "~002E~002E"
+    safe = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._")
+    units = text.encode("utf-16-le", errors="surrogatepass")
+    encoded = []
+    for index in range(0, len(units), 2):
+        unit = units[index] | units[index + 1] << 8
+        encoded.append(chr(unit) if unit < 128 and chr(unit) in safe else f"~{unit:04X}")
+    return "".join(encoded)
+
+
+def _dsh_project_key(cwd: str | None) -> str:
+    if cwd is None:
+        return "_no-cwd"
+    safe = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._")
+    units = cwd.encode("utf-16-le", errors="surrogatepass")
+    pieces: list[str] = []
+    separator_run = False
+    for index in range(0, len(units), 2):
+        unit = units[index] | units[index + 1] << 8
+        if unit in (0x2F, 0x5C, 0x3A):
+            if not separator_run:
+                pieces.append("-")
+            separator_run = True
+        elif unit < 128 and chr(unit) in safe:
+            pieces.append(chr(unit))
+            separator_run = False
+        else:
+            pieces.append(f"~{unit:04X}")
+            separator_run = False
+    slug = "".join(pieces).lstrip("-")[:251]
+    return "--" + (slug or "root") + "--"
+
+
+def _dsh_canonical_artifact_path(
+    root: Path, header: dict[str, Any], generation: int, compressed: bool
+) -> Path:
+    project = _dsh_project_key(header.get("cwd"))
+    session = _dsh_encode_path_segment(header["id"])
+    filename = "session.jsonl" if generation == 0 else f"session.v{generation}.jsonl"
+    if compressed:
+        filename += ".zstd"
+    return root / project / session / filename
+
+
+def _dsh_resolve_sessions_root(config: dict[str, Any]) -> Path:
+    env_name = str(config.get("root_env") or "DSH_HOME")
+    configured_home = os.environ.get(env_name, "").strip()
+    if configured_home:
+        root = _expand_path(configured_home)
+        if root.name != "sessions":
+            root = root / "sessions"
+        return root.absolute()
+    default_root = str(config.get("default_root") or "~/.dsh/sessions")
+    return _expand_path(default_root).absolute()
+
+
+def _dsh_inspect_header(
+    path: Path, generation: int
+) -> tuple[dict[str, Any], os.stat_result, int]:
+    compressed = path.name.endswith(".jsonl.zstd")
+    raw, metadata, bytes_read = _dsh_read_stable_header(
+        path, compressed=compressed
+    )
+    if compressed:
+        rows = list(_dsh_record_lines(raw))
+        if len(rows) != 1:
+            raise _DeepSeekHarnessMonitorError("first_frame_header_violation")
+        return _dsh_validate_header(rows[0], generation), metadata, bytes_read
+    rows = list(_dsh_record_lines(raw))
+    if len(rows) != 1:
+        raise _DeepSeekHarnessMonitorError("invalid_session_header")
+    return _dsh_validate_header(rows[0], generation), metadata, bytes_read
+
+
+def _dsh_weekly_scan(config: dict[str, Any], sample_count: int, max_lines: int) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    root = _dsh_resolve_sessions_root(config)
+    issues: dict[str, int] = {}
+
+    def issue(code: str) -> None:
+        issues[code] = issues.get(code, 0) + 1
+
+    try:
+        root_mode = root.stat().st_mode
+    except FileNotFoundError:
+        return None, {
+            "ok": False,
+            "root": str(root),
+            "error": "sessions_root_missing",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": {},
+            "failure_is_actionable": False,
+        }
+    except OSError:
+        issue("sessions_root_unreadable")
+        return None, {
+            "ok": False,
+            "root": str(root),
+            "error": "sessions_root_unreadable",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": issues,
+            "failure_is_actionable": True,
+        }
+    if not stat.S_ISDIR(root_mode):
+        issue("sessions_root_not_directory")
+        return None, {
+            "ok": False,
+            "root": str(root),
+            "error": "sessions_root_not_directory",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": issues,
+            "failure_is_actionable": True,
+        }
+
+    artifacts: list[tuple[Path, Path, int, bool, float]] = []
+    encodings: set[bool] = set()
+    header_scan_bytes = 0
+    discovery_entries = 0
+    scan_exhausted = False
+
+    def count_discovery_entry() -> bool:
+        nonlocal discovery_entries
+        if discovery_entries >= _DSH_MAX_DISCOVERY_ENTRIES:
+            issue("session_discovery_entry_limit")
+            return False
+        discovery_entries += 1
+        return True
+
+    try:
+        project_entries = os.scandir(root)
+    except OSError:
+        issue("sessions_root_unreadable")
+        return None, {
+            "ok": False,
+            "root": str(root),
+            "error": "sessions_root_unreadable",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": issues,
+            "failure_is_actionable": True,
+        }
+
+    try:
+        with project_entries:
+            for project_entry in project_entries:
+                if not count_discovery_entry():
+                    break
+                try:
+                    if not project_entry.is_dir(follow_symlinks=False):
+                        continue
+                    child_entries = os.scandir(project_entry.path)
+                except OSError:
+                    issue("filesystem_access")
+                    continue
+                with child_entries:
+                    for child_entry in child_entries:
+                        if not count_discovery_entry():
+                            scan_exhausted = True
+                            break
+                        try:
+                            child_is_file = child_entry.is_file(follow_symlinks=False)
+                            child_is_dir = child_entry.is_dir(follow_symlinks=False)
+                        except OSError:
+                            issue("filesystem_access")
+                            continue
+                        if child_is_file and child_entry.name.endswith((".jsonl", ".jsonl.zstd")):
+                            encodings.add(child_entry.name.endswith(".jsonl.zstd"))
+                            issue("legacy_flat_layout")
+                            continue
+                        if not child_is_dir:
+                            continue
+                        try:
+                            artifact_entries = os.scandir(child_entry.path)
+                        except OSError:
+                            issue("filesystem_access")
+                            continue
+                        with artifact_entries:
+                            for artifact_entry in artifact_entries:
+                                if not count_discovery_entry():
+                                    scan_exhausted = True
+                                    break
+                                generation, compressed = _dsh_parse_generation_filename(artifact_entry.name)
+                                if generation is None:
+                                    continue
+                                if len(artifacts) >= _DSH_MAX_SESSIONS_TO_INSPECT:
+                                    issue("session_scan_limit")
+                                    scan_exhausted = True
+                                    break
+                                try:
+                                    if not artifact_entry.is_file(follow_symlinks=False):
+                                        continue
+                                    artifact_mtime = artifact_entry.stat(follow_symlinks=False).st_mtime
+                                except OSError:
+                                    issue("filesystem_access")
+                                    continue
+                                path = Path(artifact_entry.path)
+                                session_dir = Path(child_entry.path)
+                                encodings.add(compressed)
+                                artifacts.append((path, session_dir, generation, compressed, artifact_mtime))
+                        if scan_exhausted:
+                            break
+                if scan_exhausted:
+                    break
+    except OSError:
+        issue("sessions_root_unreadable")
+
+    if len(encodings) > 1:
+        issue("mixed_compression_encodings")
+        contract = {
+            "ok": False,
+            "root": str(root),
+            "encoding": "mixed",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": issues,
+            "failure_is_actionable": True,
+        }
+        return None, contract
+
+    if not artifacts:
+        return None, {
+            "ok": False,
+            "root": str(root),
+            "error": "no_sessions_found",
+            "candidate_sessions": 0,
+            "sampled_sessions": 0,
+            "issue_counts": issues,
+            "failure_is_actionable": bool(issues),
+        }
+
+    grouped: dict[Path, list[tuple[Path, int, bool, float]]] = {}
+    for path, session_dir, generation, compressed, mtime in artifacts:
+        grouped.setdefault(session_dir, []).append((path, generation, compressed, mtime))
+
+    candidates: list[tuple[Path, int, bool, float, dict[str, Any]]] = []
+    by_id: dict[str, list[tuple[Path, int, bool, float, dict[str, Any]]]] = {}
+    for session_dir, members in grouped.items():
+        highest = max(member[1] for member in members)
+        selected = [member for member in members if member[1] == highest]
+        if len(selected) != 1:
+            issue("ambiguous_generation")
+            continue
+        path, generation, compressed, mtime = selected[0]
+        try:
+            header, metadata, bytes_read = _dsh_inspect_header(path, generation)
+            header_scan_bytes += bytes_read
+            if header_scan_bytes > _DSH_MAX_HEADER_SCAN_BYTES:
+                raise _DeepSeekHarnessMonitorError("header_scan_size_limit")
+            expected = _dsh_canonical_artifact_path(root, header, generation, compressed)
+            same_spelling = path.absolute() == expected.absolute()
+            same_physical_path = path.resolve(strict=False) == expected.resolve(strict=False)
+            if not (same_spelling or same_physical_path):
+                raise _DeepSeekHarnessMonitorError("canonical_path_mismatch")
+            candidate = (path, generation, compressed, metadata.st_mtime, header)
+            by_id.setdefault(header["id"], []).append(candidate)
+        except _DeepSeekHarnessMonitorError as exc:
+            issue(exc.code)
+
+    for same_id_candidates in by_id.values():
+        if len(same_id_candidates) != 1:
+            issue("ambiguous_session_id")
+            continue
+        candidates.append(same_id_candidates[0])
+
+    candidates.sort(
+        key=lambda entry: (-int(entry[4]["createdAt"]), str(entry[0]))
+    )
+    sample_candidates = candidates[: max(1, sample_count)]
+    fingerprints: list[dict[str, Any]] = []
+    newest_error: str | None = None
+    for index, (path, generation, compressed, _mtime, discovered_header) in enumerate(sample_candidates):
+        try:
+            fingerprint, parsed_header = _dsh_parse_artifact(path, max_lines=max_lines)
+            if (
+                parsed_header.get("id") != discovered_header.get("id")
+                or parsed_header.get("version") != generation
+                or parsed_header.get("createdAt") != discovered_header.get("createdAt")
+                or path.name.endswith(".jsonl.zstd") != compressed
+            ):
+                raise _DeepSeekHarnessMonitorError(
+                    "artifact_changed_between_discovery_and_parse"
+                )
+            fingerprints.append(fingerprint)
+        except _DeepSeekHarnessMonitorError as exc:
+            issue(exc.code)
+            if index == 0:
+                newest_error = exc.code
+
+    local_schema: dict[str, Any] | None = None
+    if fingerprints:
+        local_schema = _dsh_merge_fingerprints(fingerprints)
+    elif newest_error and sample_candidates:
+        local_schema = {
+            "file": str(sample_candidates[0][0]),
+            "error": newest_error,
+            "type_counts": {},
+            "type_keys": {},
+            "parsed_lines": 0,
+            "parse_errors": 1,
+        }
+
+    all_issues = bool(issues)
+    contract = {
+        "ok": not all_issues and bool(candidates),
+        "root": str(root),
+        "layout": "<root>/<project-key>/<encoded-session-id>/session[.vN].jsonl[.zstd]",
+        "encoding": "zstd" if encodings == {True} else "plain" if encodings == {False} else None,
+        "candidate_sessions": len(candidates),
+        "sampled_sessions": len(fingerprints),
+        "header_scan_bytes": header_scan_bytes,
+        "header_scan_bytes_limit": _DSH_MAX_HEADER_SCAN_BYTES,
+        "issue_counts": issues,
+        "failure_is_actionable": all_issues,
+    }
+    return local_schema, contract
+
+
+def _dsh_merge_fingerprints(
+    fingerprints: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not fingerprints:
+        return None
+    merged = dict(fingerprints[0])
+    merged["type_keys"] = _merge_type_keys(fingerprints)
+    merged_counts: dict[str, int] = {}
+    merged_catalog_known: set[str] = set()
+    merged_accepted_ignorable: set[str] = set()
+    merged_unsupported_required: set[str] = set()
+    for fingerprint in fingerprints:
+        for event_type, count in (fingerprint.get("type_counts") or {}).items():
+            merged_counts[event_type] = merged_counts.get(event_type, 0) + int(count)
+        merged_catalog_known.update(fingerprint.get("catalog_known_event_types") or [])
+        merged_accepted_ignorable.update(fingerprint.get("accepted_unknown_ignorable_types") or [])
+        merged_unsupported_required.update(fingerprint.get("unsupported_required_event_types") or [])
+    merged["type_counts"] = dict(sorted(merged_counts.items()))
+    merged["catalog_known_event_types"] = sorted(merged_catalog_known)
+    merged["accepted_unknown_ignorable_types"] = sorted(merged_accepted_ignorable)
+    merged["unsupported_required_event_types"] = sorted(merged_unsupported_required)
+    merged["sampled_files"] = [fingerprint["file"] for fingerprint in fingerprints]
+    merged["sampled_sessions"] = len(fingerprints)
+    merged["sampled_total_parsed_lines"] = sum(
+        int(fingerprint.get("parsed_lines") or 0) for fingerprint in fingerprints
+    )
+    merged["sample_evidence"] = [
+        {
+            "file": fingerprint.get("file"),
+            "generation": fingerprint.get("generation"),
+            "source_created_at_epoch": fingerprint.get("source_created_at_epoch"),
+            "source_created_at_utc": fingerprint.get("source_created_at_utc"),
+            "artifact_mtime_epoch": fingerprint.get("artifact_mtime_epoch"),
+            "artifact_mtime_utc": fingerprint.get("artifact_mtime_utc"),
+            "parsed_lines": fingerprint.get("parsed_lines"),
+            "type_counts": fingerprint.get("type_counts"),
+            "type_keys": fingerprint.get("type_keys"),
+            "catalog_known_event_types": fingerprint.get("catalog_known_event_types"),
+            "accepted_unknown_ignorable_types": fingerprint.get("accepted_unknown_ignorable_types"),
+            "unsupported_required_event_types": fingerprint.get("unsupported_required_event_types"),
+        }
+        for fingerprint in fingerprints
+    ]
+    return merged
+
+
 def _observed_event_count(fingerprint: dict[str, Any] | None) -> int | None:
-    """Total events a fingerprint actually saw, across every record kind."""
+    """Total physical records seen, without double-counting nested schema buckets."""
     if not isinstance(fingerprint, dict):
         return None
+    for key in ("sampled_total_parsed_lines", "parsed_lines", "parsed_messages"):
+        v = fingerprint.get(key)
+        if isinstance(v, int):
+            return v
     counts = fingerprint.get("type_counts")
     if isinstance(counts, dict) and counts:
         total = 0
@@ -1165,10 +2866,6 @@ def _observed_event_count(fingerprint: dict[str, Any] | None) -> int | None:
             if isinstance(n, int):
                 total += n
         return total
-    for key in ("parsed_lines", "parsed_messages"):
-        v = fingerprint.get(key)
-        if isinstance(v, int):
-            return v
     return None
 
 
@@ -1225,12 +2922,30 @@ def _grok_session_schema_fingerprint(path: Path, max_lines: int) -> dict[str, An
     return fp
 
 
+def _deepseek_harness_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    """Fingerprint validated DSH event data for fixture and real-session parity."""
+    try:
+        fingerprint, _ = _dsh_parse_artifact(path, max_lines=max_lines)
+        return fingerprint
+    except _DeepSeekHarnessMonitorError as exc:
+        return {
+            "file": str(path),
+            "error": exc.code,
+            "type_counts": {},
+            "type_keys": {},
+            "parsed_lines": 0,
+            "parse_errors": 1,
+        }
+
+
 def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -> dict[str, Any]:
     """Single place that decides how deep an agent's JSONL is fingerprinted.
 
     Baseline and observed samples MUST go through this together — fingerprinting one
     side flat and the other nested would diff two different alphabets.
     """
+    if agent_name == "deepseek_harness":
+        return _deepseek_harness_schema_fingerprint(path, max_lines=max_lines)
     if agent_name == "kimi":
         return _kimi_wire_schema_fingerprint(path, max_lines=max_lines)
     if agent_name == "grok":
@@ -1240,23 +2955,24 @@ def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -
             path,
             max_lines=max_lines,
             opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get(agent_name, ())),
+            typed_list_keys=frozenset(_NESTED_TYPED_LIST_KEYS.get(agent_name, ())),
         )
     return _jsonl_schema_fingerprint(path, max_lines=max_lines)
 
 
 _KIMI_LOOP_EVENT_TYPE = "context.append_loop_event"
+_KIMI_AGENT_MESSAGE_TYPE = "agent.message.appended"
 
 
 def _kimi_wire_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     """
     Schema fingerprint for Kimi Code `agents/<id>/wire.jsonl` journals.
 
-    Everything Kimi renders — assistant text, reasoning, tool calls, tool results —
-    arrives nested under `context.append_loop_event` -> `event`, never at the top
-    level (see docs/agent-json-tracking.md -> "Kimi Code"). A top-level-only
-    fingerprint therefore sees one opaque `context.append_loop_event` bucket and is
-    blind to the entire renderable surface, so this walks into `event` and emits
-    namespaced buckets into the same `type_keys` map `_schema_diff()` compares.
+    Legacy renderable content arrives under `context.append_loop_event` -> `event`.
+    Kimi 2.x also writes projected history entries under
+    `agent.message.appended` -> `message`. A top-level-only fingerprint sees both as
+    opaque buckets, so this walks their fixed schema while leaving message text, ids,
+    reasoning content, and tool arguments opaque.
 
     Synthetic buckets (prefixes cannot collide with a real top-level wire op):
       `event.<event.type>`               keys of the loop event; count = histogram
@@ -1268,6 +2984,11 @@ def _kimi_wire_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
                                          transcripts and inflate assistant counts.
       `event.<event.type>.result`        keys inside `tool.result`'s `result` object,
                                          where `isError` drives error classification.
+      `agent.message.appended.entry`    keys of the projected history entry
+      `agent.message.appended.message.<role>` keys of its role-specific message
+      `agent.message.appended.content.<type>` keys of each content part
+      `agent.message.appended.tool_call` keys of each tool call; arguments stay opaque
+      `agent.message.appended.meta[.<kind>]` fixed metadata object keys
 
     Nested shape changes (a value that stops being an object) get their own
     `.<non-object>` bucket rather than being silently skipped.
@@ -1312,6 +3033,61 @@ def _kimi_wire_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
 
         top_type = _named(obj.get("type"))
         _add(top_type, obj.keys())
+        if top_type == _KIMI_AGENT_MESSAGE_TYPE:
+            entry = obj.get("message")
+            if not isinstance(entry, dict):
+                _add("agent.message.appended.entry.<non-object>")
+                continue
+
+            _add("agent.message.appended.entry", entry.keys())
+            message = entry.get("message")
+            if not isinstance(message, dict):
+                _add("agent.message.appended.message.<non-object>")
+            else:
+                role = _named(message.get("role"))
+                _add(f"agent.message.appended.message.{role}", message.keys())
+
+                if "content" in message:
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict):
+                                part_type = _named(part.get("type"))
+                                _add(f"agent.message.appended.content.{part_type}", part.keys())
+                            else:
+                                _add("agent.message.appended.content.<non-object>")
+                    else:
+                        _add("agent.message.appended.content.<non-list>")
+
+                if "toolCalls" in message:
+                    tool_calls = message.get("toolCalls")
+                    if isinstance(tool_calls, list):
+                        for call in tool_calls:
+                            if isinstance(call, dict):
+                                # `arguments` is a tool-defined payload. Record the
+                                # containing key but never descend into its contents.
+                                _add("agent.message.appended.tool_call", call.keys())
+                            else:
+                                _add("agent.message.appended.tool_call.<non-object>")
+                    else:
+                        _add("agent.message.appended.toolCalls.<non-list>")
+
+            if "meta" in entry:
+                meta = entry.get("meta")
+                if isinstance(meta, dict):
+                    _add("agent.message.appended.meta", meta.keys())
+                    for meta_kind in ("finish", "model", "origin", "usage"):
+                        if meta_kind not in meta:
+                            continue
+                        nested = meta.get(meta_kind)
+                        if isinstance(nested, dict):
+                            _add(f"agent.message.appended.meta.{meta_kind}", nested.keys())
+                        else:
+                            _add(f"agent.message.appended.meta.{meta_kind}.<non-object>")
+                else:
+                    _add("agent.message.appended.meta.<non-object>")
+            continue
+
         if top_type != _KIMI_LOOP_EVENT_TYPE:
             continue
 
@@ -1369,7 +3145,7 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
     Cursor transcripts use `role` (user/assistant) as the top-level discriminator
     instead of `type`. We bucket by normalized role AND by content block type
     (prefixed `content.<type>`) so _schema_diff() detects both structural and
-    content-level drift.
+    content-level drift. Roleless typed records get their own `type.<type>` bucket.
 
     Role normalization matches CursorSessionParser.swift:187-193:
       user/human -> user, assistant/model -> assistant, system -> system, else -> assistant
@@ -1397,14 +3173,20 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
             parse_errors += 1
             continue
         if not isinstance(obj, dict):
+            parse_errors += 1
             continue
 
-        # Bucket top-level keys by normalized role
+        # Bucket top-level keys by normalized role. Cursor also emits typed,
+        # roleless turn events (for example turn_ended errors); keep those apart
+        # from assistant messages so the monitor can catch their shape explicitly.
         raw_role = obj.get("role")
         role_key = raw_role.lower() if isinstance(raw_role, str) else ""
-        role = _ROLE_MAP.get(role_key, "assistant")
-        type_counts[role] = type_counts.get(role, 0) + 1
-        ks = type_keys.setdefault(role, set())
+        event_type = obj.get("type")
+        bucket = _ROLE_MAP.get(role_key)
+        if bucket is None:
+            bucket = f"type.{event_type}" if isinstance(event_type, str) and event_type else "assistant"
+        type_counts[bucket] = type_counts.get(bucket, 0) + 1
+        ks = type_keys.setdefault(bucket, set())
         for k in obj.keys():
             ks.add(k)
 
@@ -1432,6 +3214,42 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
         "parsed_lines": total_lines,
         "parse_errors": parse_errors,
     }
+
+
+def _cursor_recent_schema_fingerprint(
+    roots: list[str],
+    glob: str,
+    *,
+    max_lines: int,
+    exclude_globs: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Union the five newest Cursor transcripts so a short newest chat cannot hide drift."""
+    paths = _newest_files(
+        roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
+    )
+    if not paths:
+        return None
+
+    fingerprints = [
+        _cursor_transcript_schema_fingerprint(path, max_lines=max_lines)
+        for path in paths
+    ]
+    merged = dict(fingerprints[0])
+    merged["type_keys"] = _merge_type_keys(fingerprints)
+    merged_counts: dict[str, int] = {}
+    for fingerprint in fingerprints:
+        for event_type, count in (fingerprint.get("type_counts") or {}).items():
+            merged_counts[event_type] = merged_counts.get(event_type, 0) + int(count)
+    merged["type_counts"] = dict(sorted(merged_counts.items()))
+    merged["parse_errors"] = sum(
+        int(fingerprint.get("parse_errors") or 0) for fingerprint in fingerprints
+    )
+    merged["sampled_files"] = [fingerprint["file"] for fingerprint in fingerprints]
+    merged["sampled_sessions"] = len(fingerprints)
+    merged["sampled_total_parsed_lines"] = sum(
+        int(fingerprint.get("parsed_lines") or 0) for fingerprint in fingerprints
+    )
+    return merged
 
 
 def _antigravity_markdown_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
@@ -1984,9 +3802,7 @@ def _cline_session_schema_fingerprint(path: Path) -> dict[str, Any]:
     def _add(event_type: str, obj: dict[str, Any]) -> None:
         type_counts[event_type] = type_counts.get(event_type, 0) + 1
         keys = type_keys.setdefault(event_type, set())
-        for key, value in obj.items():
-            if value is not None:
-                keys.add(key)
+        keys.update(obj.keys())
 
     manifest, manifest_error = _read_json_object(path)
     if manifest is not None:
@@ -2343,7 +4159,9 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
 
     if agent_name in ("codex", "claude", "copilot", "deepseek_harness", "droid", "pi", "qwen"):
         for p in filtered:
-            if not p.endswith(".jsonl"):
+            if not p.endswith(".jsonl") and not (
+                agent_name == "deepseek_harness" and p.endswith(".jsonl.zstd")
+            ):
                 continue
             bp = Path(p)
             if bp.exists():
@@ -2369,7 +4187,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             if p.endswith(".md"):
                 fps.append(_antigravity_markdown_schema_fingerprint(bp, max_lines=5000))
             elif p.endswith(".jsonl"):
-                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+                fps.append(_schema_fingerprint_for_agent(agent_name, bp, max_lines=5000))
     elif agent_name == "hermes":
         for p in filtered:
             if not p.endswith(".json"):
@@ -2422,7 +4240,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
                 continue
             bp = Path(p)
             if bp.exists():
-                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+                fps.append(_schema_fingerprint_for_agent(agent_name, bp, max_lines=5000))
     elif agent_name == "cursor":
         for p in filtered:
             if not p.endswith(".jsonl"):
@@ -2505,6 +4323,117 @@ def _schema_diff(
         "observed_event_count": observed_event_count,
         "is_empty": (not unknown_types and not missing_types and not unknown_keys and not missing_keys),
     }
+
+
+def _prebump_schema_check(
+    *,
+    fingerprint: dict[str, Any],
+    baseline_type_keys: dict[str, list[str]],
+    required_schema_buckets: list[str] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Require valid, nonempty real-session evidence before a prebump can pass."""
+    schema_diff = _schema_diff(
+        observed_type_keys=fingerprint.get("type_keys") or {},
+        baseline_type_keys=baseline_type_keys,
+        observed_event_count=_observed_event_count(fingerprint),
+    )
+    raw_parse_errors = fingerprint.get("parse_errors", 0)
+    parse_errors = raw_parse_errors if isinstance(raw_parse_errors, int) and raw_parse_errors >= 0 else 1
+    observed_count = _observed_event_count(fingerprint)
+    observed_buckets = set((fingerprint.get("type_keys") or {}).keys())
+    observed_counts = fingerprint.get("type_counts")
+    if isinstance(observed_counts, dict):
+        observed_buckets.update(observed_counts.keys())
+    required = sorted({item for item in (required_schema_buckets or []) if isinstance(item, str) and item})
+    missing_required = sorted(set(required) - observed_buckets)
+    schema_diff["parse_errors"] = parse_errors
+    schema_diff["required_schema_buckets"] = required
+    schema_diff["missing_required_schema_buckets"] = missing_required
+    schema_diff["observation_nonempty"] = observed_count is not None and observed_count > 0
+    schema_diff["baseline_present"] = bool(baseline_type_keys)
+    matches = (
+        bool(baseline_type_keys)
+        and parse_errors == 0
+        and observed_count is not None
+        and observed_count > 0
+        and not missing_required
+        and bool(schema_diff.get("unknown_only_is_empty"))
+    )
+    return schema_diff, matches
+
+
+def _dsh_schema_diff(
+    *,
+    fingerprint: dict[str, Any],
+    baseline_type_keys: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Compare DSH keys while separating app-known coverage gaps from drift."""
+    observed_type_keys = fingerprint.get("type_keys") or {}
+    diff = _schema_diff(
+        observed_type_keys=observed_type_keys,
+        baseline_type_keys=baseline_type_keys,
+        observed_event_count=_observed_event_count(fingerprint),
+    )
+    known_event_types = set(fingerprint.get("catalog_known_event_types") or [])
+    accepted_ignorable_types = set(fingerprint.get("accepted_unknown_ignorable_types") or [])
+    baseline_event_types = {bucket for bucket in baseline_type_keys if "." not in bucket}
+
+    unknown_keys: dict[str, list[str]] = {}
+    supported_shapes: dict[str, list[str]] = {}
+    for bucket, keys in diff["unknown_keys"].items():
+        event_type = bucket.split(".", 1)[0]
+        allowed = _DSH_SUPPORTED_UNBASELINED_KEYS.get(bucket)
+        if event_type in accepted_ignorable_types and bucket == event_type:
+            allowed = {"type", "seq", "time", "data", "ignorable", "sourceEventSeqs", "surfaceOp"}
+        if event_type == "session":
+            allowed = _DSH_SUPPORTED_UNBASELINED_KEYS["session"]
+        if allowed is None or (event_type not in known_event_types and event_type not in accepted_ignorable_types and event_type != "session"):
+            unknown_keys[bucket] = keys
+            continue
+        admitted = sorted(set(keys) & allowed)
+        remaining = sorted(set(keys) - allowed)
+        if admitted:
+            supported_shapes[bucket] = admitted
+        if remaining:
+            unknown_keys[bucket] = remaining
+
+    unknown_types: list[str] = []
+    for bucket in diff["unknown_types"]:
+        event_type = bucket.split(".", 1)[0]
+        if bucket in supported_shapes and not unknown_keys.get(bucket):
+            continue
+        allowed = _DSH_SUPPORTED_UNBASELINED_KEYS.get(bucket)
+        if event_type in accepted_ignorable_types and bucket == event_type:
+            allowed = {"type", "seq", "time", "data", "ignorable", "sourceEventSeqs", "surfaceOp"}
+        if event_type == "session":
+            allowed = _DSH_SUPPORTED_UNBASELINED_KEYS["session"]
+        if allowed is not None and (
+            event_type in known_event_types or event_type in accepted_ignorable_types or event_type == "session"
+        ):
+            extra = set(observed_type_keys.get(bucket, [])) - set(baseline_type_keys.get(bucket, []))
+            unexpected = extra - allowed
+            if not unexpected:
+                supported_shapes[bucket] = sorted(extra)
+                continue
+        unknown_types.append(bucket)
+
+    unsupported_required_event_types = sorted(
+        set(fingerprint.get("unsupported_required_event_types") or [])
+    )
+    unknown_types = sorted(set(unknown_types) | set(unsupported_required_event_types))
+    diff["unknown_types"] = unknown_types
+    diff["unknown_keys"] = unknown_keys
+    diff["unknown_only_is_empty"] = not unknown_types and not unknown_keys
+    diff["is_empty"] = (
+        not unknown_types and not diff["missing_types"] and not unknown_keys and not diff["missing_keys"]
+    )
+    diff["known_but_unbaselined_types"] = sorted(known_event_types - baseline_event_types)
+    diff["accepted_unknown_ignorable_types"] = sorted(accepted_ignorable_types)
+    diff["unsupported_required_event_types"] = unsupported_required_event_types
+    diff["supported_unbaselined_shapes"] = supported_shapes
+    diff["catalog_known_event_count"] = len(_dsh_app_event_catalog().get(fingerprint.get("generation"), set()))
+    diff["observed_catalog_known_event_count"] = len(known_event_types)
+    return diff
 
 
 def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> dict[str, Any]:
@@ -2648,7 +4577,23 @@ def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
         tag = obj.get("tag_name")
         name = obj.get("name")
         body = obj.get("body")
-        raw = tag if isinstance(tag, str) else (name if isinstance(name, str) else "")
+        # Most projects put their semantic version in the tag. Hermes is a valid
+        # counterexample: its release tags are calendar versions (v2026.9.14), while
+        # the release name carries the CLI version (Hermes Agent v0.21.3). Let a
+        # source opt into the name without teaching the monitor an agent-specific
+        # exception or comparing two unrelated version families.
+        version_source = source.get("version_source", "tag_name")
+        if version_source == "name":
+            raw = name if isinstance(name, str) else ""
+        elif version_source == "tag_name":
+            raw = tag if isinstance(tag, str) else (name if isinstance(name, str) else "")
+        else:
+            return {
+                "ok": False,
+                "error": "invalid_version_source",
+                "detail": f"unsupported GitHub release version_source: {version_source}",
+                "url": url,
+            }
         ver = _extract_semver(raw) or None
         return {
             "ok": True,
@@ -2695,6 +4640,14 @@ def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
         if not versions:
             return {"ok": False, "error": "no_versions_found", "url": url}
         best = max(versions)
+        rejected_versions = source.get("reject_versions")
+        if isinstance(rejected_versions, list) and str(best) in rejected_versions:
+            return {
+                "ok": False,
+                "error": "rejected_version",
+                "detail": f"source matched rejected version {best}",
+                "url": url,
+            }
         return {"ok": True, "version": str(best), "url": url}
 
     return {"ok": False, "error": "unsupported_source_kind", "kind": kind}
@@ -3087,6 +5040,8 @@ def _build_compatibility_assessment(
     failed_prebump_evidence: dict[str, Any] | None = None,
     upstream_source_status: str | None = None,
     weekly_schema_diff: dict[str, Any] | None = None,
+    fresh_schema_diff: dict[str, Any] | None = None,
+    fresh_schema_required: bool = False,
 ) -> dict[str, Any]:
     """Answer whether current AS code supports the latest available agent format.
 
@@ -3124,7 +5079,14 @@ def _build_compatibility_assessment(
         and not sample_is_stale
         and (fresh_evidence_source == "latest_prebump_report" or not cli_binary_unresolved)
     )
-    latest_real_session_evidence = fresh_evidence_source == "latest_prebump_report"
+    latest_real_session_evidence = (
+        fresh_evidence_source == "latest_prebump_report"
+        and installed is not None
+        and upstream is not None
+        and installed == upstream
+        and latest_status == "current_fetch_known"
+        and not monitoring_failed
+    )
     selected_schema_drift = (
         schema_matches_baseline is False
         and isinstance(schema_diff, dict)
@@ -3153,9 +5115,16 @@ def _build_compatibility_assessment(
     unknown_schema_drift = (
         selected_schema_drift or weekly_schema_drift or failed_prebump_schema_drift
     )
-    thin_sample = all(
-        _sample_is_thin(d) for d in (schema_diff, weekly_schema_diff) if isinstance(d, dict)
-    ) and isinstance(schema_diff, dict) and not unknown_schema_drift
+    if fresh_schema_required:
+        thin_sample = (
+            isinstance(fresh_schema_diff, dict)
+            and _sample_is_thin(fresh_schema_diff)
+            and not unknown_schema_drift
+        )
+    else:
+        thin_sample = all(
+            _sample_is_thin(d) for d in (schema_diff, weekly_schema_diff) if isinstance(d, dict)
+        ) and isinstance(schema_diff, dict) and not unknown_schema_drift
 
     if monitoring_failed:
         blockers.append("latest_source_failed")
@@ -3177,6 +5146,17 @@ def _build_compatibility_assessment(
         blockers.append(latest_status)
     if not real_session_driver_configured:
         blockers.append("no_real_session_driver_configured")
+    if upstream and not installed:
+        blockers.append("installed_version_unknown")
+
+    if real_session_driver_configured:
+        prebump_action = "run prebump validator for the affected agent"
+        latest_action = "run prebump/latest-build validation before claiming latest support"
+        fresh_sample_action = "generate a fresh session with the configured driver and compare against the fixture baseline"
+    else:
+        prebump_action = "capture a fresh native session or configure a prebump driver, then rerun weekly"
+        latest_action = "no prebump driver is configured; capture a session from the latest build or configure a driver before claiming latest support"
+        fresh_sample_action = "no prebump driver is configured; capture a fresh native session or add a driver before claiming support"
     failed_prebump_class = None
     if isinstance(failed_prebump_evidence, dict) and not latest_real_session_evidence:
         value = failed_prebump_evidence.get("failure_class")
@@ -3204,7 +5184,7 @@ def _build_compatibility_assessment(
     elif sample_is_stale and (installed_newer_than_verified or upstream_newer_than_verified):
         verdict = "blocked_stale_sample"
         scope = "none"
-        next_action = "run prebump validator for the affected agent"
+        next_action = prebump_action
         supports_latest = False if upstream else None
         supports_installed = False if installed_newer_than_verified else supports_installed
         confidence = "high"
@@ -3221,7 +5201,7 @@ def _build_compatibility_assessment(
     elif (installed_newer_than_verified or upstream_newer_than_verified) and not fresh_schema_evidence:
         verdict = "blocked_no_fresh_evidence"
         scope = "none"
-        next_action = "generate a fresh session sample and compare against fixture baseline"
+        next_action = fresh_sample_action
         supports_latest = False if upstream else None
         supports_installed = False if installed_newer_than_verified else supports_installed
         confidence = "high"
@@ -3230,6 +5210,13 @@ def _build_compatibility_assessment(
         scope = "installed" if supports_installed else "none"
         next_action = "configure or repair latest-version source for this agent"
         supports_latest = None
+        confidence = "high"
+    elif upstream and not installed:
+        verdict = "blocked_no_fresh_evidence"
+        scope = "none"
+        next_action = "resolve installed version before making installed/latest support claims"
+        supports_installed = None
+        supports_latest = False
         confidence = "high"
     elif upstream_newer_than_verified and installed == upstream and latest_real_session_evidence and latest_status == "current_fetch_known":
         verdict = "supports_latest"
@@ -3240,13 +5227,13 @@ def _build_compatibility_assessment(
     elif upstream_newer_than_verified and installed == upstream and fresh_schema_evidence:
         verdict = "supports_installed_only"
         scope = "installed"
-        next_action = "run prebump/latest-build validation before claiming latest support"
+        next_action = latest_action
         supports_latest = False
         confidence = "medium"
     elif upstream_newer_than_verified:
         verdict = "supports_installed_only" if supports_installed else "blocked_no_fresh_evidence"
         scope = "installed" if supports_installed else "none"
-        next_action = "run prebump/latest-build validation before bumping verified support"
+        next_action = latest_action
         supports_latest = False
         confidence = "high"
     elif upstream and installed == upstream and latest_real_session_evidence and latest_status == "current_fetch_known":
@@ -3259,7 +5246,7 @@ def _build_compatibility_assessment(
         verdict = "supports_installed_only" if upstream else "latest_unknown"
         scope = "installed"
         next_action = (
-            "run prebump/latest-build validation before claiming latest support"
+            latest_action
             if upstream
             else "configure or repair latest-version source for this agent"
         )
@@ -3288,6 +5275,7 @@ def _build_compatibility_assessment(
         "supports_latest": supports_latest,
         "evidence_source": evidence_source,
         "fresh_schema_evidence": fresh_schema_evidence,
+        "fresh_schema_diff": fresh_schema_diff,
         "latest_real_session_evidence": latest_real_session_evidence,
         "real_session_driver_configured": real_session_driver_configured,
         "latest_real_session_failure": failed_prebump_evidence,
@@ -3308,13 +5296,23 @@ def _apply_compatibility_to_legacy_status(
     if verdict in ("monitoring_broken", "format_drift_detected"):
         return "high", "prepare_hotfix"
     if verdict in ("blocked_stale_sample", "blocked_no_fresh_evidence"):
-        return "medium", "run_prebump_validator"
+        if compatibility.get("real_session_driver_configured") is True:
+            return "medium", "run_prebump_validator"
+        return "medium", "monitor"
     if verdict == "latest_unknown":
         if latest_status == "unknown_fetch_failed":
             return "medium", "monitor"
         return "low", "monitor"
-    if verdict == "supports_installed_only" and severity == "none":
-        return "low", "monitor"
+    if verdict == "supports_installed_only":
+        if (
+            recommendation == "bump_verified_version"
+            and compatibility.get("evidence_source") != "latest_prebump_report"
+        ):
+            if compatibility.get("real_session_driver_configured") is True:
+                return severity, "run_prebump_validator"
+            return severity, "monitor"
+        if severity == "none":
+            return "low", "monitor"
     return severity, recommendation
 
 
@@ -3550,6 +5548,7 @@ def _run_prebump(
         _roots = _ds.get("roots")
         _globs = _ds.get("globs")
         _req = _ds.get("required_types", [])
+        _required_schema_buckets = _pb.get("required_schema_buckets", [])
         _reasons: list[str] = []
         if not isinstance(_roots, list) or len(_roots) < 1:
             _reasons.append("roots must be a non-empty list")
@@ -3559,6 +5558,11 @@ def _run_prebump(
         # (Copilot declares required_types: [] by design).
         if "required_types" in _ds and not isinstance(_req, list):
             _reasons.append("required_types must be a list when present")
+        if "required_schema_buckets" in _pb and (
+            not isinstance(_required_schema_buckets, list)
+            or any(not isinstance(item, str) or not item for item in _required_schema_buckets)
+        ):
+            _reasons.append("required_schema_buckets must be a list of non-empty strings")
         if _reasons:
             import sys as _sys
             _msg = f"config_gate:{_name}: " + "; ".join(_reasons)
@@ -3792,7 +5796,7 @@ def _run_prebump(
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
             if agent_name == "antigravity":
                 if result.session_path.suffix == ".jsonl":
-                    fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
+                    fp = _schema_fingerprint_for_agent(agent_name, result.session_path, max_lines=5000)
                 else:
                     fp = _antigravity_markdown_schema_fingerprint(result.session_path, max_lines=5000)
             elif agent_name == "hermes":
@@ -3813,15 +5817,11 @@ def _run_prebump(
                 fp = _cursor_transcript_schema_fingerprint(result.session_path, max_lines=5000)
             else:
                 fp = _schema_fingerprint_for_agent(agent_name, result.session_path, max_lines=5000)
-            if baseline_type_keys:
-                schema_diff = _schema_diff(
-                    observed_type_keys=fp.get("type_keys") or {},
-                    baseline_type_keys=baseline_type_keys,
-                    observed_event_count=_observed_event_count(fp),
-                )
-                fresh_matches = bool(schema_diff.get("unknown_only_is_empty"))
-            else:
-                fresh_matches = True  # no baseline → nothing diffs
+            schema_diff, fresh_matches = _prebump_schema_check(
+                fingerprint=fp,
+                baseline_type_keys=baseline_type_keys,
+                required_schema_buckets=pb.get("required_schema_buckets"),
+            )
 
         cli_path, cli_mtime = _resolve_cli_binary_mtime(
             agent_cfg.get("installed_version_cmd") if isinstance(agent_cfg.get("installed_version_cmd"), list) else None
@@ -4057,6 +6057,7 @@ def main(argv: list[str]) -> int:
         schema_matches_baseline: bool | None = None
         schema_diff: dict[str, Any] | None = None
         weekly_schema_diff: dict[str, Any] | None = None
+        dsh_fresh_schema_diff: dict[str, Any] | None = None
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
@@ -4071,10 +6072,18 @@ def main(argv: list[str]) -> int:
 
                 local_fp: dict[str, Any] | None = None
                 newest: Path | None = None
+                dsh_integrity_contract: dict[str, Any] | None = None
 
                 # `kimi_wire_newest` selects the same way as `jsonl_newest` but
                 # fingerprints the nested loop-event structure as well.
-                if kind in ("jsonl_newest", "kimi_wire_newest"):
+                if kind == "deepseek_harness_sessions":
+                    local_fp, dsh_integrity_contract = _dsh_weekly_scan(
+                        local_schema_cfg,
+                        sample_count=int(local_schema_cfg.get("sample_count") or 5),
+                        max_lines=int(local_schema_cfg.get("max_lines") or 5000),
+                    )
+                    roots = [str(dsh_integrity_contract.get("root"))] if dsh_integrity_contract.get("root") else roots
+                elif kind in ("jsonl_newest", "kimi_wire_newest"):
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     required_types = list(local_schema_cfg.get("required_types") or [])
                     exclude_globs_cfg = local_schema_cfg.get("exclude_globs")
@@ -4205,19 +6214,38 @@ def main(argv: list[str]) -> int:
                             local_fp["logical_size"] = logical_stat[1]
                 elif kind == "cursor_transcript_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
-                    newest = _newest_file(roots, glob)
-                    if newest:
-                        local_fp = _cursor_transcript_schema_fingerprint(newest, max_lines=max_lines)
+                    exclude_cfg = local_schema_cfg.get("exclude_globs")
+                    exclude_globs = (
+                        [g for g in exclude_cfg if isinstance(g, str)]
+                        if isinstance(exclude_cfg, list)
+                        else None
+                    )
+                    local_fp = _cursor_recent_schema_fingerprint(
+                        roots,
+                        glob,
+                        max_lines=max_lines,
+                        exclude_globs=exclude_globs,
+                    )
+                    if isinstance(local_fp, dict) and isinstance(local_fp.get("file"), str):
+                        newest = Path(local_fp["file"])
 
                 if local_fp is not None:
                     weekly_details["local_schema"] = local_fp
                     if baseline_type_keys:
-                        schema_diff = _schema_diff(
-                            observed_type_keys=local_fp.get("type_keys") or {},
-                            baseline_type_keys=baseline_type_keys,
-                            observed_event_count=_observed_event_count(local_fp),
-                        )
+                        if kind == "deepseek_harness_sessions":
+                            schema_diff = _dsh_schema_diff(
+                                fingerprint=local_fp,
+                                baseline_type_keys=baseline_type_keys,
+                            )
+                        else:
+                            schema_diff = _schema_diff(
+                                observed_type_keys=local_fp.get("type_keys") or {},
+                                baseline_type_keys=baseline_type_keys,
+                                observed_event_count=_observed_event_count(local_fp),
+                            )
                         schema_matches_baseline = bool(schema_diff.get("unknown_only_is_empty"))
+                        if kind == "deepseek_harness_sessions":
+                            weekly_schema_diff = schema_diff
                         weekly_details["baseline_schema"] = {
                             "fixtures": [p for p in baseline_paths if isinstance(p, str) and "schema_drift" not in p],
                             "type_keys": baseline_type_keys,
@@ -4233,8 +6261,18 @@ def main(argv: list[str]) -> int:
                         if isinstance(local_file_value, str):
                             local_file = local_file_value
                     contract_result = _check_discovery_path_contract(local_file, discovery_contract_cfg)
+                    if kind == "deepseek_harness_sessions" and dsh_integrity_contract is not None:
+                        path_ok = bool(contract_result.get("ok"))
+                        integrity_ok = bool(dsh_integrity_contract.get("ok"))
+                        contract_result["path_ok"] = path_ok
+                        contract_result["session_integrity"] = dsh_integrity_contract
+                        contract_result["ok"] = path_ok and integrity_ok
+                        discovery_contract_failed = bool(
+                            dsh_integrity_contract.get("failure_is_actionable")
+                        ) or (bool(local_file) and not path_ok)
                     weekly_details["discovery_path_contract"] = contract_result
-                    discovery_contract_failed = bool(local_file) and not bool(contract_result.get("ok"))
+                    if kind != "deepseek_harness_sessions":
+                        discovery_contract_failed = bool(local_file) and not bool(contract_result.get("ok"))
 
             probes_cfg = (agent_cfg.get("weekly") or {}).get("probes") or []
             probe_results: list[dict[str, Any]] = []
@@ -4325,8 +6363,96 @@ def main(argv: list[str]) -> int:
                 freshness_window_seconds=window_seconds,
                 now_epoch=datetime.now(timezone.utc).timestamp(),
                 mode_context=mode_context,
-                force_fresh=bool(getattr(args, "force_fresh", False)),
+                force_fresh=(
+                    bool(getattr(args, "force_fresh", False))
+                    and agent_name != "deepseek_harness"
+                ),
             )
+            if agent_name == "deepseek_harness" and isinstance(weekly_details, dict):
+                local_schema_obj = weekly_details.get("local_schema")
+                samples = (
+                    local_schema_obj.get("sample_evidence")
+                    if isinstance(local_schema_obj, dict)
+                    else None
+                )
+                now_epoch = datetime.now(timezone.utc).timestamp()
+                fresh_samples: list[dict[str, Any]] = []
+                newest_sample_freshness: dict[str, Any] | None = None
+                if isinstance(samples, list):
+                    for sample in samples:
+                        if not isinstance(sample, dict):
+                            continue
+                        freshness = _dsh_source_sample_freshness(
+                            sample,
+                            cli_binary_path=cli_path,
+                            cli_binary_mtime=cli_mtime,
+                            freshness_window_seconds=window_seconds,
+                            now_epoch=now_epoch,
+                        )
+                        freshness["force_fresh_requested"] = bool(
+                            getattr(args, "force_fresh", False)
+                        )
+                        sample["freshness"] = freshness
+                        if newest_sample_freshness is None:
+                            newest_sample_freshness = freshness
+                        if freshness.get("fresh_for_compatibility") is True:
+                            fresh_samples.append(sample)
+
+                fresh_fingerprints = [
+                    {
+                        key: sample.get(key)
+                        for key in (
+                            "file",
+                            "generation",
+                            "source_created_at_epoch",
+                            "source_created_at_utc",
+                            "artifact_mtime_epoch",
+                            "artifact_mtime_utc",
+                            "parsed_lines",
+                            "type_counts",
+                            "type_keys",
+                            "catalog_known_event_types",
+                            "accepted_unknown_ignorable_types",
+                            "unsupported_required_event_types",
+                        )
+                    }
+                    for sample in fresh_samples
+                ]
+                fresh_local_schema = _dsh_merge_fingerprints(fresh_fingerprints)
+                weekly_details["fresh_local_schema"] = fresh_local_schema
+                weekly_details["fresh_sampled_sessions"] = len(fresh_samples)
+                if fresh_local_schema is not None and isinstance(
+                    weekly_details.get("baseline_schema"), dict
+                ):
+                    baseline = weekly_details["baseline_schema"].get("type_keys")
+                    if isinstance(baseline, dict):
+                        dsh_fresh_schema_diff = _dsh_schema_diff(
+                            fingerprint=fresh_local_schema,
+                            baseline_type_keys=baseline,
+                        )
+                        weekly_details["fresh_schema_diff"] = dsh_fresh_schema_diff
+                        schema_diff = dsh_fresh_schema_diff
+                        schema_matches_baseline = bool(
+                            dsh_fresh_schema_diff.get("unknown_only_is_empty")
+                        )
+                if fresh_samples:
+                    sample_freshness = fresh_samples[0]["freshness"]
+                elif newest_sample_freshness is not None:
+                    sample_freshness = newest_sample_freshness
+                    schema_matches_baseline = None
+                else:
+                    sample_freshness = {
+                        "is_stale": True,
+                        "stale_reason": "no_parseable_dsh_sample",
+                        "mode_context": "dsh_source_reported_created_at",
+                        "cli_binary_path": cli_path,
+                        "cli_binary_mtime_utc": _epoch_to_utc_iso(cli_mtime),
+                        "freshness_window_seconds": int(window_seconds),
+                        "fresh_for_compatibility": False,
+                        "force_fresh_requested": bool(
+                            getattr(args, "force_fresh", False)
+                        ),
+                    }
             if isinstance(agent_cfg.get("prebump"), dict):
                 prebump_evidence, failed_prebump_evidence = _latest_prebump_evidence(
                     agent_name=agent_name,
@@ -4384,6 +6510,8 @@ def main(argv: list[str]) -> int:
                 schema_matches_baseline=schema_matches_baseline,
                 schema_diff=schema_diff,
                 weekly_schema_diff=weekly_schema_diff,
+                fresh_schema_diff=dsh_fresh_schema_diff,
+                fresh_schema_required=agent_name == "deepseek_harness",
                 sample_freshness=sample_freshness,
                 fresh_evidence_source=fresh_evidence_source,
                 probe_failed=probe_failed,

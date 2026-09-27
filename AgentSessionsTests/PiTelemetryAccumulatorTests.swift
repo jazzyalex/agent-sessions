@@ -198,8 +198,12 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.initialConfiguration?.model, "pi-fixture-model")
         XCTAssertNil(t.initialConfiguration?.reasoningEffort)
         XCTAssertEqual(t.initialConfiguration?.reasoningEffortAnchorLine, nil)
-        // Two assistant messages, 12 in / 7 out each.
-        XCTAssertEqual(t.usageSummary?.topLineTokens, 38)
+        // Two original assistant messages (12 in / 7 out) plus the final answer
+        // after the fixture's read-only ls tool turn (16 in / 5 out). The final
+        // record also carries reasoning=2; it is a subset of output in the only
+        // observed real record, so it must not be added again without stronger
+        // source semantics.
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 59)
         XCTAssertEqual(t.usageSummary?.hasComponentBreakdown, true)
         for change in t.configurationChanges {
             XCTAssertNotNil(change.newValue)

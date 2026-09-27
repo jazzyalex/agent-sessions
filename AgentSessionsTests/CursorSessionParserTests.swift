@@ -460,6 +460,24 @@ final class CursorSessionParserTests: XCTestCase {
         XCTAssertEqual(session.events.filter { $0.kind == .assistant }.count, 1)
     }
 
+    func testRolelessTurnEndedErrorIsVisibleAndCounted() throws {
+        let url = try writeTempJSONL([
+            #"{"type":"turn_ended","status":"error","error":"upstream request failed"}"#,
+        ])
+        defer { cleanupTemp(url) }
+
+        let preview = CursorSessionParser.parseFile(at: url)
+        XCTAssertEqual(preview?.eventCount, 1)
+
+        guard let session = CursorSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        let error = try XCTUnwrap(session.events.first)
+        XCTAssertEqual(error.kind, .error)
+        XCTAssertNil(error.role)
+        XCTAssertEqual(error.text, "upstream request failed")
+    }
+
     // MARK: - Subagent Detection
 
     func testSubagentDetectionFromPath() throws {

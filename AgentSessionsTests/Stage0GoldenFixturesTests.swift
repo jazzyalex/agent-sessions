@@ -45,6 +45,21 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(worldState.isEmpty, "world_state event should survive parsing as .meta")
     }
 
+    func testCodexSeptemberSchemaCandidatesSurviveParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        guard let full = SessionIndexer().parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+
+        for key in [
+            "retained_context", "user_messages_incomplete", "questions",
+            "runtime_workspace_roots", "executed_tool_calls", "tool_calls_complete",
+        ] {
+            XCTAssertTrue(full.events.contains { $0.rawJSON.contains("\"\(key)\"") },
+                          "Codex \(key) field should survive parsing")
+        }
+    }
+
     func testClaudeSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let preview = ClaudeSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
@@ -58,6 +73,22 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_call }))
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_result }))
         XCTAssertTrue(full.events.contains(where: { $0.kind == .meta }))
+    }
+
+    func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        let decoded = full.events.compactMap { event -> String? in
+            guard let data = Data(base64Encoded: event.rawJSON) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+
+        for key in ["advisorModel", "input_transformations", "managedCommit", "turnOrigin"] {
+            XCTAssertTrue(decoded.contains { $0.contains("\"\(key)\"") },
+                          "Claude \(key) field should survive parsing")
+        }
     }
 
     func testClaudeAITitleIsRowTitleFallback() throws {
@@ -267,6 +298,21 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             XCTAssertEqual(full.source, .cursor)
             XCTAssertFalse(full.events.isEmpty)
         }
+    }
+
+    func testCursorRolelessTurnEndedErrorFixtureRenders() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/cursor/small.jsonl")
+        guard let preview = CursorSessionParser.parseFile(at: url) else {
+            return XCTFail("preview parse returned nil")
+        }
+        XCTAssertEqual(preview.eventCount, 5)
+
+        guard let full = CursorSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        let error = try XCTUnwrap(full.events.first(where: { $0.kind == .error }))
+        XCTAssertNil(error.role)
+        XCTAssertEqual(error.text, "[trimmed for fixture]")
     }
 
     func testCursorSchemaDriftBlocksMapToExpectedEvents() throws {
