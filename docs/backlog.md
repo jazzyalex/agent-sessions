@@ -47,6 +47,20 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Cross-Surface Session Storage
 
+### Experimental CLI pages do not pin a transcript revision
+> **open** · sev: med · urg: low · verified 2026-09-29
+
+- **What:** `runRead` in `cli/as-core/Commands.swift` full-parses each request and
+  paginates by event index. Edits, compaction or database updates between requests
+  can change positions; there is no snapshot token or bounded parser-memory guarantee.
+- **Fix shape:** design source-aware revisions and reject changed-revision cursors;
+  profile large sessions before introducing a streaming parser or persistent service.
+- **Why deferred:** this first companion to PR #77 establishes bounded output for
+  quiescent histories. It makes no live-snapshot promise; see `docs/cli-history-retrieval.md`.
+- **Risk if wrong:** consumers can miss or duplicate events if they treat offsets as
+  durable bookmarks. **To close:** test append, rewrite and SQLite/WAL mutation
+  between pages and document the verified consistency contract.
+
 ### Cursor Desktop conversations are never discovered
 > **open** · sev: med · urg: low · verified 2026-08-18
 

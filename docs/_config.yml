@@ -44,6 +44,7 @@ defaults:
 # NOTE: on the Pages Jekyll (3.x) this list REPLACES the built-in defaults,
 # so the tooling entries are repeated here explicitly.
 exclude:
+  - "cli-history-retrieval.md"
   # build tooling
   - Gemfile
   - Gemfile.lock

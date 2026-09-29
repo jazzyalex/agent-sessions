@@ -1,0 +1,46 @@
+name: CLI retrieval contract
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'cli/as-core/**'
+      - 'AgentSessions/**'
+      - 'ThirdParty/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'scripts/as_core*'
+      - 'Resources/Fixtures/**'
+      - 'AgentSessionsTests/Resources/Fixtures/**'
+      - '.github/workflows/as-core-read.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build CLI
+        run: swift build -c debug
+      - name: Check retrieval and existing parser contracts
+        run: |
+          python3 scripts/as_core_read_contract.py --binary .build/debug/as-core
+          python3 scripts/as_core_contract.py --binary .build/debug/as-core
+
+  linux:
+    runs-on: ubuntu-22.04
+    container: swift:6.1-jammy
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build and test dependencies
+        run: apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev python3
+      - name: Build CLI
+        run: swift build -c debug --jobs 2
+      - name: Check retrieval and existing parser contracts
+        run: |
+          python3 scripts/as_core_read_contract.py --binary .build/debug/as-core
+          python3 scripts/as_core_contract.py --binary .build/debug/as-core

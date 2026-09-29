@@ -9,6 +9,8 @@ import Foundation
 //                                                 indexed sessions, newest first by default
 //   as-core search <query> [--source s]... [--limit n] [--sort date|duration|tokens]
 //   as-core show   <source> <file> [--id id]      session header + every event
+//   as-core read   <source> <file> [--id id] [--offset n] [--limit n] [--max-field-bytes n]
+//                                                 bounded event page for agent clients
 //   as-core resume <source> <file> [--id id]      shell command that reopens the session
 //   as-core stats  <source> <file>                token totals and API-equivalent cost
 //   as-core parse  <source> <file>                one-file summary (no index)
@@ -24,9 +26,9 @@ redirectLogsToStderr()
 
 let arguments = CommandLine.arguments.dropFirst()
 guard let command = arguments.first else {
-    fail("usage: as-core <sources|index|list|search|show|resume|stats|parse|scan> [options]", code: 2)
+    fail("usage: as-core <sources|index|list|search|show|read|resume|stats|parse|scan> [options]", code: 2)
 }
-let options = Options(arguments.dropFirst())
+let options = Options(arguments.dropFirst(), command: command)
 
 switch command {
 case "sources": runSources()
@@ -34,6 +36,7 @@ case "index": await runIndex(options)
 case "list": await runList(options)
 case "search": await runSearch(options)
 case "show": runShow(options)
+case "read": runRead(options)
 case "resume": runResume(options)
 case "stats": runStats(options)
 case "parse": runParse(options)

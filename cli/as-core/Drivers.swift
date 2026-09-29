@@ -38,6 +38,10 @@ struct SourceDriver {
     }
 
     var usesIdentity: Bool { descriptor.parseFullByIdentity != nil }
+
+    func requiresIdentity(at url: URL) -> Bool {
+        descriptor.searchUsesIdentityAtURL?(url) == true
+    }
 }
 
 let drivers: [SourceDriver] = SessionSourceDescriptorCatalog.ordered.compactMap(SourceDriver.init)

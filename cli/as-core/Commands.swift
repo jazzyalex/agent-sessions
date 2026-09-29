@@ -6,6 +6,8 @@ struct Options {
     var positional: [String] = []
     var sources: [SourceDriver] = drivers
     var limit = 50
+    var offset = 0
+    var maxFieldBytes = 4_096
     var light = false
     var includeSubagents = false
     var sort = SortKey.date
@@ -24,7 +26,7 @@ struct Options {
         return dataHome.appendingPathComponent("agent-sessions/index.db")
     }
 
-    init(_ args: ArraySlice<String>) {
+    init(_ args: ArraySlice<String>, command: String) {
         var selected: [SourceDriver] = []
         var it = args.makeIterator()
         while let arg = it.next() {
@@ -37,6 +39,16 @@ struct Options {
             case "--limit":
                 guard let value = it.next().flatMap(Int.init), value > 0 else { fail("--limit needs a positive integer", code: 2) }
                 limit = value
+            case "--offset":
+                guard command == "read" else { fail("--offset is only supported by read", code: 2) }
+                guard let value = it.next().flatMap(Int.init), value >= 0 else { fail("--offset needs a nonnegative integer", code: 2) }
+                offset = value
+            case "--max-field-bytes":
+                guard command == "read" else { fail("--max-field-bytes is only supported by read", code: 2) }
+                guard let value = it.next().flatMap(Int.init), (1...65_536).contains(value) else {
+                    fail("--max-field-bytes needs an integer from 1 through 65536", code: 2)
+                }
+                maxFieldBytes = value
             case "--db":
                 guard let path = it.next() else { fail("--db needs a path", code: 2) }
                 databaseURL = URL(fileURLWithPath: path)
@@ -152,6 +164,82 @@ func runShow(_ options: Options) {
             "toolInput": orNull(event.toolInput),
             "toolOutput": orNull(event.toolOutput),
         ])
+    }
+}
+
+/// Prefix by UTF-8 bytes, not grapheme count: one grapheme can contain arbitrarily many
+/// combining marks. Drop a partial trailing scalar instead of emitting replacement text.
+func boundedHistoryField(_ value: String?, maxBytes: Int) -> (value: Any, truncated: Bool) {
+    guard let value else { return (NSNull(), false) }
+    var bytes = Array(value.utf8.prefix(maxBytes + 1))
+    guard bytes.count > maxBytes else { return (value, false) }
+    bytes.removeLast()
+    while !bytes.isEmpty {
+        if let prefix = String(bytes: bytes, encoding: .utf8) { return (prefix, true) }
+        // At most three bytes can be the incomplete suffix of a valid UTF-8 string.
+        bytes.removeLast()
+    }
+    return ("", true)
+}
+
+/// `read` is a bounded excerpt interface for agent clients. `show` keeps its existing
+/// full-transcript contract for the TUI. This still full-parses on each request; offsets
+/// refer to parsed events (including metadata), not raw file lines or durable cursors.
+func runRead(_ options: Options) {
+    guard options.limit <= 200 else { fail("read --limit must be at most 200", code: 2) }
+    let usage = "usage: as-core read <source> <file> [--id id] [--offset n] [--limit n] [--max-field-bytes n]"
+    guard options.positional.count == 2, let driver = driver(named: options.positional[0]) else {
+        fail(usage, code: 2)
+    }
+    let url = URL(fileURLWithPath: options.positional[1])
+    if driver.requiresIdentity(at: url), options.sessionID?.isEmpty != false {
+        fail("read requires --id for this database-backed source", code: 2)
+    }
+    // Some UI parsers represent an unreadable file as a synthetic error event. Reject a
+    // missing/unreadable target up front instead of reporting it as a successful page.
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+          !isDirectory.boolValue, FileManager.default.isReadableFile(atPath: url.path) else {
+        fail("cannot read history at \(url.path)", code: 1)
+    }
+    let session = loadSession(options, usage: usage)
+    let start = min(options.offset, session.events.count)
+    // Subtract before adding so even an Int.max offset cannot overflow.
+    let end = start + min(options.limit, session.events.count - start)
+
+    func withBoundedFields(_ fields: [String: String?], base: [String: Any]) -> [String: Any] {
+        var result = base
+        var truncated: [String] = []
+        for (name, value) in fields {
+            let field = boundedHistoryField(value, maxBytes: options.maxFieldBytes)
+            result[name] = field.value
+            if field.truncated { truncated.append(name) }
+        }
+        result["truncatedFields"] = truncated.sorted()
+        return result
+    }
+
+    emit(withBoundedFields(["title": session.title, "cwd": session.cwd, "model": session.model], base: [
+        "type": "session_page",
+        "source": session.source.rawValue,
+        "id": session.id,
+        "path": session.filePath,
+        "offset": start,
+        "returnedEvents": end - start,
+        "totalEvents": session.events.count,
+        "nextOffset": orNull(end < session.events.count ? end : nil),
+        "maxFieldBytes": options.maxFieldBytes,
+        "contentTrust": "untrusted_history",
+    ]))
+    for index in start..<end {
+        let event = session.events[index]
+        emit(withBoundedFields([
+            "role": event.role, "text": event.text, "toolName": event.toolName,
+            "toolInput": event.toolInput, "toolOutput": event.toolOutput,
+        ], base: [
+            "type": "event", "id": event.id, "index": index,
+            "kind": event.kind.rawValue, "timestamp": iso(event.timestamp),
+        ]))
     }
 }
 

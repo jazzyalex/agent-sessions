@@ -101,6 +101,7 @@ costs a re-index. It is separate from the macOS app's index. Set `$AS_CORE_DB` t
     agent-sessions-core list [--source s] [--limit n] [--sort date|duration|tokens] [--include-subagents]
     agent-sessions-core search <query> [--source s] [--limit n] [--sort date|duration|tokens]
     agent-sessions-core show <source> <file> [--id id]      header plus every event
+    agent-sessions-core read <source> <file> [--id id] [--offset n] [--limit n] [--max-field-bytes n]
     agent-sessions-core resume <source> <file> [--id id]    the command that reopens it
     agent-sessions-core stats <source> <file>         token totals and API-rate cost
     agent-sessions-core parse <source> <file>         one-file summary, no index
@@ -114,6 +115,11 @@ search index, and never touch the macOS app's index.
 
 Common option: `--db <path>`. Database-backed sources (OpenCode, Hermes, Devin) share one
 storage path, so `show` and `resume` take `--id`.
+
+For coding-agent consumers, `read` returns a bounded event page with explicit
+truncation and history references; database-backed reads require `--id`. See the
+[retrieval contract](../docs/cli-history-retrieval.md) for pagination, trust, and
+search limitations. `show` continues to return the full parsed transcript.
 
 ## Uninstall
 
