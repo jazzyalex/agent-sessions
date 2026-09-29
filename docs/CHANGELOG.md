@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.2] - 2026-09-29
+
 - **Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Sonnet 5.5 stay current.** Sanitized fixtures cover their newly observed session fields, Kimi tool-result timing remains available for a future timing surface, and Session Runway recognizes Claude Sonnet 5.5 at its published input, output, and cache rates. Copilot's new reasoning and model/effort records remain available for presentation follow-ups.
 - **Codex 0.159 sessions remain compatible.** Retained Guardian context, assistant completeness, attribution errors, resume settings, and retained-source provenance are covered by sanitized fixtures; incomplete retained context remains tracked as a presentation follow-up.
 - **DeepSeek Harness 0.2 histories remain browseable.** The reader now admits native v4 artifacts, including producer-owned message sources, first-class tool-role results, developer messages, and the stricter v4 relationship and integrity checks. Discovery and Saved snapshots include canonical generations through v4 while retaining v0-v3 migration support.
