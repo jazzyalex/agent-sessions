@@ -517,4 +517,233 @@ final class DeepSeekHarnessPayloadValidatorTests: XCTestCase {
                 v3("user/message", 1, data: userMessageData(),
                    surfaceOp: .replaceV3(startSeq: 0, endSeq: 1))))
     }
+
+    func testV4FirstClassToolResultAndProducerSources() throws {
+        let valid: [String: Any] = [
+            "turn": 1, "step": 1,
+            "message": [
+                "id": "result-v4", "role": "tool", "toolCallId": "call-v4",
+                "content": [["type": "text", "text": "out"] as [String: Any]],
+                "source": ["kind": "tool", "callId": "call-v4"] as [String: Any],
+            ] as [String: Any],
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 1, data: valid, surfaceOp: .append))
+
+        var mismatched = valid
+        var message = try XCTUnwrap(mismatched["message"] as? [String: Any])
+        message["toolCallId"] = "other"
+        mismatched["message"] = message
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 1, data: mismatched, surfaceOp: .append)))
+
+        var retired = valid
+        message = try XCTUnwrap(retired["message"] as? [String: Any])
+        message["role"] = "user"
+        message["content"] = [["type": "tool-result", "toolCallId": "call-v4",
+                               "content": [] as [Any]] as [String: Any]]
+        retired["message"] = message
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 1, data: retired, surfaceOp: .append)))
+
+        var pluginSource = userMessageData()
+        pluginSource["source"] = ["kind": "plugin", "plugin": "legacy"] as [String: Any]
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("user/message", 1, data: pluginSource, surfaceOp: .append)))
+
+        var zeroTurn = valid
+        zeroTurn["turn"] = 0
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 1, data: zeroTurn, surfaceOp: .append)))
+        var missingStep = valid
+        missingStep.removeValue(forKey: "step")
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 1, data: missingStep, surfaceOp: .append)))
+    }
+
+    func testV4TitleRequestRequiresCompleteReleasedPayload() throws {
+        let valid: [String: Any] = [
+            "titleProvider": "dsh-session-title-llm",
+            "messageSeqs": [1],
+            "route": ["provider": "p", "model": "m"] as [String: Any],
+            "system": "Generate a concise title.",
+            "messages": [[
+                "id": "title-request", "role": "user",
+                "content": [["type": "text", "text": "Name this session"] as [String: Any]],
+                "source": ["kind": "dsh-session-title-llm"] as [String: Any],
+            ] as [String: Any]],
+            "maxTokens": 20,
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: valid))
+
+        for key in ["titleProvider", "route", "system", "maxTokens"] {
+            var missing = valid
+            missing.removeValue(forKey: key)
+            XCTAssertThrowsError(
+                try DeepSeekHarnessPayloadValidator.assertV4Event(
+                    v3("session/title-llm-request", 2, data: missing)),
+                "missing \(key) must be rejected")
+        }
+
+        var malformed = valid
+        malformed["titleProvider"] = ""
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: malformed)))
+        malformed = valid
+        malformed["route"] = ["provider": "p", "model": ""] as [String: Any]
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: malformed)))
+        malformed = valid
+        malformed["system"] = 7
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: malformed)))
+        malformed = valid
+        malformed["maxTokens"] = 0
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: malformed)))
+    }
+
+    func testV4RepresentationChangesRetainReleasedCommonSemantics() throws {
+        let inbox: [String: Any] = [
+            "target": "next-turn", "start": 0,
+            "inserted": [userMessageData(source: ["kind": "user"])],
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("agent/inbox/spliced", 2, data: inbox))
+        var invalidInbox = inbox
+        invalidInbox["target"] = "later"
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("agent/inbox/spliced", 2, data: invalidInbox)))
+
+        let compaction: [String: Any] = [
+            "compactionId": "compact-1",
+            "summary": [["type": "text", "text": "summary"] as [String: Any]],
+            "shadowedRange": ["start": 0, "end": 1] as [String: Any],
+            "shadowedSeqs": [0, 1], "shadowedTokenCount": 3,
+            "provider": "p", "model": "m",
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("compaction/summary", 2, data: compaction))
+        var invalidCompaction = compaction
+        invalidCompaction["llmStreamCall"] = true
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("compaction/summary", 2, data: invalidCompaction)))
+
+        let queued: [String: Any] = [
+            "version": 1, "teamId": "team-1",
+            "message": [
+                "id": "message-1", "senderId": "member-1", "senderName": "Member",
+                "targetId": "member-2", "delivery": "quiet",
+                "content": [["type": "text", "text": "hello"] as [String: Any]],
+            ] as [String: Any],
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("team/message/queued", 2, data: queued))
+        var invalidQueued = queued
+        var queuedMessage = try XCTUnwrap(queued["message"] as? [String: Any])
+        queuedMessage["delivery"] = "eventually"
+        invalidQueued["message"] = queuedMessage
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("team/message/queued", 2, data: invalidQueued)))
+
+        var assistant = assistantMessageData()
+        assistant["usage"] = ["inputTokens": 1] as [String: Any]
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("assistant/message", 2, data: assistant, surfaceOp: .append)))
+
+        var malformedUser = userMessageData()
+        malformedUser["content"] = [["type": "text", "text": 7] as [String: Any]]
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("user/message", 2, data: malformedUser, surfaceOp: .append)))
+
+        var malformedHeader = requestHeaderData()
+        var header = try XCTUnwrap(malformedHeader["header"] as? [String: Any])
+        var config = try XCTUnwrap(header["config"] as? [String: Any])
+        config["maxTokens"] = 0
+        header["config"] = config
+        malformedHeader["header"] = header
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("request/header", 2, data: malformedHeader)))
+    }
+
+    func testV4RejectsRetiredAndDeveloperOnlyAssistantStreamBlocks() {
+        let forbiddenChunks: [[String: Any]] = [
+            ["type": "block-start", "blockType": "tool-result"],
+            ["type": "block-end", "block": ["type": "tool-result"] as [String: Any]],
+            ["type": "block-start", "blockType": "tool-addition"],
+            ["type": "block-end", "block": ["type": "tool-removal",
+                                               "toolName": "read"] as [String: Any]],
+        ]
+        for eventType in ["assistant/message", "assistant/attempt"] {
+            for (index, chunk) in forbiddenChunks.enumerated() {
+                let stream: [Any] = [[
+                    "type": "chunk", "time": Int(baseTime), "chunk": chunk,
+                ] as [String: Any]]
+                let data: [String: Any]
+                if eventType == "assistant/message" {
+                    var message = assistantMessageData()
+                    message["stream"] = stream
+                    data = message
+                } else {
+                    data = ["turn": 1, "step": 1, "stream": stream]
+                }
+                XCTAssertThrowsError(
+                    try DeepSeekHarnessPayloadValidator.assertV4Event(
+                        v3(eventType, index + 1, data: data,
+                           surfaceOp: eventType == "assistant/message" ? .append : nil)),
+                    "\(eventType) must reject stream chunk \(chunk)")
+            }
+        }
+    }
+
+    func testV4SystemContentValidationDoesNotDependOnSourceKind() {
+        let malformed: [String: Any] = [
+            "turn": 1, "step": 1,
+            "message": [
+                "id": "system-v4", "role": "system",
+                "source": ["kind": "generated-context"] as [String: Any],
+                "content": [["type": "text", "text": 42] as [String: Any]],
+            ] as [String: Any],
+        ]
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("system/message", 1, data: malformed, surfaceOp: .append)))
+    }
+
+    func testV4ForkedToolNotStartedResultRequiresExactCoordinatesAndSurface() throws {
+        func forkData(id: String = "forked-tool-result-call-v4-3") -> [String: Any] {
+            [
+                "turn": 1, "step": 1,
+                "message": [
+                    "id": id, "role": "tool", "toolCallId": "call-v4",
+                    "isError": true,
+                    "content": [["type": "text", "text": "not started"] as [String: Any]],
+                    "source": ["kind": "tool", "callId": "call-v4"] as [String: Any],
+                ] as [String: Any],
+                "error": ["name": "ToolNotStartedError",
+                          "code": "TOOL_NOT_STARTED"] as [String: Any],
+            ]
+        }
+
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 3, data: forkData(), surfaceOp: .append))
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("tool/result", 4, data: forkData(id: "forked-tool-result-call-v4-2"),
+               sourceEventSeqs: [2], surfaceOp: .replaceV3(startSeq: 2, endSeq: 2)))
+
+        let invalid: [DeepSeekHarnessEnvelope] = [
+            v3("tool/result", 3,
+               data: forkData(id: "forked-tool-result-call-v4-2"), surfaceOp: .append),
+            v3("tool/result", 3, data: forkData(), sourceEventSeqs: [2], surfaceOp: .append),
+            v3("tool/result", 4,
+               data: forkData(id: "forked-tool-result-call-v4-2"),
+               surfaceOp: .replaceV3(startSeq: 2, endSeq: 2)),
+            v3("tool/result", 4,
+               data: forkData(id: "forked-tool-result-call-v4-02"),
+               sourceEventSeqs: [2], surfaceOp: .replaceV3(startSeq: 2, endSeq: 2)),
+        ]
+        for event in invalid {
+            XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(event))
+        }
+    }
 }

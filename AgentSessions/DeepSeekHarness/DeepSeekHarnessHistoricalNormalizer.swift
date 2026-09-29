@@ -66,6 +66,21 @@ enum DeepSeekHarnessHistoricalNormalizer {
                                        inheritedEventCount: inheritedEventCount)
             version = 3
         }
+        if version == 4 {
+            let v4Header = normalizedHeader(result.header)
+            try validateV4(events, header: v4Header)
+            try DeepSeekHarnessRelationshipValidator.assertPublishableRelationships(
+                events, header: v4Header)
+            return events.map { event in
+                let unknownIgnorable = !DeepSeekHarnessVocabulary.v4Known.contains(event.type)
+                    && event.ignorable
+                return DeepSeekHarnessNormalizedEvent(
+                    envelope: event,
+                    canonicalType: event.type,
+                    diagnosticOnly: event.type == "assistant/attempt" || unknownIgnorable
+                )
+            }
+        }
         guard version == 3 else { throw DeepSeekHarnessFormatError.unsupportedVersion(version) }
 
         let v3Header = normalizedHeader(result.header)
@@ -1460,6 +1475,120 @@ enum DeepSeekHarnessHistoricalNormalizer {
         if header.origin == "subagent", header.parentSessionID == nil {
             throw DeepSeekHarnessFormatError.invalidHeader
         }
+    }
+
+    private static func validateV4(
+        _ events: [DeepSeekHarnessEnvelope],
+        header: DeepSeekHarnessHeader
+    ) throws {
+        var ownCatalogChildren = Set<String>()
+        var surface: [Int] = []
+        var systemHead: Int?
+        for (index, event) in events.enumerated() {
+            guard event.sequence == index else {
+                throw DeepSeekHarnessFormatError.sequence(expected: index, actual: event.sequence)
+            }
+            try DeepSeekHarnessPayloadValidator.assertV4Event(event)
+            guard DeepSeekHarnessVocabulary.v4Known.contains(event.type) || event.ignorable else {
+                throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type)
+            }
+            if event.type == "developer/message" {
+                try validateV4DeveloperBindings(event, events: events)
+            }
+            if DeepSeekHarnessVocabulary.surfaceV4.contains(event.type) {
+                guard let operation = event.surfaceOp else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(event.type) \(event.sequence) requires surfaceOp")
+                }
+                if operation.isAppend {
+                    if event.type == "system/message", surface.isEmpty { systemHead = event.sequence }
+                    surface.append(event.sequence)
+                } else {
+                    guard let start = operation.startValue, let end = operation.endValue,
+                          let startIndex = surface.firstIndex(of: start),
+                          let endIndex = surface.firstIndex(of: end), startIndex <= endIndex else {
+                        throw DeepSeekHarnessFormatError.invalidReference(
+                            "\(event.type) replacement range is not on the current surface")
+                    }
+                    let shadowsHead = systemHead.map { surface[startIndex...endIndex].contains($0) } ?? false
+                    if shadowsHead {
+                        guard event.type == "system/message", start == systemHead, end == systemHead else {
+                            throw DeepSeekHarnessFormatError.invalidReference(
+                                "surface replacement cannot shadow the protected system head")
+                        }
+                        systemHead = event.sequence
+                    }
+                    surface.replaceSubrange(startIndex...endIndex, with: [event.sequence])
+                }
+            }
+            if (event.type == "compaction/prune" || event.type == "compaction/summary"),
+               let head = systemHead,
+               let seqs = event.data["shadowedSeqs"] as? [Any],
+               seqs.contains(where: { DeepSeekHarnessJSON.count($0) == head }) {
+                throw DeepSeekHarnessFormatError.invalidReference(
+                    "compaction cannot shadow the protected system head")
+            }
+            if event.type == "subagent/catalog", event.sequence >= inheritedCutForV4(events, header: header) {
+                guard let version = DeepSeekHarnessJSON.safeInt(event.data["version"]),
+                      version == 0 || version == 1,
+                      let childID = DeepSeekHarnessJSON.nonEmptyString(event.data["childId"]),
+                      DeepSeekHarnessJSON.count(event.data["childCreatedAt"]) != nil,
+                      let mode = event.data["mode"] as? String,
+                      ["continuable", "one-shot", "unknown"].contains(mode),
+                      !(version == 0 && mode == "unknown"),
+                      (mode != "continuable" || event.data["label"] is String),
+                      event.data["label"] == nil || event.data["label"] is String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "subagent/catalog requires a supported versioned catalog fact")
+                }
+                guard ownCatalogChildren.insert(childID).inserted else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("duplicate catalog child \(childID)")
+                }
+            }
+        }
+        if header.origin == "subagent", header.parentSessionID == nil {
+            throw DeepSeekHarnessFormatError.invalidHeader
+        }
+    }
+
+    private static func validateV4DeveloperBindings(
+        _ event: DeepSeekHarnessEnvelope,
+        events: [DeepSeekHarnessEnvelope]
+    ) throws {
+        guard let message = event.data["message"] as? [String: Any],
+              let blocks = message["content"] as? [Any] else { return }
+        let additions = blocks.compactMap { $0 as? [String: Any] }
+            .filter { $0["type"] as? String == "tool-addition" }
+        guard !additions.isEmpty else { return }
+        guard let headerSeq = DeepSeekHarnessJSON.count(event.data["headerSeq"]),
+              headerSeq < event.sequence, headerSeq < events.count,
+              events[headerSeq].type == "request/header",
+              let header = events[headerSeq].data["header"] as? [String: Any],
+              let rawTools = header["tools"] as? [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "developer/message tool additions require an earlier request/header")
+        }
+        let tools = rawTools.compactMap { $0 as? [String: Any] }
+        for addition in additions {
+            let name = addition["toolName"] as? String
+            let matches = tools.filter { $0["name"] as? String == name }
+            guard matches.count == 1,
+                  matches[0]["description"] is String,
+                  matches[0]["parameters"] is [String: Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "developer/message tool addition does not bind one complete header tool")
+            }
+        }
+    }
+
+    private static func inheritedCutForV4(
+        _ events: [DeepSeekHarnessEnvelope],
+        header: DeepSeekHarnessHeader
+    ) -> Int {
+        guard header.isSeeded else { return 0 }
+        return events.last(where: {
+            $0.type == "session/end-seed" && ($0.data["inherited"] as? Bool) == true
+        })?.sequence ?? 0
     }
 
     private static func validateEarlierReferences(_ event: DeepSeekHarnessEnvelope) throws {

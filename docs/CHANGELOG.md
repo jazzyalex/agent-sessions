@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **DeepSeek Harness 0.2 histories remain browseable.** The reader now admits native v4 artifacts, including producer-owned message sources, first-class tool-role results, developer messages, and the stricter v4 relationship and integrity checks. Discovery and Saved snapshots include canonical generations through v4 while retaining v0-v3 migration support.
 - **DeepSeek Harness enters weekly format monitoring.** The check selects up to five canonical local sessions by source-reported creation time, validates every event, and fingerprints all rows without recording prompt or tool payload values. Freshness is assessed per session; artifact mtime is diagnostic only, and historical samples detect drift without supporting fresh compatibility claims. Known v3 surface records follow the app's validation rules. Catalog-known but unbaselined event shapes and unknown ignorable v3 events are reported separately; newly observed keys and unsupported required event types remain drift findings.
 - **OpenClaw keeps current tool arguments and results.** Tool calls that store arguments under `input` now render with those arguments, and nested `toolResult` content is retained as the visible tool output with its error state and identifiers.
 - **Cursor shows role-less turn errors.** A `turn_ended` record with `status=error` now appears as a visible error event and contributes to lightweight session preview counts.

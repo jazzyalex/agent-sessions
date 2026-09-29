@@ -223,6 +223,34 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         XCTAssertEqual(full.firstUserPreview, "Fix the parser bug")
     }
 
+    func testSyntheticV4TitleRequestWithProducerSourceParses() throws {
+        let url = try writeSession(filename: "session.v4.jsonl", rows: [
+            header(id: "dsh-v4-title-request", version: 4),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("user/message", 1,
+                     data: userData(id: "user-v4", text: "Name this session"),
+                     surfaceAppend: true),
+            envelope("session/title-llm-request", 2, data: [
+                "titleProvider": "dsh-session-title-llm",
+                "messageSeqs": [1],
+                "route": ["provider": "p", "model": "m"],
+                "system": "Generate a concise session title.",
+                "messages": [[
+                    "id": "title-request-v4", "role": "user",
+                    "content": [["type": "text", "text": "Name this session"]],
+                    "source": ["kind": "dsh-session-title-llm"] as [String: Any],
+                ] as [String: Any]],
+                "maxTokens": 20,
+            ]),
+            envelope("turn/end", 3,
+                     data: ["turn": 1, "reason": ["kind": "completed"]]),
+        ])
+
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(parsed.id, "dsh-v4-title-request")
+        XCTAssertEqual(parsed.lightweightTitle, "Name this session")
+    }
+
     func testPluginMessageExcludedFromTitleCountsAndUserKind() throws {
         let url = try mainURL()
         guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {

@@ -1,8 +1,9 @@
 agent_sessions_version: "5.5.1-unreleased"
 as_of_commit: "5c359a7f+working-tree"
-as_of_date: 2026-09-27
+as_of_date: 2026-09-29
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-09-29 DeepSeek Harness v4 verification: installed, upstream, and verified versions are 0.2.0-rc.2. A fresh headless tool session proved message, tool, usage, relationship, and integrity buckets; the production catalog, synthetic v4 fixture pair, parser tests, Debug build, and 3,200-test suite all pass. The final weekly reports supports_latest for DSH. The same sweep independently found high-severity Codex 0.159.0 schema drift, which is outside this DSH ceiling advance. Prebump: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json. Final weekly: scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json."
   - "2026-09-27 Kimi follow-up: a fresh 2.0.2 Bash turn proved agent.message.appended user, assistant, tool-call, and tool-result rows duplicate the legacy context projection. Sanitized normal-fixture coverage and a no-duplicate parser regression preserve the legacy projection as canonical; the strengthened prebump now requires tool traffic and matches baseline. Kimi advances to verified 2.0.2; upstream 2.1.1 remains unverified. Prebump report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json. Final weekly report: scripts/probe_scan_output/agent_watch/20260927-045502-543478Z-p15724/report.json."
   - "2026-09-26 final 16-agent format check: report scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json. Codex 0.157.0, Claude 2.1.278, and Copilot 1.0.87 retain ceilings established by fresh, schema-clean prebump sessions; current Codex/Claude usage and status probes pass. Codex compaction/resume and MCP-attribution shapes are fixture-covered after an all-session sweep of 1,406 local sessions found no remaining bucket/key gap. OpenClaw's current nested toolCall/input and toolResult/content forms are fixture-covered, and the parser now preserves their arguments and result text; its ceiling remains 2026.7.1 because a pending local state migration blocks fresh evidence. Pi's thinking/signature/reasoning shapes are fixture-covered and thinking renders as metadata, but 0.86.1 remains blocked on text-only tool-gate runs. Hermes latest-release monitoring now reads the official release-name semver and reports installed-only at 0.21.1 versus upstream 0.21.5. DSH's five fresh 0.1.5-rc.2 sessions remain clean; its 0.1.6-alpha.2 ceiling is unchanged without an upstream driver. Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin/fx remain steward-owned."
   - "2026-09-25 model-price check: local slugs from recent Codex and Claude sessions resolve to existing table entries (apart from Claude <synthetic>, whose observed usage is zero). The two local tables remain identical at 31 keys, updated 2026-09-23. Current official pricing pages showed no rate change in the rows they publish; legacy Claude 3 and GPT-5.6 Terra/Luna, GPT-5.5, GPT-5.4, and GPT-5 rates were not freshly confirmed from those rendered pages."
@@ -341,9 +342,9 @@ agents:
       - "AgentSessionsTests/ClineIntegrationTests.swift"
       - "scripts/tests/test_cline_monitoring.py"
   deepseek_harness:
-    max_verified_version: "0.1.6-alpha.2"
-    version_field: "repository release/tag plus physical header version 0-3; fixtures pin source commit ddefc45fbc7f8e46dd73185e68295696d1297887"
-    support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v3 plain or independently framed Zstandard histories"
+    max_verified_version: "0.2.0-rc.2"
+    version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887 and 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2)"
+    support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v4 plain or independently framed Zstandard histories"
     unsupported_surfaces:
       - "resume and live ingestion"
       - "DSH archive-state mirroring"
@@ -351,13 +352,14 @@ agents:
       - "source-reported per-message usage in Analytics (usage is present and validated, but not surfaced)"
       - "live quota and rate-limit status"
       - "image extraction"
-      - "custom required event extensions outside the pinned 58-event catalog"
+      - "custom required event extensions outside the pinned 59-event v4 catalog"
     notes:
       - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout. The weekly monitor reads bounded headers, selects up to five canonical sessions by source-reported createdAt, then fingerprints every validated row in each selected session. The bounded sample is not a representative compatibility corpus."
       - "Weekly monitoring compares upstream releases, fingerprints canonical sessions under $DSH_HOME/sessions (or ~/.dsh/sessions) across plain/Zstandard encodings, and verifies every fixture hash. The private report records event types, schema keys, counts, and sample paths, not prompt or tool payload values."
       - "Freshness is assessed per session from the unauthenticated header createdAt against the installed CLI mtime and freshness window; artifact mtime is diagnostic only. The all-sample union detects drift, but only individually fresh sessions support a positive compatibility claim. Known v3 surface envelopes and references follow the app admission rules; legacy v0-v2 surface forms retain their validation."
       - "Fork provenance is retained as metadata while forks remain roots; DSH archive flags are ignored; incomplete or corrupt artifacts remain invisible."
       - "2026-09-25 weekly verification: the authorized headless CLI run produced a real installed 0.1.5-rc.2 session newer than the binary. Five individually fresh sessions contributed 1,139 validated events with no unknown event types or keys; per-session freshness uses source-reported createdAt, not artifact mtime. Upstream 0.1.7-rc.2 is newer and remains unverified because DSH has no prebump driver. The 0.1.6-alpha.2 app ceiling is unchanged. Report: scripts/probe_scan_output/agent_watch/20260925-161641-619599Z-p136/report.json."
+      - "2026-09-29 v4 verification: installed and upstream both resolve to 0.2.0-rc.2. The real-home headless prebump driver produced a fresh 29-event v4 tool session and proved message, tool, usage, relationship, and integrity buckets with zero parse errors, unknown required types, or unknown keys. Native v4 fixtures are synthetic and validated through the installed production catalog; no prompt or tool values were copied from the private session. Prebump report: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json."
     evidence_docs:
       - "docs/superpowers/plans/2026-09-18-dsh-source-implementation-plan.md"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/manifest.json"
@@ -366,12 +368,14 @@ agents:
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_tool_session.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_agent_instructions_source.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v0_minimal_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v1_minimal_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v2_minimal_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_tool_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl.zstd"
     evidence_tests:
       - "AgentSessionsTests/DeepSeekHarnessFixtureParityTests.swift"

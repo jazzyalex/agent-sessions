@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -1216,3 +1217,181 @@ class GrokSingleDriver:
 
 
 DRIVERS["grok_single"] = GrokSingleDriver()
+
+
+class DeepSeekHarnessHeadlessDriver:
+    """Run one bounded, tool-bearing DeepSeek Harness task in the real store.
+
+    DSH profiles, credentials, and durable sessions all live below DSH_HOME. Copying
+    selected files into a synthetic HOME would create a configuration that the user
+    does not actually run, so this driver deliberately requires the framework's
+    explicit ``--allow-real-home`` opt-in. The output logs remain in the disposable
+    prebump sandbox; only DSH's own session artifact is written to the real store.
+    """
+
+    name = "deepseek_harness_headless"
+    _MAX_DISCOVERY_ENTRIES = 10_000
+
+    @staticmethod
+    def _sessions_root(env: dict[str, str]) -> Path:
+        configured = str(env.get("DSH_HOME") or "").strip()
+        if configured:
+            home = Path(configured).expanduser()
+        else:
+            session_home = Path(
+                env.get("AGENT_WATCH_SESSION_HOME")
+                or env.get("HOME")
+                or ""
+            )
+            home = session_home / ".dsh"
+        return home if home.name == "sessions" else home / "sessions"
+
+    @staticmethod
+    def _project_key(cwd: Path) -> str:
+        safe = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._")
+        units = str(cwd).encode("utf-16-le", errors="surrogatepass")
+        pieces: list[str] = []
+        separator_run = False
+        for index in range(0, len(units), 2):
+            unit = units[index] | units[index + 1] << 8
+            if unit in (0x2F, 0x5C, 0x3A):
+                if not separator_run:
+                    pieces.append("-")
+                separator_run = True
+            elif unit < 128 and chr(unit) in safe:
+                pieces.append(chr(unit))
+                separator_run = False
+            else:
+                pieces.append(f"~{unit:04X}")
+                separator_run = False
+        slug = "".join(pieces).lstrip("-")[:251]
+        return "--" + (slug or "root") + "--"
+
+    @classmethod
+    def _snapshot_project(
+        cls, project_root: Path
+    ) -> tuple[dict[Path, tuple[int, int]], bool]:
+        snapshot: dict[Path, tuple[int, int]] = {}
+        if not project_root.exists():
+            return snapshot, False
+        entries = 0
+        try:
+            session_entries = os.scandir(project_root)
+        except OSError:
+            return snapshot, False
+        with session_entries:
+            for session_entry in session_entries:
+                entries += 1
+                if entries > cls._MAX_DISCOVERY_ENTRIES:
+                    return snapshot, True
+                try:
+                    if not session_entry.is_dir(follow_symlinks=False):
+                        continue
+                    artifact_entries = os.scandir(session_entry.path)
+                except OSError:
+                    continue
+                with artifact_entries:
+                    for artifact_entry in artifact_entries:
+                        entries += 1
+                        if entries > cls._MAX_DISCOVERY_ENTRIES:
+                            return snapshot, True
+                        if not re.fullmatch(
+                            r"session\.v[1-9][0-9]*\.jsonl(?:\.zstd)?",
+                            artifact_entry.name,
+                        ):
+                            continue
+                        try:
+                            if not artifact_entry.is_file(follow_symlinks=False):
+                                continue
+                            stat_result = artifact_entry.stat(follow_symlinks=False)
+                            path = Path(artifact_entry.path).resolve()
+                        except OSError:
+                            continue
+                        snapshot[path] = (
+                            stat_result.st_mtime_ns,
+                            stat_result.st_size,
+                        )
+        return snapshot, False
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        stdout_file = sandbox / "deepseek-harness.stdout.txt"
+        stderr_file = sandbox / "deepseek-harness.stderr.txt"
+        session_home = env.get("AGENT_WATCH_SESSION_HOME")
+        if not session_home:
+            stdout_file.write_text("")
+            stderr_file.write_text(
+                "DeepSeek Harness prebump requires --allow-real-home so the installed "
+                "profile, credentials, and durable session store stay authoritative."
+            )
+            return DriverResult(
+                False,
+                None,
+                stdout_file,
+                stderr_file,
+                4,
+                "sandbox_breach:dsh_requires_real_home",
+            )
+
+        workspace = sandbox / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "PREBUMP.txt").write_text(
+            "DeepSeek Harness agent-watch prebump probe\n", encoding="utf-8"
+        )
+        sessions_root = self._sessions_root(env)
+        project_root = sessions_root / self._project_key(workspace.resolve())
+        before, scan_exhausted = self._snapshot_project(project_root)
+        if scan_exhausted:
+            stdout_file.write_text("")
+            stderr_file.write_text("DSH prebump project scan exceeded its entry limit")
+            return DriverResult(
+                False, None, stdout_file, stderr_file, 3, "dsh_session_scan_limit"
+            )
+        run_started_ns = time.time_ns()
+        try:
+            proc = subprocess.run(
+                ["dsh", "headless", prompt],
+                cwd=workspace,
+                env=dict(env),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            stdout_file.write_text(proc.stdout or "")
+            stderr_file.write_text(proc.stderr or "")
+            rc = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "deepseek-harness", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(
+                sandbox, "deepseek-harness", "dsh", exc
+            )
+
+        after, scan_exhausted = self._snapshot_project(project_root)
+        if scan_exhausted:
+            return DriverResult(
+                False, None, stdout_file, stderr_file, rc, "dsh_session_scan_limit"
+            )
+        candidates: list[tuple[int, Path]] = []
+        for resolved, identity in after.items():
+            if identity == before.get(resolved):
+                continue
+            # Allow coarse filesystems a one-second timestamp margin while still
+            # requiring a new or changed artifact from this invocation and cwd.
+            if identity[0] + 1_000_000_000 < run_started_ns:
+                continue
+            candidates.append((identity[0], resolved))
+        newest = max(candidates, default=(0, None), key=lambda item: item[0])[1]
+
+        if rc != 0 or newest is None:
+            error = (
+                f"deepseek_harness_headless_failed rc={rc}"
+                if rc != 0
+                else "deepseek_harness_no_fresh_session"
+            )
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, error)
+        return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
+
+
+DRIVERS["deepseek_harness_headless"] = DeepSeekHarnessHeadlessDriver()

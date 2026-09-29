@@ -109,7 +109,7 @@ struct DeepSeekHarnessHeader: Equatable, Sendable {
         return header
     }
 
-    /// Decodes a released physical header for v0 through v3.
+    /// Decodes a released physical header for v0 through v4.
     /// Returns the logical header plus the physical inherited cut when the
     /// header itself carries it (v0/v1 `seedLength`). v2/v3 carry no cut; the
     /// reader derives it from `session/end-seed` markers.
@@ -117,7 +117,7 @@ struct DeepSeekHarnessHeader: Equatable, Sendable {
         guard let version = DeepSeekHarnessJSON.safeInt(object["version"]) else {
             throw DeepSeekHarnessFormatError.invalidHeader
         }
-        guard (0...3).contains(version) else {
+        guard (0...4).contains(version) else {
             throw DeepSeekHarnessFormatError.unsupportedVersion(version)
         }
         guard (object["type"] as? String) == "session" else {
@@ -560,8 +560,12 @@ enum DeepSeekHarnessVocabulary {
         "web/deepseek-search-llm-request", "workspace/changes",
     ]
 
+    /// V4 retains the released V3 catalog and adds durable developer history.
+    static let v4Known: Set<String> = v3Known.union(["developer/message"])
+
     static let surfaceV0: Set<String> = ["user/message", "assistant/message", "tool/result"]
     static let surfaceV3: Set<String> = ["system/message", "user/message", "assistant/message", "tool/result"]
+    static let surfaceV4: Set<String> = surfaceV3.union(["developer/message"])
     static let contentKinds: Set<String> = ["text", "reasoning", "image", "file", "tool-call", "tool-result"]
 }
 
@@ -666,17 +670,32 @@ enum DeepSeekHarnessPresentation {
         "workspace/changes": .intentionallyIgnored,
     ]
 
+    static let v4Dispositions: [String: DeepSeekHarnessPresentationDisposition] = {
+        var result = dispositions
+        result["developer/message"] = .systemMetadata
+        return result
+    }()
+
     /// Explicit lookup only. Known names classify solely through the table
     /// above; there is no default mapping. Returns nil for unknown types so
     /// callers preserve the existing normalizer contract (diagnostic-only
     /// ignorable passthrough, fail-closed required events upstream).
-    static func disposition(for eventType: String) -> DeepSeekHarnessPresentationDisposition? {
-        dispositions[eventType]
+    static func disposition(for eventType: String, version: Int = 3) -> DeepSeekHarnessPresentationDisposition? {
+        version == 4 ? v4Dispositions[eventType] : dispositions[eventType]
     }
 
     static var isComplete: Bool {
         dispositions.count == v3KnownCount
             && Set(dispositions.keys) == DeepSeekHarnessVocabulary.v3Known
+    }
+
+
+    static func isComplete(version: Int) -> Bool {
+        if version == 4 {
+            return v4Dispositions.count == DeepSeekHarnessVocabulary.v4Known.count
+                && Set(v4Dispositions.keys) == DeepSeekHarnessVocabulary.v4Known
+        }
+        return isComplete
     }
 
     private static let v3KnownCount = 58
@@ -707,7 +726,7 @@ enum DeepSeekHarnessFormatError: Error, Equatable, LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedVersion(let version): return "DeepSeek format v\(version) is unsupported; supported versions are v0 through v3."
+        case .unsupportedVersion(let version): return "DeepSeek format v\(version) is unsupported; supported versions are v0 through v4."
         case .invalidHeader: return "DeepSeek session header is invalid."
         case .invalidEnvelope: return "DeepSeek event envelope is invalid."
         case .invalidPayload(let detail): return "DeepSeek event payload is invalid: \(detail)."

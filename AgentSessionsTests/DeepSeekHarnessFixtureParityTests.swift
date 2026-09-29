@@ -160,7 +160,7 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
             let data = try Data(contentsOf: dir.appendingPathComponent(file))
             XCTAssertEqual(sha256Hex(data), hash.lowercased(), file)
 
-            if outcome.hasPrefix("accept:") {
+            if outcome.hasPrefix("accept:") && entry["physicalFormatVersion"] as? Int != 4 {
                 XCTAssertEqual(entry["expectedNormalizedV3"] as? String, expectedFile, file)
             } else {
                 XCTAssertNil(entry["expectedNormalizedV3"], file)
@@ -242,6 +242,28 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         XCTAssertTrue(retained[0].diagnosticOnly)
     }
 
+    func testNativeV4ToolFixturePlainAndZstdNormalizeIdentically() throws {
+        let dir = try fixtureDir()
+        var normalizedRepresentations: [Data] = []
+        for (file, compression) in [
+            ("v4_tool_session.jsonl", DeepSeekHarnessCompression.plain),
+            ("v4_tool_session.jsonl.zstd", DeepSeekHarnessCompression.zstd),
+        ] {
+            let result = try DeepSeekHarnessArtifactReader.read(
+                url: dir.appendingPathComponent(file), compression: compression)
+            XCTAssertEqual(result.header.version, 4, file)
+            XCTAssertEqual(result.rows.count, 14, file)
+            let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(result)
+            XCTAssertEqual(normalized.count, 14, file)
+            let toolResult = try XCTUnwrap(normalized.first { $0.canonicalType == "tool/result" })
+            let message = try XCTUnwrap(toolResult.data["message"] as? [String: Any])
+            XCTAssertEqual(message["role"] as? String, "tool", file)
+            XCTAssertEqual(message["toolCallId"] as? String, "call-v4-1", file)
+            normalizedRepresentations.append(try stableRepresentation(result: result, events: normalized))
+        }
+        XCTAssertEqual(normalizedRepresentations[0], normalizedRepresentations[1])
+    }
+
     func testMonitorOnlyAgentInstructionSourceFixtureIsAdmitted() throws {
         let dir = try fixtureDir()
         let file = "v3_agent_instructions_source.jsonl"
@@ -264,12 +286,12 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         let dir = try fixtureDir()
         do {
             _ = try DeepSeekHarnessArtifactReader.read(
-                url: dir.appendingPathComponent("future_v4_header.jsonl"),
+                url: dir.appendingPathComponent("future_v5_header.jsonl"),
                 compression: .plain
             )
-            XCTFail("future v4 must be rejected")
+            XCTFail("future v5 must be rejected")
         } catch let error as DeepSeekHarnessFormatError {
-            XCTAssertEqual(error, .unsupportedVersion(4))
+            XCTAssertEqual(error, .unsupportedVersion(5))
         }
     }
 

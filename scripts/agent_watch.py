@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import ctypes.util
+import fnmatch
 import io
 import json
 import math
@@ -1243,6 +1244,15 @@ _DSH_SAFE_INTEGER = 9_007_199_254_740_991
 _DSH_FRAME_MAGIC = b"\x28\xb5\x2f\xfd"
 _DSH_PACKED_TYPES = {"text-chunks", "reasoning-chunks", "tool-call-chunks"}
 _DSH_SURFACE_V3 = {"system/message", "user/message", "assistant/message", "tool/result"}
+_DSH_SURFACE_V4 = _DSH_SURFACE_V3 | {"developer/message"}
+_DSH_V4_VALIDATION_SOURCE: Path | None = None
+_DSH_V4_VALIDATION_SOURCE_RESOLUTION: tuple[Path | None, str | None] | None = None
+_DSH_V4_VALIDATION_SOURCE_RELATIVE = Path(
+    "node_modules/@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js"
+)
+_DSH_PACKAGE_DISCOVERY_TIMEOUT_SECONDS = 5
+_DSH_MAX_NPM_ROOT_OUTPUT_BYTES = 4096
+_DSH_MAX_V4_VALIDATION_SOURCE_BYTES = 4 * 1024 * 1024
 _DSH_ZSTD_LIBRARY: Any | None = None
 _DSH_ZSTD_LOAD_ATTEMPTED = False
 _DSH_APP_EVENT_CATALOG: dict[int, set[str]] | None = None
@@ -1345,6 +1355,119 @@ class _DeepSeekHarnessMonitorError(Exception):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+def _dsh_package_root_from_executable(executable: Path) -> Path | None:
+    """Find the installed DSH package when the executable resolves into it."""
+    try:
+        resolved = executable.resolve(strict=True)
+    except OSError:
+        return None
+    for candidate in (resolved.parent, *resolved.parents):
+        if candidate.name == "dsh" and candidate.parent.name == "@deepseek-ai":
+            return candidate
+    return None
+
+
+def _dsh_resolve_v4_validation_source() -> tuple[Path | None, str | None]:
+    """Resolve the installed DSH V4 validator across npm installation layouts."""
+    dsh_executable_text = shutil.which("dsh")
+    dsh_executable = Path(dsh_executable_text) if dsh_executable_text else None
+    if dsh_executable is not None:
+        package_root = _dsh_package_root_from_executable(dsh_executable)
+        if package_root is not None:
+            source = package_root / _DSH_V4_VALIDATION_SOURCE_RELATIVE
+            if source.is_file():
+                return source, None
+
+    npm_executable: str | None = None
+    if dsh_executable is not None:
+        sibling_npm = dsh_executable.parent / "npm"
+        if sibling_npm.is_file() and os.access(sibling_npm, os.X_OK):
+            npm_executable = str(sibling_npm)
+    if npm_executable is None:
+        npm_executable = shutil.which("npm")
+    if npm_executable is None:
+        return None, "npm_executable_unavailable"
+
+    rc, stdout, _stderr = _run_cmd(
+        [npm_executable, "root", "--global"],
+        timeout=_DSH_PACKAGE_DISCOVERY_TIMEOUT_SECONDS,
+    )
+    if rc != 0:
+        return None, "npm_root_command_failed"
+    if len(stdout.encode("utf-8")) > _DSH_MAX_NPM_ROOT_OUTPUT_BYTES:
+        return None, "npm_root_output_too_large"
+    roots = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if len(roots) != 1:
+        return None, "npm_root_output_invalid"
+    npm_root = Path(roots[0])
+    if not npm_root.is_absolute():
+        return None, "npm_root_output_invalid"
+    return (
+        npm_root
+        / "@deepseek-ai/dsh"
+        / _DSH_V4_VALIDATION_SOURCE_RELATIVE,
+        None,
+    )
+
+
+def _dsh_v4_validation_source() -> tuple[Path | None, str | None]:
+    if _DSH_V4_VALIDATION_SOURCE is not None:
+        return _DSH_V4_VALIDATION_SOURCE, None
+    global _DSH_V4_VALIDATION_SOURCE_RESOLUTION
+    if _DSH_V4_VALIDATION_SOURCE_RESOLUTION is None:
+        _DSH_V4_VALIDATION_SOURCE_RESOLUTION = (
+            _dsh_resolve_v4_validation_source()
+        )
+    return _DSH_V4_VALIDATION_SOURCE_RESOLUTION
+
+
+def _dsh_v4_validation_source_contract() -> dict[str, Any]:
+    """Prove the local V4 checks still correspond to the installed DSH package.
+
+    The monitor reports only the public package path and marker names. It never
+    copies package source or Session values into an artifact.
+    """
+    source_path, resolution_error = _dsh_v4_validation_source()
+    if source_path is None:
+        return {
+            "ok": False,
+            "path": None,
+            "error": "v4_validation_source_unresolved",
+            "resolution_error": resolution_error,
+        }
+    try:
+        if (
+            source_path.stat().st_size
+            > _DSH_MAX_V4_VALIDATION_SOURCE_BYTES
+        ):
+            return {
+                "ok": False,
+                "path": str(source_path),
+                "error": "v4_validation_source_size_limit",
+            }
+        source = source_path.read_text(encoding="utf-8")
+    except OSError:
+        return {
+            "ok": False,
+            "path": str(source_path),
+            "error": "v4_validation_source_unavailable",
+        }
+    required_markers = (
+        "function assertReleasedV4Header(",
+        "function assertV4RowAdmission(",
+        "function assertReleasedV4Relationships(",
+        "const SURFACE_TYPES = new Set([",
+        'row["type"] === "developer/message"',
+        'row["type"] !== "tool/result"',
+    )
+    missing = [marker for marker in required_markers if marker not in source]
+    return {
+        "ok": not missing,
+        "path": str(source_path),
+        "missing_markers": missing,
+    }
 
 
 class _ZstdInBuffer(ctypes.Structure):
@@ -1672,7 +1795,7 @@ def _dsh_safe_integer(value: Any) -> bool:
 
 def _dsh_validate_header(obj: dict[str, Any], filename_generation: int | None = None) -> dict[str, Any]:
     version = obj.get("version")
-    if not _dsh_nonnegative_integer(version) or version > 3 or obj.get("type") != "session":
+    if not _dsh_nonnegative_integer(version) or version > 4 or obj.get("type") != "session":
         raise _DeepSeekHarnessMonitorError("invalid_or_unsupported_header")
     if filename_generation is not None and filename_generation != version:
         raise _DeepSeekHarnessMonitorError("generation_header_mismatch")
@@ -2013,6 +2136,79 @@ def _dsh_validate_v3_surface_payload(
     return False
 
 
+def _dsh_validate_v4_message(value: Any, expected_role: str) -> bool:
+    """Port the native V4 message/source and retired-wrapper admission floor."""
+    if not isinstance(value, dict) or not {
+        "id", "role", "content", "source"
+    }.issubset(value):
+        return False
+    if (
+        not isinstance(value.get("id"), str)
+        or not value["id"]
+        or value.get("role") != expected_role
+        or not isinstance(value.get("content"), list)
+    ):
+        return False
+    source = value.get("source")
+    if (
+        not isinstance(source, dict)
+        or not isinstance(source.get("kind"), str)
+        or not source["kind"]
+        or source["kind"] == "plugin"
+    ):
+        return False
+    for block in value["content"]:
+        if not isinstance(block, dict) or not isinstance(block.get("type"), str):
+            return False
+        if block["type"] == "tool-result":
+            return False
+    if expected_role != "tool":
+        return True
+    tool_call_id = value.get("toolCallId")
+    return (
+        isinstance(tool_call_id, str)
+        and bool(tool_call_id)
+        and source.get("kind") == "tool"
+        and source.get("callId") == tool_call_id
+        and ("isError" not in value or isinstance(value["isError"], bool))
+    )
+
+
+def _dsh_validate_v4_surface_payload(
+    event_type: str, data: dict[str, Any], event_seq: int
+) -> bool:
+    if event_type == "user/message":
+        return _dsh_validate_v4_message(data, "user")
+    expected_roles = {
+        "system/message": "system",
+        "developer/message": "developer",
+        "assistant/message": "assistant",
+        "tool/result": "tool",
+    }
+    expected_role = expected_roles.get(event_type)
+    if expected_role is None or not {
+        "turn", "step", "message"
+    }.issubset(data):
+        return False
+    if (
+        not _dsh_nonnegative_integer(data.get("turn"))
+        or not _dsh_nonnegative_integer(data.get("step"))
+        or not _dsh_validate_v4_message(data.get("message"), expected_role)
+    ):
+        return False
+    if event_type == "developer/message" and "headerSeq" in data:
+        header_seq = data["headerSeq"]
+        if not _dsh_nonnegative_integer(header_seq) or header_seq >= event_seq:
+            return False
+    if event_type == "assistant/message":
+        return isinstance(data.get("stream"), list) and (
+            "interrupted" not in data or data["interrupted"] is True
+        )
+    if event_type == "tool/result" and "error" in data:
+        return data["message"].get("isError") is True
+    return True
+
+
 def _dsh_exact_keys(
     value: Any, required: set[str], optional: set[str] | frozenset[str] = frozenset()
 ) -> bool:
@@ -2150,7 +2346,7 @@ def _dsh_validate_row(obj: dict[str, Any], generation: int, expected_seq: int) -
         raise _DeepSeekHarnessMonitorError("record_count_limit")
     if "ignorable" in obj and obj["ignorable"] is not True:
         raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
-    if generation == 3:
+    if generation in (3, 4):
         decoded_sources = None
         if "sourceEventSeqs" in obj:
             decoded_sources = _dsh_decode_v3_source_sequences(
@@ -2160,9 +2356,14 @@ def _dsh_validate_row(obj: dict[str, Any], generation: int, expected_seq: int) -
                 raise _DeepSeekHarnessMonitorError("invalid_event_reference")
         if "surfaceOp" in obj and not _dsh_validate_surface_op(obj["surfaceOp"]):
             raise _DeepSeekHarnessMonitorError("invalid_event_envelope")
-        known_types = _dsh_app_event_catalog().get(3, set())
+        known_types = _dsh_app_event_catalog().get(generation, set())
         known = event_type in known_types
-        surface = event_type in _DSH_SURFACE_V3
+        surface_types = _DSH_SURFACE_V3 if generation == 3 else _DSH_SURFACE_V4
+        surface = event_type in surface_types
+        if generation == 4 and event_type in {
+            "tool/code-dispatch-start", "tool/code-dispatch"
+        } and obj.get("ignorable") is not True:
+            raise _DeepSeekHarnessMonitorError("retired_v4_event_type")
         if known and not surface and (
             "surfaceOp" in obj or "sourceEventSeqs" in obj
         ):
@@ -2180,7 +2381,14 @@ def _dsh_validate_row(obj: dict[str, Any], generation: int, expected_seq: int) -
                 or any(source >= expected_seq for source in decoded_sources)
             ):
                 raise _DeepSeekHarnessMonitorError("invalid_event_reference")
-            if not _dsh_validate_v3_surface_payload(event_type, obj["data"]):
+            payload_valid = (
+                _dsh_validate_v3_surface_payload(event_type, obj["data"])
+                if generation == 3
+                else _dsh_validate_v4_surface_payload(
+                    event_type, obj["data"], expected_seq
+                )
+            )
+            if not payload_valid:
                 raise _DeepSeekHarnessMonitorError("invalid_surface_payload")
     else:
         if "sourceEventSeqs" in obj and not _dsh_validate_source_sequences(
@@ -2279,6 +2487,9 @@ def _dsh_new_fingerprint_state(header: dict[str, Any]) -> dict[str, Any]:
         "accepted_unknown_ignorable_types": set(),
         "unsupported_required_event_types": set(),
         "catalog": _dsh_app_event_catalog(),
+        "evidence_types": set(),
+        "usage_observed": False,
+        "relationship_reference_observed": False,
     }
     _dsh_add_fingerprint_row(header, header, state)
     return state
@@ -2301,6 +2512,21 @@ def _dsh_add_fingerprint_row(
         if isinstance(row.get("type"), str) and row.get("type")
         else "<missing-type>"
     )
+    if event_type != "session":
+        state["evidence_types"].add(event_type)
+        data = row.get("data")
+        if (
+            event_type == "assistant/message"
+            and isinstance(data, dict)
+            and isinstance(data.get("usage"), dict)
+            and any(
+                _dsh_nonnegative_integer(data["usage"].get(key))
+                for key in ("inputTokens", "outputTokens", "totalTokens")
+            )
+        ):
+            state["usage_observed"] = True
+        if event_type == "tool/result" and row.get("sourceEventSeqs"):
+            state["relationship_reference_observed"] = True
     type_counts[event_type] = type_counts.get(event_type, 0) + 1
     if event_type == "session":
         _dsh_nested_bucket_walk(event_type, row, type_keys, 0, 4)
@@ -2309,7 +2535,7 @@ def _dsh_add_fingerprint_row(
     known_types = state["catalog"].get(generation, set())
     if event_type in known_types:
         catalog_known_types.add(event_type)
-    elif generation == 3 and row.get("ignorable") is True:
+    elif generation in (3, 4) and row.get("ignorable") is True:
         accepted_unknown_ignorable_types.add(event_type)
         # Unknown v3 ignorable data remains opaque in the app. Retain only
         # envelope keys so dynamic or sensitive payload keys never enter a report.
@@ -2342,6 +2568,29 @@ def _dsh_finish_fingerprint(
     unsupported_required_event_types: set[str] = state[
         "unsupported_required_event_types"
     ]
+    evidence_types = set(state.get("evidence_types") or ())
+    source_contract = (
+        _dsh_v4_validation_source_contract()
+        if header["version"] == 4
+        else {"ok": True, "path": None, "legacy_generation": header["version"]}
+    )
+    evidence_buckets = {
+        "message": {"user/message", "assistant/message"}.issubset(evidence_types),
+        "tool": {"tool/call", "tool/result"}.issubset(evidence_types),
+        "usage": bool(state.get("usage_observed")),
+        "relationship": (
+            {
+                "turn/start", "step/start", "tool/call", "tool/result",
+                "step/end", "turn/end",
+            }.issubset(evidence_types)
+            and bool(state.get("relationship_reference_observed"))
+        ),
+        "integrity": (
+            header["version"] == 4
+            and bool(source_contract.get("ok"))
+            and not unsupported_required_event_types
+        ),
+    }
     fingerprint = {
         "file": str(path),
         "encoding": "zstd" if compressed else "plain",
@@ -2351,6 +2600,8 @@ def _dsh_finish_fingerprint(
         "catalog_known_event_types": sorted(catalog_known_types),
         "accepted_unknown_ignorable_types": sorted(accepted_unknown_ignorable_types),
         "unsupported_required_event_types": sorted(unsupported_required_event_types),
+        "evidence_buckets": evidence_buckets,
+        "v4_validation_source": source_contract,
         "parsed_lines": record_count,
         "parse_errors": 0,
         "nested_depth": 4,
@@ -2450,6 +2701,25 @@ def _dsh_swift_disposition_inventory(source: str, name: str) -> set[str]:
     return set(re.findall(r'^\s*"([^"\\]+)"\s*:\s*Disposition\b', match.group(1), re.MULTILINE))
 
 
+def _dsh_swift_derived_inventory(
+    source: str, name: str, inherited: set[str]
+) -> set[str]:
+    """Read a nearby Swift Set expression such as ``v3Known.union([...])``."""
+    match = re.search(
+        rf"static\s+let\s+{re.escape(name)}(?:\s*:\s*Set<String>)?\s*=\s*"
+        rf"(.*?)(?=^\s*static\s+let\s+|^\s*}})",
+        source,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return set()
+    expression = match.group(1)
+    values = set(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', expression))
+    if "v3Known" in expression:
+        values.update(inherited)
+    return values
+
+
 def _dsh_app_event_catalog() -> dict[int, set[str]]:
     """Read the app's checked-in event inventories as the monitoring authority."""
     global _DSH_APP_EVENT_CATALOG
@@ -2478,7 +2748,17 @@ def _dsh_app_event_catalog() -> dict[int, set[str]]:
         | legacy
     )
     generations_3 = _dsh_swift_string_inventory(format_source, "v3Known")
-    _DSH_APP_EVENT_CATALOG = {0: generations_0_1, 1: generations_0_1, 2: generations_2, 3: generations_3}
+    generations_4 = (
+        _dsh_swift_string_inventory(format_source, "v4Known")
+        or _dsh_swift_derived_inventory(format_source, "v4Known", generations_3)
+    )
+    _DSH_APP_EVENT_CATALOG = {
+        0: generations_0_1,
+        1: generations_0_1,
+        2: generations_2,
+        3: generations_3,
+        4: generations_4,
+    }
     return _DSH_APP_EVENT_CATALOG
 
 
@@ -2770,6 +3050,13 @@ def _dsh_weekly_scan(config: dict[str, Any], sample_count: int, max_lines: int) 
                 raise _DeepSeekHarnessMonitorError(
                     "artifact_changed_between_discovery_and_parse"
                 )
+            if (
+                generation == 4
+                and not bool(
+                    (fingerprint.get("v4_validation_source") or {}).get("ok")
+                )
+            ):
+                issue("v4_validation_source_contract")
             fingerprints.append(fingerprint)
         except _DeepSeekHarnessMonitorError as exc:
             issue(exc.code)
@@ -2816,16 +3103,23 @@ def _dsh_merge_fingerprints(
     merged_catalog_known: set[str] = set()
     merged_accepted_ignorable: set[str] = set()
     merged_unsupported_required: set[str] = set()
+    merged_evidence_buckets: dict[str, bool] = {}
     for fingerprint in fingerprints:
         for event_type, count in (fingerprint.get("type_counts") or {}).items():
             merged_counts[event_type] = merged_counts.get(event_type, 0) + int(count)
         merged_catalog_known.update(fingerprint.get("catalog_known_event_types") or [])
         merged_accepted_ignorable.update(fingerprint.get("accepted_unknown_ignorable_types") or [])
         merged_unsupported_required.update(fingerprint.get("unsupported_required_event_types") or [])
+        for bucket, present in (fingerprint.get("evidence_buckets") or {}).items():
+            if isinstance(bucket, str):
+                merged_evidence_buckets[bucket] = (
+                    merged_evidence_buckets.get(bucket, False) or present is True
+                )
     merged["type_counts"] = dict(sorted(merged_counts.items()))
     merged["catalog_known_event_types"] = sorted(merged_catalog_known)
     merged["accepted_unknown_ignorable_types"] = sorted(merged_accepted_ignorable)
     merged["unsupported_required_event_types"] = sorted(merged_unsupported_required)
+    merged["evidence_buckets"] = dict(sorted(merged_evidence_buckets.items()))
     merged["sampled_files"] = [fingerprint["file"] for fingerprint in fingerprints]
     merged["sampled_sessions"] = len(fingerprints)
     merged["sampled_total_parsed_lines"] = sum(
@@ -2845,6 +3139,8 @@ def _dsh_merge_fingerprints(
             "catalog_known_event_types": fingerprint.get("catalog_known_event_types"),
             "accepted_unknown_ignorable_types": fingerprint.get("accepted_unknown_ignorable_types"),
             "unsupported_required_event_types": fingerprint.get("unsupported_required_event_types"),
+            "evidence_buckets": fingerprint.get("evidence_buckets"),
+            "v4_validation_source": fingerprint.get("v4_validation_source"),
         }
         for fingerprint in fingerprints
     ]
@@ -4330,13 +4626,21 @@ def _prebump_schema_check(
     fingerprint: dict[str, Any],
     baseline_type_keys: dict[str, list[str]],
     required_schema_buckets: list[str] | None = None,
+    required_evidence_buckets: list[str] | None = None,
+    agent_name: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Require valid, nonempty real-session evidence before a prebump can pass."""
-    schema_diff = _schema_diff(
-        observed_type_keys=fingerprint.get("type_keys") or {},
-        baseline_type_keys=baseline_type_keys,
-        observed_event_count=_observed_event_count(fingerprint),
-    )
+    if agent_name == "deepseek_harness":
+        schema_diff = _dsh_schema_diff(
+            fingerprint=fingerprint,
+            baseline_type_keys=baseline_type_keys,
+        )
+    else:
+        schema_diff = _schema_diff(
+            observed_type_keys=fingerprint.get("type_keys") or {},
+            baseline_type_keys=baseline_type_keys,
+            observed_event_count=_observed_event_count(fingerprint),
+        )
     raw_parse_errors = fingerprint.get("parse_errors", 0)
     parse_errors = raw_parse_errors if isinstance(raw_parse_errors, int) and raw_parse_errors >= 0 else 1
     observed_count = _observed_event_count(fingerprint)
@@ -4346,9 +4650,25 @@ def _prebump_schema_check(
         observed_buckets.update(observed_counts.keys())
     required = sorted({item for item in (required_schema_buckets or []) if isinstance(item, str) and item})
     missing_required = sorted(set(required) - observed_buckets)
+    evidence_buckets = fingerprint.get("evidence_buckets")
+    if not isinstance(evidence_buckets, dict):
+        evidence_buckets = {}
+    required_evidence = sorted({
+        item
+        for item in (required_evidence_buckets or [])
+        if isinstance(item, str) and item
+    })
+    missing_required_evidence = sorted(
+        item for item in required_evidence if evidence_buckets.get(item) is not True
+    )
     schema_diff["parse_errors"] = parse_errors
     schema_diff["required_schema_buckets"] = required
     schema_diff["missing_required_schema_buckets"] = missing_required
+    schema_diff["evidence_buckets"] = {
+        key: evidence_buckets.get(key) is True for key in required_evidence
+    }
+    schema_diff["required_evidence_buckets"] = required_evidence
+    schema_diff["missing_required_evidence_buckets"] = missing_required_evidence
     schema_diff["observation_nonempty"] = observed_count is not None and observed_count > 0
     schema_diff["baseline_present"] = bool(baseline_type_keys)
     matches = (
@@ -4357,6 +4677,7 @@ def _prebump_schema_check(
         and observed_count is not None
         and observed_count > 0
         and not missing_required
+        and not missing_required_evidence
         and bool(schema_diff.get("unknown_only_is_empty"))
     )
     return schema_diff, matches
@@ -5371,29 +5692,42 @@ class _DiscoveryViolation(Exception):
 
 
 def _session_path_matches_glob(session_path: Path, root: Path, pattern: str) -> bool:
-    """Return True if session_path is among the files yielded by root.glob(pattern).
+    """Match one resolved candidate against a root-relative glob without walking.
 
-    Delegates glob walking to pathlib itself (root.glob) so ** spans
-    nested directories regardless of the host interpreter's pattern
-    semantics. Resolves both sides so symlinked sandbox HOMEs compare
-    equal.
-
-    Performance: root.glob(pattern) walks the directory tree on every
-    call. That is fine for per-agent prebump runs (one session per run,
-    tiny sandbox HOME) but must not be used in hot loops — keep it
-    scoped to post-run validation.
+    Both paths are resolved before deriving the relative path, so a symlinked
+    candidate cannot use lexical containment to escape the declared root. A
+    whole-segment ``**`` matches zero or more path components, matching the
+    recursive layouts accepted by ``Path.glob`` without enumerating siblings.
     """
     try:
         session_resolved = session_path.resolve()
+        root_resolved = root.resolve()
+        relative_parts = session_resolved.relative_to(root_resolved).parts
     except (OSError, RuntimeError):
         return False
-    for candidate in root.glob(pattern):
-        try:
-            if candidate.resolve() == session_resolved:
-                return True
-        except (OSError, RuntimeError):
+    except ValueError:
+        return False
+
+    pattern_path = Path(pattern)
+    if pattern_path.is_absolute():
+        return False
+    pattern_parts = pattern_path.parts
+
+    positions = {0}
+    for part_pattern in pattern_parts:
+        if part_pattern == "**":
+            positions = set(range(min(positions), len(relative_parts) + 1))
             continue
-    return False
+        positions = {
+            index + 1
+            for index in positions
+            if index < len(relative_parts)
+            and fnmatch.fnmatchcase(relative_parts[index], part_pattern)
+        }
+        if not positions:
+            return False
+
+    return len(relative_parts) in positions
 
 
 def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Path) -> None:
@@ -5402,8 +5736,8 @@ def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Pat
     Checks (each failure raises _DiscoveryViolation):
       1. session_path is under one of contract['roots'], where each root
          is interpreted relative to *sandbox* (sandbox-HOME substitution).
-      2. session_path is yielded by root.glob(pattern) for one of the
-         declared (root, glob) pairs — see _session_path_matches_glob.
+      2. session_path's root-relative path matches one of the declared
+         (root, glob) pairs — see _session_path_matches_glob.
       3. The file parses as JSONL and contains at least one line per
          type in contract['required_types'] (matched on the per-line
          'type' field).
@@ -5466,23 +5800,34 @@ def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Pat
     required_types = list(contract.get("required_types") or [])
     if required_types:
         seen: set[str] = set()
-        try:
-            with session_path.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        raise _DiscoveryViolation(
-                            f"session {session_path} is not valid JSONL: {exc}"
-                        ) from exc
-                    t = obj.get("type") if isinstance(obj, dict) else None
-                    if isinstance(t, str):
-                        seen.add(t)
-        except OSError as exc:
-            raise _DiscoveryViolation(f"cannot read session: {exc}") from exc
+        if session_path.name.endswith(".jsonl.zstd"):
+            fingerprint = _deepseek_harness_schema_fingerprint(
+                session_path, max_lines=5000
+            )
+            if fingerprint.get("error"):
+                raise _DiscoveryViolation(
+                    f"session {session_path} failed DSH validation: "
+                    f"{fingerprint['error']}"
+                )
+            seen.update((fingerprint.get("type_counts") or {}).keys())
+        else:
+            try:
+                with session_path.open("r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError as exc:
+                            raise _DiscoveryViolation(
+                                f"session {session_path} is not valid JSONL: {exc}"
+                            ) from exc
+                        t = obj.get("type") if isinstance(obj, dict) else None
+                        if isinstance(t, str):
+                            seen.add(t)
+            except OSError as exc:
+                raise _DiscoveryViolation(f"cannot read session: {exc}") from exc
         missing = [t for t in required_types if t not in seen]
         if missing:
             raise _DiscoveryViolation(
@@ -5549,6 +5894,7 @@ def _run_prebump(
         _globs = _ds.get("globs")
         _req = _ds.get("required_types", [])
         _required_schema_buckets = _pb.get("required_schema_buckets", [])
+        _required_evidence_buckets = _pb.get("required_evidence_buckets", [])
         _reasons: list[str] = []
         if not isinstance(_roots, list) or len(_roots) < 1:
             _reasons.append("roots must be a non-empty list")
@@ -5563,6 +5909,16 @@ def _run_prebump(
             or any(not isinstance(item, str) or not item for item in _required_schema_buckets)
         ):
             _reasons.append("required_schema_buckets must be a list of non-empty strings")
+        if "required_evidence_buckets" in _pb and (
+            not isinstance(_required_evidence_buckets, list)
+            or any(
+                not isinstance(item, str) or not item
+                for item in _required_evidence_buckets
+            )
+        ):
+            _reasons.append(
+                "required_evidence_buckets must be a list of non-empty strings"
+            )
         if _reasons:
             import sys as _sys
             _msg = f"config_gate:{_name}: " + "; ".join(_reasons)
@@ -5821,6 +6177,8 @@ def _run_prebump(
                 fingerprint=fp,
                 baseline_type_keys=baseline_type_keys,
                 required_schema_buckets=pb.get("required_schema_buckets"),
+                required_evidence_buckets=pb.get("required_evidence_buckets"),
+                agent_name=agent_name,
             )
 
         cli_path, cli_mtime = _resolve_cli_binary_mtime(

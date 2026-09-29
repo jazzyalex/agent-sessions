@@ -1578,7 +1578,7 @@ this. The entry sat `verified —` and read as open work for two weeks.
   per-source reclaimable-by-rule figures traceable to the bench manifest.
 
 ### Kimi and DeepSeek Harness report measured token counts that nothing surfaces
-> **open** · sev: low · urg: low · verified 2026-09-24
+> **open** · sev: low · urg: low · verified 2026-09-29
 
 - **What:** Kimi 0.38.0 added `token_counting.measured` and
   `token_counting.turn_recorded`, carrying `tokens`, `length`, `turnId` and `time`. This
@@ -1587,7 +1587,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   cache-read, cache-write, and reasoning token counts. Its assistant stream also carries
   `stream.chunk.type=usage` with the same token-count field family. In the 2026-09-24
   weekly sample, all 4 sessions had message usage on all 137 sampled assistant messages.
-  Only field names and occurrence counts were inspected; token values were not copied.
+  A fresh DSH 0.2.0-rc.2 v4 headless tool session on 2026-09-29 also carried usage on
+  both assistant messages and matching stream usage chunks. Only field names and
+  occurrence counts were inspected; token values were not copied.
 - **Where:** `token_counting` appears nowhere in `AgentSessions/`; both Kimi types fall to
   `.meta` in [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift).
   DSH's [DeepSeekHarnessPayloadValidator.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessPayloadValidator.swift)

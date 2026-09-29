@@ -1,4 +1,4 @@
-{"type":"session","version":4,"id":"dsh-synth-v3-0001","createdAt":1700000000000,"cwd":"/tmp/synthetic-dsh-demo","isSeeded":false,"delegationDepth":0,"agentPreset":"ptc"}
+{"type":"session","version":5,"id":"dsh-synth-v3-0001","createdAt":1700000000000,"cwd":"/tmp/synthetic-dsh-demo","isSeeded":false,"delegationDepth":0,"agentPreset":"ptc"}
 {"type":"turn/start","seq":0,"time":1700000000001,"data":{"turn":1}}
 {"type":"step/start","seq":1,"time":1700000000002,"data":{"turn":1,"step":1}}
 {"type":"system/message","seq":2,"time":1700000000002,"data":{"turn":1,"step":1,"message":{"id":"v2-to-v3-system-491c2958acbcfe10950d56a4c7a2f791a4d3a523eccb6860a94e11e62c21ad12","role":"system","source":{"kind":"plugin","plugin":"@deepseek-ai/dsh-system-prompt"},"content":[]}},"surfaceOp":"append"}

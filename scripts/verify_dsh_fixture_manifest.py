@@ -11,6 +11,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
 PINNED_SOURCE_COMMIT = "ddefc45fbc7f8e46dd73185e68295696d1297887"
+PINNED_V4_SOURCE_COMMIT = "639ed015397290b3745d163aafe02ffee4aa3f84"
+PINNED_V4_SOURCE_TAG = "dsh-v0.2.0-rc.2"
+PINNED_V4_PACKAGE_VERSION = "0.2.0-rc.2"
 
 
 def sha256(path: Path) -> str:
@@ -21,6 +24,12 @@ def verify() -> int:
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("sourceCommit") != PINNED_SOURCE_COMMIT:
         raise SystemExit("DSH fixture manifest source commit does not match the pinned checkout")
+    if manifest.get("latestSourceCommit") != PINNED_V4_SOURCE_COMMIT:
+        raise SystemExit("DSH v4 fixture source commit does not match the pinned release")
+    if manifest.get("latestSourceTag") != PINNED_V4_SOURCE_TAG:
+        raise SystemExit("DSH v4 fixture source tag does not match the pinned release")
+    if manifest.get("latestSourceVersion") != PINNED_V4_PACKAGE_VERSION:
+        raise SystemExit("DSH v4 fixture package version does not match the pinned release")
 
     entries = manifest.get("fixtures")
     if not isinstance(entries, list) or not entries:
@@ -42,6 +51,13 @@ def verify() -> int:
         expected = str(entry.get("sha256", "")).lower()
         if sha256(path) != expected:
             raise SystemExit(f"DSH fixture hash mismatch: {entry['file']}")
+        if entry.get("physicalFormatVersion") == 4:
+            if entry.get("sourceCommit") != PINNED_V4_SOURCE_COMMIT:
+                raise SystemExit(f"DSH v4 fixture source commit mismatch: {entry['file']}")
+            if entry.get("sourceTag") != PINNED_V4_SOURCE_TAG:
+                raise SystemExit(f"DSH v4 fixture source tag mismatch: {entry['file']}")
+            if entry.get("sourcePackageVersion") != PINNED_V4_PACKAGE_VERSION:
+                raise SystemExit(f"DSH v4 fixture package version mismatch: {entry['file']}")
 
     expected = manifest.get("expectedNormalizedV3")
     if not isinstance(expected, dict) or not isinstance(expected.get("file"), str):
@@ -50,7 +66,10 @@ def verify() -> int:
     if sha256(expected_path) != str(expected.get("sha256", "")).lower():
         raise SystemExit(f"DSH normalized-v3 hash mismatch: {expected_path.name}")
 
-    print(f"verified DSH fixture manifest: {len(entries)} artifacts at {PINNED_SOURCE_COMMIT}")
+    print(
+        "verified DSH fixture manifest: "
+        f"{len(entries)} artifacts at {PINNED_SOURCE_COMMIT} and {PINNED_V4_SOURCE_COMMIT}"
+    )
     return 0
 
 

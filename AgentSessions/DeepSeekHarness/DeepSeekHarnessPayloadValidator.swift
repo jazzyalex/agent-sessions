@@ -721,6 +721,521 @@ enum DeepSeekHarnessPayloadValidator {
         try assertV3CanonicalPayload(event, subject: subject)
     }
 
+    // MARK: - Native V4 admission
+
+    /// Native V4 keeps V2 physical framing but owns a new logical catalog.
+    /// This ports the generation-owned checks from the released 0.2.0-rc.2
+    /// V3-to-V4 package; common legacy payload checks remain delegated to the
+    /// proven V3 validator for names whose representation did not change.
+    static func assertV4Event(
+        _ event: DeepSeekHarnessEnvelope,
+        knownTypes: Set<String> = []
+    ) throws {
+        let subject = "format v4 \(event.type) at seq \(event.sequence)"
+        let retired = event.type == "tool/code-dispatch-start" || event.type == "tool/code-dispatch"
+        let known = !retired && (DeepSeekHarnessVocabulary.v4Known.contains(event.type)
+            || knownTypes.contains(event.type))
+        if retired, !event.ignorable { throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type) }
+        if !known, !event.ignorable { throw DeepSeekHarnessFormatError.unknownRequiredEvent(event.type) }
+        if !known { return }
+
+        let surface = DeepSeekHarnessVocabulary.surfaceV4.contains(event.type)
+        if !surface, event.sourceEventSeqs != nil || event.surfaceOp != nil {
+            let field = event.sourceEventSeqs != nil ? "sourceEventSeqs" : "surfaceOp"
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has unexpected field \(field)")
+        }
+        if surface {
+            guard let rawOperation = event.rawObject["surfaceOp"] else {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) requires a surfaceOp marker")
+            }
+            if let operation = rawOperation as? String {
+                guard operation == "append" else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has invalid surfaceOp")
+                }
+            } else {
+                guard let operation = rawOperation as? [String: Any],
+                      Set(operation.keys) == ["op", "startSeq", "endSeq"],
+                      operation["op"] as? String == "replace",
+                      let start = DeepSeekHarnessJSON.count(operation["startSeq"]),
+                      let end = DeepSeekHarnessJSON.count(operation["endSeq"]),
+                      start <= end, end < event.sequence else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) requires exact replace fields op/startSeq/endSeq")
+                }
+            }
+            if event.type == "assistant/message", event.sourceEventSeqs != nil {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) embeds its stream and cannot carry sourceEventSeqs")
+            }
+            if let sources = event.sourceEventSeqs {
+                guard !sources.isEmpty, Set(sources).count == sources.count,
+                      sources.allSatisfy({ $0 >= 0 && $0 < event.sequence }) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) sourceEventSeqs must be unique earlier seqs")
+                }
+            }
+        }
+
+        try assertV4RetiredSyntax(event, subject: subject)
+        if event.type == "assistant/message" || event.type == "assistant/attempt" {
+            try rejectV4AssistantStreamToolChanges(event.data["stream"], subject: subject)
+        }
+        try assertV4MessageSources(event, subject: subject)
+        try assertV4CommonPayload(event, subject: subject)
+        try assertV4ForkResult(event, subject: subject)
+        switch event.type {
+        case "system/message": try assertV4SystemMessage(event, subject: subject)
+        case "developer/message": try assertV4DeveloperMessage(event, subject: subject)
+        case "user/message": try assertV4UserMessage(event, subject: subject)
+        case "assistant/message": try assertV4AssistantMessage(event, subject: subject)
+        case "tool/result": try assertV4ToolResult(event, subject: subject)
+        case "request/header": try assertV4RequestHeader(event, subject: subject)
+        default: break
+        }
+    }
+
+    private static func assertV4CommonPayload(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        let representationChanged: Set<String> = [
+            "agent/inbox/spliced", "assistant/message", "compaction/summary",
+            "request/header", "session/title-llm-request", "system/message",
+            "team/message/queued", "tool/result", "user/message",
+        ]
+        if let admitted = v2Dispositions[event.type] {
+            try keys(event.data, required: admitted.required, optional: admitted.optional,
+                     label: "\(subject) data")
+            for key in admitted.opaque {
+                if let value = event.data[key], !isLosslessJSON(value) {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) opaque \(key) is not lossless JSON")
+                }
+            }
+        }
+        if DeepSeekHarnessVocabulary.v0Events.contains(event.type),
+           !representationChanged.contains(event.type),
+           event.type != "tool/code-dispatch", event.type != "tool/code-dispatch-start" {
+            try assertReleasedPayloadSemantics(
+                event, data: event.data, subject: subject, version: 4)
+            return
+        }
+        switch event.type {
+        case "agent/inbox/spliced", "assistant/message", "compaction/summary",
+             "session/title-llm-request", "team/message/queued", "user/message":
+            try assertReleasedPayloadSemantics(
+                event, data: event.data, subject: subject, version: 4)
+        case "assistant/attempt":
+            try coordinatePair(event.data, subject: subject)
+            guard event.data["stream"] is [Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) stream must be an array")
+            }
+        case "feedback/message-put", "feedback/message-delete":
+            try assertFeedback(event.type, event.data, subject: subject)
+        case "tool/ptc-dispatch-start", "tool/ptc-dispatch":
+            for key in ["rootCallId", "parentCallId", "subCallId", "name"] {
+                try nonEmptyString(event.data[key], "\(subject) \(key)")
+            }
+            guard event.data["arguments"] != nil,
+                  event.data["arguments"].map(isLosslessJSON) == true else {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) arguments must be JSON")
+            }
+            if event.type == "tool/ptc-dispatch" {
+                _ = try booleanValue(event.data["isError"], "\(subject) isError")
+                guard event.data["content"] is [Any] else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(subject) content must be an array")
+                }
+            }
+        case "tool/result":
+            for coordinate in ["turn", "step"] {
+                guard let value = DeepSeekHarnessJSON.count(event.data[coordinate]), value > 0 else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) \(coordinate) must be positive")
+                }
+            }
+            if let error = event.data["error"] {
+                let metadata = try exactRecord(
+                    error, "\(subject) error", required: ["name", "code"], optional: ["reason"])
+                try nonEmptyString(metadata["name"], "\(subject) error name")
+                try nonEmptyString(metadata["code"], "\(subject) error code")
+                if let reason = metadata["reason"] {
+                    _ = try stringValue(reason, "\(subject) error reason")
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private static func assertV4MessageSources(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        var messages: [Any] = []
+        switch event.type {
+        case "user/message": messages = [event.data]
+        case "system/message", "developer/message", "assistant/message", "tool/result":
+            if let message = event.data["message"] { messages = [message] }
+        case "agent/inbox/spliced": messages = event.data["inserted"] as? [Any] ?? []
+        case "session/title-llm-request": messages = event.data["messages"] as? [Any] ?? []
+        default: break
+        }
+        for value in messages {
+            guard let message = value as? [String: Any],
+                  let source = message["source"] as? [String: Any],
+                  let kind = DeepSeekHarnessJSON.nonEmptyString(source["kind"]), kind != "plugin" else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) message requires a producer-owned source kind")
+            }
+        }
+    }
+
+    private static func assertV4SystemMessage(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        try assertV4RoleMessage(event, role: "system", subject: subject)
+        guard let message = event.data["message"] as? [String: Any],
+              let content = message["content"] as? [Any] else { return }
+        for value in content {
+            guard let block = value as? [String: Any],
+                  let type = DeepSeekHarnessJSON.nonEmptyString(block["type"]) else {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has malformed system content")
+            }
+            switch type {
+            case "text", "reasoning":
+                guard block["text"] is String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(subject) content text must be a string")
+                }
+            case "tool-call":
+                guard DeepSeekHarnessJSON.nonEmptyString(block["id"]) != nil,
+                      DeepSeekHarnessJSON.nonEmptyString(block["name"]) != nil,
+                      block["arguments"] is String else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has malformed system tool-call")
+                }
+            case "image": try assertV4SystemImage(block["attachment"], subject: subject)
+            case "tool-result":
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) content must not contain a released tool-result wrapper")
+            default: break
+            }
+        }
+    }
+
+    private static func assertV4UserMessage(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        guard DeepSeekHarnessJSON.nonEmptyString(event.data["id"]) != nil,
+              event.data["role"] as? String == "user",
+              event.data["content"] is [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) requires an identified user message with array content")
+        }
+        try rejectV4ToolChanges(event.data["content"], subject: subject)
+    }
+
+    private static func assertV4AssistantMessage(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        try assertV4RoleMessage(event, role: "assistant", subject: subject)
+        guard event.data["stream"] is [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) requires an assistant stream")
+        }
+        let message = event.data["message"] as? [String: Any]
+        try rejectV4ToolChanges(message?["content"], subject: subject)
+    }
+
+    private static func assertV4DeveloperMessage(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        try assertV4RoleMessage(event, role: "developer", subject: subject)
+        guard let message = event.data["message"] as? [String: Any],
+              let content = message["content"] as? [Any] else { return }
+        var additions = false
+        for value in content {
+            guard let block = value as? [String: Any], let type = block["type"] as? String else { continue }
+            if type == "tool-addition" || type == "tool-removal" {
+                guard DeepSeekHarnessJSON.nonEmptyString(block["toolName"]) != nil else {
+                    throw DeepSeekHarnessFormatError.invalidPayload("\(subject) \(type) requires a nonempty toolName")
+                }
+                if type == "tool-addition" {
+                    additions = true
+                    guard block["tool"] == nil else {
+                        throw DeepSeekHarnessFormatError.invalidPayload(
+                            "\(subject) tool-addition must omit inline tool definitions")
+                    }
+                }
+            }
+        }
+        if additions {
+            guard let headerSeq = DeepSeekHarnessJSON.count(event.data["headerSeq"]),
+                  headerSeq < event.sequence else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) tool additions require an earlier headerSeq")
+            }
+        } else if event.data["headerSeq"] != nil {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) must omit headerSeq without tool additions")
+        }
+    }
+
+    private static func assertV4RoleMessage(
+        _ event: DeepSeekHarnessEnvelope,
+        role: String,
+        subject: String
+    ) throws {
+        guard let turn = DeepSeekHarnessJSON.count(event.data["turn"]), turn > 0,
+              let step = DeepSeekHarnessJSON.count(event.data["step"]), step > 0,
+              let message = event.data["message"] as? [String: Any],
+              DeepSeekHarnessJSON.nonEmptyString(message["id"]) != nil,
+              message["role"] as? String == role,
+              message["content"] is [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) requires positive turn/step and a \(role) message")
+        }
+    }
+
+    private static func assertV4ToolResult(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        guard let message = event.data["message"] as? [String: Any],
+              DeepSeekHarnessJSON.nonEmptyString(message["id"]) != nil,
+              message["role"] as? String == "tool",
+              let callID = DeepSeekHarnessJSON.nonEmptyString(message["toolCallId"]),
+              let source = message["source"] as? [String: Any],
+              source["kind"] as? String == "tool", source["callId"] as? String == callID,
+              let content = message["content"] as? [Any] else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) requires a first-class tool-role message")
+        }
+        if content.contains(where: { ($0 as? [String: Any])?["type"] as? String == "tool-result" }) {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) content must not contain a released tool-result wrapper")
+        }
+        if let isError = message["isError"], strictBool(isError) == nil {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) isError must be boolean when present")
+        }
+        if event.data["error"] != nil, strictBool(message["isError"]) != true {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) carries error metadata for a non-error tool result")
+        }
+    }
+
+    private static func assertV4RequestHeader(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        let header = try exactRecord(
+            event.data["header"], "\(subject) header", required: ["config"],
+            optional: ["adapterDefaults", "tools"])
+        let config = try exactRecord(
+            header["config"], "\(subject) header config", required: ["provider", "model"],
+            optional: ["reasoningEffort", "temperature", "maxTokens", "stop"])
+        try nonEmptyString(config["provider"], "\(subject) header provider")
+        try nonEmptyString(config["model"], "\(subject) header model")
+        if let effort = config["reasoningEffort"], DeepSeekHarnessJSON.nonEmptyString(effort) == nil {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) reasoningEffort must be nonempty")
+        }
+        if let temperature = config["temperature"] {
+            _ = try finiteNumberValue(temperature, "\(subject) header temperature")
+        }
+        if let maxTokens = config["maxTokens"] {
+            _ = try positiveIntegerValue(maxTokens, "\(subject) header maxTokens")
+        }
+        if let stop = config["stop"] {
+            try arrayValue(stop, "\(subject) header stop") { value, label in
+                _ = try stringValue(value, label)
+            }
+        }
+        if let defaults = header["adapterDefaults"] {
+            let values = try exactRecord(
+                defaults, "\(subject) header adapterDefaults", required: [],
+                optional: ["reasoningEffort", "maxTokens"])
+            for (key, value) in values {
+                guard strictBool(value) == true, config[key] != nil else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) adapter default \(key) requires true and a config value")
+                }
+            }
+        }
+        guard let reason = event.data["reason"] as? String,
+              ["initial", "resume", "change", "series"].contains(reason) else {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has invalid reason")
+        }
+        if let starts = event.data["startsSeries"], strictBool(starts) != true {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) startsSeries must be true when present")
+        }
+        if let tools = header["tools"] as? [Any] {
+            for value in tools {
+                let tool = try exactRecord(
+                    value, "\(subject) tool", required: ["name", "description", "parameters"],
+                    optional: ["deferLoading"])
+                try nonEmptyString(tool["name"], "\(subject) tool name")
+                _ = try stringValue(tool["description"], "\(subject) tool description")
+                _ = try record(tool["parameters"], "\(subject) tool parameters")
+                if let deferred = tool["deferLoading"], strictBool(deferred) != true {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) tool deferLoading must be true when present")
+                }
+            }
+        } else if header["tools"] != nil {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) tools must be an array")
+        }
+    }
+
+    private static func assertV4RetiredSyntax(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        func rejectWrappers(_ content: Any?) throws {
+            guard let blocks = content as? [Any] else { return }
+            if blocks.contains(where: { ($0 as? [String: Any])?["type"] as? String == "tool-result" }) {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) content must not contain a released tool-result wrapper")
+            }
+        }
+        if event.type == "request/header" {
+            guard let header = event.data["header"] as? [String: Any] else {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) requires a header object")
+            }
+            if header["system"] != nil {
+                throw DeepSeekHarnessFormatError.invalidPayload("\(subject) rejects retired header.system")
+            }
+        }
+        switch event.type {
+        case "user/message": try rejectWrappers(event.data["content"])
+        case "system/message", "developer/message", "assistant/message", "tool/result", "team/message/queued":
+            try rejectWrappers((event.data["message"] as? [String: Any])?["content"])
+        case "compaction/summary":
+            try rejectWrappers(event.data["summary"]); try rejectWrappers(event.data["rawOutput"])
+        case "tool/ptc-dispatch": try rejectWrappers(event.data["content"])
+        default: break
+        }
+        if event.type == "assistant/message" || event.type == "assistant/attempt" {
+            try inspectV4AssistantStream(event.data["stream"]) { chunk in
+                if chunk["type"] as? String == "block-end" {
+                    try rejectWrappers([chunk["block"] as Any])
+                }
+                if chunk["type"] as? String == "block-start",
+                   chunk["blockType"] as? String == "tool-result" {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "\(subject) content must not contain a released tool-result wrapper")
+                }
+            }
+        }
+    }
+
+    private static func rejectV4ToolChanges(_ content: Any?, subject: String) throws {
+        guard let blocks = content as? [Any] else { return }
+        if blocks.contains(where: {
+            guard let type = ($0 as? [String: Any])?["type"] as? String else { return false }
+            return type == "tool-addition" || type == "tool-removal"
+        }) {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) tool-change blocks require developer role")
+        }
+    }
+
+    private static func rejectV4AssistantStreamToolChanges(
+        _ stream: Any?,
+        subject: String
+    ) throws {
+        try inspectV4AssistantStream(stream) { chunk in
+            if chunk["type"] as? String == "block-end" {
+                try rejectV4ToolChanges([chunk["block"] as Any], subject: subject)
+            }
+            if chunk["type"] as? String == "block-start",
+               let type = chunk["blockType"] as? String,
+               type == "tool-addition" || type == "tool-removal" {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "\(subject) tool-change blocks require developer role")
+            }
+        }
+    }
+
+    private static func inspectV4AssistantStream(
+        _ value: Any?,
+        visit: ([String: Any]) throws -> Void
+    ) throws {
+        guard let entries = value as? [Any] else { return }
+        for entryValue in entries {
+            guard let entry = entryValue as? [String: Any],
+                  entry["type"] as? String == "chunk",
+                  let chunk = entry["chunk"] as? [String: Any] else { continue }
+            try visit(chunk)
+        }
+    }
+
+    private static func assertV4ForkResult(
+        _ event: DeepSeekHarnessEnvelope,
+        subject: String
+    ) throws {
+        guard event.type == "tool/result",
+              let error = event.data["error"] as? [String: Any],
+              error["code"] as? String == "TOOL_NOT_STARTED",
+              let message = event.data["message"] as? [String: Any],
+              let id = message["id"] as? String,
+              id.hasPrefix("forked-tool-result-") else {
+            return
+        }
+        let source = message["source"] as? [String: Any]
+        let callID = source?["callId"] as? String
+        let prefix = "forked-tool-result-\(callID ?? "nil")-"
+        let suffix = id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : ""
+        let sequence = canonicalV4SequenceSuffix(suffix)
+        let replacement = event.surfaceOp.map { !$0.isAppend } == true
+        let content = message["content"] as? [Any]
+        let text = content?.count == 1 ? content?.first as? [String: Any] : nil
+        let validSurface: Bool
+        if replacement {
+            validSurface = sequence.map { $0 < event.sequence && event.sourceEventSeqs == [$0] } == true
+        } else {
+            validSurface = event.surfaceOp?.isAppend == true
+                && event.sourceEventSeqs == nil
+                && sequence == event.sequence
+        }
+        guard callID != nil,
+              sequence != nil,
+              error["name"] as? String == "ToolNotStartedError",
+              validSurface,
+              message["role"] as? String == "tool",
+              message["isError"] as? Bool == true,
+              message["toolCallId"] as? String == callID,
+              source?["kind"] as? String == "tool",
+              text?["type"] as? String == "text",
+              text?["text"] is String else {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "\(subject) has invalid V4 not-started fork result")
+        }
+    }
+
+    private static func canonicalV4SequenceSuffix(_ value: String) -> Int? {
+        guard !value.isEmpty,
+              value == "0" || (value.first != "0" && value.allSatisfy(\.isNumber)),
+              let sequence = Int(value), sequence >= 0,
+              sequence <= 9_007_199_254_740_991,
+              String(sequence) == value else {
+            return nil
+        }
+        return sequence
+    }
+
+    private static func assertV4SystemImage(_ value: Any?, subject: String) throws {
+        guard let image = value as? [String: Any],
+              DeepSeekHarnessJSON.nonEmptyString(image["attachmentId"]) != nil,
+              let media = image["mediaType"] as? String,
+              ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(media),
+              DeepSeekHarnessJSON.count(image["bytes"]) != nil,
+              let width = DeepSeekHarnessJSON.count(image["width"]), width > 0,
+              let height = DeepSeekHarnessJSON.count(image["height"]), height > 0 else {
+            throw DeepSeekHarnessFormatError.invalidPayload("\(subject) has malformed system image")
+        }
+    }
+
     /// Ports `assertV3StructuralRow`: native v3 system/header shapes are
     /// rejected even beyond a recoverable physical-row failure.
     private static func assertV3StructuralRow(_ event: DeepSeekHarnessEnvelope, subject: String) throws {

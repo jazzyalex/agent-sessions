@@ -20,6 +20,29 @@ Update this file when:
 Record every upstream check, even if no changes are needed.
 - YYYY-MM-DD: Agents checked; sources (release notes or repos); result (no change, candidate,
   or format change) and evidence path.
+- 2026-09-29: **Full 16-agent weekly check after DeepSeek Harness v4 support.** Final evidence is in `scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json`. DeepSeek Harness installed, upstream, and verified versions are all 0.2.0-rc.2; a fresh 29-event headless tool session proved message, tool, usage, relationship, and integrity buckets and matched the v4 baseline, so its verdict advances to `supports_latest`. Codex independently reports high-severity 0.159.0 schema drift and remains the next format task. Codex status and both Claude status/usage probes passed.
+
+  | Agent | Installed / upstream | Weekly verdict |
+  |---|---|---|
+  | Antigravity | 1.1.27 / 1.2.13 | `blocked_thin_sample` |
+  | Claude | 2.1.278 / 2.1.284 | `supports_installed_only` |
+  | Cline | 3.0.65 / 3.0.65 | `blocked_stale_sample` |
+  | Codex | 0.159.0 / 0.159.0 | `format_drift_detected` |
+  | Copilot | 1.0.87 / 1.0.89 | `supports_installed_only` |
+  | Cursor | 2026.9.10 / 2026.9.28 | `supports_installed_only` |
+  | DeepSeek Harness | 0.2.0-rc.2 / 0.2.0-rc.2 | `supports_latest` |
+  | Devin | unknown / unknown | `latest_unknown` |
+  | fx | unknown / 0.0.11 | `blocked_no_fresh_evidence` |
+  | Grok | 1.0.24 / 1.0.44 | `supports_installed_only` |
+  | Hermes | 0.21.1 / 0.21.5 | `supports_installed_only` |
+  | Kimi | 2.0.2 / 2.1.1 | `supports_installed_only` |
+  | OpenClaw | 2026.9.5 / 2026.9.6 | `blocked_stale_sample` |
+  | OpenCode | 1.18.31 / 1.18.33 | `supports_installed_only` |
+  | Pi | 0.86.1 / 0.99.1 | `blocked_stale_sample` |
+  | Qwen | 0.24.3 / 0.24.7 | `blocked_stale_sample` |
+
+  **DeepSeek Harness evidence:** prebump report `scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json`; synthetic native-v4 fixtures `AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_tool_session.jsonl` and `.zstd`; production source tag `dsh-v0.2.0-rc.2` at commit `639ed015397290b3745d163aafe02ffee4aa3f84`. The fixture contains no copied prompt or tool values from the private session.
+
 - 2026-09-26: **Full 16-agent weekly check and value pass.** Final source versions and compatibility evidence are in `scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json`. Codex 0.157.0, Claude 2.1.278, and Copilot 1.0.87 retain ceilings established by fresh matching prebump sessions. Codex's active status probe and Claude's usage and status probes all pass. DSH has five individually fresh 0.1.5-rc.2 sessions contributing 1,139 validated events with zero unknown types or keys; upstream 0.1.7-rc.2 remains unverified because there is no driver. Devin and fx remain steward-owned.
 
   | Agent | Installed / upstream | Weekly verdict | Evidence ruling |

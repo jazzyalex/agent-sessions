@@ -28,12 +28,22 @@ enum DeepSeekHarnessRelationshipValidator {
         var state = State(cut: cut)
         state.staleCompactionStarts = inheritedOrphanCompactionStarts(events)
         for event in events {
-            guard let projected = try projectForRelationships(event) else { continue }
-            guard DeepSeekHarnessVocabulary.v0Events.contains(projected.type)
-                || projected.type == "assistant/attempt" else { continue }
+            guard let projected = try projectForRelationships(event, version: header.version) else { continue }
+            let relationshipKnown = header.version == 4
+                ? DeepSeekHarnessVocabulary.v4Known.contains(projected.type)
+                : (DeepSeekHarnessVocabulary.v0Events.contains(projected.type)
+                    || projected.type == "assistant/attempt")
+            guard relationshipKnown else { continue }
             let data = projected.data
-            if DeepSeekHarnessRelationshipValidator.surfaceTypes.contains(projected.type) {
-                state.surface = try applySurface(state.surface, event: projected)
+            let surfaceTypes = header.version == 4
+                ? DeepSeekHarnessVocabulary.surfaceV4
+                : DeepSeekHarnessRelationshipValidator.surfaceTypes
+            if surfaceTypes.contains(projected.type) {
+                if header.version == 4 {
+                    try applyV4Surface(&state, event: projected)
+                } else {
+                    state.surface = try applySurface(state.surface, event: projected)
+                }
             }
             if (projected.type == "turn/start" || projected.type == "turn/end"),
                let open = state.openCompaction,
@@ -41,7 +51,9 @@ enum DeepSeekHarnessRelationshipValidator {
                 throw DeepSeekHarnessFormatError.invalidPayload(
                     "\(projected.type) crosses an open compaction")
             }
-            if projected.type == "assistant/attempt" {
+            if projected.type == "assistant/attempt"
+                || (header.version == 4 && (projected.type == "system/message"
+                    || projected.type == "developer/message")) {
                 try requireOpenStep(projected, data: data,
                                     openTurn: state.openTurn, openStep: state.openStep)
                 continue
@@ -141,7 +153,8 @@ enum DeepSeekHarnessRelationshipValidator {
                             "tool/result \(callID) has no advertised tool lifecycle")
                     }
                     if lifecycle.state == .advertised,
-                       !isExactToolNotStartedRepair(projected, content: content, error: error) {
+                       !isExactToolNotStartedRepair(projected, content: content, error: error,
+                                                    version: header.version) {
                         throw DeepSeekHarnessFormatError.invalidPayload(
                             "tool/result \(callID) is not the exact TOOL_NOT_STARTED repair")
                     }
@@ -241,7 +254,8 @@ enum DeepSeekHarnessRelationshipValidator {
                 }
                 state.retryStarts.insert(key)
             case "session/title", "session/title-llm-request":
-                try assertTitleSources(events: events, event: projected, data: data)
+                try assertTitleSources(events: events, event: projected, data: data,
+                                       version: header.version)
             case "command/run":
                 guard let id = data["commandId"] as? String else {
                     throw DeepSeekHarnessFormatError.invalidPayload(
@@ -272,6 +286,12 @@ enum DeepSeekHarnessRelationshipValidator {
             case "session-log-deepseek/delivery-accepted":
                 let accepted = DeepSeekHarnessJSON.safeInt(data["sessionFormatVersion"]) ?? 0
                 if accepted == header.version {
+                    guard let through = DeepSeekHarnessJSON.count(data["throughSeq"]),
+                          through < projected.sequence,
+                          DeepSeekHarnessJSON.nonEmptyString(data["sessionId"]) != nil else {
+                        throw DeepSeekHarnessFormatError.invalidPayload(
+                            "delivery marker requires an earlier throughSeq and nonempty Session id")
+                    }
                     let inherited = header.parentSessionID != nil
                         && projected.sequence < state.cut
                     if !inherited, (data["sessionId"] as? String) != header.id {
@@ -375,6 +395,7 @@ enum DeepSeekHarnessRelationshipValidator {
         var nextTurn = 1
         var nextStep = 1
         var surface: [Int] = []
+        var protectedSurfaceHead: Int?
         var openCompaction: CompactionState?
         var staleCompactionStarts: Set<Int> = []
         var retries: [DeepSeekHarnessEnvelope] = []
@@ -420,7 +441,8 @@ enum DeepSeekHarnessRelationshipValidator {
     /// staged `relationshipEvent`. Returns nil for obsolete ignorable
     /// dispatch tags, which do not participate in lifecycle validation.
     private static func projectForRelationships(
-        _ event: DeepSeekHarnessEnvelope
+        _ event: DeepSeekHarnessEnvelope,
+        version: Int
     ) throws -> DeepSeekHarnessEnvelope? {
         switch event.type {
         case "tool/ptc-dispatch-start":
@@ -442,6 +464,7 @@ enum DeepSeekHarnessRelationshipValidator {
             // obsolete ignorable tags stay opaque and skipped.
             return nil
         case "system/message":
+            if version == 4 { return event }
             guard let message = event.data["message"] as? [String: Any] else {
                 throw DeepSeekHarnessFormatError.invalidPayload(
                     "system/message \(event.sequence) message must be an object")
@@ -455,6 +478,7 @@ enum DeepSeekHarnessRelationshipValidator {
                                            sourceEventSeqs: event.sourceEventSeqs,
                                            surfaceOp: event.surfaceOp)
         case "tool/result":
+            if version == 4 { return event }
             guard let error = event.data["error"] as? [String: Any],
                   error["code"] as? String == "TOOL_NOT_STARTED",
                   let message = event.data["message"] as? [String: Any],
@@ -560,8 +584,38 @@ enum DeepSeekHarnessRelationshipValidator {
     private static func isExactToolNotStartedRepair(
         _ event: DeepSeekHarnessEnvelope,
         content: [Any],
-        error: [String: Any]?
+        error: [String: Any]?,
+        version: Int
     ) -> Bool {
+        if version == 4 {
+            guard let error, error["name"] as? String == "ToolNotStartedError",
+                  error["code"] as? String == "TOOL_NOT_STARTED",
+                  event.sourceEventSeqs == nil,
+                  let message = event.data["message"] as? [String: Any],
+                  let source = message["source"] as? [String: Any],
+                  let callID = source["callId"] as? String,
+                  message["isError"] as? Bool == true,
+                  let id = message["id"] as? String else {
+                return false
+            }
+            if id.hasPrefix("forked-tool-result-\(callID)-") {
+                // Exact fork coordinates and surface ownership are admitted by
+                // `assertV4ForkResult`; lifecycle validation only classifies it
+                // as the upstream relationship checker does.
+                return true
+            }
+            let prefix = "interrupted-tool-result-\(callID)-"
+            guard id.hasPrefix(prefix),
+                  isCanonicalSafeIntegerSuffix(String(id.dropFirst(prefix.count))),
+                  content.count == 1,
+                  let text = content.first as? [String: Any],
+                  text["type"] as? String == "text",
+                  text["text"] as? String
+                    == "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed." else {
+                return false
+            }
+            return true
+        }
         guard let error, error["name"] as? String == "ToolNotStartedError",
               error["code"] as? String == "TOOL_NOT_STARTED",
               event.sourceEventSeqs == nil,
@@ -608,10 +662,41 @@ enum DeepSeekHarnessRelationshipValidator {
         return Array(surface[..<startIndex]) + [event.sequence] + Array(surface[(endIndex + 1)...])
     }
 
+    private static func applyV4Surface(
+        _ state: inout State,
+        event: DeepSeekHarnessEnvelope
+    ) throws {
+        if event.type == "system/message", !state.surface.isEmpty,
+           state.protectedSurfaceHead == nil {
+            throw DeepSeekHarnessFormatError.invalidPayload(
+                "system/message requires a protected first surface head")
+        }
+        let previous = state.surface
+        let next = try applySurface(previous, event: event)
+        if event.surfaceOp?.isAppend == true {
+            if event.type == "system/message", previous.isEmpty {
+                state.protectedSurfaceHead = event.sequence
+            }
+        } else if let head = state.protectedSurfaceHead,
+                  let start = event.surfaceOp?.startValue,
+                  let end = event.surfaceOp?.endValue,
+                  let startIndex = previous.firstIndex(of: start),
+                  let endIndex = previous.firstIndex(of: end),
+                  previous[startIndex...endIndex].contains(head) {
+            guard event.type == "system/message", startIndex == endIndex else {
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "surface replacement cannot shadow the protected system head")
+            }
+            state.protectedSurfaceHead = event.sequence
+        }
+        state.surface = next
+    }
+
     private static func assertTitleSources(
         events: [DeepSeekHarnessEnvelope],
         event: DeepSeekHarnessEnvelope,
-        data: [String: Any]
+        data: [String: Any],
+        version: Int
     ) throws {
         // The publication extension preserves source-validated title-request
         // text across sequence remapping, so only the relationship framing
@@ -638,17 +723,20 @@ enum DeepSeekHarnessRelationshipValidator {
             }
         }
         var selected: [(seq: Int, text: String)] = []
+        var seen = Set<Int>()
         for seq in seqs {
-            guard seq < events.count, events[seq].type == "user/message" else {
+            guard seq < event.sequence, seq < events.count, !seen.contains(seq),
+                  events[seq].type == "user/message" else {
                 throw DeepSeekHarnessFormatError.invalidPayload(
-                    "\(event.type) \(event.sequence) messageSeqs must cite earlier human user/message events")
+                    "\(event.type) \(event.sequence) messageSeqs must cite distinct earlier human user/message events")
             }
+            seen.insert(seq)
             let sourceData = events[seq].data
             guard let messageSource = sourceData["source"] as? [String: Any],
                   messageSource["kind"] as? String == "user",
                   let content = sourceData["content"] as? [Any] else {
                 throw DeepSeekHarnessFormatError.invalidPayload(
-                    "\(event.type) \(event.sequence) messageSeqs must cite earlier human user/message events")
+                    "\(event.type) \(event.sequence) messageSeqs must cite distinct earlier human user/message events")
             }
             let text = content.compactMap { $0 as? [String: Any] }
                 .filter { $0["type"] as? String == "text" }
@@ -657,20 +745,33 @@ enum DeepSeekHarnessRelationshipValidator {
             selected.append((seq: seq, text: text))
         }
         guard event.type == "session/title-llm-request" else { return }
-        guard let messages = data["messages"] as? [Any],
+        guard !seqs.isEmpty,
+              let messages = data["messages"] as? [Any],
               messages.count == 1,
               let message = messages.first as? [String: Any],
               message["role"] as? String == "user",
               let content = message["content"] as? [Any], content.count == 1,
               let source = message["source"] as? [String: Any],
-              source["kind"] as? String == "plugin",
-              source["plugin"] as? String == "dsh-session-title-llm",
+              (version == 4
+                ? source["kind"] as? String == "dsh-session-title-llm"
+                : source["kind"] as? String == "plugin"
+                    && source["plugin"] as? String == "dsh-session-title-llm"),
               let framed = content.first as? [String: Any],
               framed["type"] as? String == "text" else {
             throw DeepSeekHarnessFormatError.invalidPayload(
                 "session/title-llm-request messages do not represent messageSeqs")
         }
         _ = selected
+    }
+
+    private static func isCanonicalSafeIntegerSuffix(_ value: String) -> Bool {
+        guard !value.isEmpty,
+              value == "0" || (value.first != "0" && value.allSatisfy(\.isNumber)),
+              let number = Int64(value), number >= 0,
+              number <= 9_007_199_254_740_991 else {
+            return false
+        }
+        return String(number) == value
     }
 
     private static func compactionTurn(_ value: Any?) -> Int? {

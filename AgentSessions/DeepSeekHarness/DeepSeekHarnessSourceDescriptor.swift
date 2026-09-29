@@ -88,13 +88,13 @@ enum DeepSeekHarnessArchiveBackfill {
 // directory, but only canonical generation siblings travel with it. The filter
 // is flat (exact directory, no recursion, no subdirectories) and anchored at
 // the selected primary: same compression encoding, supported generations
-// 0...3, generation <= selected (no successors), regular files only, never
+// 0...4, generation <= selected (no successors), regular files only, never
 // symlinks. DSH workspace.json state is ignored; nothing here resumes.
 // Pure file-attribute reads via FileManager.default (no shared mutable state).
 private enum DeepSeekHarnessArchiveFilter {
     static func archiveUnit(forPrimary primaryURL: URL) -> ArchiveUnit? {
         guard let parsed = DeepSeekHarnessDiscovery.parseGenerationFilename(primaryURL.lastPathComponent) else { return nil }
-        guard (0...3).contains(parsed.generation) else { return nil }
+        guard (0...4).contains(parsed.generation) else { return nil }
         let fm = FileManager.default
         guard let type = (try? fm.attributesOfItem(atPath: primaryURL.path))?[.type] as? FileAttributeType,
               type == .typeRegular else { return nil }
@@ -111,7 +111,7 @@ private enum DeepSeekHarnessArchiveFilter {
               primaryRelativePath != ".",
               primaryRelativePath != ".." else { return nil }
         guard let primaryParsed = DeepSeekHarnessDiscovery.parseGenerationFilename(primaryRelativePath) else { return nil }
-        guard (0...3).contains(primaryParsed.generation) else { return nil }
+        guard (0...4).contains(primaryParsed.generation) else { return nil }
         let fm = FileManager.default
         guard let dirType = (try? fm.attributesOfItem(atPath: upstream.path))?[.type] as? FileAttributeType,
               dirType == .typeDirectory else { return nil }
@@ -125,7 +125,7 @@ private enum DeepSeekHarnessArchiveFilter {
             let name = child.lastPathComponent
             guard let parsed = DeepSeekHarnessDiscovery.parseGenerationFilename(name) else { continue }
             guard parsed.compression == primaryParsed.compression else { continue }
-            guard (0...3).contains(parsed.generation) else { continue }
+            guard (0...4).contains(parsed.generation) else { continue }
             guard parsed.generation <= primaryParsed.generation else { continue }
             guard let type = (try? fm.attributesOfItem(atPath: child.path))?[.type] as? FileAttributeType,
                   type == .typeRegular else { continue }

@@ -156,7 +156,7 @@ enum DeepSeekHarnessSessionParser {
         guard let result = try? DeepSeekHarnessArtifactReader.read(url: url, compression: parsedFilename.compression),
               let normalized = try? DeepSeekHarnessHistoricalNormalizer.normalize(result),
               let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              DeepSeekHarnessPresentation.isComplete else { return nil }
+              DeepSeekHarnessPresentation.isComplete(version: result.header.version) else { return nil }
 
         let header = DeepSeekHarnessHistoricalNormalizer.normalizedHeader(result.header)
         let projection = project(header: header, events: normalized,
@@ -245,7 +245,8 @@ enum DeepSeekHarnessSessionParser {
 
         for item in events {
             if item.diagnosticOnly { continue }
-            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
+            guard let disposition = checkedPresentationDisposition(
+                for: item.canonicalType, version: header.version) else { continue }
             let data = item.data
             switch disposition {
             case .assistantRendering:
@@ -343,7 +344,8 @@ enum DeepSeekHarnessSessionParser {
                 ])))
                 continue
             }
-            guard let disposition = checkedPresentationDisposition(for: item.canonicalType) else { continue }
+            guard let disposition = checkedPresentationDisposition(
+                for: item.canonicalType, version: header.version) else { continue }
             let data = item.data
             switch disposition {
             case .userMessage:
@@ -519,7 +521,12 @@ enum DeepSeekHarnessSessionParser {
         }
         let callID = (message["source"] as? [String: Any])?["callId"] as? String
             ?? firstToolResultBlock(message["content"])?.toolCallID
-        let nested = nestedResultBlocks(message["content"])
+        let nested: [[String: Any]]
+        if message["role"] as? String == "tool" {
+            nested = message["content"] as? [[String: Any]] ?? []
+        } else {
+            nested = nestedResultBlocks(message["content"])
+        }
         // Nested attachments stay inline in the rendered result text (see
         // joinResultText); only top-level message attachments get their own
         // marker events, so a result is never represented twice.
@@ -720,9 +727,10 @@ enum DeepSeekHarnessSessionParser {
     /// nil so the caller preserves the normalizer contract (diagnostic-only
     /// ignorable skip; required events already fail closed upstream).
     private static func checkedPresentationDisposition(
-        for canonicalType: String
+        for canonicalType: String,
+        version: Int
     ) -> DeepSeekHarnessPresentationDisposition? {
-        DeepSeekHarnessPresentation.disposition(for: canonicalType)
+        DeepSeekHarnessPresentation.disposition(for: canonicalType, version: version)
     }
 
     private static let renderedTextLimit = 32_768

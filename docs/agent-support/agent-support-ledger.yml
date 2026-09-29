@@ -10,6 +10,17 @@
 #
 entries:
   - agent_sessions_version: "5.5.1-unreleased"
+    as_of_date_utc: "2026-09-29"
+    as_of_commit: "a93b22b6+working-tree"
+    note: "DeepSeek Harness 0.2.0-rc.2 and native v4 support. A fresh real-home headless tool session proved the five required evidence buckets and matched the synthetic v4 baseline with no unknown required schema. Installed and upstream versions match, so the weekly verdict is supports_latest. The same weekly sweep found separate Codex 0.159.0 drift. Prebump: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json. Final weekly: scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json."
+    verified:
+      deepseek_harness:
+        sessions:
+          max_verified_version: "0.2.0-rc.2"
+          scope: "latest; installed and upstream both 0.2.0-rc.2"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json", "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_tool_session.jsonl"]
+          notes: "The fresh 29-event v4 session contained message, tool call/result, usage, relationship, and checksum-integrity evidence. Native v4 parsing preserves first-class tool results and producer-owned sources; v0-v3 migration remains covered."
+  - agent_sessions_version: "5.5.1-unreleased"
     as_of_date_utc: "2026-09-27"
     as_of_commit: "5c359a7f+working-tree"
     note: "Kimi 2.0.2 follow-up. A fresh Bash turn proved the appended message projection duplicates legacy user, assistant, call, and result records. Sanitized fixture coverage and a no-duplicate parser test establish the metadata-only contract. Upstream 2.1.1 remains unverified. Prebump report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json. Final weekly report: scripts/probe_scan_output/agent_watch/20260927-045502-543478Z-p15724/report.json."

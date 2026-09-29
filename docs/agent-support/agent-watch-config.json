@@ -797,6 +797,27 @@
           }
         ],
         "_privacy_note": "Weekly monitoring reads headers and up to five recent real DSH session generations under $DSH_HOME/sessions (or ~/.dsh/sessions), validates their JSONL/zstd record structure, and records only schema keys, event types, counts, and private report paths. Prompt and tool payload values are not written to reports."
+      },
+      "prebump": {
+        "driver": "deepseek_harness_headless",
+        "sandbox": { "mode": "home_override", "subdir": "deepseek_harness_sandbox" },
+        "prompt": "Use the shell tool to run pwd exactly once, then report the directory in one short sentence.",
+        "real_home_session": true,
+        "timeout_seconds": 240,
+        "env_vars": [],
+        "credential_files": [],
+        "required_evidence_buckets": [
+          "message", "tool", "usage", "relationship", "integrity"
+        ],
+        "discover_session": {
+          "kind": "deepseek_harness_session_newest",
+          "roots": [".dsh/sessions"],
+          "globs": ["**/session.v*.jsonl", "**/session.v*.jsonl.zstd"],
+          "required_types": [
+            "user/message", "assistant/message", "tool/call", "tool/result"
+          ]
+        },
+        "_real_home_note": "The installed DSH profile, credentials, and durable Session store are one authority below DSH_HOME. Run this driver with --allow-real-home; stdout and stderr stay in the disposable prebump sandbox, while DSH writes only its normal Session artifact to the real store."
       }
     }
   }

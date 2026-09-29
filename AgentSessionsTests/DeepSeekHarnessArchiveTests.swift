@@ -175,7 +175,7 @@ final class DeepSeekHarnessArchiveTests: XCTestCase {
         XCTAssertNil(archiveUnit(nonregular))
         XCTAssertNil(manifestEntries(nonregularDirectory, nonregular.lastPathComponent))
 
-        let unsupported = try writeGeneration(root: root, id: "unsupported", version: 4)
+        let unsupported = try writeGeneration(root: root, id: "unsupported", version: 5)
         XCTAssertNil(archiveUnit(unsupported))
         XCTAssertNil(manifestEntries(unsupported.deletingLastPathComponent(), unsupported.lastPathComponent))
 

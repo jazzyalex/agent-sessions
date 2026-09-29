@@ -33,7 +33,7 @@ def test_dsh_fixture_manifest_and_monitoring_baseline_are_nonempty() -> None:
 
     matrix_text = (REPO / "docs/agent-support/agent-support-matrix.yml").read_text()
     fixture_root = "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
-    evidence = [
+    matrix_evidence = [
         f"{fixture_root}/v{version}_minimal_session.jsonl"
         for version in range(4)
     ] + [
@@ -45,7 +45,11 @@ def test_dsh_fixture_manifest_and_monitoring_baseline_are_nonempty() -> None:
         ],
         f"{fixture_root}/unknown_ignorable_event.jsonl.zstd",
     ]
-    assert all(path in matrix_text for path in evidence)
+    assert all(path in matrix_text for path in matrix_evidence)
+    evidence = matrix_evidence + [
+        f"{fixture_root}/v4_tool_session.jsonl",
+        f"{fixture_root}/v4_tool_session.jsonl.zstd",
+    ]
     baseline = agent_watch._baseline_type_keys_for_agent(
         "deepseek_harness", evidence
     )
@@ -215,6 +219,179 @@ def test_dsh_real_session_scan_selects_canonical_zstd_and_nested_schema(tmp_path
     assert "SYNTHETIC" not in repr(fingerprint)
 
 
+@pytest.mark.parametrize(
+    "filename", ["v4_tool_session.jsonl", "v4_tool_session.jsonl.zstd"]
+)
+def test_dsh_v4_tool_session_proves_every_prebump_evidence_bucket(
+    filename: str, tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "dsh-session-format-v3-to-v4.js"
+    source.write_text(
+        "\n".join(
+            [
+                "function assertReleasedV4Header(",
+                "function assertV4RowAdmission(",
+                "function assertReleasedV4Relationships(",
+                "const SURFACE_TYPES = new Set([",
+                'row[\"type\"] === \"developer/message\"',
+                'row[\"type\"] !== \"tool/result\"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_watch, "_DSH_V4_VALIDATION_SOURCE", source)
+    fixture = (
+        REPO
+        / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
+        / filename
+    )
+
+    fingerprint = agent_watch._deepseek_harness_schema_fingerprint(
+        fixture, max_lines=5000
+    )
+
+    assert fingerprint.get("error") is None
+    assert fingerprint["generation"] == 4
+    assert fingerprint["unsupported_required_event_types"] == []
+    assert fingerprint["evidence_buckets"] == {
+        "message": True,
+        "tool": True,
+        "usage": True,
+        "relationship": True,
+        "integrity": True,
+    }
+    assert fingerprint["v4_validation_source"] == {
+        "ok": True, "path": str(source), "missing_markers": []
+    }
+    assert "SYNTHETIC" not in repr(fingerprint)
+
+
+def test_dsh_v4_prebump_gate_accepts_the_rich_synthetic_fixture(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "dsh-session-format-v3-to-v4.js"
+    source.write_text(
+        "\n".join(
+            [
+                "function assertReleasedV4Header(",
+                "function assertV4RowAdmission(",
+                "function assertReleasedV4Relationships(",
+                "const SURFACE_TYPES = new Set([",
+                'row[\"type\"] === \"developer/message\"',
+                'row[\"type\"] !== \"tool/result\"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_watch, "_DSH_V4_VALIDATION_SOURCE", source)
+    fixture = (
+        REPO
+        / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/"
+        "v4_tool_session.jsonl"
+    )
+    fingerprint = agent_watch._deepseek_harness_schema_fingerprint(
+        fixture, max_lines=5000
+    )
+    baseline = agent_watch._baseline_type_keys_for_agent(
+        "deepseek_harness", [str(fixture)]
+    )
+
+    diff, matches = agent_watch._prebump_schema_check(
+        fingerprint=fingerprint,
+        baseline_type_keys=baseline,
+        required_evidence_buckets=[
+            "message", "tool", "usage", "relationship", "integrity"
+        ],
+        agent_name="deepseek_harness",
+    )
+
+    assert matches is True
+    assert diff["missing_required_evidence_buckets"] == []
+    assert diff["unknown_only_is_empty"] is True
+
+
+def test_dsh_v4_validation_source_follows_the_installed_dsh_executable(
+    tmp_path, monkeypatch
+) -> None:
+    package_root = tmp_path / "node_modules/@deepseek-ai/dsh"
+    source = package_root / agent_watch._DSH_V4_VALIDATION_SOURCE_RELATIVE
+    source.parent.mkdir(parents=True)
+    source.write_text("validator", encoding="utf-8")
+    executable = package_root / "bin/dsh.js"
+    executable.parent.mkdir()
+    executable.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    launcher = tmp_path / "bin/dsh"
+    launcher.parent.mkdir()
+    launcher.symlink_to(executable)
+    monkeypatch.setattr(
+        agent_watch.shutil, "which", lambda name: str(launcher) if name == "dsh" else None
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_cmd",
+        lambda *_args, **_kwargs: pytest.fail("npm fallback must not run"),
+    )
+
+    resolved, error = agent_watch._dsh_resolve_v4_validation_source()
+
+    assert error is None
+    assert resolved == source
+
+
+@pytest.mark.parametrize(
+    "npm_root",
+    [
+        "/opt/homebrew/lib/node_modules",
+        "/usr/local/lib/node_modules",
+        "/Users/test/.nvm/versions/node/v24.1.0/lib/node_modules",
+    ],
+)
+def test_dsh_v4_validation_source_uses_the_active_npm_global_root(
+    npm_root: str, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        agent_watch.shutil,
+        "which",
+        lambda name: f"/active/bin/{name}" if name in {"dsh", "npm"} else None,
+    )
+    monkeypatch.setattr(agent_watch.Path, "is_file", lambda _path: False)
+    calls = []
+
+    def run(argv, timeout):
+        calls.append((argv, timeout))
+        return 0, npm_root, ""
+
+    monkeypatch.setattr(agent_watch, "_run_cmd", run)
+
+    resolved, error = agent_watch._dsh_resolve_v4_validation_source()
+
+    assert error is None
+    assert resolved == Path(npm_root) / (
+        "@deepseek-ai/dsh/node_modules/@deepseek-ai/"
+        "dsh-session-format-v3-to-v4/lib/index.js"
+    )
+    assert calls == [
+        (["/active/bin/npm", "root", "--global"], 5)
+    ]
+
+
+def test_dsh_v4_validation_source_reports_bounded_resolution_failure(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(agent_watch.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(agent_watch, "_DSH_V4_VALIDATION_SOURCE", None)
+    monkeypatch.setattr(agent_watch, "_DSH_V4_VALIDATION_SOURCE_RESOLUTION", None)
+
+    contract = agent_watch._dsh_v4_validation_source_contract()
+
+    assert contract == {
+        "ok": False,
+        "path": None,
+        "error": "v4_validation_source_unresolved",
+        "resolution_error": "npm_executable_unavailable",
+    }
+
+
 def test_dsh_nested_schema_fingerprint_surfaces_new_data_keys_without_values(tmp_path) -> None:
     fixture_root = REPO / "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness"
     source = fixture_root / "v3_minimal_session.jsonl"
@@ -277,7 +454,9 @@ def test_dsh_schema_fingerprint_rejects_sequence_gaps() -> None:
 def test_dsh_catalog_is_read_from_the_app_and_classifies_unbaselined_shapes() -> None:
     catalog = agent_watch._dsh_app_event_catalog()
     assert len(catalog[3]) == 58
+    assert len(catalog[4]) == 59
     assert "tool/call" in catalog[3]
+    assert catalog[4] == catalog[3] | {"developer/message"}
     assert "feedback/message-put" in catalog[2]
 
     fingerprint = {

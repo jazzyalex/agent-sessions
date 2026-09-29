@@ -124,7 +124,7 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
             }
             do {
                 let header = try DeepSeekHarnessArtifactReader.readHeader(url: selected.url, compression: selected.compression)
-                guard (0...3).contains(header.version) else {
+                guard (0...4).contains(header.version) else {
                     throw DeepSeekHarnessFormatError.unsupportedVersion(header.version)
                 }
                 guard header.version == selected.generation else {

@@ -303,7 +303,7 @@ const physicalFixtures = new Map([
   ['v3_minimal_session.jsonl', v3Text],
   ['malformed_torn_tail.jsonl', tornTail(v3Text)],
   ['malformed_seq_gap.jsonl', physicalText(v3.header, sequenceGap(v3.rows))],
-  ['future_v4_header.jsonl', physicalText({ ...v3.header, version: 4 }, v3.rows)],
+  ['future_v5_header.jsonl', physicalText({ ...v3.header, version: 5 }, v3.rows)],
   ['unknown_ignorable_event.jsonl', physicalText(v3.header, unknownIgnorableRows)],
   ['unknown_required_event.jsonl', physicalText(v3.header, unknownRequiredRows)],
 ])
@@ -350,7 +350,7 @@ const fixtureMetadata = [
   ['v3_minimal_session.jsonl', 3, 'accept: native v3 zero-based dense events with canonical surface metadata and system head', 'Encoded from the pinned catalog-produced v3 artifact with the production current encoder; no historical fields were hand-schematized.'],
   ['malformed_torn_tail.jsonl', 3, 'reject: final JSONL record is truncated before its closing bytes', 'Derived byte-for-byte from the generated v3 fixture by truncating the final JSON object by 12 UTF-8 bytes and removing its final line terminator.'],
   ['malformed_seq_gap.jsonl', 3, 'reject: dense physical sequence fails at the user/message row', 'Derived from the generated v3 fixture by changing only the user/message seq from 3 to 4, leaving later rows unchanged.'],
-  ['future_v4_header.jsonl', 4, 'reject: header version is newer than the supported v3 catalog', 'Derived from the generated v3 fixture by changing only the physical header version from 3 to 4.'],
+  ['future_v5_header.jsonl', 5, 'reject: header version is newer than the supported v4 catalog', 'Derived from the generated v3 fixture by changing only the physical header version from 3 to 5.'],
   ['unknown_ignorable_event.jsonl', 3, 'accept: retain the source event for diagnostics while treating the unknown ignorable event as non-rendered', 'Derived from the generated v3 fixture by appending one dense x-synth/unknown-ignorable event with ignorable true.'],
   ['unknown_required_event.jsonl', 3, 'reject: unknown required event is refused by the released v3 admission rules', 'Derived from the generated v3 fixture by appending one dense x-synth/unknown-required event with ignorable false.'],
 ]

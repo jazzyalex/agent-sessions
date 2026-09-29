@@ -13,10 +13,11 @@ final class DeepSeekHarnessRelationshipValidatorTests: XCTestCase {
     private func header(
         id: String = "dsh-rel-test",
         isSeeded: Bool = false,
-        parentSessionID: String? = nil
+        parentSessionID: String? = nil,
+        version: Int = 3
     ) -> DeepSeekHarnessHeader {
         DeepSeekHarnessHeader(
-            version: 3, id: id, createdAtMilliseconds: baseTime,
+            version: version, id: id, createdAtMilliseconds: baseTime,
             cwd: "/tmp/dsh-tests", parentSessionID: parentSessionID,
             isSeeded: isSeeded, origin: nil, delegationDepth: 0, agentPreset: nil)
     }
@@ -367,6 +368,82 @@ final class DeepSeekHarnessRelationshipValidatorTests: XCTestCase {
         ], match: "names the wrong Session")
     }
 
+    func testV4ToolLifecycleBindsAdvertisedCallStartAndFirstClassResult() throws {
+        let prefix = [
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("assistant/message", 2,
+                     data: assistantData(toolCall: (id: "call-v4", name: "read", args: "{}")),
+                     surfaceOp: .append),
+        ]
+        requireInvalidPayload(prefix + [
+            envelope("tool/call", 3, data: ["turn": 1, "step": 1, "callId": "call-v4",
+                                             "name": "write", "arguments": "{}"]),
+        ], header: header(version: 4), match: "does not match one advertised tool call")
+
+        let started = prefix + [
+            envelope("tool/call", 3, data: ["turn": 1, "step": 1, "callId": "call-v4",
+                                             "name": "read", "arguments": "{}"]),
+        ]
+        requireInvalidPayload(started + [
+            envelope("tool/result", 4, data: ["turn": 1, "step": 1,
+                "message": ["id": "result-v4", "role": "tool", "toolCallId": "other",
+                            "content": [] as [Any],
+                            "source": ["kind": "tool", "callId": "other"] as [String: Any]
+                           ] as [String: Any]], surfaceOp: .append),
+        ], header: header(version: 4), match: "has no advertised tool lifecycle")
+    }
+
+    func testV4InterruptedToolNotStartedRepairUsesFrozenApologyAndNumericSuffix() throws {
+        let apology = "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+        let prefix = [
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("assistant/message", 2,
+                     data: assistantData(toolCall: (id: "call-v4", name: "read", args: "{}")),
+                     surfaceOp: .append),
+        ]
+        func result(id: String, text: String, turn: Int = 1) -> DeepSeekHarnessEnvelope {
+            envelope("tool/result", 3, data: [
+                "turn": turn, "step": 1,
+                "message": [
+                    "id": id, "role": "tool", "toolCallId": "call-v4", "isError": true,
+                    "content": [["type": "text", "text": text] as [String: Any]],
+                    "source": ["kind": "tool", "callId": "call-v4"] as [String: Any],
+                ] as [String: Any],
+                "error": ["name": "ToolNotStartedError",
+                          "code": "TOOL_NOT_STARTED"] as [String: Any],
+            ], surfaceOp: .append)
+        }
+
+        try check(prefix + [result(id: "interrupted-tool-result-call-v4-0", text: apology)],
+                  header: header(version: 4))
+        requireInvalidPayload(
+            prefix + [result(id: "interrupted-tool-result-call-v4-0", text: "changed")],
+            header: header(version: 4), match: "is not the exact TOOL_NOT_STARTED repair")
+        requireInvalidPayload(
+            prefix + [result(id: "interrupted-tool-result-call-v4-03", text: apology)],
+            header: header(version: 4), match: "is not the exact TOOL_NOT_STARTED repair")
+        requireInvalidPayload(
+            prefix + [result(id: "interrupted-tool-result-call-v4-0", text: apology, turn: 2)],
+            header: header(version: 4), match: "does not match an open turn and step")
+    }
+
+    func testV4DeliveryRequiresEarlierCoordinateAndCurrentOwner() {
+        requireInvalidPayload([
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("session-log-deepseek/delivery-accepted", 1, data: [
+                "sessionId": "dsh-rel-test", "throughSeq": 1, "sessionFormatVersion": 4,
+            ]),
+        ], header: header(version: 4), match: "earlier throughSeq")
+        requireInvalidPayload([
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("session-log-deepseek/delivery-accepted", 1, data: [
+                "sessionId": "other", "throughSeq": 0, "sessionFormatVersion": 4,
+            ]),
+        ], header: header(version: 4), match: "wrong Session")
+    }
+
     func testInheritedDeliveryPassesBeforeCut() throws {
         let seeded = header(isSeeded: true, parentSessionID: "parent")
         try check([
@@ -539,7 +616,68 @@ final class DeepSeekHarnessRelationshipValidatorTests: XCTestCase {
             envelope("assistant/message", 2, data: assistantData(), surfaceOp: .append),
             envelope("session/title", 3, data: ["title": "Hello", "messageSeqs": [2],
                                                 "source": ["kind": "fallback"] as [String: Any]]),
-        ], match: "must cite earlier human user/message events")
+        ], match: "must cite distinct earlier human user/message events")
+    }
+
+    func testV4TitleRequestUsesProducerOwnedSourceKind() throws {
+        let base = [
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("user/message", 1, data: userData(), surfaceOp: .append),
+        ]
+        let request: (String) -> DeepSeekHarnessEnvelope = { kind in
+            self.envelope("session/title-llm-request", 2, data: [
+                "titleProvider": "dsh-session-title-llm",
+                "messageSeqs": [1],
+                "route": ["provider": "p", "model": "m"] as [String: Any],
+                "system": "title",
+                "messages": [[
+                    "id": "title-request", "role": "user",
+                    "content": [["type": "text", "text": "framed"] as [String: Any]],
+                    "source": ["kind": kind] as [String: Any],
+                ] as [String: Any]],
+                "maxTokens": 20,
+            ])
+        }
+        try check(base + [request("dsh-session-title-llm")], header: header(version: 4))
+        requireInvalidPayload(base + [request("plugin")], header: header(version: 4),
+                              match: "messages do not represent messageSeqs")
+
+        func requestWithSeqs(_ seqs: [Int]) -> DeepSeekHarnessEnvelope {
+            envelope("session/title-llm-request", 2, data: [
+                "titleProvider": "dsh-session-title-llm",
+                "messageSeqs": seqs,
+                "route": ["provider": "p", "model": "m"] as [String: Any],
+                "system": "title",
+                "messages": [[
+                    "id": "title-request", "role": "user",
+                    "content": [["type": "text", "text": "framed"] as [String: Any]],
+                    "source": ["kind": "dsh-session-title-llm"] as [String: Any],
+                ] as [String: Any]],
+                "maxTokens": 20,
+            ])
+        }
+        requireInvalidPayload(base + [requestWithSeqs([1, 1])], header: header(version: 4),
+                              match: "distinct earlier human user/message events")
+        requireInvalidPayload(base + [requestWithSeqs([2])], header: header(version: 4),
+                              match: "distinct earlier human user/message events")
+        requireInvalidPayload(base + [requestWithSeqs([])], header: header(version: 4),
+                              match: "messages do not represent messageSeqs")
+    }
+
+    func testV4SystemMessageRequiresProtectedFirstSurfaceHead() {
+        requireInvalidPayload([
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("user/message", 1, data: userData(), surfaceOp: .append),
+            envelope("step/start", 2, data: ["turn": 1, "step": 1]),
+            envelope("system/message", 3, data: [
+                "turn": 1, "step": 1,
+                "message": [
+                    "id": "system-v4", "role": "system",
+                    "content": [["type": "text", "text": "late"] as [String: Any]],
+                    "source": ["kind": "system-prompt"] as [String: Any],
+                ] as [String: Any],
+            ], surfaceOp: .append),
+        ], header: header(version: 4), match: "requires a protected first surface head")
     }
 
     // MARK: - Opaque events and strict publication
