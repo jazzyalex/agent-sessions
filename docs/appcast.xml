@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.5.1</title>
-            <pubDate>Wed, 23 Sep 2026 00:28:35 -0700</pubDate>
+            <title>5.5.2</title>
+            <pubDate>Tue, 29 Sep 2026 13:33:36 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,35 +27,26 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.5.1</h2>
-<h3>Features</h3>
-<ul>
-<li><strong>Continue existing Codex Desktop conversations.</strong> Find local desktop sessions in history and open an eligible conversation in Codex Desktop from the row or toolbar. Work, desktop, CLI, and VS Code badges remain distinct; side chats keep their relationship labels. The action needs a valid local thread ID and the same Codex session store.</li>
-<li><strong>Search supported Cursor ACP conversations.</strong> Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable.</li>
-</ul>
+<h2>What&#x27;s New in 5.5.2</h2>
 <h3>Improvements</h3>
 <ul>
-<li><strong>Weekly Quota Meter rates use more of your local history.</strong> Calibration includes native archived Codex sessions and refines estimates as quota movement is observed. Active sessions show plain <code>%/h</code> rates; local estimates explain their limits and do not claim a run-out time.</li>
-<li><strong>The dollar lens keeps the same unit in its header and rows.</strong> When the five-hour limit is absent, the header totals priced active sessions in dollars per hour. It hides the total if an active session cannot be priced.</li>
-<li><strong>API-equivalent estimates cover current models.</strong> Quota Meter includes published GPT-6 Sol and Luna rates and Claude Opus 5.5 pricing, including supported cache, speed, and inference-region variants.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li><strong>Transcript jump arrows work in Rich mode.</strong> Scrolling updates the up and down controls, and the down arrow reaches the latest row before it disappears.</li>
-<li><strong>Codex Desktop working indicators follow the active task.</strong> Finished or unknown-state threads no longer inherit a working marker from a retained desktop file handle; CLI status is unchanged.</li>
+<li><strong>Current Claude, Copilot, Kimi, and Codex sessions remain compatible.</strong> Agent Sessions recognizes the latest observed session fields from Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Codex 0.159.</li>
+<li><strong>Session Runway recognizes Claude Sonnet 5.5.</strong> Dollar estimates use its published input, output, and cache rates.</li>
+<li><strong>DeepSeek Harness 0.2 histories remain browseable.</strong> Native v4 sessions now open alongside v0-v3 history, including developer messages and first-class tool results; discovery and Saved snapshots select supported generations through v4.</li>
+<li><strong>OpenClaw and Cursor retain more useful transcript detail.</strong> OpenClaw shows current tool arguments and nested results, while role-less Cursor turn failures appear as visible errors and count in session previews.</li>
 </ul>
 <h3>Reminder: What You Got in 5.5</h3>
 <ul>
 <li>Browse and search supported DeepSeek Harness histories locally.</li>
 <li>Follow Codex weekly quota from the configured sessions root with clearer reset and session-runway status.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.1</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.2</a></p>
 </div>
             ]]></description>
-            <sparkle:version>77</sparkle:version>
-            <sparkle:shortVersionString>5.5.1</sparkle:shortVersionString>
+            <sparkle:version>78</sparkle:version>
+            <sparkle:shortVersionString>5.5.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg" length="27489588" type="application/octet-stream" sparkle:edSignature="NKEJ7DVl36BofWrxWj/zHk/Sb4p9RlyK4FJWomU9TukTloUqIkOIokDf90xAhCFbzsfA9Wn/cjv/P9MUKMojCQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.2/AgentSessions-5.5.2.dmg" length="27588836" type="application/octet-stream" sparkle:edSignature="IxeCXPHsLCmHJvLSA2lekDYlkIU1i5JHOm3XgOx88KXyf6dpwV1YqP+ue99ty4T6wb3aGkPM6huAgHIvV6RUCA=="/>
         </item>
     </channel>
 </rss>
