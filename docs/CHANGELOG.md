@@ -6,13 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ## [5.5.2] - 2026-09-29
 
-- **Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Sonnet 5.5 stay current.** Sanitized fixtures cover their newly observed session fields, Kimi tool-result timing remains available for a future timing surface, and Session Runway recognizes Claude Sonnet 5.5 at its published input, output, and cache rates. Copilot's new reasoning and model/effort records remain available for presentation follow-ups.
-- **Codex 0.159 sessions remain compatible.** Retained Guardian context, assistant completeness, attribution errors, resume settings, and retained-source provenance are covered by sanitized fixtures; incomplete retained context remains tracked as a presentation follow-up.
-- **DeepSeek Harness 0.2 histories remain browseable.** The reader now admits native v4 artifacts, including producer-owned message sources, first-class tool-role results, developer messages, and the stricter v4 relationship and integrity checks. Discovery and Saved snapshots include canonical generations through v4 while retaining v0-v3 migration support.
-- **DeepSeek Harness enters weekly format monitoring.** The check selects up to five canonical local sessions by source-reported creation time, validates every event, and fingerprints all rows without recording prompt or tool payload values. Freshness is assessed per session; artifact mtime is diagnostic only, and historical samples detect drift without supporting fresh compatibility claims. Known v3 surface records follow the app's validation rules. Catalog-known but unbaselined event shapes and unknown ignorable v3 events are reported separately; newly observed keys and unsupported required event types remain drift findings.
-- **OpenClaw keeps current tool arguments and results.** Tool calls that store arguments under `input` now render with those arguments, and nested `toolResult` content is retained as the visible tool output with its error state and identifiers.
-- **Cursor shows role-less turn errors.** A `turn_ended` record with `status=error` now appears as a visible error event and contributes to lightweight session preview counts.
-- **Weekly format evidence covers recent Cursor sessions and actionable support gates.** Cursor schema checks union the five newest transcripts; compatibility recommendations no longer ask for unavailable prebump drivers, and latest-session evidence requires a known matching upstream build.
+- **Current Claude, Copilot, Kimi, and Codex sessions remain compatible.** Agent Sessions recognizes the latest observed session fields from Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Codex 0.159.
+- **Session Runway recognizes Claude Sonnet 5.5.** Dollar estimates use its published input, output, and cache rates.
+- **DeepSeek Harness 0.2 histories remain browseable.** Native v4 sessions now open alongside v0-v3 history, including developer messages and first-class tool results; discovery and Saved snapshots select supported generations through v4.
+- **OpenClaw and Cursor retain more useful transcript detail.** OpenClaw shows current tool arguments and nested results, while role-less Cursor turn failures appear as visible errors and count in session previews.
 
 ## [5.5.1] - 2026-09-23
 
