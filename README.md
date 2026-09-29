@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg"><b>Download Agent Sessions 5.5.1</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.2/AgentSessions-5.5.2.dmg"><b>Download Agent Sessions 5.5.2</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -34,11 +34,11 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
-## What's New in 5.5.1
+## What's New in 5.5.2
 
-- **Open existing Codex Desktop conversations.** Find a local desktop session in your history and continue it in Codex Desktop from its row or toolbar action. Surface badges distinguish work, desktop, CLI, and VS Code sessions.
-- **Search more Cursor history.** Agent Sessions reads supported ACP-persisted Cursor conversations from local SQLite/protobuf stores. This surface is for browsing and search; CLI resume remains unavailable.
-- **Weekly Quota Meter estimates.** Active sessions show weekly burn rates from local history, including archived Codex sessions. The dollar lens keeps its header in dollars per hour, and weekly local estimates do not claim a run-out time.
+- **Current agent formats stay compatible.** Agent Sessions recognizes the latest observed session fields from Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Codex 0.159.
+- **DeepSeek Harness 0.2 histories remain browseable.** Native v4 sessions open alongside v0-v3 history, including developer messages and first-class tool results.
+- **More transcript detail survives parsing.** OpenClaw shows current tool arguments and nested results, while role-less Cursor turn failures appear as visible errors.
 
 ## What's New in 5.5
 
@@ -112,7 +112,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.5.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.1/AgentSessions-5.5.1.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.5.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.2/AgentSessions-5.5.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
