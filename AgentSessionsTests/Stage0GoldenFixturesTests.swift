@@ -45,7 +45,7 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(worldState.isEmpty, "world_state event should survive parsing as .meta")
     }
 
-    func testCodexSeptemberSchemaCandidatesSurviveParsing() throws {
+    func testCodexSeptemberSchemaAdditionsSurviveParsing() throws {
         let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
         guard let full = SessionIndexer().parseFileFull(at: url) else {
             return XCTFail("full parse returned nil")
@@ -54,10 +54,19 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         for key in [
             "retained_context", "user_messages_incomplete", "questions",
             "runtime_workspace_roots", "executed_tool_calls", "tool_calls_complete",
+            "guardian_metadata", "assistant_messages", "assistant_messages_incomplete",
+            "retained_source", "revision", "cyber_access_program", "error_reason",
         ] {
             XCTAssertTrue(full.events.contains { $0.rawJSON.contains("\"\(key)\"") },
                           "Codex \(key) field should survive parsing")
         }
+
+        XCTAssertTrue(full.events.contains {
+            $0.kind == .user && $0.rawJSON.contains("\"retained_source\"")
+        }, "retained-source messages should remain ordinary transcript messages")
+        XCTAssertTrue(full.events.contains {
+            $0.kind == .meta && $0.rawJSON.contains("\"assistant_messages\"")
+        }, "retained-context snapshots should remain metadata instead of replaying messages")
     }
 
     func testClaudeSmallPreviewAndFull() throws {
@@ -85,7 +94,12 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             return String(data: data, encoding: .utf8)
         }
 
-        for key in ["advisorModel", "input_transformations", "managedCommit", "turnOrigin"] {
+        for key in [
+            "advisorModel", "input_transformations", "managedCommit", "turnOrigin",
+            "fallback_credit", "renderedRole", "builtInTypes", "credential_org",
+            "nameOnlyAnnouncements", "contextRendering", "echoWireToolInputs",
+            "keptReminders", "reminderFold", "systemTurns", "turnPosition",
+        ] {
             XCTAssertTrue(decoded.contains { $0.contains("\"\(key)\"") },
                           "Claude \(key) field should survive parsing")
         }
@@ -198,6 +212,18 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(full.events.isEmpty)
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_call }))
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_result }))
+
+        let decodedRawEvents = full.events.compactMap { event -> String? in
+            guard let data = Data(base64Encoded: event.rawJSON) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        for key in [
+            "responsesReasoning", "initialEffort", "contentBlocks", "reasoningBlocks",
+            "encrypted_content", "summary", "toolTitle",
+        ] {
+            XCTAssertTrue(decodedRawEvents.contains { $0.contains("\"\(key)\"") },
+                          "Copilot 1.0.89 \(key) field should survive parsing")
+        }
     }
 
     func testCopilotLargeAndSchemaDriftParses() throws {

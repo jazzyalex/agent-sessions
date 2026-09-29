@@ -1,8 +1,12 @@
 agent_sessions_version: "5.5.1-unreleased"
-as_of_commit: "5c359a7f+working-tree"
+as_of_commit: "7714ccaf+working-tree"
 as_of_date: 2026-09-29
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-09-29 final 16-agent sweep: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json. Codex 0.159.0, Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and DeepSeek Harness 0.2.0-rc.2 have fresh schema-clean evidence; Kimi alone reports supports_latest because its upstream fetch was current, while GitHub rate limiting degraded the other equal-version latest sources to cached evidence. Codex status and both Claude status/usage probes passed. Held: Antigravity 1.2.13 has a thin two-event tool-start sample; Hermes 0.21.5 cannot produce a post-update session because the migrated Copilot provider lacks COPILOT_GITHUB_TOKEN; Pi 0.86.1 cannot refresh its reused OAuth token; Grok 1.0.44 is not signed in; OpenClaw still requires its vendor-owned state migration; Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin and fx remain steward-owned."
+  - "2026-09-29 Copilot 1.0.89 verification: a fresh tool-bearing session exposed additive Responses reasoning, internal system-block, friendly tool-title, and user-message model/effort fields. An all-session 16-session sweep found no remaining fixture bucket/key gap or dynamic-key container; four standard-redacted records extend the normal fixture, and the repeat prebump proves all required buckets with zero unknown types, unknown keys, or parse errors. Reasoning presentation and model/effort attribution are filed as backlog candidates. All-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/copilot/all-session-baseline.txt. Drift report: scripts/probe_scan_output/agent_watch/20260929-190756-016498Z-p80735-prebump/report.json. Clean prebump: scripts/probe_scan_output/agent_watch/20260929-191448-106542Z-p83701-prebump/report.json."
+  - "2026-09-29 Claude 2.1.285 and Kimi 2.1.1 verification: fresh tool-bearing sessions match refreshed sanitized baselines after all-session sweeps classified Claude's new organization, fallback-credit, rendered-role, turn-position, prompt-snapshot, and announcement fields and Kimi's tool-result duration. Claude's 1,922-session and Kimi's 8-session repeat sweeps report no remaining fixture bucket/key gap. Claude's new Sonnet 5.5 model label is priced from Anthropic's published rates. Claude all-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/claude/all-session-baseline.txt. Kimi all-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/kimi/all-session-baseline.txt. Claude prebump: scripts/probe_scan_output/agent_watch/20260929-190710-208052Z-p80382-prebump/report.json. Kimi prebump: scripts/probe_scan_output/agent_watch/20260929-190503-758607Z-p79741-prebump/report.json."
+  - "2026-09-29 Codex 0.159.0 verification: a fresh isolated tool-bearing session reproduced the retained_source provenance shape. A repeat all-session sweep of 1,426 local rollouts found and then closed two remaining nested fixture gaps: Guardian retained-source metadata and MCP source connector identity. Five redacted normal-fixture records now cover the complete union; the parser safely preserves these records, the existing retained-context completeness backlog entry includes assistant completeness and provenance completeness, and a hardened 0.159.0 prebump proves message, custom-tool call/result, and token-count buckets. All-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/codex/all-session-baseline.txt. Prebump: scripts/probe_scan_output/agent_watch/20260929-190258-242921Z-p78637-prebump/report.json."
   - "2026-09-29 DeepSeek Harness v4 verification: installed, upstream, and verified versions are 0.2.0-rc.2. A fresh headless tool session proved message, tool, usage, relationship, and integrity buckets; the production catalog, synthetic v4 fixture pair, parser tests, Debug build, and 3,200-test suite all pass. The final weekly reports supports_latest for DSH. The same sweep independently found high-severity Codex 0.159.0 schema drift, which is outside this DSH ceiling advance. Prebump: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json. Final weekly: scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json."
   - "2026-09-27 Kimi follow-up: a fresh 2.0.2 Bash turn proved agent.message.appended user, assistant, tool-call, and tool-result rows duplicate the legacy context projection. Sanitized normal-fixture coverage and a no-duplicate parser regression preserve the legacy projection as canonical; the strengthened prebump now requires tool traffic and matches baseline. Kimi advances to verified 2.0.2; upstream 2.1.1 remains unverified. Prebump report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json. Final weekly report: scripts/probe_scan_output/agent_watch/20260927-045502-543478Z-p15724/report.json."
   - "2026-09-26 final 16-agent format check: report scripts/probe_scan_output/agent_watch/20260926-173849-143087Z-p81513/report.json. Codex 0.157.0, Claude 2.1.278, and Copilot 1.0.87 retain ceilings established by fresh, schema-clean prebump sessions; current Codex/Claude usage and status probes pass. Codex compaction/resume and MCP-attribution shapes are fixture-covered after an all-session sweep of 1,406 local sessions found no remaining bucket/key gap. OpenClaw's current nested toolCall/input and toolResult/content forms are fixture-covered, and the parser now preserves their arguments and result text; its ceiling remains 2026.7.1 because a pending local state migration blocks fresh evidence. Pi's thinking/signature/reasoning shapes are fixture-covered and thinking renders as metadata, but 0.86.1 remains blocked on text-only tool-gate runs. Hermes latest-release monitoring now reads the official release-name semver and reports installed-only at 0.21.1 versus upstream 0.21.5. DSH's five fresh 0.1.5-rc.2 sessions remain clean; its 0.1.6-alpha.2 ceiling is unchanged without an upstream driver. Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin/fx remain steward-owned."
@@ -52,14 +56,14 @@ notes:
   - "2026-09-08 full format check: fresh native evidence verified Codex 0.153.4, Claude 2.1.263, Copilot 1.0.83, Kimi 0.41.0, Antigravity 1.1.27, OpenCode 1.18.29, Hermes 0.21.1, Cursor 2026.9.8, Pi 0.85.1, and Grok 1.0.24 after additive fixture refreshes. No parser behavior change was required. Claude remains installed-only because its updater advertised 2.1.266 but declined to replace 2.1.263; the separate usage capture was repaired and live-verified. Held: OpenClaw 2026.7.1 (vendor workspace migration blocks a fresh run), Qwen 0.14.3 (no modern native session), Devin 3000.6.7 (steward cadence), and fx 0.0.7 pending the requested steward check of 0.0.8. Final weekly report: scripts/probe_scan_output/agent_watch/20260908-235525-879296Z-p58511/report.json."
 agents:
   codex_cli:
-    max_verified_version: "0.157.0"
+    max_verified_version: "0.159.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.278"
+    max_verified_version: "2.1.285"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -75,7 +79,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.87"
+    max_verified_version: "1.0.89"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -106,6 +110,8 @@ agents:
   hermes:
     max_verified_version: "0.21.1"
     version_field: "not_logged"
+    notes:
+      - "Hermes updated to 0.21.5 on 2026-09-29 and restored its pre-existing local patch exactly, but the post-update one-shot stops before session creation because the migrated configuration selects provider `copilot` without `COPILOT_GITHUB_TOKEN`. Keep 0.21.1 until a noninteractive authenticated run writes a fresh matching session. Current-build clean report: scripts/probe_scan_output/agent_watch/20260929-191147-275916Z-p82817-prebump/report.json. Post-update failure: scripts/probe_scan_output/agent_watch/20260929-192532-724083Z-p88348-prebump/report.json."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/hermes/small.json"
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
@@ -157,7 +163,7 @@ agents:
       - "account-level quota/rate-limit feed"
       - "subagent hierarchy"
     notes:
-      - "Pi session transcripts provide token and API-equivalent cost telemetry; the unsupported quota surface is an account-level feed. The 2026-09-25 0.86.1 prebump initially matched the five-type baseline with only six events from a one-line greeting. The driver now enables only read-only `ls` and requires an assistant `toolCall`; two retries still returned no tool turn (`pi_tool_turn_missing`), so weekly reports `blocked_stale_sample`. Keep the 0.85.1 ceiling until a rich tool-using sample matches. Reports: scripts/probe_scan_output/agent_watch/20260925-181536-476753Z-p13847-prebump/report.json, 20260925-210650-245130Z-p21689-prebump/report.json, and 20260925-210737-797132Z-p21734-prebump/report.json."
+      - "Pi session transcripts provide token and API-equivalent cost telemetry; the unsupported quota surface is an account-level feed. The driver enables only read-only `ls` and requires an assistant `toolCall`. The 2026-09-29 0.86.1 run wrote a fresh six-event text-only session after OpenAI Codex OAuth refresh failed with 401 `refresh_token_reused`; it therefore failed `pi_tool_turn_missing`. Keep the 0.85.1 ceiling until authentication can produce a rich matching tool session. Report: scripts/probe_scan_output/agent_watch/20260929-190305-339226Z-p78815-prebump/report.json."
     evidence_docs:
       - "https://pi.dev/docs/latest/quickstart"
       - "https://pi.dev/docs/latest/usage"
@@ -172,7 +178,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "2.0.2"
+    max_verified_version: "2.1.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -180,7 +186,7 @@ agents:
       - "quota/rate-limit tracking (Kimi publishes no limit or quota endpoint). NOT the same as token accounting: Kimi 0.38.0 writes per-turn `token_counting.measured` and `token_counting.turn_recorded` records carrying tokens, length, turnId and time. That data is on disk in every session and Agent Sessions does not yet read it — the gap is a missing surface, not a missing source."
       - "subagent hierarchy"
     notes:
-      - "A fresh 2026-09-27 Kimi 2.0.2 Bash turn proved `agent.message.appended` user, assistant, tool-call, and tool-result rows duplicate `context.append_message` / `context.append_loop_event` content. The parser intentionally keeps the appended projection as metadata to prevent duplicate transcript rows. Sanitized normal-fixture coverage includes the agent lifecycle, projection, `llmClientBlockedMs`, `reasoningKey`, and `turnId` shapes; the strengthened tool-bearing prebump matches baseline. Upstream 2.1.1 remains unverified. Report: scripts/probe_scan_output/agent_watch/20260927-045446-050681Z-p15665-prebump/report.json."
+      - "A fresh 2026-09-29 Kimi 2.1.1 Bash turn produced required tool-call and tool-result buckets and matched the refreshed sanitized baseline. Kimi 2.1.1 adds `durationMs` to tool results; the field is retained in raw JSON and tracked with the existing turn-duration presentation follow-up. The parser intentionally keeps `agent.message.appended` projection rows as metadata to prevent duplicate transcript content. Report: scripts/probe_scan_output/agent_watch/20260929-190503-758607Z-p79741-prebump/report.json."
     evidence_docs:
       - "https://github.com/MoonshotAI/kimi-code"
       - "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html"

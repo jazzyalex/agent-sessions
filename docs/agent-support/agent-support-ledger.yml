@@ -11,6 +11,47 @@
 entries:
   - agent_sessions_version: "5.5.1-unreleased"
     as_of_date_utc: "2026-09-29"
+    as_of_commit: "7714ccaf+working-tree"
+    note: "Full 16-agent sweep after current-build upgrades and additive fixture refreshes. Codex 0.159.0, Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and DeepSeek Harness 0.2.0-rc.2 have fresh schema-clean evidence. Kimi is supports_latest; GitHub rate limiting degraded the other equal-version latest sources to cached evidence. Codex status and Claude status/usage probes pass. Final weekly: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.159.0"
+          scope: "installed; installed and cached upstream both 0.159.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260929-190258-242921Z-p78637-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/codex/all-session-baseline.txt", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh tool-bearing evidence covers messages, custom-tool call/result, and token-count buckets. A repeat all-session 1,426-rollout sweep confirms the sanitized fixture covers retained-context, Guardian, attribution, resume, and provenance additions with no remaining bucket/key gap."
+      claude:
+        sessions:
+          max_verified_version: "2.1.285"
+          scope: "installed; latest source degraded during final weekly"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260929-190710-208052Z-p80382-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/claude/all-session-baseline.txt", "Resources/Fixtures/stage0/agents/claude/small.jsonl"]
+          notes: "Fresh Bash evidence matches the sanitized baseline. Organization identity is redacted; fallback credit, rendered role, and turn position are watch items; prompt snapshot and announcement fields are noise. Claude status and authenticated usage probes pass."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.89"
+          scope: "installed; installed and cached upstream both 1.0.89"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260929-190756-016498Z-p80735-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-191448-106542Z-p83701-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/copilot/all-session-baseline.txt"]
+          notes: "Four standard-redacted records cover Responses reasoning, internal system blocks, friendly tool titles, and user-message model/effort attribution. Repeat prebump has all five required buckets, zero unknowns, and zero parse errors."
+      kimi:
+        sessions:
+          max_verified_version: "2.1.1"
+          scope: "latest; installed and upstream both 2.1.1"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260929-190503-758607Z-p79741-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json", "scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/kimi/all-session-baseline.txt", "Resources/Fixtures/stage0/agents/kimi/small.jsonl"]
+          notes: "Fresh Bash call/result evidence matches baseline. New tool-result duration is retained and joins the existing timing presentation follow-up."
+    not_verified:
+      antigravity: {sessions: {held_at_version: "1.1.27", installed_version: "1.2.13", upstream_version: "1.2.13", reason: "Fresh evidence is only a thin two-event sample with a tool start and no result."}}
+      cline: {sessions: {held_at_version: "3.0.62", installed_version: "3.0.65", upstream_version: "3.0.65", reason: "Newest sample predates the installed CLI and no driver is configured."}}
+      cursor: {sessions: {held_at_version: "2026.9.8", installed_version: "2026.9.10", upstream_version: "2026.9.28", reason: "No latest-build fresh session; current local schema remains clean."}}
+      grok: {sessions: {held_at_version: "1.0.24", installed_version: "1.0.44", upstream_version: "1.0.44", reason: "The activated latest binary is not signed in and produced no session."}}
+      hermes: {sessions: {held_at_version: "0.21.1", installed_version: "0.21.5", upstream_version: "0.21.5", reason: "Post-update one-shot requires COPILOT_GITHUB_TOKEN for the migrated provider and produced no session."}}
+      openclaw: {sessions: {held_at_version: "2026.7.1", installed_version: "2026.9.5", upstream_version: "2026.9.6", reason: "Vendor-owned local state migration still blocks fresh session generation."}}
+      opencode: {sessions: {held_at_version: "1.18.29", installed_version: "1.18.31", upstream_version: "1.18.33", reason: "No latest-build fresh session; current local schema remains clean."}}
+      pi: {sessions: {held_at_version: "0.85.1", installed_version: "0.86.1", upstream_version: "0.99.1", reason: "OAuth refresh_token_reused prevented the required tool turn."}}
+      qwen: {sessions: {held_at_version: "0.14.3", installed_version: "0.24.3", upstream_version: "0.24.7", reason: "OAuth free tier is discontinued, no driver exists, and the native sample is stale."}}
+      devin: {sessions: {held_at_version: "3000.6.7 (260a97c8)", installed_version: "unknown", upstream_version: "unknown", reason: "Steward-owned; no local CLI or fresh session."}}
+      fx: {sessions: {held_at_version: "0.0.7", installed_version: "unknown", upstream_version: "0.0.11", reason: "Steward-owned; no local fresh evidence."}}
+  - agent_sessions_version: "5.5.1-unreleased"
+    as_of_date_utc: "2026-09-29"
     as_of_commit: "a93b22b6+working-tree"
     note: "DeepSeek Harness 0.2.0-rc.2 and native v4 support. A fresh real-home headless tool session proved the five required evidence buckets and matched the synthetic v4 baseline with no unknown required schema. Installed and upstream versions match, so the weekly verdict is supports_latest. The same weekly sweep found separate Codex 0.159.0 drift. Prebump: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json. Final weekly: scripts/probe_scan_output/agent_watch/20260929-183758-740009Z-p72498/report.json."
     verified:

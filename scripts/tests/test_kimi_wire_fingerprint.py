@@ -372,6 +372,7 @@ def test_repo_fixture_baseline_covers_the_nested_vocabulary():
     ):
         assert bucket in baseline, f"fixture no longer covers {bucket}"
     assert "isError" in baseline["event.tool.result.result"]
+    assert "durationMs" in baseline["event.tool.result.result"]
     # A fixture that already contained streamed parts would disable the signal.
     assert not any(k.endswith("<multi-per-step>") for k in baseline)
 

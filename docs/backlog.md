@@ -468,7 +468,27 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   `agent_role: null` + `agent_path` form and the legacy form.
 
 ### Watch list from the 2026-08-21 format sweep
-> **open** · sev: low · urg: low · verified 2026-08-30
+> **open** · sev: low · urg: low · verified 2026-09-29
+
+- **Added by the 2026-09-29 Claude 2.1.285 sweep** — retained as watch items because
+  they carry potentially useful state but do not yet justify a presentation surface:
+  - **`fallback_credit`** — records whether a turn used fallback credit; promote if it
+    varies in enough real sessions to explain user-visible usage behavior.
+  - **`renderedRole`** — records the role Claude rendered for an attachment; promote if
+    it changes transcript attribution or visibility.
+  - **`credential_org.organizationUuid`** — organization identity metadata. The fixture
+    keeps only a redacted placeholder; promote only for an explicit account-scope need.
+  - **`turnPosition`** — source ordering metadata; use it if timestamp ordering proves
+    insufficient.
+- **Settled 2026-09-29, do not re-open:** Claude `builtInTypes`,
+  `nameOnlyAnnouncements`, and prompt-snapshot flags are harness/configuration plumbing.
+  They remain sanitized fixture coverage and do not need a product surface.
+- **Copilot `tool.execution_start.data.toolTitle`** — observed once in 1.0.89 as
+  `Running command` beside `toolName: bash`. It may become a useful friendly label if it
+  grows beyond the current redundant single observation.
+- **Settled 2026-09-29, do not re-open:** Copilot system `contentBlocks` are internal
+  prompt assembly, and Responses reasoning `encrypted_content` / block IDs are opaque
+  provider metadata. Fixtures retain only their redacted structure.
 
 - **Added by the 2026-08-30 sweep** (codex 0.151.0, claude 2.1.251) — all ruled *watch*,
   none earning a surface yet:
@@ -525,12 +545,12 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   deleted as settled noise.
 
 ### Codex retained-context completeness is not visible
-> **open** · sev: low · urg: low · verified 2026-09-25
+> **open** · sev: low · urg: low · verified 2026-09-29
 
-- **What:** the 2026-09-25 sweep found `compacted.payload.retained_context` on eight
-  compaction records, including `incomplete` and `user_messages_incomplete` flags. The
-  current parser preserves the records as metadata but does not expose whether the
-  retained context is complete.
+- **What:** the 2026-09-29 sweep found `compacted.payload.retained_context` completeness
+  for both user and assistant messages, plus per-message `complete` state under
+  `retained_source`. The current parser preserves the records as metadata but does not
+  expose whether the retained context is complete.
 - **Where:** the fields are present in the redacted Codex normal fixture. Codex event
   parsing retains the raw record, but no model or transcript view consumes these keys.
 - **Fix shape:** determine how retained messages and verified answers relate to the
@@ -755,16 +775,14 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   with neither, and the transcript shows the optional operation label without changing
   legacy rows.
 
-### Copilot 1.0.82 emits reasoning blocks and the transcript shows none of them
-> **open** · sev: med · urg: low · verified 2026-08-31
+### Copilot reasoning blocks are not visible
+> **open** · sev: med · urg: low · verified 2026-09-29
 
-- **What:** Copilot 1.0.82 added `assistant.message.data.reasoningBlocks`, a
-  `{provider, blocks[]}` object whose blocks are `{type: "thinking", thinking, signature}`.
-  That is the model's reasoning text, delivered as first-class structured data on the
-  assistant record. Nothing in `AgentSessions/` reads it, so the transcript renders the
-  reply and silently drops the thinking that produced it — while Claude's equivalent
-  thinking blocks *are* rendered, so the same user sees reasoning for one agent and not
-  the other.
+- **What:** Copilot 1.0.82 added `assistant.message.data.reasoningBlocks` with legacy
+  `{type: "thinking", thinking, signature}` blocks. Copilot 1.0.89 also writes Responses
+  blocks with `content`, `summary`, `encrypted_content`, and `id`; one observed summary
+  contains a `summary_text` item. Nothing in `AgentSessions/` reads either form, so the
+  transcript drops source-provided reasoning that Claude can present.
 - **Where:** `reasoningBlocks` appears nowhere in `AgentSessions/`. It arrives on the
   `assistant.message` record that the Copilot path already parses for `data.content`, so
   this is an additional read on a record already being decoded, not a new discovery path.
@@ -773,18 +791,38 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   inventing a Copilot-specific presentation. `provider` names which backend produced the
   reasoning and is worth showing on the block header when it is not the session's main
   model.
-- **Risk if wrong:** `signature` is an opaque cryptographic attestation, not text — it
-  must never be rendered. Reasoning content is also the most sensitive part of a
+- **Risk if wrong:** `signature`, `encrypted_content`, and the provider block ID are
+  opaque metadata, not text, and must never be rendered. Reasoning content is also the most sensitive part of a
   transcript to surface by accident, so it should follow whatever collapse/redaction
   default the Claude thinking path already uses, not a looser one.
-- **Why deferred / measure first:** only **2 records across the 13 local Copilot
-  sessions**, because reasoning is model- and mode-dependent. That is thin evidence for a
+- **Why deferred / measure first:** the 2026-09-29 sweep found **8 records across 4 of 16
+  local Copilot sessions**: six legacy thinking blocks and two Responses blocks. That remains thin evidence for a
   render path. Count again on a machine that uses Copilot heavily before building it —
   the `budget_usd` lesson.
-- **To close:** a Copilot session carrying `reasoningBlocks` shows its thinking with the
-  same affordance as a Claude session; `signature` never reaches the view; a session
+- **To close:** a Copilot session carrying either reasoning-block form shows its text or
+  summary with the same affordance as a Claude session; signatures, ciphertext, and IDs
+  never reach the view; a session
   without the field is unchanged. Fixture covers a `thinking` block and an assistant
-  record with no `reasoningBlocks` at all.
+  record with a Responses summary and an assistant record with no `reasoningBlocks` at all.
+
+### Copilot 1.0.89 model and effort can exist only on the user message
+> **open** · sev: med · urg: low · verified 2026-09-29
+
+- **What:** a fresh 1.0.89 session emitted no `session.model_change`. Its effective
+  `model`, `effort`, and `initialEffort` were instead recorded under
+  `user.message.data.responsesReasoning`. The parser and telemetry accumulator only read
+  model configuration from `session.model_change`, so Session Info can omit the model and
+  reasoning effort even though the transcript records both.
+- **Where:** [CopilotSessionParser.swift](../AgentSessions/Services/CopilotSessionParser.swift)
+  and [CopilotTelemetryAccumulator.swift](../AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift)
+  handle `session.model_change`; the sanitized normal fixture now covers the 1.0.89 user
+  message shape.
+- **Fix shape:** use `responsesReasoning.model` and effective `effort` as initial/current
+  fallbacks when no explicit model-change record exists. Keep `session.model_change` as
+  the authoritative transition source and pin the relationship between `initialEffort`
+  and `effort` before presenting a change.
+- **To close:** parser and telemetry tests cover a session with only
+  `responsesReasoning`, a later explicit model change, and a legacy session with neither.
 
 ### Codex `content_item_kinds` states what the app currently guesses by string-matching
 > **open** · sev: low · urg: low · verified 2026-08-30
@@ -1292,24 +1330,26 @@ Fresh 2.0.2 Bash evidence proved parity for user, assistant, tool-call, and tool
 - **To close:** `agentId` is confirmed to vary in a real session and Kimi subagent events
   become attributable — or it is recorded here as constant and dropped.
 
-### `turn.ended` carries per-turn duration that nothing reads
-> **open** · sev: low · urg: low · verified 2026-08-17
+### Kimi turn and tool durations are not visible
+> **open** · sev: low · urg: low · verified 2026-09-29
 
-- **What:** Kimi's `turn.ended` wire event carries `durationMs` and `reason`, present in
-  every session. The 2026-08-13 ledger entry already named this "the natural source of a
+- **What:** Kimi's `turn.ended` wire event carries `durationMs` and `reason`, and Kimi
+  2.1.1 adds `durationMs` to `tool.result.result`. The 2026-08-13 ledger entry already
+  named the turn field "the natural source of a
   per-turn duration UI" and it has sat unused since — filed here so it stops living as an
   aside in a ledger note.
 - **Where:** [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift) —
   `turn.ended` falls through the `default:` branch to `.meta`, so both fields survive in
-  `rawJSON` and are never read. `durationMs` appears nowhere in `AgentSessions/`.
+  `rawJSON` and are never read. Tool-result duration is likewise retained without a
+  presentation path.
 - **Fix shape:** per-turn timing already has a home in
   [TranscriptTurnTiming.swift](../AgentSessions/Services/TranscriptTurnTiming.swift),
   which currently derives timing from timestamps; a source-reported duration is more
   accurate where it exists.
 - **Risk if wrong:** only Kimi reports this, so any UI must degrade cleanly for the other
   eleven sources rather than showing a gap.
-- **To close:** Kimi turns show a source-reported duration, or the field is explicitly
-  declared redundant against derived timing.
+- **To close:** Kimi turns and tools show source-reported durations, or the fields are
+  explicitly declared redundant against derived timing.
 
 ### Fixture does not cover image / audio / video content parts
 > **open** · sev: low · urg: low · verified —

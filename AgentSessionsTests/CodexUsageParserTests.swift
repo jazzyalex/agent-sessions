@@ -4690,6 +4690,15 @@ final class CodexUsageParserTests: XCTestCase {
         // lower price must not change the Sonnet 4.x fallback.
         XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.outputPerMTok, 10.0)
         XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.inputPerMTok, 2.0)
+        let sonnet55 = t.price(forModel: "claude-sonnet-5-5")
+        XCTAssertEqual(sonnet55?.inputPerMTok, 2.0)
+        XCTAssertEqual(sonnet55?.outputPerMTok, 10.0)
+        XCTAssertEqual(sonnet55?.cachedInputPerMTok, 0.2)
+        XCTAssertEqual(sonnet55?.cacheWritePerMTok, 2.5)
+        XCTAssertEqual(sonnet55?.cacheWrite1hPerMTok, 4.0)
+        XCTAssertEqual(sonnet55?.inferenceGeoUSMultiplier, 1.1)
+        XCTAssertEqual(t.price(forModel: "claude-sonnet-5-5-20260928")?.outputPerMTok, 10.0)
+        XCTAssertNil(t.price(forModel: "claude-sonnet-5-6"))
         XCTAssertEqual(t.price(forModel: "claude-sonnet-4-5-20250929")?.outputPerMTok, 15.0)
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 25.0)   // Opus dropped to $5/$25
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)

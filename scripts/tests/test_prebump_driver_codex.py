@@ -50,3 +50,9 @@ def test_codex_config_has_prebump_block():
     assert pb["discover_session"]["globs"][0].endswith(".jsonl")
     assert pb["discover_session"]["roots"] == [".codex/sessions"]
     assert "session_meta" in pb["discover_session"]["required_types"]
+    assert pb["required_schema_buckets"] == [
+        "response_item.payload:message",
+        "response_item.payload:custom_tool_call",
+        "response_item.payload:custom_tool_call_output",
+        "event_msg.payload:token_count",
+    ]

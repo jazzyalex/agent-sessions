@@ -470,3 +470,22 @@ def test_rebuild_merges_missing_grok_sidecar_structure_without_overwriting_value
         "agent_name": "grok",
         "last_recap": "[trimmed]",
     }
+
+
+def test_rebuild_redacts_claude_organization_identity_and_string_lists():
+    import rebuild_stage0_baseline as rebuild
+
+    source = {
+        "type": "attachment",
+        "attachment": {
+            "type": "credential_org",
+            "organizationUuid": "019db6b0-1234-7000-8000-private",
+            "builtInTypes": ["private-agent-type"],
+        },
+    }
+    redacted = rebuild._redact(source, frozenset())
+
+    assert redacted["type"] == "attachment"
+    assert redacted["attachment"]["type"] == "credential_org"
+    assert redacted["attachment"]["organizationUuid"] == rebuild.PLACEHOLDER
+    assert redacted["attachment"]["builtInTypes"] == [rebuild.PLACEHOLDER]

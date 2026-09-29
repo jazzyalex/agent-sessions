@@ -136,6 +136,11 @@ final class KimiSessionParserTests: XCTestCase {
         XCTAssertEqual(session.events.filter {
             $0.kind == .tool_result && $0.messageID == "synthetic-tool"
         }.count, 1)
+        XCTAssertTrue(session.events.contains {
+            $0.kind == .tool_result &&
+            $0.messageID == "synthetic-tool" &&
+            $0.rawJSON.contains("\"durationMs\":1")
+        })
     }
 
     func testUnknownFutureOpTypeSurvivesAsMeta() throws {

@@ -40,6 +40,12 @@
         "sandbox": {"mode": "home_override", "subdir": "codex_sandbox"},
         "prompt": "List files in the current directory.",
         "timeout_seconds": 180,
+        "required_schema_buckets": [
+          "response_item.payload:message",
+          "response_item.payload:custom_tool_call",
+          "response_item.payload:custom_tool_call_output",
+          "event_msg.payload:token_count"
+        ],
         "env_vars": ["OPENAI_API_KEY"],
         "credential_files": ["~/.codex/auth.json"],
         "discover_session": {

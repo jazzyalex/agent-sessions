@@ -46,4 +46,4 @@
 {"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"SYNTHETIC KIMI PARITY PROMPT"}],"toolCalls":[],"origin":{"kind":"user"}},"time":0,"agentId":"main"}
 {"type":"context.append_loop_event","event":{"type":"content.part","uuid":"synthetic-text","turnId":"synthetic-turn","step":1,"stepUuid":"synthetic-step","part":{"type":"text","text":"SYNTHETIC ASSISTANT TEXT"}},"time":0,"agentId":"main"}
 {"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"synthetic-tool","turnId":"synthetic-turn","step":1,"stepUuid":"synthetic-step","toolCallId":"synthetic-tool","name":"Bash","args":{"command":"pwd"},"display":[]},"time":0,"agentId":"main"}
-{"type":"context.append_loop_event","event":{"type":"tool.result","parentUuid":"synthetic-tool","toolCallId":"synthetic-tool","result":{"output":"/tmp/synthetic-kimi","isError":false}},"time":0,"agentId":"main"}
+{"type":"context.append_loop_event","event":{"type":"tool.result","parentUuid":"synthetic-tool","toolCallId":"synthetic-tool","result":{"output":"/tmp/synthetic-kimi","isError":false,"durationMs":1}},"time":0,"agentId":"main"}
