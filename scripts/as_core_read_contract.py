@@ -157,6 +157,15 @@ class ReadContract(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("requires --id", result.stderr)
 
+    def test_file_identity_must_match_when_supplied(self):
+        self.write_events([{"role": "user", "text": "one"}])
+        identity = self.call("parse")[0]["id"]
+        page, event = self.call("read", "--id", identity)
+        self.assertEqual(page["id"], identity)
+        self.assertEqual(event["text"], "one")
+        result = self.call("read", "--id", "different-session", expected=1)
+        self.assertIn("identity mismatch", result.stderr)
+
     def test_database_identity_selects_only_requested_session(self):
         database = self.root / "state.db"
         with sqlite3.connect(database) as db:

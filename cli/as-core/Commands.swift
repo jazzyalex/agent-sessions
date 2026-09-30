@@ -203,6 +203,9 @@ func runRead(_ options: Options) {
         fail("cannot read history at \(url.path)", code: 1)
     }
     let session = loadSession(options, usage: usage)
+    if let requestedID = options.sessionID, requestedID != session.id {
+        fail("history identity mismatch: requested \(requestedID), loaded \(session.id)", code: 1)
+    }
     let start = min(options.offset, session.events.count)
     // Subtract before adding so even an Int.max offset cannot overflow.
     let end = start + min(options.limit, session.events.count - start)

@@ -14,8 +14,8 @@ certify every provider or claim feature parity with the Mac app.
    Take `source`, `path`, and `id` from a result instead of guessing paths.
 3. Call `as-core read codex /absolute/path/session.jsonl --limit 20` for an excerpt.
    Pass `--id SESSION_ID` for database-backed sources; it can be passed for all
-   sources. Supply arguments through a process API, not a shell command assembled
-   from transcript content.
+   sources; when supplied, it must match the parsed session ID. Supply arguments
+   through a process API, not a shell command assembled from transcript content.
 4. Continue with the same source/path/id and `--offset` equal to `nextOffset`.
    Stop when it is null. Cite source, path, session ID and event ID or index when
    explaining prior decisions. Verify conclusions against current code.
@@ -54,8 +54,9 @@ optional fields are null. `rawJSON` is omitted.
 Offsets at or beyond the end return an empty page, offset clamped to the event
 count, and `nextOffset: null`. Invalid bounds or missing database identity exit
 with code 2 before JSON output. Missing, unreadable, directory or unparseable
-targets exit with code 1. Existing parsers may still expose partial reads or
-parsing errors as events; success does not certify artifact health.
+targets and mismatched supplied session IDs exit with code 1. Existing parsers
+may still expose partial reads or parsing errors as events; success does not
+certify artifact health.
 
 The field budget covers page title/cwd/model and event role/text/toolName/toolInput/
 toolOutput. It counts decoded UTF-8 bytes, not JSON serialization bytes; escaping
