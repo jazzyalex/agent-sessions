@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.5.3] - 2026-09-29
+
 - Added published GPT-6.1 Sol pricing to Session Runway so its activity can contribute to dollar estimates and shared weekly calibration alongside Astra.
 
 ## [5.5.2] - 2026-09-29
