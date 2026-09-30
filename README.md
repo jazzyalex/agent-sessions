@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.2/AgentSessions-5.5.2.dmg"><b>Download Agent Sessions 5.5.2</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.3/AgentSessions-5.5.3.dmg"><b>Download Agent Sessions 5.5.3</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -33,6 +33,10 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 5.5.3
+
+- **Session Runway recognizes GPT-6.1 Sol.** Published rates cover cached input, fast mode, and long context, so mixed Sol/Astra activity contributes to dollar estimates and shared weekly calibration.
 
 ## What's New in 5.5.2
 
@@ -112,7 +116,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.5.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.2/AgentSessions-5.5.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.5.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.3/AgentSessions-5.5.3.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
