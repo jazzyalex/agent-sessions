@@ -1,3 +1,27 @@
+## 2026-09-29 13:59 · format-check-5.5.2-release · Current formats verified and 5.5.2 released
+status: done
+
+**State:** Current agent formats are verified, committed, pushed, and shipped in Agent Sessions 5.5.2 build 78.
+
+**Verified:**
+- `main` and `origin/main` are synchronized at `296e3a3c77d3cd639ae18f08bbfdb5e7425663aa` (`chore(release): update appcast for 5.5.2`); the bounded handover snapshot was otherwise clean.
+- Format work is in `358f53a3`; Oracle GPT-5.6 Sol Extra High returned SHIP with no actionable correctness, privacy, schema, resource, pricing, evidence, or test-integrity findings.
+- Release QA reported 3,197 passed, 3 skipped, 0 failed, plus 413 passing Python checks. Apple notarization/stapling, DMG smoke tests, Sparkle appcast verification, Homebrew cask update, and final deployment verification passed.
+- Production release: https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.2; DMG SHA-256 `52f40cef0b0c361755b8760de309974610ff9b31879fa2386d018b8a141b882f`.
+
+**Decided / don't redo:**
+- Do not rerun the format sweep, Oracle review, or release pipeline unless source or published artifacts change. The strict final weekly verdict keeps Kimi at `supports_latest`; equal-version GitHub-backed agents remain conservatively installed-only when their latest-source read is cached.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — this user-authorized checkpoint; intentionally remains uncommitted and unpushed.
+
+**Key files:**
+- `docs/agent-support/agent-support-matrix.yml` and `docs/agent-support/agent-format-tracker.jsonl` — verified ceilings, blockers, all-session evidence, and append-only version advances.
+- `docs/CHANGELOG.md`, `README.md`, `docs/index.html`, and `appcast.xml` — 5.5.2 public notes, download links, and signed update feed.
+
+**Next:**
+1. Optional manual follow-up: clean-machine install and upgrade testing from 5.5.1 through Sparkle and Homebrew.
+
 ## 2026-09-21 17:29 · transcript-rich-jump-controls · Rich transcript jump controls fixed and pushed
 status: done
 

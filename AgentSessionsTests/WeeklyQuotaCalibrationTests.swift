@@ -1751,11 +1751,12 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 
     /// Writes a Codex transcript whose turns all carry `resetsAt` as their weekly
     /// anchor, so a scan of this root produces a real, priced measurement.
-    private func writeTranscript(outputTokens: Int, resetsAt: Date, at: Date) throws {
+    private func writeTranscript(outputTokens: Int, resetsAt: Date, at: Date,
+                                 model: String = "gpt-5.6", name: String = "s.jsonl") throws {
         let iso = ISO8601DateFormatter().string(from: at)
         let lines = [
             "{\"timestamp\":\"\(iso)\",\"type\":\"session_meta\",\"payload\":{\"account_id\":\"\(codexAccountID)\"}}",
-            "{\"timestamp\":\"\(iso)\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6\"}}",
+            "{\"timestamp\":\"\(iso)\",\"type\":\"turn_context\",\"payload\":{\"model\":\"\(model)\"}}",
             "{\"timestamp\":\"\(iso)\",\"type\":\"token_count\",\"payload\":{\"info\":{\"total_token_usage\":"
             + "{\"input_tokens\":0,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,"
             + "\"output_tokens\":\(outputTokens),\"total_tokens\":\(outputTokens)},\"last_token_usage\":"
@@ -1765,7 +1766,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
             + "\"resets_at\":\(resetsAt.timeIntervalSince1970)},\"secondary\":null}}}"
         ]
         try lines.joined(separator: "\n").write(
-            to: root.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+            to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
     private func waitForScan(_ store: WeeklyQuotaCalibrationStore, provider: String) {
@@ -2183,6 +2184,75 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 
     /// Compatibility is an in-memory rule too. A remotely refreshed price table
     /// must invalidate a bootstrap already selected by this process.
+    func testSol61PriceUpdateRecoversAllWeeklyRowsFromRejectedMixedHistory() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let now = t0.addingTimeInterval(120)
+        try writeTranscript(outputTokens: 100_000, resetsAt: resetsAt, at: t0,
+                            model: "gpt-6.1-sol", name: "sol.jsonl")
+        try writeTranscript(outputTokens: 100_000, resetsAt: resetsAt, at: t0,
+                            model: "gpt-6-astra", name: "astra.jsonl")
+        let prices = RunwayPriceTable.makeForTesting()
+        let corrected = Data(RunwayPriceTable.bundledJSON.utf8)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: corrected) as? [String: Any])
+        var models = try XCTUnwrap(old["models"] as? [String: Any])
+        models.removeValue(forKey: "gpt-6.1-sol")
+        old["models"] = models
+        XCTAssertTrue(prices.loadForTesting(json: try JSONSerialization.data(withJSONObject: old)))
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, root, reset, minutes, used, _, now, account, cancelled in
+                CodexWeeklyQuotaBootstrapScanner.scan(
+                    root: root, resetsAt: reset, windowMinutes: minutes,
+                    usedPercentPoints: used, priceTable: prices, now: now,
+                    expectedAccountHash: account, shouldCancel: cancelled)
+            },
+            priceRevisionProvider: { prices.revision })
+        func ensure() {
+            store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                                  windowMinutes: 10080, usedPercentPoints: 6,
+                                  accountHash: codexAccountHash, limitShape: "weekly",
+                                  sourceFamily: "oauth", now: now, defaults: suite)
+            waitForScanToFinish(store, provider: "codex")
+        }
+        ensure()
+        XCTAssertNil(store.bootstrap(provider: "codex"))
+        XCTAssertTrue(store.scanIsCoolingDownForTesting(provider: "codex", now: now))
+        XCTAssertTrue(store.calibrationAbandoned(provider: "codex", now: now))
+
+        XCTAssertTrue(prices.loadForTesting(json: corrected))
+        ensure() // Same instant: the table change must bypass the old ten-minute cooldown.
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 1,
+                       "scope transition resets bookkeeping and dispatches a new scan")
+        XCTAssertFalse(store.scanIsCoolingDownForTesting(provider: "codex", now: now))
+        XCTAssertEqual(try XCTUnwrap(store.bootstrap(provider: "codex")).dollars, 6, accuracy: 0.0001)
+        let scope = WeeklyQuotaCalibrationScope(
+            provider: "codex", accountHash: codexAccountHash, sourceFamily: "oauth",
+            limitShape: "weekly", priceRevision: prices.revision)
+        store.observeQuota(provider: "codex", remainingPercent: 94, hasExactPercent: false,
+                           resetAt: resetsAt, observedAt: now, scope: scope, now: now, defaults: suite)
+        let calibration = store.runwayCalibration(provider: "codex", now: now)
+        XCTAssertTrue(calibration.state.canDisplayRate)
+        XCTAssertFalse(store.calibrationAbandoned(provider: "codex", now: now))
+
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 94, resetAt: resetsAt,
+            currentRunoutAt: resetsAt, observedAt: now, hasProjectedRunout: false,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let activities = ["gpt-6.1-sol", "gpt-6-astra", "unknown-model"].map { model in
+            RunwaySessionActivity(
+                identity: .init(id: model, displayName: model, isGoal: false, logPaths: [model]),
+                tokensPerSecond: 1, sampleStart: t0, sampleEnd: now,
+                inputPerSecond: 0, cachedInputPerSecond: 0, outputPerSecond: 1,
+                cacheCreationPerSecond: 0, modelSlug: model)
+        }
+        let weekly = try XCTUnwrap(CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: baseline, activities: activities, priceTable: prices,
+            percentPointsPerDollar: try XCTUnwrap(calibration.ratio), maxRows: 5))
+        XCTAssertEqual(Set(weekly.snapshot.rows.map(\.id)), ["gpt-6.1-sol", "gpt-6-astra"])
+        XCTAssertEqual(weekly.unpriceableIDs, ["unknown-model"])
+        XCTAssertTrue(weekly.snapshot.rows.allSatisfy { $0.confidence == .direct && $0.displayRate > 0 })
+    }
+
     func testAPriceRevisionChangeDropsAnInMemoryBootstrap() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
         let prices = RunwayPriceTable.makeForTesting()

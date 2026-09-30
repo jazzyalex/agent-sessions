@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added published GPT-6.1 Sol pricing to Session Runway so its activity can contribute to dollar estimates and shared weekly calibration alongside Astra.
+
 ## [5.5.2] - 2026-09-29
 
 - **Current Claude, Copilot, Kimi, and Codex sessions remain compatible.** Agent Sessions recognizes the latest observed session fields from Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and Codex 0.159.

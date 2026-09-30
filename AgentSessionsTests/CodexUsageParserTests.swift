@@ -4731,6 +4731,36 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(t.price(forModel: nil))
     }
 
+    func testSol61PricingUsesPublishedCacheFastAndLongContextRates() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        let price = try XCTUnwrap(table.price(forModel: "gpt-6.1-sol"))
+        XCTAssertEqual(table.price(forModel: "gpt-6.1-sol-2026-09-29"), price)
+        XCTAssertEqual(table.price(forModel: "gpt-6.1-sol-20260929"), price)
+        XCTAssertNil(table.price(forModel: "gpt-6.1-sol-preview"))
+        XCTAssertNil(table.price(forModel: "gpt-6.2-sol"))
+        XCTAssertEqual(table.price(forModel: "gpt-6-sol")?.cachedInputPerMTok, 0.2)
+
+        let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))
+        XCTAssertEqual(standard.inputPerMTok, 2)
+        XCTAssertEqual(standard.cachedInputPerMTok, 0.1)
+        XCTAssertEqual(standard.outputPerMTok, 10)
+        XCTAssertEqual(standard.cacheWritePerMTok, 2.5)
+        let fast = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_000))
+        XCTAssertEqual(fast.inputPerMTok, 4)
+        XCTAssertEqual(fast.cachedInputPerMTok, 0.2)
+        XCTAssertEqual(fast.outputPerMTok, 20)
+        XCTAssertEqual(fast.cacheWritePerMTok, 5)
+
+        for speed in [RunwaySpeedTier.standard, .fast] {
+            let base = try XCTUnwrap(price.rates(for: speed, contextInputTokens: 272_000))
+            let long = try XCTUnwrap(price.rates(for: speed, contextInputTokens: 272_001))
+            XCTAssertEqual(long.inputPerMTok, base.inputPerMTok * 2)
+            XCTAssertEqual(long.cachedInputPerMTok, base.cachedInputPerMTok * 2)
+            XCTAssertEqual(long.cacheWritePerMTok, base.cacheWritePerMTok.map { $0 * 2 })
+            XCTAssertEqual(long.outputPerMTok, base.outputPerMTok * 1.5)
+        }
+    }
+
     func testOpus55PricingUsesPublishedCacheAndFastRates() throws {
         let table = RunwayPriceTable.makeForTesting()
         let price = try XCTUnwrap(table.price(forModel: "claude-opus-5-5"))

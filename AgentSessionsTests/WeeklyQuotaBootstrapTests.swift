@@ -80,6 +80,18 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             now: anchor.addingTimeInterval(-3600))
     }
 
+    func testMixedSol61AndAstraHistoryIsFullyPriceable() throws {
+        let at = anchor.addingTimeInterval(-7200)
+        try write([modelLine("gpt-6.1-sol", at: at),
+                   turn(output: 100_000, resetsAt: anchor, at: at)], name: "sol.jsonl")
+        try write([modelLine("gpt-6-astra", at: at),
+                   turn(output: 100_000, resetsAt: anchor, at: at)], name: "astra.jsonl")
+        let result = try XCTUnwrap(scan(usedPercentPoints: 6))
+        XCTAssertEqual(result.dollars, 6, accuracy: 0.0001)
+        XCTAssertEqual(result.unpricedVolumeShare, 0, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(result.percentPointsPerDollar), 1, accuracy: 0.0001)
+    }
+
     /// The Claude scan feeds the same calibration the runway `$` view is weighted by,
     /// so it must price a 1-hour cache write at 2× input exactly as the runway does —
     /// otherwise the weekly denominator and the `$/h` numerator describe different
