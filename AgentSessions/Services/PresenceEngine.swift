@@ -1239,6 +1239,9 @@ actor PresenceEngine {
 
         let commandInfos = psData.map { CodexActiveSessionsModel.parsePSCommandListOutput(String(decoding: $0, as: UTF8.self)) } ?? []
         let codexDesktopPIDs = CodexActiveSessionsModel.codexDesktopPIDs(from: commandInfos)
+        let codexHeadlessPIDs = Set(
+            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["codex"])
+        )
         let claudeTTYPIDs = Set(
             commandInfos
                 .filter { info in
@@ -1247,23 +1250,25 @@ actor PresenceEngine {
                 }
                 .map(\.pid)
         )
-        // Headless runs (`claude -p` from launchd, a script, or another app) never carry a
-        // tty, so the terminal-shaped filter above cannot see them. They are matched by
-        // needle and separated from Claude Desktop by app-bundle location instead.
+        // Headless CLI runs from launchd, a script, or another app never carry a tty.
+        // Match them by executable needle and let the shared helper exclude app-bundle
+        // processes so GUI backends stay on their dedicated discovery paths.
         let claudeHeadlessPIDs = Set(
             CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["claude", "claude-code"])
         )
         let claudeCommandPIDs = Array(claudeTTYPIDs.union(claudeHeadlessPIDs)).sorted()
-        let opencodeCommandPIDs = Array(
-            Set(
-                commandInfos
-                    .filter { info in
-                        guard info.tty != nil else { return false }
-                        return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["opencode"])
-                    }
-                    .map(\.pid)
-            )
-        ).sorted()
+        let opencodeTTYPIDs = Set(
+            commandInfos
+                .filter { info in
+                    guard info.tty != nil else { return false }
+                    return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["opencode"])
+                }
+                .map(\.pid)
+        )
+        let opencodeHeadlessPIDs = Set(
+            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["opencode"])
+        )
+        let opencodeCommandPIDs = Array(opencodeTTYPIDs.union(opencodeHeadlessPIDs)).sorted()
         let antigravityCommandPIDs = Array(
             Set(
                 commandInfos
@@ -1281,6 +1286,7 @@ actor PresenceEngine {
             sessionsRoots: codexSessionRoots,
             source: .codex,
             timeout: timeout,
+            headlessEligiblePIDs: codexHeadlessPIDs,
             desktopEligiblePIDs: codexDesktopPIDs
         )
         let claudeInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
@@ -1301,7 +1307,8 @@ actor PresenceEngine {
             queryArguments: ["-w", "-a", "-c", "opencode", "-u", user, "-nP", "-F", "pftn"],
             sessionsRoots: opencodeSessionRoots,
             source: .opencode,
-            timeout: timeout
+            timeout: timeout,
+            headlessEligiblePIDs: opencodeHeadlessPIDs
         )
         let opencodeCommandInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
         if opencodeCommandPIDs.isEmpty {
@@ -1312,7 +1319,8 @@ actor PresenceEngine {
                 queryArguments: ["-w", "-a", "-p", opencodeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
                 sessionsRoots: opencodeSessionRoots,
                 source: .opencode,
-                timeout: timeout
+                timeout: timeout,
+                headlessEligiblePIDs: opencodeHeadlessPIDs
             )
         }
         let antigravityInfos: [Int: CodexActiveSessionsModel.LsofPIDInfo]
@@ -1365,7 +1373,10 @@ actor PresenceEngine {
                     info.termProgram = envMeta.termProgram
                     info.itermSessionId = envMeta.itermSessionId
                 }
-                let isHeadless = source == .claude && claudeHeadlessPIDs.contains(info.pid)
+                let isHeadless =
+                    (source == .codex && codexHeadlessPIDs.contains(info.pid))
+                    || (source == .claude && claudeHeadlessPIDs.contains(info.pid))
+                    || (source == .opencode && opencodeHeadlessPIDs.contains(info.pid))
                 var presence = CodexActivePresence()
                 presence.schemaVersion = 1
                 presence.publisher = "agent-sessions-process"

@@ -237,6 +237,53 @@ final class HeadlessAgentPresenceTests: XCTestCase {
         XCTAssertTrue(CodexActiveSessionsModel.headlessAgentPIDs(from: infos, needles: ["claude"]).isEmpty)
     }
 
+    func testHeadlessAgentPIDs_admitsCodexAndOpenCodeCLIsButSeparatesAppBundles() {
+        let codexHeadlessPID = 5101
+        let codexDesktopPID = 5102
+        let openCodeHeadlessPID = 5201
+        let openCodeDesktopPID = 5202
+        let codexDesktopCommand = "/Applications/ChatGPT.app/Contents/Resources/codex app-server"
+        let openCodeDesktopCommand = "/Applications/OpenCode.app/Contents/MacOS/OpenCode"
+
+        let infos = [
+            CodexActiveSessionsModel.PSCommandInfo(
+                pid: codexHeadlessPID,
+                tty: nil,
+                command: "/opt/homebrew/bin/codex exec --json"
+            ),
+            CodexActiveSessionsModel.PSCommandInfo(
+                pid: codexDesktopPID,
+                tty: nil,
+                command: codexDesktopCommand
+            ),
+            CodexActiveSessionsModel.PSCommandInfo(
+                pid: openCodeHeadlessPID,
+                tty: nil,
+                command: "/opt/homebrew/bin/opencode run"
+            ),
+            CodexActiveSessionsModel.PSCommandInfo(
+                pid: openCodeDesktopPID,
+                tty: nil,
+                command: openCodeDesktopCommand
+            )
+        ]
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.headlessAgentPIDs(from: infos, needles: ["codex"]),
+            [codexHeadlessPID]
+        )
+        XCTAssertEqual(
+            CodexActiveSessionsModel.codexDesktopPIDs(from: infos),
+            [codexDesktopPID],
+            "Codex Desktop stays on the dedicated desktop path instead of headless CLI admission"
+        )
+        XCTAssertEqual(
+            CodexActiveSessionsModel.headlessAgentPIDs(from: infos, needles: ["opencode"]),
+            [openCodeHeadlessPID]
+        )
+        XCTAssertTrue(CodexActiveSessionsModel.isAppBundleExecutable(openCodeDesktopCommand))
+    }
+
     // MARK: - lsof admission
 
     /// Real `lsof -w -a -p <pid> -u <user> -nP -F pftn` output for a headless run:

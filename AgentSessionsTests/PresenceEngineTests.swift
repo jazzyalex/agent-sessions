@@ -111,6 +111,38 @@ final class PresenceEngineTests: XCTestCase {
         return FakeProbeRunner(responders: [responder])
     }
 
+    private func makeHeadlessPresenceRunner(pid: Int,
+                                            command: String,
+                                            cwd: String,
+                                            sessionLogPath: String) -> FakeProbeRunner {
+        let lsofBlob = """
+        p\(pid)
+        fcwd
+        tDIR
+        n\(cwd)
+        f0
+        tPIPE
+        n
+        f1
+        tREG
+        n\(PresenceFixtureRoots.base)/headless-stdout.txt
+        f26w
+        tREG
+        n\(sessionLogPath)
+        """
+        return FakeProbeRunner(responders: [
+            .init { executable, arguments in
+                if executable == "ps", arguments.contains("pid=,tty=,command=") {
+                    return Data("\(pid) ?? \(command)\n".utf8)
+                }
+                if executable == "lsof" {
+                    return Data(lsofBlob.utf8)
+                }
+                return nil
+            }
+        ])
+    }
+
     private func claudeAssistantLine(id: String,
                                      sessionID: String,
                                      at date: Date,
@@ -355,6 +387,145 @@ final class PresenceEngineTests: XCTestCase {
 
         XCTAssertEqual(emissions.count, 1)
         XCTAssertTrue(emissions[0].isMembershipChange)
+    }
+
+    func testRefreshOnce_admitsVettedHeadlessCodexCLI() async throws {
+        let pid = 6101
+        let logPath = PresenceFixtureRoots.codexSessions
+            + "/2026/10/02/rollout-2026-10-02T13-00-00-11111111-1111-4111-8111-111111111111.jsonl"
+        let runner = makeHeadlessPresenceRunner(
+            pid: pid,
+            command: "/opt/homebrew/bin/codex exec --json",
+            cwd: PresenceFixtureRoots.base + "/Repository/HeadlessCodex",
+            sessionLogPath: logPath
+        )
+        let engine = PresenceEngine(
+            probeRunner: runner,
+            rootsResolver: FixedPresenceRootsResolver.hermetic()
+        )
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        let snapshot = await engine.debugRefreshOnce()
+        let presence = try XCTUnwrap(snapshot.presences.first { $0.source == .codex && $0.pid == pid })
+
+        XCTAssertEqual(presence.kind, "headless")
+        XCTAssertNil(presence.tty)
+        XCTAssertEqual(
+            presence.sessionLogPath.map(CodexActiveSessionsModel.normalizePath),
+            CodexActiveSessionsModel.normalizePath(logPath)
+        )
+    }
+
+    func testRefreshOnce_admitsHeadlessOpenCodeAndJoinsExactSessionAmongSameCwd() async throws {
+        let pid = 6201
+        let cwd = PresenceFixtureRoots.base + "/Repository/SharedOpenCode"
+        let openCodeRoot = PresenceFixtureRoots.base + "/opencode/storage/session"
+        let currentLog = openCodeRoot + "/project-current/ses_current-session.json"
+        let otherLog = openCodeRoot + "/project-other/ses_other-session.json"
+        let runner = makeHeadlessPresenceRunner(
+            pid: pid,
+            command: "/opt/homebrew/bin/opencode run",
+            cwd: cwd,
+            sessionLogPath: currentLog
+        )
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.opencodeSessions = [URL(fileURLWithPath: openCodeRoot, isDirectory: true)]
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        let snapshot = await engine.debugRefreshOnce()
+        let presence = try XCTUnwrap(snapshot.presences.first { $0.source == .opencode && $0.pid == pid })
+        XCTAssertEqual(presence.kind, "headless")
+        XCTAssertNil(presence.tty)
+        XCTAssertEqual(presence.sessionId, "current-session")
+
+        let current = Session(
+            id: "current-session",
+            source: .opencode,
+            startTime: nil,
+            endTime: Date(),
+            model: nil,
+            filePath: currentLog,
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: "Current"
+        )
+        let other = Session(
+            id: "other-session",
+            source: .opencode,
+            startTime: nil,
+            endTime: Date().addingTimeInterval(30),
+            model: nil,
+            filePath: otherLog,
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: "Other newer same cwd"
+        )
+        let model = CodexActiveSessionsModel()
+        model.debugApply(PresenceEngine.Emission(snapshot: snapshot, isMembershipChange: true))
+
+        XCTAssertEqual(model.presence(for: current)?.pid, pid)
+        XCTAssertNil(
+            model.presence(for: other),
+            "exact OpenCode log/session identity must not leak to a newer session sharing the cwd"
+        )
+    }
+
+    func testRefreshOnce_deduplicatesRegistryAndHeadlessProcessEvidenceForSameSession() async throws {
+        let fm = FileManager.default
+        let registryRoot = fm.temporaryDirectory
+            .appendingPathComponent("presence-registry-headless-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: registryRoot, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: registryRoot) }
+
+        let pid = 6301
+        let sessionID = "22222222-2222-4222-8222-222222222222"
+        let logPath = PresenceFixtureRoots.codexSessions
+            + "/2026/10/02/rollout-2026-10-02T13-10-00-\(sessionID).jsonl"
+        let now = ISO8601DateFormatter().string(from: Date())
+        let registryJSON = """
+        {
+          "schema_version": 1,
+          "publisher": "agent-sessions-shim",
+          "kind": "headless",
+          "source": "codex",
+          "session_id": "\(sessionID)",
+          "session_log_path": "\(logPath)",
+          "workspace_root": "\(PresenceFixtureRoots.base)/Repository/Dedup",
+          "last_seen_at": "\(now)"
+        }
+        """
+        try Data(registryJSON.utf8).write(
+            to: registryRoot.appendingPathComponent("registry-evidence.json"),
+            options: [.atomic]
+        )
+
+        let runner = makeHeadlessPresenceRunner(
+            pid: pid,
+            command: "/opt/homebrew/bin/codex exec --json",
+            cwd: PresenceFixtureRoots.base + "/Repository/Dedup",
+            sessionLogPath: logPath
+        )
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.registry = [registryRoot]
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        let snapshot = await engine.debugRefreshOnce()
+        let matching = snapshot.presences.filter {
+            $0.source == .codex
+                && $0.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
+                    == CodexActiveSessionsModel.normalizePath(logPath)
+        }
+
+        XCTAssertEqual(matching.count, 1)
+        XCTAssertEqual(matching.first?.pid, pid, "merged row must retain process evidence")
+        XCTAssertEqual(snapshot.bySessionID.count, 1)
+        XCTAssertEqual(snapshot.byLogPath.count, 1)
     }
 
     func testRefreshOnce_discoversClaudeDesktopPresenceViaRunwayIdentity() async throws {

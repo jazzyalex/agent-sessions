@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed live presence discovery for headless Codex and OpenCode CLI runs that have no controlling terminal, while keeping app-bundle processes excluded and Codex Desktop on its separate discovery path. OpenCode can join an active process to an exact per-session JSON identity when a `ses_*.json` file is open; this does not add OpenCode token telemetry or exact current-session inference for shared SQLite `opencode.db` storage.
 - Hardened the stage0 baseline rebuild helper for current OpenCode SQLite storage: declared DB mode no longer falls back to legacy JSON when `db_roots` is absent, configured databases remain bounded latest-session diagnostics, parsed-row limit checks are conservative, and DB-backed runs always fail closed and refuse fixture emission rather than claiming complete all-session coverage.
 
 ## [5.5.3] - 2026-09-29
