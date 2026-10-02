@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Hardened the stage0 baseline rebuild helper for current OpenCode SQLite storage: declared DB mode no longer falls back to legacy JSON when `db_roots` is absent, configured databases remain bounded latest-session diagnostics, parsed-row limit checks are conservative, and DB-backed runs always fail closed and refuse fixture emission rather than claiming complete all-session coverage.
+
 ## [5.5.3] - 2026-09-29
 
 - Added published GPT-6.1 Sol pricing to Session Runway so its activity can contribute to dollar estimates and shared weekly calibration alongside Astra.

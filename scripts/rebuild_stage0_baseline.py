@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild a stage0 baseline fixture from EVERY session on disk, not a recent sample.
+"""Rebuild a stage0 baseline fixture from every supported file-backed session.
 
 Why this exists
 ---------------
@@ -12,10 +12,17 @@ stops being read, which defeats the point of having one.
 
 What it does
 ------------
-Sweeps every session the weekly monitor could discover for an agent, unions their
-schema fingerprints, and reports which buckets/keys the committed fixture is missing.
-With --emit it harvests real records covering those gaps, redacts them, and appends
-them to the fixture.
+For file-backed agents, sweeps every session the weekly monitor could discover, unions
+their schema fingerprints, and reports which buckets/keys the committed fixture is
+missing. With --emit it harvests real records covering those gaps, redacts them, and
+appends them to the fixture.
+
+OpenCode's current SQLite path is different: the weekly fingerprinter intentionally
+inspects only the latest session. This tool may use that bounded fingerprint for a
+diagnostic report, but it cannot call that an all-session rebuild. Its row-limit
+diagnostics are conservative because the existing fingerprinter exposes parsed-row
+counts rather than fetched-row counts. DB-backed OpenCode runs therefore always return
+nonzero, and --emit is refused before any fixture write.
 
 Redaction
 ---------
@@ -168,12 +175,175 @@ def _merge_missing_structure(existing, observed):
     return existing
 
 
+def _report_opencode_db_diagnostic(
+    cfg: dict, baseline: dict[str, list[str]], *, emit: bool
+) -> int:
+    """Inspect configured OpenCode DB roots without claiming an all-session rebuild."""
+    local_schema = cfg.get("weekly", {}).get("local_schema", {})
+    configured = local_schema.get("db_roots")
+    if not isinstance(configured, list) or not configured:
+        print(
+            "opencode: configured SQLite db_roots is missing or empty; "
+            "the implicit HOME default DB path is not accessed, so "
+            "DB-backed all-session rebuild is incomplete/unsupported",
+            file=sys.stderr,
+        )
+        if emit:
+            print(
+                "opencode: --emit is unsupported for DB-backed diagnostics; "
+                "no fixture files were modified",
+                file=sys.stderr,
+            )
+        return 1
+
+    max_messages = int(local_schema.get("max_messages") or 250)
+    max_parts = int(local_schema.get("max_parts") or 2500)
+    db_paths: list[Path] = []
+    invalid_roots = False
+    for raw in configured:
+        if not isinstance(raw, str) or not raw.strip():
+            print(
+                f"opencode: invalid configured SQLite DB root: {raw!r}",
+                file=sys.stderr,
+            )
+            invalid_roots = True
+            continue
+        db_paths.append(agent_watch._expand_path(raw))
+
+    print(
+        "opencode: DB-backed baseline rebuild is diagnostic only; "
+        f"inspecting latest SQLite session from {len(configured)} configured DB root(s)"
+    )
+
+    fingerprints: list[dict] = []
+    incomplete = invalid_roots
+    for db_path in db_paths:
+        if not db_path.exists():
+            print(f"opencode: configured SQLite DB missing: {db_path}", file=sys.stderr)
+            incomplete = True
+            continue
+
+        try:
+            fp = agent_watch._opencode_sqlite_latest_session_schema_fingerprint(
+                db_path,
+                max_messages=max_messages,
+                max_parts=max_parts,
+            )
+        except Exception as exc:
+            print(
+                f"opencode: SQLite fingerprint failed for {db_path}: {exc}",
+                file=sys.stderr,
+            )
+            incomplete = True
+            continue
+
+        error = fp.get("error")
+        if error:
+            print(
+                f"opencode: SQLite fingerprint failed for {db_path}: {error}",
+                file=sys.stderr,
+            )
+            incomplete = True
+            continue
+
+        parse_errors = int(fp.get("parse_errors") or 0)
+        if parse_errors:
+            print(
+                f"opencode: SQLite fingerprint for {db_path} had "
+                f"{parse_errors} parse error(s)",
+                file=sys.stderr,
+            )
+            incomplete = True
+            continue
+
+        warning = fp.get("warning")
+        type_keys = fp.get("type_keys")
+        if warning == "no_sessions_found" or not isinstance(type_keys, dict) or not type_keys:
+            print(
+                f"opencode: SQLite DB is empty or has no active sessions: {db_path}",
+                file=sys.stderr,
+            )
+            incomplete = True
+            continue
+
+        message_rows = int(fp.get("message_rows_parsed") or 0)
+        part_rows = int(fp.get("part_rows_parsed") or 0)
+        if max_messages <= 0 or message_rows >= max_messages:
+            print(
+                f"opencode: latest SQLite session diagnostic reached the "
+                f"max_messages row limit ({max_messages}) for {db_path}",
+                file=sys.stderr,
+            )
+            incomplete = True
+        if max_parts <= 0 or part_rows >= max_parts:
+            print(
+                f"opencode: latest SQLite session diagnostic reached the "
+                f"max_parts row limit ({max_parts}) for {db_path}",
+                file=sys.stderr,
+            )
+            incomplete = True
+
+        fingerprints.append(fp)
+
+    observed = agent_watch._merge_type_keys(fingerprints) if fingerprints else {}
+    missing = _gaps(observed, baseline)
+
+    if missing:
+        buckets = sorted({bucket for bucket, _ in missing})
+        print(
+            f"opencode: {len(missing)} missing (bucket, key) pairs "
+            f"across {len(buckets)} buckets in latest SQLite session diagnostics"
+        )
+        for bucket in buckets:
+            keys = sorted(key for candidate, key in missing if candidate == bucket)
+            print(f"  {bucket} += {','.join(keys)}")
+    elif fingerprints:
+        if incomplete:
+            print(
+                "opencode: observed parsed SQLite rows show no schema gaps, "
+                "but configured DB evidence is incomplete"
+            )
+        else:
+            print(
+                "opencode: observed parsed SQLite rows show no schema gaps; "
+                "this bounded latest-session diagnostic cannot establish complete coverage"
+            )
+
+    if emit:
+        print(
+            "opencode: --emit is unsupported for DB-backed diagnostics; "
+            "no fixture files were modified",
+            file=sys.stderr,
+        )
+
+    if incomplete:
+        print(
+            "opencode: SQLite diagnostic is incomplete; "
+            "DB-backed all-session rebuild cannot be certified",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "opencode: latest-session SQLite fingerprint is bounded and cannot "
+            "establish all-session coverage; DB-backed rebuild remains incomplete/unsupported",
+            file=sys.stderr,
+        )
+
+    return 1
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--agent", required=True)
-    ap.add_argument("--emit", action="store_true",
-                    help="append redacted coverage records to the fixture")
+    ap.add_argument(
+        "--emit",
+        action="store_true",
+        help=(
+            "append redacted coverage for supported file-backed all-session rebuilds; "
+            "DB-backed OpenCode diagnostics never emit"
+        ),
+    )
     ap.add_argument("--max-sessions", type=int, default=None)
     args = ap.parse_args(argv)
 
@@ -181,6 +351,13 @@ def main(argv: list[str]) -> int:
     cfg = _load_config(agent)
     opaque = frozenset(agent_watch._NESTED_OPAQUE_KEYS.get(agent, ()))
     baseline = agent_watch._baseline_type_keys_for_agent(agent, _baseline_paths(agent))
+
+    local_schema = cfg.get("weekly", {}).get("local_schema", {})
+    if agent == "opencode" and (
+        local_schema.get("kind") == "opencode_latest_session"
+        or "db_roots" in local_schema
+    ):
+        return _report_opencode_db_diagnostic(cfg, baseline, emit=args.emit)
 
     sessions = _all_sessions(agent, cfg, args.max_sessions)
     print(f"{agent}: sweeping {len(sessions)} sessions on disk")
