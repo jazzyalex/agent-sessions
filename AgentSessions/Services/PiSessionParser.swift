@@ -151,6 +151,8 @@ final class PiSessionParser {
            fileSize > defaultFullParseMaxBytes {
             return nil
         }
+        SessionInfoMetrics.shared.beginTranscript(path: url.path)
+        defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
         guard let entries = loadEntries(url),
               let header = entries.first(where: { $0.type == "session" }),
               let id = header.id else { return nil }

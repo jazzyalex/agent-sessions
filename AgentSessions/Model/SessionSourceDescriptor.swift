@@ -263,6 +263,9 @@ struct SessionSourceDescriptor {
     /// What telemetry this source can produce. Non-optional on purpose: the
     /// compiler makes every source state a verdict.
     let telemetry: TelemetryCapabilities
+    /// Source-specific transcript parser, created only for an on-demand telemetry
+    /// scan. nil means this source has no audited full-telemetry provider yet.
+    let makeTelemetryProvider: (@Sendable () -> any SessionTelemetryProvider)?
 
     // MARK: Labels
 
@@ -363,6 +366,7 @@ struct SessionSourceDescriptor {
 
     init(source: SessionSource,
          telemetry: TelemetryCapabilities,
+         makeTelemetryProvider: (@Sendable () -> any SessionTelemetryProvider)? = nil,
          shortLabel: String,
          badgeInitials: String,
          brandHue: BrandHue,
@@ -387,6 +391,7 @@ struct SessionSourceDescriptor {
          otherAgentPill: PillSpec?) {
         self.source = source
         self.telemetry = telemetry
+        self.makeTelemetryProvider = makeTelemetryProvider
         self.shortLabel = shortLabel
         self.badgeInitials = badgeInitials
         self.brandHue = brandHue

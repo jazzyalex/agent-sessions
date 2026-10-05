@@ -21,6 +21,7 @@ extension SessionSourceDescriptor {
                 cost: .partial("priced from the session summary, not per turn"),
                 weeklyQuota: .unavailable("no account-level quota feed")
             ),
+            makeTelemetryProvider: { CopilotTelemetryProvider() },
             shortLabel: "Copilot",
             badgeInitials: "CP",
             // Magenta-ish.

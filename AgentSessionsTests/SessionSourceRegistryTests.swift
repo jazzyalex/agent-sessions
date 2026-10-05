@@ -28,6 +28,41 @@ final class SessionSourceRegistryTests: XCTestCase {
         }
     }
 
+    func testTelemetryProvidersMatchDeclaredTelemetryAvailability() {
+        for source in SessionSource.allCases {
+            let descriptor = SessionSourceRegistry.descriptor(for: source)
+            let declaresTelemetry = descriptor.telemetry.configuration.isAvailable
+                || descriptor.telemetry.tokens.isAvailable
+            XCTAssertEqual(descriptor.makeTelemetryProvider != nil, declaresTelemetry, "\(source)")
+        }
+    }
+
+    func testTelemetryDispatchBoundaryIsPinnedToAuditedProviders() {
+        let expected: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+
+        XCTAssertEqual(SessionTelemetryEngine.dispatchableSources, expected)
+        XCTAssertEqual(expected.count, 4)
+
+        for source in SessionSource.allCases {
+            let descriptor = SessionSourceRegistry.descriptor(for: source)
+            if expected.contains(source) {
+                XCTAssertNotNil(descriptor.makeTelemetryProvider, "\(source)")
+                XCTAssertTrue(
+                    descriptor.telemetry.configuration.isAvailable
+                        || descriptor.telemetry.tokens.isAvailable,
+                    "audited provider must declare telemetry: \(source)")
+            } else {
+                XCTAssertNil(descriptor.makeTelemetryProvider, "\(source)")
+                XCTAssertFalse(
+                    descriptor.telemetry.configuration.isAvailable,
+                    "unaudited provider must not advertise configuration telemetry: \(source)")
+                XCTAssertFalse(
+                    descriptor.telemetry.tokens.isAvailable,
+                    "unaudited provider must not advertise token telemetry: \(source)")
+            }
+        }
+    }
+
     // MARK: - Keys (SPEC §10.2)
 
     func testDescriptorKeysMatchTheStabilityTable() {

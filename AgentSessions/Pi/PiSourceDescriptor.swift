@@ -19,6 +19,7 @@ extension SessionSourceDescriptor {
                 cost: .supported,
                 weeklyQuota: .unavailable("no account-level quota feed")
             ),
+            makeTelemetryProvider: { PiTelemetryProvider() },
             shortLabel: "Pi",
             badgeInitials: "PI",
             // Green-cyan accent, distinct from Gemini and Cursor.

@@ -23,6 +23,7 @@ extension SessionSourceDescriptor {
                 cost: .partial("legacy total-only logs cannot be priced"),
                 weeklyQuota: .partial("estimated from account-wide quota calibration; other-device activity is unobservable")
             ),
+            makeTelemetryProvider: { CodexTelemetryProvider() },
             shortLabel: "Codex",
             badgeInitials: "CX",
             // Deep blue.

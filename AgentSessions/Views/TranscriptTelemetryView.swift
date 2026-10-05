@@ -47,13 +47,38 @@ public struct SessionInfoHistoryRow: Equatable, Identifiable {
     public let blockIndex: Int?
 }
 
+/// A structural identity for the selected telemetry source. Session IDs and
+/// paths are external values and may legally contain any delimiter.
+struct TranscriptTelemetrySelectionIdentity: Hashable, Sendable {
+    let source: SessionSource
+    let sessionID: String
+    let filePath: String
+
+    init(source: SessionSource, sessionID: String, filePath: String) {
+        self.source = source
+        self.sessionID = sessionID
+        self.filePath = filePath
+    }
+
+    init(session: Session) {
+        source = session.source
+        sessionID = session.id
+        filePath = session.filePath
+    }
+}
+
 /// Keeps the expensive full-file telemetry read tied to the inspector's actual
 /// visibility. Returning nil while hidden also keeps session-selection churn from
 /// restarting the SwiftUI task merely because its underlying session key changed.
-enum TranscriptTelemetryLoadRequest {
-    static func key(isVisible: Bool, selectionKey: String, refresh: Int) -> String? {
-        guard isVisible, selectionKey != "none" else { return nil }
-        return "\(selectionKey)|\(refresh)"
+struct TranscriptTelemetryLoadRequest: Equatable {
+    let selection: TranscriptTelemetrySelectionIdentity
+    let refresh: Int
+
+    static func key(isVisible: Bool,
+                    selection: TranscriptTelemetrySelectionIdentity?,
+                    refresh: Int) -> TranscriptTelemetryLoadRequest? {
+        guard isVisible, let selection else { return nil }
+        return TranscriptTelemetryLoadRequest(selection: selection, refresh: refresh)
     }
 }
 
@@ -223,14 +248,99 @@ enum TranscriptTelemetryPresentation {
         guard let model = value?.model else {
             return .absent(localized("This transcript records no model setting.", locale: locale))
         }
-        return Value(text: model, help: configurationHelp(value, locale: locale))
+        return Value(text: model, help: configurationHelp(
+            value?.modelProvenance ?? value?.provenance, locale: locale))
+    }
+
+    /// Presents a value that was already available on the indexed Session row.
+    /// Quick facts must say where they came from so an immediate value cannot be
+    /// mistaken for a transcript-derived observation.
+    static func quickFactValue(_ field: SessionInfoField<String>,
+                               locale: Locale = .current) -> Value {
+        switch field {
+        case let .known(value, provenance):
+            return Value(
+                text: value,
+                help: localized(
+                    "\(provenance.displayName) from already-loaded Session metadata.",
+                    locale: locale))
+        case let .unavailable(reason):
+            let detail = reason == .notLoaded
+                ? " Detailed telemetry may provide more evidence."
+                : ""
+            return .absent(localized(
+                "\(reason.displayName).\(detail)",
+                locale: locale))
+        }
+    }
+
+    static func sourceValue(_ source: SessionSource,
+                            locale: Locale = .current) -> Value {
+        Value(
+            text: source.displayName,
+            help: localized("Provider-neutral source from loaded Session metadata.",
+                            locale: locale))
+    }
+
+    static func titleValue(_ field: SessionInfoField<String>,
+                           locale: Locale = .current) -> Value {
+        switch field {
+        case .known(_, _):
+            return quickFactValue(field, locale: locale)
+        case let .unavailable(reason):
+            let help: String
+            if reason == .notLoaded {
+                help = localized(
+                    "No title is available in already-loaded Session metadata.",
+                    locale: locale)
+            } else {
+                help = localized("\(reason.displayName)", locale: locale)
+            }
+            return .absent(help)
+        }
+    }
+
+    /// The first observed model is transcript evidence when the optional
+    /// telemetry pass has completed. Before then, the quick-facts field stays
+    /// explicitly not loaded rather than guessing from the current model. A
+    /// completed failure is kept distinct from that pending state.
+    static func firstObservedModelValue(_ facts: SessionInfoQuickFacts,
+                                        telemetry: SessionTelemetry?,
+                                        telemetryLoadState: SessionInfoTelemetryLoadState = .notStarted,
+                                        locale: Locale = .current) -> Value {
+        if let configuration = telemetry?.initialConfiguration,
+           let model = configuration.model?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !model.isEmpty {
+            let modelProvenance = configuration.modelProvenance ?? configuration.provenance
+            let help = modelProvenance == .inferredFirstObservation
+                ? localized("First observed model inferred from the first transcript record.",
+                            locale: locale)
+                : localized("First observed model recorded by the provider.",
+                            locale: locale)
+            return Value(text: model, help: help)
+        }
+
+        if telemetry != nil || telemetryLoadState == .loaded {
+            return .absent(localized(
+                "Not recorded in detailed telemetry.", locale: locale))
+        }
+        switch telemetryLoadState {
+        case .notStarted, .loading:
+            return quickFactValue(facts.firstObservedModel, locale: locale)
+        case let .unavailable(reason):
+            return quickFactValue(.unavailable(reason), locale: locale)
+        case .loaded:
+            return .absent(localized(
+                "Not recorded in detailed telemetry.", locale: locale))
+        }
     }
 
     /// nil means the provider never recorded a thinking setting, so the sidebar
     /// omits the row rather than presenting a permanent absent value.
     static func thinkingValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value? {
         guard let effort = value?.reasoningEffort else { return nil }
-        return Value(text: effort, help: configurationHelp(value, locale: locale))
+        return Value(text: effort, help: configurationHelp(
+            value?.reasoningEffortProvenance ?? value?.provenance, locale: locale))
     }
 
     static func tokenSharePercent(_ fraction: Double, locale: Locale = .current) -> String {
@@ -253,8 +363,9 @@ enum TranscriptTelemetryPresentation {
         !telemetry.configurationChanges.isEmpty
     }
 
-    private static func configurationHelp(_ value: SessionConfiguration?, locale: Locale) -> String {
-        value?.provenance == .inferredFirstObservation
+    private static func configurationHelp(_ provenance: TelemetryProvenance?,
+                                          locale: Locale) -> String {
+        provenance == .inferredFirstObservation
             ? localized("Inferred from the first record, not a session-start setting.", locale: locale)
             : localized("Recorded by the provider.", locale: locale)
     }
@@ -465,7 +576,10 @@ struct TranscriptTelemetryView: View {
     /// "$145.54 API-equivalent", the three-part token legend — never wrap or cut.
     static let panelWidth: CGFloat = 300
 
+    let quickFacts: SessionInfoQuickFacts?
+    @Binding var quickInfoPaintState: SessionInfoQuickPaintState
     let telemetry: SessionTelemetry?
+    let telemetryLoadState: SessionInfoTelemetryLoadState
     let blocks: [SessionTranscriptBuilder.LogicalBlock]
     let loading: Bool
     let isSubagent: Bool
@@ -491,10 +605,14 @@ struct TranscriptTelemetryView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: LayoutTokens.md) {
+                    if let quickFacts {
+                        quickInfo(quickFacts, telemetry: telemetry)
+                        Divider()
+                    }
                     if let telemetry {
                         summary(telemetry)
                         Divider()
-                        facts(telemetry)
+                        facts(telemetry, quickFacts: quickFacts)
                         Divider()
                         activity(telemetry)
                         if TranscriptTelemetryPresentation.shouldShowHistory(telemetry) {
@@ -504,7 +622,11 @@ struct TranscriptTelemetryView: View {
                         Divider()
                         basis(telemetry)
                     } else if loading {
-                        Text("Loading session information…")
+                        Text("Loading detailed telemetry…")
+                            .font(SessionInfoType.row)
+                            .foregroundStyle(.secondary)
+                    } else if quickFacts != nil {
+                        Text("Detailed telemetry is unavailable for this source or transcript.")
                             .font(SessionInfoType.row)
                             .foregroundStyle(.secondary)
                     } else {
@@ -593,14 +715,73 @@ struct TranscriptTelemetryView: View {
         }
     }
 
-    private func facts(_ telemetry: SessionTelemetry) -> some View {
+    private func quickInfo(_ facts: SessionInfoQuickFacts,
+                           telemetry: SessionTelemetry?) -> some View {
+        SessionInfoSection(title: "Quick info") {
+            VStack(alignment: .leading, spacing: LayoutTokens.xs) {
+                SessionInfoRow(label: "Agent",
+                               value: TranscriptTelemetryPresentation.sourceValue(
+                                facts.source, locale: locale))
+                SessionInfoRow(label: "Current model",
+                               value: TranscriptTelemetryPresentation.quickFactValue(
+                                facts.currentModel, locale: locale))
+                    .onAppear {
+                        recordModelFirstPaintIfNeeded(facts)
+                    }
+                    .onChange(of: facts.currentModel) { _, _ in
+                        recordModelFirstPaintIfNeeded(facts)
+                    }
+                SessionInfoRow(label: "First observed model",
+                               value: TranscriptTelemetryPresentation.firstObservedModelValue(
+                                facts,
+                                telemetry: telemetry,
+                                telemetryLoadState: telemetryLoadState,
+                                locale: locale))
+                SessionInfoRow(label: "Thinking",
+                               value: TranscriptTelemetryPresentation.quickFactValue(
+                                facts.reasoningEffort, locale: locale))
+                SessionInfoRow(label: "Title",
+                               value: TranscriptTelemetryPresentation.titleValue(
+                                facts.title, locale: locale))
+            }
+        }
+        // The parent arms the paint episode from the selection task. Observe
+        // that state as well as the facts so a new selection is measured even
+        // when the replacement session exposes the same current model and the
+        // row therefore has no model-value change to trigger its hook.
+        .onChange(of: quickInfoPaintState.identity) { _, _ in
+            recordModelFirstPaintIfNeeded(facts)
+        }
+        .onChange(of: facts.paintIdentity) { _, _ in
+            recordModelFirstPaintIfNeeded(facts)
+        }
+    }
+
+    private func recordModelFirstPaintIfNeeded(_ facts: SessionInfoQuickFacts) {
+        guard let duration = quickInfoPaintState.recordModelFirstPaintIfNeeded(
+            identity: facts.paintIdentity,
+            modelIsKnown: facts.currentModel.value != nil,
+            at: Date()) else { return }
+        SessionInfoMetrics.shared.recordModelFirstPaint(duration: duration)
+    }
+
+    private func facts(_ telemetry: SessionTelemetry,
+                       quickFacts: SessionInfoQuickFacts?) -> some View {
         VStack(alignment: .leading, spacing: LayoutTokens.xs) {
-            SessionInfoRow(label: isSubagent ? "Subagent model" : "Model",
-                           value: TranscriptTelemetryPresentation.modelValue(
-                            telemetry.currentConfiguration, locale: locale))
+            if let model = telemetry.currentConfiguration?.model,
+               !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                SessionInfoRow(
+                    label: quickFacts == nil
+                        ? (isSubagent ? "Subagent model" : "Model")
+                        : "Transcript current model",
+                    value: TranscriptTelemetryPresentation.modelValue(
+                        telemetry.currentConfiguration, locale: locale))
+            }
             if let thinking = TranscriptTelemetryPresentation.thinkingValue(
                 telemetry.currentConfiguration, locale: locale) {
-                SessionInfoRow(label: "Thinking", value: thinking)
+                SessionInfoRow(
+                    label: quickFacts == nil ? "Thinking" : "Transcript thinking",
+                    value: thinking)
             }
             // Delegated does NOT keep its row. A permanent em dash teaches the
             // reader to ignore the line, and for a provider that cannot record

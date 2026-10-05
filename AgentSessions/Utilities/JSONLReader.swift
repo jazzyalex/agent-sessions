@@ -25,22 +25,32 @@ final class JSONLReader {
     }
 
     func forEachLine(_ handleLine: (String) -> Void) throws {
-        _ = try forEachLineCore { line in
+        _ = try forEachLineCore({ line in
             handleLine(line)
             return true
-        }
+        }, reportBytesRead: nil)
     }
 
     /// Streaming line reader that can stop early by returning `false`.
     /// Useful for lightweight preview scans without reading the full file.
     @discardableResult
     func forEachLineWhile(_ shouldContinue: (String) -> Bool) throws -> Bool {
-        try forEachLineCore(shouldContinue)
+        try forEachLineCore(shouldContinue, reportBytesRead: nil)
+    }
+
+    /// Streaming line reader with the number of physical bytes consumed by the
+    /// bounded read. The callback runs once on every exit path, including a
+    /// reader error or an early stop.
+    @discardableResult
+    func forEachLineWhile(_ shouldContinue: (String) -> Bool,
+                          reportBytesRead: @escaping (UInt64) -> Void) throws -> Bool {
+        try forEachLineCore(shouldContinue, reportBytesRead: reportBytesRead)
     }
 
     // Core implementation shared by both APIs.
     @discardableResult
-    private func forEachLineCore(_ shouldContinue: (String) -> Bool) throws -> Bool {
+    private func forEachLineCore(_ shouldContinue: (String) -> Bool,
+                                 reportBytesRead: ((UInt64) -> Void)?) throws -> Bool {
         let fh = try FileHandle(forReadingFrom: url)
         defer { try? fh.close() }
         var buffer = Data()
@@ -51,6 +61,7 @@ final class JSONLReader {
         var skippingOversizeLine = false
         var didEmitSkipStub = false
         var bytesRead: UInt64 = 0
+        defer { reportBytesRead?(bytesRead) }
         var readError: Error?
         while autoreleasepool(invoking: {
             let requestedCount: Int

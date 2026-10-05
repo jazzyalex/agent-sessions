@@ -21,7 +21,12 @@ enum TelemetryCostCalculator {
     static func price(events: [TelemetryUsageEvent],
                       fallbackSlices: [TelemetryUsageSlice],
                       priceTable: RunwayPriceTable) -> Result {
-        let snapshot = priceTable.snapshot()
+        price(events: events, fallbackSlices: fallbackSlices, snapshot: priceTable.snapshot())
+    }
+
+    static func price(events: [TelemetryUsageEvent],
+                      fallbackSlices: [TelemetryUsageSlice],
+                      snapshot: RunwayPriceSnapshot) -> Result {
         guard !events.isEmpty else {
             return Result(estimate: estimate(slices: fallbackSlices, snapshot: snapshot), events: [])
         }

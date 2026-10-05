@@ -506,18 +506,25 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @State private var sessionTelemetry: SessionTelemetry?
-    @State private var telemetryOwner: String?
+    @State private var telemetryOwner: TranscriptTelemetrySelectionIdentity?
     @State private var telemetryLoading = false
+    @State private var telemetryLoadState: SessionInfoTelemetryLoadState = .notStarted
     @State private var telemetryRefresh = 0
     @State private var telemetryUpdatedAt: Date?
+    @State private var quickInfoPaintState = SessionInfoQuickPaintState()
 
-    private var telemetrySelectionKey: String {
-        guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return "none" }
-        return "\(session.source.rawValue)|\(session.id)|\(session.filePath)"
+    private var telemetrySelectionIdentity: TranscriptTelemetrySelectionIdentity? {
+        guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return nil }
+        return TranscriptTelemetrySelectionIdentity(session: session)
     }
 
     private var selectedTelemetry: SessionTelemetry? {
-        telemetryOwner == telemetrySelectionKey ? sessionTelemetry : nil
+        telemetryOwner == telemetrySelectionIdentity ? sessionTelemetry : nil
+    }
+
+    private var selectedQuickFacts: SessionInfoQuickFacts? {
+        guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return nil }
+        return SessionInfoQuickFacts(session: session)
     }
 
     // Text transcript buffer
@@ -836,7 +843,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     let telemetrySession = sessionID.flatMap { resolvedSessionForRender(id: $0) }
                     let blocksReady = telemetrySession.map { isTranscriptReady(for: $0) } ?? false
                     TranscriptTelemetryView(
+                        quickFacts: selectedQuickFacts,
+                        quickInfoPaintState: $quickInfoPaintState,
                         telemetry: selectedTelemetry,
+                        telemetryLoadState: telemetryLoadState,
                         blocks: blocksReady ? derivedState.snapshot.blocks : [],
                         loading: telemetryLoading,
                         isSubagent: telemetrySession?.isSubagent ?? false,
@@ -847,7 +857,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             richConfigJumpBlockIndex = index
                             richConfigJumpToken &+= 1
                         } : nil,
-                        lastUpdatedAt: telemetryOwner == telemetrySelectionKey ? telemetryUpdatedAt : nil,
+                        lastUpdatedAt: telemetryOwner == telemetrySelectionIdentity ? telemetryUpdatedAt : nil,
                         refresh: { telemetryRefresh &+= 1 },
                         close: { showSessionInfo = false })
                         // A fixed width the panel never gives up. It used to be
@@ -864,29 +874,57 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // visible. A hidden inspector must not re-read every selected transcript.
         .task(id: TranscriptTelemetryLoadRequest.key(
             isVisible: showSessionInfo,
-            selectionKey: telemetrySelectionKey,
+            selection: telemetrySelectionIdentity,
             refresh: telemetryRefresh
         )) {
             guard showSessionInfo else {
                 sessionTelemetry = nil
                 telemetryOwner = nil
                 telemetryLoading = false
+                telemetryLoadState = .notStarted
+                quickInfoPaintState.reset()
                 return
             }
-            let owner = telemetrySelectionKey
+
+            let selection = telemetrySelectionIdentity
+            quickInfoPaintState.arm(
+                identity: selection.map {
+                    SessionInfoQuickPaintIdentity(source: $0.source, sessionID: $0.sessionID)
+                },
+                at: Date())
+
+            let owner = selection
+            guard let owner else {
+                sessionTelemetry = nil
+                telemetryOwner = nil
+                telemetryLoading = false
+                telemetryLoadState = .notStarted
+                return
+            }
             sessionTelemetry = nil
             telemetryOwner = owner
             telemetryUpdatedAt = nil
+            telemetryLoadState = .loading
             guard let id = sessionID, let session = resolvedSessionForRender(id: id) else {
                 telemetryLoading = false
+                telemetryLoadState = .notStarted
                 return
             }
             telemetryLoading = true
             let result = await SessionTelemetryEngine.shared.telemetry(for: session)
-            guard !Task.isCancelled, owner == telemetrySelectionKey else { return }
+            guard !Task.isCancelled, owner == telemetrySelectionIdentity else { return }
             sessionTelemetry = result
             telemetryUpdatedAt = Date()
             telemetryLoading = false
+            if result != nil {
+                telemetryLoadState = .loaded
+            } else {
+                let reason: SessionInfoUnavailableReason =
+                    SessionSourceRegistry.descriptor(for: session.source).makeTelemetryProvider == nil
+                        ? .unsupported
+                        : .parseFailed
+                telemetryLoadState = .unavailable(reason)
+            }
         }
     }
 

@@ -1,6 +1,67 @@
 import XCTest
 @testable import AgentSessions
 
+private final class OneShotAction: @unchecked Sendable {
+    private let lock = NSLock()
+    private let action: @Sendable () -> Void
+    private var didRun = false
+
+    init(action: @escaping @Sendable () -> Void) {
+        self.action = action
+    }
+
+    func run() {
+        lock.lock()
+        guard !didRun else {
+            lock.unlock()
+            return
+        }
+        didRun = true
+        lock.unlock()
+        action()
+    }
+}
+
+private final class BlockingAction: @unchecked Sendable {
+    private let lock = NSLock()
+    private let gate = DispatchSemaphore(value: 0)
+    private var entered = false
+
+    var hasEntered: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entered
+    }
+
+    func run() {
+        lock.lock()
+        entered = true
+        lock.unlock()
+        gate.wait()
+    }
+
+    func release() {
+        gate.signal()
+    }
+}
+
+private final class AppendOnEveryCall: @unchecked Sendable {
+    private let url: URL
+    private let data: Data
+
+    init(url: URL, line: String) {
+        self.url = url
+        data = Data("\n\(line)".utf8)
+    }
+
+    func run() {
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
+    }
+}
+
 /// The engine re-reads transcripts on demand and caches by file signature. The
 /// cache key must include SIZE as well as mtime — the repo already has a runway
 /// test pinning that lesson, because an append inside the same mtime second is a
@@ -79,10 +140,9 @@ final class SessionTelemetryEngineTests: XCTestCase {
 
     // MARK: - Dispatch / descriptor agreement
 
-    /// A source can declare telemetry available and still have no `case` in the
-    /// engine's switch. The `default` arm returns nil, which is indistinguishable
-    /// from a source that correctly declares nothing — so the feature would look
-    /// wired up and produce silence. This pins the two lists together.
+    /// A source can declare telemetry available and still have no registry-owned
+    /// provider. The engine would then return nil and make the feature look wired
+    /// up while producing silence. This pins the descriptor and provider together.
     func testEveryDispatchableSourceDeclaresTelemetryAvailable() {
         for source in SessionTelemetryEngine.dispatchableSources {
             let t = SessionSourceRegistry.descriptor(for: source).telemetry
@@ -112,11 +172,149 @@ final class SessionTelemetryEngineTests: XCTestCase {
 
     func testFirstCallParsesAndSecondCallIsCached() async throws {
         let url = try write(codexLines())
-        let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable(loadBundled: true, readCache: false))
+        let metrics = SessionInfoMetrics()
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: metrics)
         _ = await engine.telemetry(for: session(url, source: .codex))
         XCTAssertEqual(engine.parseCount, 1)
         _ = await engine.telemetry(for: session(url, source: .codex))
         XCTAssertEqual(engine.parseCount, 1, "unchanged file must not be re-parsed")
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let byteCount = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        XCTAssertEqual(metrics.snapshot.cacheHitCount, 1)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 1)
+        XCTAssertEqual(metrics.snapshot.telemetryBytesScanned, byteCount)
+    }
+
+    func testConcurrentIdenticalScansShareOneProducer() async throws {
+        let url = try write(codexLines())
+        let metrics = SessionInfoMetrics()
+        let blocker = BlockingAction()
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: metrics,
+            beforeTelemetryScan: { blocker.run() })
+
+        let first = Task { await engine.telemetry(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where !blocker.hasEntered {
+            await Task.yield()
+        }
+        let second = Task { await engine.telemetry(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where metrics.snapshot.inFlightJoinCount == 0 {
+            await Task.yield()
+        }
+        blocker.release()
+        let firstValue = await first.value
+        let secondValue = await second.value
+
+        XCTAssertNotNil(firstValue)
+        XCTAssertNotNil(secondValue)
+        XCTAssertEqual(engine.parseCount, 1)
+        XCTAssertEqual(metrics.snapshot.inFlightJoinCount, 1)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 1)
+    }
+
+    func testCancellingOneSubscriberLeavesSharedProducerForAnother() async throws {
+        let url = try write(codexLines())
+        let metrics = SessionInfoMetrics()
+        let blocker = BlockingAction()
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: metrics,
+            beforeTelemetryScan: { blocker.run() })
+
+        let first = Task { await engine.telemetry(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where !blocker.hasEntered {
+            await Task.yield()
+        }
+        let second = Task { await engine.telemetry(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where metrics.snapshot.inFlightJoinCount == 0 {
+            await Task.yield()
+        }
+
+        first.cancel()
+        let firstValue = await first.value
+        XCTAssertNil(firstValue, "a cancelled subscriber should return without waiting for the producer")
+
+        blocker.release()
+        let secondValue = await second.value
+        XCTAssertNotNil(secondValue, "cancelling one subscriber must not cancel the shared producer")
+        XCTAssertEqual(engine.parseCount, 1)
+        XCTAssertEqual(metrics.snapshot.inFlightJoinCount, 1)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 1)
+    }
+
+    func testAppendDuringScanDoesNotCacheStaleRevision() async throws {
+        let url = try write(codexLines())
+        let initialBytes = UInt64(try Data(contentsOf: url).count)
+        let appendedLine = codexLines().last!
+        let appendOnce = OneShotAction {
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
+            handle.seekToEndOfFile()
+            handle.write(Data("\n\(appendedLine)".utf8))
+            try? handle.close()
+        }
+        let metrics = SessionInfoMetrics()
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: metrics,
+            afterFirstTelemetryLine: { appendOnce.run() })
+
+        let telemetry = await engine.telemetry(for: session(url, source: .codex))
+        let finalBytes = UInt64(try Data(contentsOf: url).count)
+
+        XCTAssertNotNil(telemetry)
+        XCTAssertGreaterThan(finalBytes, initialBytes)
+        XCTAssertEqual(engine.parseCount, 1, "the stale first pass must not count as a completed parse")
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 2,
+                       "a changed file is retried once against its new signature")
+        XCTAssertEqual(metrics.snapshot.telemetryBytesScanned, initialBytes + finalBytes,
+                       "bytes scanned must report each bounded physical read")
+    }
+
+    func testRepeatedChangesRetryOnlyOnceAndFailClosed() async throws {
+        let url = try write(codexLines())
+        let appendEveryTime = AppendOnEveryCall(url: url, line: codexLines().last!)
+        let metrics = SessionInfoMetrics()
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: metrics,
+            afterFirstTelemetryLine: { appendEveryTime.run() })
+
+        let telemetry = await engine.telemetry(for: session(url, source: .codex))
+
+        XCTAssertNil(telemetry, "a continuously changing transcript must not publish a stale result")
+        XCTAssertEqual(engine.parseCount, 0)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 2,
+                       "the retry budget is exactly one additional bounded scan")
+    }
+
+    func testManifestChangeDuringScanUsesOnePricingSnapshot() async throws {
+        let url = try write(codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: firstManifest))
+        let refreshOnce = OneShotAction {
+            _ = prices.loadForTesting(json: secondManifest)
+        }
+        let engine = SessionTelemetryEngine(
+            priceTable: prices,
+            beforeTelemetryScan: { refreshOnce.run() })
+
+        let firstValue = await engine.telemetry(for: session(url, source: .codex))
+        let first = try XCTUnwrap(firstValue)
+        XCTAssertEqual(first.costEstimate?.priceTableUpdated, "2098-01-01")
+        XCTAssertEqual(engine.parseCount, 1)
+
+        let secondValue = await engine.telemetry(for: session(url, source: .codex))
+        let second = try XCTUnwrap(secondValue)
+        XCTAssertEqual(second.costEstimate?.priceTableUpdated, "2099-01-01")
+        XCTAssertEqual(engine.parseCount, 2,
+                       "the second pricing identity must not reuse the first snapshot")
     }
 
     func testPriceRevisionChangeInvalidatesCachedCost() async throws {
@@ -350,6 +548,27 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertFalse(estimate.accountScoped)
     }
 
+    func testCodexWeeklyQuotaFailsClosedForConflictingAccountIDsInOneMetadataRecord() async throws {
+        let lines = [
+            #"{"type":"session_meta","account_id":"account-a","payload":{"account_id":"account-a","accountId":"account-b"}}"#
+        ] + codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        }
+        let url = try write(lines)
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped)
+    }
+
     func testCachedTranscriptRefreshesWeeklyQuotaWithoutReparsing() async throws {
         let url = try write(codexLines(accountID: "account-a").map {
             $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
@@ -404,6 +623,34 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(telemetry?.weeklyQuotaEstimate?.status, .unavailable)
         XCTAssertEqual(telemetry?.weeklyQuotaEstimate?.unavailableReason,
                        "session has no priceable component breakdown")
+    }
+
+    func testManifestChangeDuringTotalOnlyScanKeepsCapturedQuotaRevision() async throws {
+        let legacy = [
+            #"{"timestamp":"2026-08-26T10:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-codex","effort":"medium"}}"#,
+            #"{"timestamp":"2026-08-26T10:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":4242}}}}"#
+        ]
+        let url = try write(legacy)
+        let prices = RunwayPriceTable.makeForTesting()
+        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: firstManifest))
+        let firstRevision = prices.revision
+        let refreshOnce = OneShotAction {
+            _ = prices.loadForTesting(json: secondManifest)
+        }
+        let engine = SessionTelemetryEngine(
+            priceTable: prices,
+            beforeTelemetryScan: { refreshOnce.run() })
+
+        let firstValue = await engine.telemetry(for: session(url, source: .codex))
+        let first = try XCTUnwrap(firstValue)
+        XCTAssertEqual(first.weeklyQuotaEstimate?.priceTableRevision, firstRevision)
+
+        let secondValue = await engine.telemetry(for: session(url, source: .codex))
+        let second = try XCTUnwrap(secondValue)
+        XCTAssertEqual(second.weeklyQuotaEstimate?.priceTableRevision, prices.revision)
+        XCTAssertNotEqual(second.weeklyQuotaEstimate?.priceTableRevision, firstRevision)
     }
 
     // MARK: - Parity with direct accumulation

@@ -3,7 +3,7 @@ import Foundation
 /// A file's cheap identity for cache invalidation: its content-modification date
 /// and byte size. Two reads of the same path with an unchanged `(mtime, size)`
 /// are treated as identical bytes, so an expensive head/tail parse can be reused.
-struct RunwayFileSignature: Equatable, Sendable {
+struct RunwayFileSignature: Hashable, Sendable {
     let mtime: TimeInterval
     let size: UInt64
 

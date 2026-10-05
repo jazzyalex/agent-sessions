@@ -3,20 +3,92 @@ import XCTest
 
 final class TranscriptTelemetryPresentationTests: XCTestCase {
     func testTelemetryLoadRequestDoesNotTrackSelectionWhileInspectorIsHidden() {
+        let selection = TranscriptTelemetrySelectionIdentity(
+            source: .codex, sessionID: "session-a", filePath: "/tmp/a.jsonl")
         XCTAssertNil(TranscriptTelemetryLoadRequest.key(
-            isVisible: false, selectionKey: "codex|session-a|/tmp/a.jsonl", refresh: 0))
+            isVisible: false, selection: selection, refresh: 0))
         XCTAssertNil(TranscriptTelemetryLoadRequest.key(
-            isVisible: false, selectionKey: "codex|session-b|/tmp/b.jsonl", refresh: 0))
+            isVisible: false,
+            selection: TranscriptTelemetrySelectionIdentity(
+                source: .codex, sessionID: "session-b", filePath: "/tmp/b.jsonl"),
+            refresh: 0))
     }
 
     func testTelemetryLoadRequestTracksVisibleSelectionAndRefresh() {
-        XCTAssertEqual(
-            TranscriptTelemetryLoadRequest.key(
-                isVisible: true, selectionKey: "codex|session-a|/tmp/a.jsonl", refresh: 2),
-            "codex|session-a|/tmp/a.jsonl|2"
-        )
+        let selection = TranscriptTelemetrySelectionIdentity(
+            source: .codex, sessionID: "session-a", filePath: "/tmp/a.jsonl")
+        let request = TranscriptTelemetryLoadRequest.key(
+            isVisible: true, selection: selection, refresh: 2)
+        XCTAssertEqual(request?.selection, selection)
+        XCTAssertEqual(request?.refresh, 2)
         XCTAssertNil(TranscriptTelemetryLoadRequest.key(
-            isVisible: true, selectionKey: "none", refresh: 2))
+            isVisible: true, selection: nil, refresh: 2))
+    }
+
+    func testTelemetrySelectionIdentityDoesNotUseDelimiterCollisions() {
+        let first = TranscriptTelemetrySelectionIdentity(
+            source: .codex, sessionID: "a|b", filePath: "/tmp/c")
+        let second = TranscriptTelemetrySelectionIdentity(
+            source: .codex, sessionID: "a", filePath: "b|/tmp/c")
+        XCTAssertNotEqual(first, second)
+        XCTAssertNotEqual(
+            TranscriptTelemetryLoadRequest.key(isVisible: true, selection: first, refresh: 0),
+            TranscriptTelemetryLoadRequest.key(isVisible: true, selection: second, refresh: 0))
+    }
+
+    func testQuickPaintStateScopesTimingToSelectionAndRecordsOnlyOnce() {
+        let first = SessionInfoQuickPaintIdentity(source: .codex, sessionID: "first")
+        let second = SessionInfoQuickPaintIdentity(source: .claude, sessionID: "second")
+        let start = Date(timeIntervalSince1970: 100)
+        var state = SessionInfoQuickPaintState()
+
+        state.arm(identity: first, at: start)
+        XCTAssertEqual(state.recordIfNeeded(identity: first,
+                                            at: start.addingTimeInterval(1)), 1)
+        XCTAssertNil(state.recordIfNeeded(identity: first,
+                                          at: start.addingTimeInterval(2)))
+
+        // Refreshing the same selection does not restart the paint episode.
+        state.arm(identity: first, at: start.addingTimeInterval(3))
+        XCTAssertNil(state.recordIfNeeded(identity: first,
+                                          at: start.addingTimeInterval(4)))
+
+        // A different selection gets its own timestamp and one new sample.
+        state.arm(identity: second, at: start.addingTimeInterval(10))
+        XCTAssertEqual(state.recordIfNeeded(identity: second,
+                                            at: start.addingTimeInterval(12)), 2)
+        state.reset()
+        XCTAssertNil(state.recordIfNeeded(identity: second,
+                                          at: start.addingTimeInterval(13)))
+    }
+
+    func testModelFirstPaintRequiresKnownCurrentModel() {
+        let identity = SessionInfoQuickPaintIdentity(source: .codex, sessionID: "model-paint")
+        let start = Date(timeIntervalSince1970: 100)
+        var state = SessionInfoQuickPaintState()
+        state.arm(identity: identity, at: start)
+
+        XCTAssertNil(state.recordModelFirstPaintIfNeeded(
+            identity: identity, modelIsKnown: false, at: start.addingTimeInterval(1)))
+        XCTAssertEqual(state.recordModelFirstPaintIfNeeded(
+            identity: identity, modelIsKnown: true, at: start.addingTimeInterval(2)), 2)
+    }
+
+    func testModelFirstPaintRecordsTwoKnownSessionsWithTheSameModel() {
+        let first = SessionInfoQuickPaintIdentity(source: .codex, sessionID: "same-model-first")
+        let second = SessionInfoQuickPaintIdentity(source: .codex, sessionID: "same-model-second")
+        let start = Date(timeIntervalSince1970: 100)
+        var state = SessionInfoQuickPaintState()
+
+        // Both sessions already expose the same known current model. The
+        // selection identity, not the model string, must create the second
+        // paint episode.
+        state.arm(identity: first, at: start)
+        XCTAssertEqual(state.recordModelFirstPaintIfNeeded(
+            identity: first, modelIsKnown: true, at: start.addingTimeInterval(1)), 1)
+        state.arm(identity: second, at: start.addingTimeInterval(10))
+        XCTAssertEqual(state.recordModelFirstPaintIfNeeded(
+            identity: second, modelIsKnown: true, at: start.addingTimeInterval(12)), 2)
     }
 
     private func block(_ index: Int, record: Int, kind: SessionTranscriptBuilder.LogicalBlock.Kind = .assistant) -> SessionTranscriptBuilder.LogicalBlock {
@@ -343,6 +415,67 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertTrue(help.hasPrefix("12,000 tokens across 2 requests,"))
     }
 
+    func testQuickFactsPresentationKeepsCurrentAndFirstObservedProvenanceSeparate() {
+        let session = Session(
+            id: "quick-info-session",
+            source: .qwen,
+            startTime: nil,
+            endTime: nil,
+            model: "qwen3-coder",
+            filePath: "/tmp/quick-info.jsonl",
+            fileSizeBytes: 12,
+            eventCount: 0,
+            events: [],
+            cwd: "/tmp",
+            repoName: "repo",
+            lightweightTitle: "  Quick title  ",
+            reasoningEffort: "high")
+        let facts = SessionInfoQuickFacts(session: session)
+
+        let current = TranscriptTelemetryPresentation.quickFactValue(facts.currentModel)
+        XCTAssertEqual(current.text, "qwen3-coder")
+        XCTAssertTrue(current.help.contains("Current model"))
+
+        let beforeTelemetry = TranscriptTelemetryPresentation.firstObservedModelValue(
+            facts, telemetry: nil)
+        XCTAssertEqual(beforeTelemetry.text, "—")
+        XCTAssertTrue(beforeTelemetry.help.contains("Not supported"))
+        XCTAssertFalse(beforeTelemetry.help.contains("Detailed telemetry"))
+
+        let initial = SessionConfiguration(
+            model: "first-model", reasoningEffort: "medium", observedAt: nil,
+            anchorLine: 0, provenance: .inferredFirstObservation)
+        let afterTelemetry = TranscriptTelemetryPresentation.firstObservedModelValue(
+            facts, telemetry: telemetry(events: [], initial: initial, current: initial))
+        XCTAssertEqual(afterTelemetry.text, "first-model")
+        XCTAssertTrue(afterTelemetry.help.contains("inferred"))
+
+        let fieldRecorded = SessionConfiguration(
+            model: "field-recorded", reasoningEffort: "medium", observedAt: nil,
+            anchorLine: 0, provenance: .inferredFirstObservation,
+            modelProvenance: .assistantRecord)
+        let fieldRecordedValue = TranscriptTelemetryPresentation.firstObservedModelValue(
+            facts, telemetry: telemetry(events: [], initial: fieldRecorded, current: fieldRecorded))
+        XCTAssertEqual(fieldRecordedValue.text, "field-recorded")
+        XCTAssertTrue(fieldRecordedValue.help.contains("recorded"))
+        XCTAssertFalse(fieldRecordedValue.help.contains("inferred"))
+
+        let failedTelemetry = TranscriptTelemetryPresentation.firstObservedModelValue(
+            facts,
+            telemetry: nil,
+            telemetryLoadState: .unavailable(.parseFailed))
+        XCTAssertEqual(failedTelemetry.text, "—")
+        XCTAssertTrue(failedTelemetry.help.contains("Could not read"))
+        XCTAssertFalse(failedTelemetry.help.contains("Not loaded"))
+
+        XCTAssertEqual(
+            TranscriptTelemetryPresentation.quickFactValue(facts.title).text,
+            "Quick title")
+        let missingTitle = TranscriptTelemetryPresentation.titleValue(
+            .unavailable(.notLoaded))
+        XCTAssertTrue(missingTitle.help.contains("No title is available"))
+    }
+
     func testTokenShareHelpResolvesCompleteLocalizedSentences() {
         let locale = Locale(identifier: "en")
         let share = TelemetryTokenShare(
@@ -392,6 +525,16 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
             SessionConfiguration(model: "gpt-5.6-sol", reasoningEffort: nil,
                                  observedAt: nil, anchorLine: 0,
                                  provenance: .effectiveTurnContext)))
+
+        let mixed = SessionConfiguration(
+            model: "recorded-model", reasoningEffort: "inferred-effort",
+            observedAt: nil, anchorLine: 0,
+            provenance: .inferredFirstObservation,
+            modelProvenance: .assistantRecord,
+            reasoningEffortProvenance: .inferredFirstObservation)
+        XCTAssertTrue(TranscriptTelemetryPresentation.modelValue(mixed).help.contains("Recorded"))
+        XCTAssertFalse(TranscriptTelemetryPresentation.modelValue(mixed).help.contains("Inferred"))
+        XCTAssertTrue(TranscriptTelemetryPresentation.thinkingValue(mixed)?.help.contains("Inferred") == true)
     }
 
     func testUnpricedModelsAreNamedInHelpNotInTheValue() {

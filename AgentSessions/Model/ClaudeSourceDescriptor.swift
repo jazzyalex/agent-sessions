@@ -20,6 +20,7 @@ extension SessionSourceDescriptor {
                 cost: .supported,
                 weeklyQuota: .partial("raw quota evidence is available, but per-session attribution requires stable account identity")
             ),
+            makeTelemetryProvider: { ClaudeTelemetryProvider() },
             shortLabel: "Claude",
             badgeInitials: "CC",
             // Warm brown.

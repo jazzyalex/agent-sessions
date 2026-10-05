@@ -2325,6 +2325,8 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func parseFileFullResult(at url: URL, forcedID: String? = nil) -> FullParseResult? {
+        SessionInfoMetrics.shared.beginTranscript(path: url.path)
+        defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
 #if DEBUG
         reloadLock.lock()
         fullParseInvocationCountForTesting += 1

@@ -30,6 +30,8 @@ final class ClaudeSessionParser {
 
     /// Full parse of Claude Code session file
     static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
+        SessionInfoMetrics.shared.beginTranscript(path: url.path)
+        defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let reader = JSONLReader(url: url)

@@ -34,25 +34,30 @@ struct CodexTranscriptAccountIdentity {
               let type = object["type"] as? String,
               Self.metadataRecordTypes.contains(type.lowercased()) else { return }
 
-        let payload = object["payload"] as? [String: Any] ?? object
-        let raw = Self.accountID(in: payload) ?? Self.accountID(in: object)
-        guard let raw else { return }
-        let next = WeeklyQuotaCalibrationScope.hashAccount(raw)
-        guard let next else { return }
-        if let hash, hash != next {
-            isAmbiguous = true
-        } else {
-            hash = next
+        var candidates = Set<String>()
+        if let payload = object["payload"] as? [String: Any] {
+            candidates.formUnion(Self.accountIDs(in: payload).compactMap(
+                WeeklyQuotaCalibrationScope.hashAccount))
+        }
+        candidates.formUnion(Self.accountIDs(in: object).compactMap(
+            WeeklyQuotaCalibrationScope.hashAccount))
+        guard !candidates.isEmpty else { return }
+
+        for next in candidates {
+            if let hash, hash != next {
+                isAmbiguous = true
+            } else {
+                hash = next
+            }
         }
     }
 
-    private static func accountID(in object: [String: Any]) -> String? {
-        for key in ["account_id", "accountId"] {
-            guard let value = object[key] as? String else { continue }
+    private static func accountIDs(in object: [String: Any]) -> [String] {
+        ["account_id", "accountId"].compactMap { key in
+            guard let value = object[key] as? String else { return nil }
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
+            return trimmed.isEmpty ? nil : trimmed
         }
-        return nil
     }
 }
 
@@ -76,19 +81,31 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private static let cacheCapacity = 16
 
     private let lock = NSLock()
-    private var cache: [String: Entry] = [:]
+    private var cache: [TelemetryRequestKey: Entry] = [:]
     /// Least-recently-used last.
-    private var order: [String] = []
+    private var order: [TelemetryRequestKey] = []
+    /// One producer task per exact transcript/pricing revision. Subscribers await
+    /// the same task; cancellation of one subscriber never cancels the producer.
+    private var inFlight: [TelemetryRequestKey: Task<TelemetryScanResult, Never>] = [:]
     private let priceTable: RunwayPriceTable
     private let quotaStore: WeeklyQuotaCalibrationStore
     private let now: @Sendable () -> Date
+    private let metrics: SessionInfoMetrics
+    /// Test seam for changing-file and changing-manifest regression tests. The
+    /// production singleton leaves this nil.
+    private let beforeTelemetryScan: (@Sendable () -> Void)?
+    /// Test seam invoked after the first streamed record. The production
+    /// singleton leaves this nil.
+    private let afterFirstTelemetryLine: (@Sendable () -> Void)?
 
-    /// The sources `compute` can actually dispatch. A source whose descriptor
-    /// declares telemetry available but is missing here returns nil forever, and
-    /// silently — the `default` arm cannot tell that case from a source that
-    /// correctly declares nothing. `SessionTelemetryEngineTests` asserts this set
-    /// matches the descriptors, so adding a provider cannot half-land.
-    static let dispatchableSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+    /// Sources with a registry-owned telemetry provider. This remains a derived
+    /// compatibility surface for tests and diagnostics; provider dispatch itself
+    /// reads the factory from the selected source descriptor.
+    static var dispatchableSources: Set<SessionSource> {
+        Set(SessionSourceRegistry.ordered.compactMap { adapter in
+            adapter.descriptor.makeTelemetryProvider == nil ? nil : adapter.descriptor.source
+        })
+    }
 
     /// Counts full parses, so cache tests can prove a second call did no work.
     private var _parseCount = 0
@@ -98,36 +115,112 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
     init(priceTable: RunwayPriceTable = .shared,
          quotaStore: WeeklyQuotaCalibrationStore = .shared,
-         now: @escaping @Sendable () -> Date = { Date() }) {
+         now: @escaping @Sendable () -> Date = { Date() },
+         metrics: SessionInfoMetrics = .shared,
+         beforeTelemetryScan: (@Sendable () -> Void)? = nil,
+         afterFirstTelemetryLine: (@Sendable () -> Void)? = nil) {
         self.priceTable = priceTable
         self.quotaStore = quotaStore
         self.now = now
+        self.metrics = metrics
+        self.beforeTelemetryScan = beforeTelemetryScan
+        self.afterFirstTelemetryLine = afterFirstTelemetryLine
     }
 
     private struct Entry {
-        let signature: RunwayFileSignature
-        let parserVersion: Int
-        let priceTableRevision: Int
-        let priceTableUpdated: String
-        let priceManifestFingerprint: String
-        let telemetry: SessionTelemetry
-        /// Hash of an account identity explicitly recorded by the transcript.
-        /// The current signed-in account is deliberately not used as a proxy:
-        /// historical files can outlive an account switch.
-        let durableAccountHash: String?
+        let computed: ComputedTelemetry
     }
 
-    private struct ComputedTelemetry {
+    private struct ComputedTelemetry: Sendable {
         let telemetry: SessionTelemetry
         let durableAccountHash: String?
+        let pricing: TelemetryPricingIdentity
+    }
+
+    private struct TelemetryPricingIdentity: Hashable, Sendable {
+        let revision: Int
+        let updated: String
+        let manifestFingerprint: String
+
+        init(snapshot: RunwayPriceSnapshot) {
+            revision = snapshot.revision
+            updated = snapshot.updatedDate
+            manifestFingerprint = snapshot.manifestFingerprint
+        }
+    }
+
+    private struct TelemetryRequestKey: Hashable, Sendable {
+        let source: SessionSource
+        let path: String
+        let fileRevision: RunwayFileSignature
+        let parserVersion: Int
+        let pricing: TelemetryPricingIdentity
+    }
+
+    private struct TelemetryWorkSelection {
+        let cached: ComputedTelemetry?
+        let worker: Task<TelemetryScanResult, Never>?
+        let joinedInFlight: Bool
+    }
+
+    private struct TelemetryStreamResult: Sendable {
+        let completed: Bool
+        let bytesRead: UInt64
+    }
+
+    private struct TelemetryScanResult: Sendable {
+        let computed: ComputedTelemetry?
+        let bytesScanned: UInt64
+        let revisionChanged: Bool
+    }
+
+    private final class TelemetryResultRelay: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<TelemetryScanResult?, Never>?
+        private var hasResult = false
+        private var result: TelemetryScanResult?
+
+        func wait() async -> TelemetryScanResult? {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if hasResult {
+                    let result = self.result
+                    lock.unlock()
+                    continuation.resume(returning: result)
+                } else {
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            }
+        }
+
+        func resolve(_ result: TelemetryScanResult?) {
+            lock.lock()
+            guard !hasResult else {
+                lock.unlock()
+                return
+            }
+            hasResult = true
+            self.result = result
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume(returning: result)
+        }
     }
 
     /// nil when the source cannot produce telemetry, or the file is unreadable.
     func telemetry(for session: Session) async -> SessionTelemetry? {
-        let capabilities = SessionSourceRegistry.descriptor(for: session.source).telemetry
-        // Capability-gated rather than a hardcoded provider list: adding a provider
-        // later is a descriptor edit plus an accumulator, with no change here.
+        await telemetry(for: session, revisionRetryCount: 0)
+    }
+
+    private func telemetry(for session: Session, revisionRetryCount: Int) async -> SessionTelemetry? {
+        let descriptor = SessionSourceRegistry.descriptor(for: session.source)
+        let capabilities = descriptor.telemetry
+        // Capability- and registry-gated: adding a provider is a descriptor edit
+        // plus an accumulator, with no engine switch or provider list to update.
         guard capabilities.configuration.isAvailable || capabilities.tokens.isAvailable else { return nil }
+        guard let makeTelemetryProvider = descriptor.makeTelemetryProvider else { return nil }
 
         let path = session.filePath
         guard !path.isEmpty else { return nil }
@@ -135,99 +228,195 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         // A nil signature means the file is missing or unstat-able. Bypass the cache
         // entirely rather than risk serving a stale result for a file we cannot check.
         guard let signature = RunwayFileSignature.read(path: path) else { return nil }
-        if let cached = cachedTelemetry(path: path, signature: signature,
-                                        priceTableRevision: priceTable.revision,
-                                        priceTableUpdated: priceTable.updatedDate,
-                                        priceManifestFingerprint: priceTable.manifestFingerprint) {
+
+        let pricingSnapshot = priceTable.snapshot()
+        let pricing = TelemetryPricingIdentity(snapshot: pricingSnapshot)
+        let key = TelemetryRequestKey(
+            source: session.source,
+            path: path,
+            fileRevision: signature,
+            parserVersion: SessionTelemetry.parserVersion,
+            pricing: pricing)
+
+        let selection = selectWork(
+            key: key,
+            path: path,
+            signature: signature,
+            capabilities: capabilities,
+            makeTelemetryProvider: makeTelemetryProvider,
+            pricingSnapshot: pricingSnapshot)
+
+        if let cached = selection.cached {
+            metrics.recordCacheHit()
             return applyingWeeklyQuota(to: cached.telemetry,
                                        source: session.source,
                                        capabilities: capabilities,
                                        durableAccountHash: cached.durableAccountHash,
+                                       pricing: cached.pricing,
                                        now: now())
         }
 
-        let source = session.source
-        let priceTable = self.priceTable
-        let worker = Task.detached(priority: .utility) { [weak self] in
-            self?.compute(path: path, source: source, capabilities: capabilities,
-                          priceTable: priceTable)
+        if selection.joinedInFlight {
+            metrics.recordInFlightJoin()
         }
-        let computed = await withTaskCancellationHandler(
-            operation: { await worker.value },
-            onCancel: { worker.cancel() }
-        )
+        guard let worker = selection.worker else { return nil }
+        // This is a shared producer. Do not cancel it when this subscriber is
+        // cancelled; another visible Session Info consumer may still need it.
+        guard let scan = await awaitSharedScan(worker) else { return nil }
 
-        guard !Task.isCancelled, let computed else { return nil }
-        store(computed, path: path, signature: signature)
+        guard !Task.isCancelled else { return nil }
+        guard let computed = scan.computed else {
+            guard scan.revisionChanged, revisionRetryCount < 1 else { return nil }
+            return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
+        }
         return applyingWeeklyQuota(to: computed.telemetry,
-                                   source: source,
+                                   source: session.source,
                                    capabilities: capabilities,
                                    durableAccountHash: computed.durableAccountHash,
+                                   pricing: computed.pricing,
                                    now: now())
+    }
+
+    /// Waits for a shared producer without allowing subscriber cancellation to
+    /// cancel that producer. The small cancellation waiter lets a replaced
+    /// Session Info selection return promptly while another subscriber can keep
+    /// the producer alive.
+    private func awaitSharedScan(_ worker: Task<TelemetryScanResult, Never>) async -> TelemetryScanResult? {
+        guard !Task.isCancelled else { return nil }
+        let relay = TelemetryResultRelay()
+        // This observer is intentionally unstructured. A cancelled subscriber
+        // must not remain attached to `worker.value`, and cancelling this
+        // observer would not cancel the shared producer either.
+        _ = Task.detached(priority: .utility) {
+            relay.resolve(await worker.value)
+        }
+        return await withTaskCancellationHandler(operation: {
+            guard !Task.isCancelled else {
+                relay.resolve(nil)
+                return nil
+            }
+            return await relay.wait()
+        }, onCancel: {
+            relay.resolve(nil)
+        })
+    }
+
+    /// Selects a cached result, an existing producer, or a new shared producer.
+    /// This helper stays synchronous so all lock operations remain outside the
+    /// async caller's isolation context.
+    private func selectWork(
+        key: TelemetryRequestKey,
+        path: String,
+        signature: RunwayFileSignature,
+        capabilities: TelemetryCapabilities,
+        makeTelemetryProvider: @escaping @Sendable () -> any SessionTelemetryProvider,
+        pricingSnapshot: RunwayPriceSnapshot
+    ) -> TelemetryWorkSelection {
+        lock.lock()
+        if let cached = cachedTelemetryLocked(for: key) {
+            lock.unlock()
+            return TelemetryWorkSelection(cached: cached, worker: nil, joinedInFlight: false)
+        }
+        if let existing = inFlight[key] {
+            lock.unlock()
+            return TelemetryWorkSelection(cached: nil, worker: existing, joinedInFlight: true)
+        }
+
+        let metrics = self.metrics
+        let beforeTelemetryScan = self.beforeTelemetryScan
+        let afterFirstTelemetryLine = self.afterFirstTelemetryLine
+        let newWorker: Task<TelemetryScanResult, Never> = Task.detached(priority: .utility) { [weak self] in
+            let startedAt = Date()
+            metrics.beginTelemetry(path: path)
+            var result = TelemetryScanResult(computed: nil, bytesScanned: 0, revisionChanged: false)
+            defer {
+                metrics.endTelemetry(path: path)
+                metrics.recordTelemetryFinished(
+                    duration: Date().timeIntervalSince(startedAt),
+                    bytesScanned: result.bytesScanned)
+                self?.finishInFlight(for: key)
+            }
+            guard let self = self else { return result }
+            beforeTelemetryScan?()
+            result = self.compute(
+                path: path,
+                expectedSignature: signature,
+                capabilities: capabilities,
+                makeTelemetryProvider: makeTelemetryProvider,
+                priceSnapshot: pricingSnapshot,
+                afterFirstTelemetryLine: afterFirstTelemetryLine)
+            if let computed = result.computed {
+                self.store(computed, for: key)
+            }
+            return result
+        }
+        inFlight[key] = newWorker
+        lock.unlock()
+        return TelemetryWorkSelection(cached: nil, worker: newWorker, joinedInFlight: false)
     }
 
     // MARK: - Computation
 
     private func compute(path: String,
-                         source: SessionSource,
+                         expectedSignature: RunwayFileSignature,
                          capabilities: TelemetryCapabilities,
-                         priceTable: RunwayPriceTable) -> ComputedTelemetry? {
-        guard !Task.isCancelled else { return nil }
+                         makeTelemetryProvider: @Sendable () -> any SessionTelemetryProvider,
+                         priceSnapshot: RunwayPriceSnapshot,
+                         afterFirstTelemetryLine: (@Sendable () -> Void)?) -> TelemetryScanResult {
+        guard !Task.isCancelled else {
+            return TelemetryScanResult(computed: nil, bytesScanned: 0, revisionChanged: false)
+        }
         let url = URL(fileURLWithPath: path)
-        var telemetry: SessionTelemetry?
-        var durableAccountHash: String?
-
         // Streamed, never materialized: the largest local Codex rollout is 256 MB.
-        switch source {
-        case .codex:
-            var accumulator = CodexTelemetryAccumulator()
-            var identity = CodexTranscriptAccountIdentity()
-            guard streamLines(at: url, into: {
-                identity.consume(line: $0)
-                accumulator.consume(line: $0, index: $1)
-            }) else { return nil }
-            telemetry = accumulator.finish()
-            durableAccountHash = identity.durableAccountHash
-        case .claude:
-            var accumulator = ClaudeTelemetryAccumulator()
-            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
-            telemetry = accumulator.finish()
-        case .pi:
-            var accumulator = PiTelemetryAccumulator()
-            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
-            telemetry = accumulator.finish()
-        case .copilot:
-            var accumulator = CopilotTelemetryAccumulator()
-            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
-            telemetry = accumulator.finish()
-        default:
-            return nil
+        var provider = makeTelemetryProvider()
+        let streamed = streamLines(at: url,
+                                   maximumBytes: expectedSignature.size,
+                                   afterFirstLine: afterFirstTelemetryLine,
+                                   into: {
+            provider.consume(line: $0, index: $1)
+        })
+        let revisionChanged = RunwayFileSignature.read(path: path) != expectedSignature
+        guard streamed.completed, !revisionChanged, !Task.isCancelled else {
+            return TelemetryScanResult(computed: nil,
+                                       bytesScanned: streamed.bytesRead,
+                                       revisionChanged: revisionChanged)
         }
 
-        guard let base = telemetry else { return nil }
+        let parsed = provider.finish()
+        let base = parsed.telemetry
+        let durableAccountHash = parsed.durableAccountHash
         lock.lock(); _parseCount += 1; lock.unlock()
 
         // Pricing needs both permission and component tokens: a legacy total-only
         // transcript reports a token count but can never be priced.
         guard capabilities.cost.isAvailable, base.usageSummary?.hasComponentBreakdown == true else {
-            return ComputedTelemetry(telemetry: base,
-                                     durableAccountHash: durableAccountHash)
+            return TelemetryScanResult(
+                computed: ComputedTelemetry(
+                    telemetry: base,
+                    durableAccountHash: durableAccountHash,
+                    pricing: TelemetryPricingIdentity(snapshot: priceSnapshot)),
+                bytesScanned: streamed.bytesRead,
+                revisionChanged: false)
         }
         let priced = TelemetryCostCalculator.price(events: base.usageEvents,
                                                    fallbackSlices: base.usageSlices,
-                                                   priceTable: priceTable)
-        return ComputedTelemetry(
-            telemetry: SessionTelemetry(source: base.source,
-                                        initialConfiguration: base.initialConfiguration,
-                                        currentConfiguration: base.currentConfiguration,
-                                        configurationChanges: base.configurationChanges,
-                                        usageSlices: base.usageSlices,
-                                        usageEvents: priced.events,
-                                        usageSummary: base.usageSummary,
-                                        costEstimate: priced.estimate,
-                                        weeklyQuotaEstimate: nil,
-                                        parserVersion: base.parserVersion),
-            durableAccountHash: durableAccountHash)
+                                                   snapshot: priceSnapshot)
+        return TelemetryScanResult(
+            computed: ComputedTelemetry(
+                telemetry: SessionTelemetry(source: base.source,
+                                            initialConfiguration: base.initialConfiguration,
+                                            currentConfiguration: base.currentConfiguration,
+                                            configurationChanges: base.configurationChanges,
+                                            usageSlices: base.usageSlices,
+                                            usageEvents: priced.events,
+                                            usageSummary: base.usageSummary,
+                                            costEstimate: priced.estimate,
+                                            weeklyQuotaEstimate: nil,
+                                            parserVersion: base.parserVersion),
+                durableAccountHash: durableAccountHash,
+                pricing: TelemetryPricingIdentity(snapshot: priceSnapshot)),
+            bytesScanned: streamed.bytesRead,
+            revisionChanged: false)
     }
 
     /// Weekly attribution depends on live account calibration, not transcript
@@ -237,12 +426,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                                      source: SessionSource,
                                      capabilities: TelemetryCapabilities,
                                      durableAccountHash: String?,
+                                     pricing: TelemetryPricingIdentity,
                                      now: Date) -> SessionTelemetry {
         let weekly = weeklyQuotaEstimate(source: source,
                                          capabilities: capabilities,
                                          cost: telemetry.costEstimate,
                                          durableAccountHash: durableAccountHash,
                                          quotaStore: quotaStore,
+                                         pricing: pricing,
                                          now: now)
         return SessionTelemetry(source: telemetry.source,
                                 initialConfiguration: telemetry.initialConfiguration,
@@ -261,6 +452,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                                      cost: TelemetryCostEstimate?,
                                      durableAccountHash: String?,
                                      quotaStore: WeeklyQuotaCalibrationStore,
+                                     pricing: TelemetryPricingIdentity,
                                      now: Date) -> TelemetryWeeklyQuotaEstimate? {
         guard capabilities.weeklyQuota.isAvailable else { return nil }
         guard let cost else {
@@ -270,7 +462,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 percentPointsPerAPIDollar: nil, accountScoped: false,
                 sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
                 calibrationProvenance: nil,
-                calculatedAt: now, priceTableRevision: priceTable.revision)
+                calculatedAt: now, priceTableRevision: pricing.revision)
         }
         guard let dollars = cost.apiEquivalentUSD else {
             return TelemetryWeeklyQuotaEstimate(
@@ -335,62 +527,64 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     /// Feeds the shared JSONL reader's emitted records, numbering them as it goes.
     /// That numbering is what `anchorLine` refers to — the reader drops blank lines,
     /// so it is a record index, not a raw file line.
-    private func streamLines(at url: URL, into consume: (String, Int) -> Void) -> Bool {
+    private func streamLines(at url: URL,
+                             maximumBytes: UInt64,
+                             afterFirstLine: (@Sendable () -> Void)?,
+                             into consume: (String, Int) -> Void) -> TelemetryStreamResult {
         var index = 0
+        var bytesRead: UInt64 = 0
+        var didInvokeAfterFirstLine = false
         do {
-            let completed = try JSONLReader(url: url).forEachLineWhile { line in
+            let completed = try JSONLReader(url: url,
+                                            maximumBytes: maximumBytes,
+                                            propagatesReadErrors: true).forEachLineWhile({ line in
                 guard !Task.isCancelled else { return false }
                 consume(line, index)
                 index += 1
+                if !didInvokeAfterFirstLine {
+                    didInvokeAfterFirstLine = true
+                    afterFirstLine?()
+                }
                 return true
-            }
-            return completed && !Task.isCancelled
+            }, reportBytesRead: { bytesRead = $0 })
+            return TelemetryStreamResult(completed: completed && !Task.isCancelled,
+                                         bytesRead: bytesRead)
         } catch {
-            return false
+            return TelemetryStreamResult(completed: false, bytesRead: bytesRead)
         }
     }
 
     // MARK: - Cache
 
-    private func cachedTelemetry(path: String,
-                                 signature: RunwayFileSignature,
-                                 priceTableRevision: Int,
-                                 priceTableUpdated: String,
-                                 priceManifestFingerprint: String) -> ComputedTelemetry? {
-        lock.lock(); defer { lock.unlock() }
-        guard let entry = cache[path],
-              entry.signature == signature,
-              entry.parserVersion == SessionTelemetry.parserVersion,
-              entry.priceTableRevision == priceTableRevision,
-              entry.priceTableUpdated == priceTableUpdated,
-              entry.priceManifestFingerprint == priceManifestFingerprint else { return nil }
-        touch(path)
-        return ComputedTelemetry(telemetry: entry.telemetry,
-                                 durableAccountHash: entry.durableAccountHash)
+    private func cachedTelemetryLocked(for key: TelemetryRequestKey) -> ComputedTelemetry? {
+        guard let entry = cache[key] else { return nil }
+        touch(key)
+        return entry.computed
     }
 
-    private func store(_ computed: ComputedTelemetry,
-                       path: String,
-                       signature: RunwayFileSignature) {
-        lock.lock(); defer { lock.unlock() }
-        cache[path] = Entry(
-            signature: signature,
-            parserVersion: SessionTelemetry.parserVersion,
-            priceTableRevision: computed.telemetry.costEstimate?.priceTableRevision ?? priceTable.revision,
-            priceTableUpdated: computed.telemetry.costEstimate?.priceTableUpdated ?? priceTable.updatedDate,
-            priceManifestFingerprint: computed.telemetry.costEstimate?.priceManifestFingerprint
-                ?? priceTable.manifestFingerprint,
-            telemetry: computed.telemetry,
-            durableAccountHash: computed.durableAccountHash)
-        touch(path)
+    private func store(_ computed: ComputedTelemetry, for key: TelemetryRequestKey) {
+        lock.lock()
+        let replacedExisting = cache[key] != nil
+        cache[key] = Entry(computed: computed)
+        touch(key)
         while order.count > Self.cacheCapacity {
             cache.removeValue(forKey: order.removeFirst())
+        }
+        lock.unlock()
+        if replacedExisting {
+            metrics.recordDuplicateParse()
         }
     }
 
     /// Caller holds `lock`.
-    private func touch(_ path: String) {
-        order.removeAll { $0 == path }
-        order.append(path)
+    private func touch(_ key: TelemetryRequestKey) {
+        order.removeAll { $0 == key }
+        order.append(key)
+    }
+
+    private func finishInFlight(for key: TelemetryRequestKey) {
+        lock.lock()
+        inFlight.removeValue(forKey: key)
+        lock.unlock()
     }
 }
