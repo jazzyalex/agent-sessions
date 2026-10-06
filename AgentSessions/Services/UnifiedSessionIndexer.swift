@@ -620,7 +620,6 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
-    private var notificationObserverTokens: [NSObjectProtocol] = []
     /// Key-filtered defaults observers: the raw `didChangeNotification` fires on
     /// every process-wide defaults write (incl. AppKit window/splitview
     /// bookkeeping); these narrow to only the keys each subscriber consults so
@@ -970,23 +969,38 @@ final class UnifiedSessionIndexer: ObservableObject {
         // When probe cleanups succeed, mark analytics stale so they re-derive on next view.
         // Avoid calling refresh() here — probe cleanup runs during an in-flight manual refresh
         // and the coalesced second pass causes a redundant "0/N" indexing run.
-        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self = self else { return }
-            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
+        NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self else { return }
+                if let info = note.userInfo as? [String: Any],
+                   let status = info["status"] as? String,
+                   status == "success",
+                   self.analyticsLastBuiltAt != nil {
+                    self.analyticsIsStale = true
+                }
             }
-        })
-        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: ClaudeProbeProject.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self = self else { return }
-            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self else { return }
+                if let info = note.userInfo as? [String: Any],
+                   let status = info["status"] as? String,
+                   status == "success",
+                   self.analyticsLastBuiltAt != nil {
+                    self.analyticsIsStale = true
+                }
             }
-        })
+            .store(in: &cancellables)
         // A restore performed elsewhere (e.g. the transcript strip control) edits the
         // sidecar directly; refresh the overlay so the archived pill/filter reflect it.
-        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: .claudeArchiveDidChange, object: nil, queue: .main) { [weak self] _ in
-            self?.rebuildClaudeArchiveOverlay()
-        })
+        NotificationCenter.default.publisher(for: .claudeArchiveDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildClaudeArchiveOverlay()
+            }
+            .store(in: &cancellables)
         rebuildClaudeArchiveOverlay()
     }
 
@@ -2653,9 +2667,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         focusedSessionMonitorTask?.cancel()
         let coordinator = searchIngestCoordinator
         Task { await coordinator.cancelAll() }
-        for token in notificationObserverTokens {
-            NotificationCenter.default.removeObserver(token)
-        }
     }
 }
     struct LaunchState {
