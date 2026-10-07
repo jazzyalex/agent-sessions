@@ -737,8 +737,13 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Fix shape:** validate model fields against the provider's model grammar, strip known
   prompt-wrapper/instruction suffixes, and use a deterministic title fallback that prefers a
   clean user prompt over raw serialized metadata. Preserve the raw value only for diagnostics.
+- **Current status:** phase 3 adds a provider-neutral presentation sanitizer. Prompt/XML
+  wrappers and Cursor timestamp-only titles are rejected, Antigravity-style model suffixes
+  keep only a clean first line, and unsafe values are marked ambiguous without changing raw
+  session storage.
 - **Why deferred:** the values are provider-format-specific and need fixtures before a shared
-  sanitizer can be made safely without truncating legitimate model names or titles.
+  sanitizer can be made safely without truncating legitimate model names or titles. The
+  remaining work is broader fixture coverage for newly observed provider formats.
 - **Risk if wrong:** the app can display instructions as if they were configuration, or expose
   internal prompt text in a title.
 - **To close:** redacted fixtures reproduce each shape, sanitization is source-scoped, and

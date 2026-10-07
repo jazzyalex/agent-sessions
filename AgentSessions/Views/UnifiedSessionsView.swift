@@ -4431,7 +4431,8 @@ private struct SessionTitleCell: View, Equatable {
                         .help(subagentPillHelp)
                 }
                 // Model badge
-                if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
+                if let abbreviated = ModelNameAbbreviator.abbreviate(
+                    SessionInfoMetadataSanitizer.model(session.model, source: session.source)) {
                     Text(abbreviated)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .padding(.horizontal, 4)
@@ -4454,7 +4455,7 @@ private struct SessionTitleCell: View, Equatable {
             }
 
             HStack(spacing: 6) {
-                Text(displayTitleOverride ?? session.listTitle)
+                Text(displayTitle)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -4478,6 +4479,16 @@ private struct SessionTitleCell: View, Equatable {
             }
         }
         .onHover { hover = $0 }
+    }
+
+    private var displayTitle: String {
+        let candidates = [displayTitleOverride, session.listTitle, session.firstUserPreview]
+        if let clean = candidates
+            .compactMap({ SessionInfoMetadataSanitizer.title($0, source: session.source) })
+            .first {
+            return clean
+        }
+        return "Untitled session"
     }
 
     private var subagentPillHelp: String {

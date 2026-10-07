@@ -1,5 +1,83 @@
 import Foundation
 
+/// Cleans provider-owned metadata before it reaches a user-facing Session Info
+/// or session-row surface. The raw values stay on `Session` for diagnostics;
+/// this type only decides whether a value is safe to display.
+public enum SessionInfoMetadataSanitizer {
+    public static func model(_ rawValue: String?, source: SessionSource) -> String? {
+        guard let rawValue else { return nil }
+        let lines = rawValue
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard let firstLine = lines.first else { return nil }
+
+        let normalized = collapseWhitespace(rawValue)
+        if source == .cursor, looksLikeTimestampOnly(normalized) {
+            return nil
+        }
+        if lines.count > 1,
+           hasPromptMarker(normalized) || normalized.count > 160 {
+            return isCleanModel(firstLine, source: source) ? firstLine : nil
+        }
+        guard !hasPromptMarker(normalized), normalized.count <= 160 else { return nil }
+        return isCleanModel(normalized, source: source) ? normalized : nil
+    }
+
+    public static func title(_ rawValue: String?, source: SessionSource) -> String? {
+        guard let rawValue else { return nil }
+        let normalized = collapseWhitespace(rawValue)
+        guard !normalized.isEmpty,
+              normalized.count <= 400,
+              !hasPromptMarker(normalized),
+              !looksLikeRawMarkup(normalized) else { return nil }
+
+        if source == .cursor, looksLikeTimestampOnly(normalized) {
+            return nil
+        }
+        return normalized
+    }
+
+    private static func collapseWhitespace(_ value: String) -> String {
+        value.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func isCleanModel(_ value: String, source: SessionSource) -> Bool {
+        guard !value.isEmpty,
+              value.count <= 160,
+              !looksLikeRawMarkup(value),
+              !hasPromptMarker(value) else { return false }
+        guard !(source == .cursor && looksLikeTimestampOnly(value)) else { return false }
+
+        // Model IDs are provider-defined, so this is intentionally permissive.
+        // The boundary checks above reject prompt payloads without rejecting
+        // names such as `openai/gpt-5.1` or `Claude 3.7 Sonnet`.
+        return true
+    }
+
+    private static func hasPromptMarker(_ value: String) -> Bool {
+        let lowercased = value.lowercased()
+        let markers = [
+            "<system", "</system", "<system-reminder", "<user", "</user",
+            "<assistant", "</assistant", "<user_query", "</user_query",
+            "# instructions", "system prompt", "developer message",
+            "ignore previous", "begin system", "end system", "tools are grouped",
+            "you are an ai", "you are a helpful assistant"
+        ]
+        return markers.contains(where: { lowercased.contains($0) })
+    }
+
+    private static func looksLikeRawMarkup(_ value: String) -> Bool {
+        value.range(of: #"</?[A-Za-z][^>]*>"#, options: .regularExpression) != nil
+    }
+
+    private static func looksLikeTimestampOnly(_ value: String) -> Bool {
+        value.range(
+            of: #"^(?:\d{10,13}|\d{4}[-/]\d{2}[-/]\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)$"#,
+            options: .regularExpression) != nil
+    }
+}
+
 /// The source of a value shown in the immediate Session Info surface.
 ///
 /// A quick fact is deliberately honest about whether it came from the session
@@ -186,11 +264,12 @@ public struct SessionInfoQuickFacts: Hashable, Sendable {
 
     public init(session: Session) {
         self.source = session.source
+        let hasModelMetadata = Self.hasValue(session.model)
         self.sessionID = session.id
         self.currentModel = Self.field(
-            session.model,
+            SessionInfoMetadataSanitizer.model(session.model, source: session.source),
             provenance: .currentModel,
-            missing: .notRecorded)
+            missing: hasModelMetadata ? .ambiguous : .notRecorded)
         self.firstObservedModel = Self.firstObservedModelField(for: session)
         self.reasoningEffort = Self.field(
             session.reasoningEffort,
@@ -200,11 +279,14 @@ public struct SessionInfoQuickFacts: Hashable, Sendable {
         // `customTitle` and `lightweightTitle` are both already-loaded row
         // metadata. Calling Session.title here could inspect transcript events
         // and would turn quick info back into a parse-triggering surface.
-        let metadataTitle = Self.firstNonEmpty(session.customTitle, session.lightweightTitle)
+        let rawMetadataTitle = Self.firstNonEmpty(session.customTitle, session.lightweightTitle)
+        let metadataTitle = [session.customTitle, session.lightweightTitle]
+            .compactMap { SessionInfoMetadataSanitizer.title($0, source: session.source) }
+            .first
         self.title = Self.field(
             metadataTitle,
             provenance: .sessionMetadata,
-            missing: .notLoaded)
+            missing: rawMetadataTitle == nil ? .notLoaded : .ambiguous)
 
         self.identity = SessionInfoQuickFactsIdentity(
             source: session.source,
@@ -247,6 +329,11 @@ public struct SessionInfoQuickFacts: Hashable, Sendable {
         values
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
+    }
+
+    private static func hasValue(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
 }

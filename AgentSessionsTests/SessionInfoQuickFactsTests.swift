@@ -136,6 +136,45 @@ final class SessionInfoQuickFactsTests: XCTestCase {
         XCTAssertEqual(emptyFacts.title.unavailableReason, SessionInfoUnavailableReason.notLoaded)
     }
 
+    func testMetadataSanitizerRemovesPromptPayloadsFromModelAndTitle() {
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.model(
+                "gemini-2.5-pro\n\n# Instructions\nYou are a helpful assistant.",
+                source: .antigravity),
+            "gemini-2.5-pro")
+        XCTAssertNil(
+            SessionInfoMetadataSanitizer.title(
+                "<system-reminder>internal instructions</system-reminder>",
+                source: .hermes))
+        XCTAssertNil(
+            SessionInfoMetadataSanitizer.title(
+                "2026-10-07T20:15:00Z",
+                source: .cursor))
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title("  Fix the\tparser  ", source: .copilot),
+            "Fix the parser")
+    }
+
+    func testQuickFactsMarkUnsafeMetadataAmbiguous() {
+        let session = Session(
+            id: "unsafe-metadata",
+            source: .copilot,
+            startTime: nil,
+            endTime: nil,
+            model: "model-1",
+            filePath: "/tmp/copilot.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: "<user_query>raw prompt</user_query>")
+
+        let facts = SessionInfoQuickFacts(session: session)
+
+        XCTAssertEqual(facts.currentModel.value, "model-1")
+        XCTAssertEqual(facts.title.unavailableReason, .ambiguous)
+    }
+
     func testQuickFactsIdentityDoesNotUseDelimiterConcatenation() {
         let first = Session(
             id: "id\u{1F}known:currentModel:v",
