@@ -124,6 +124,36 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
         return rows
     }
 
+    private func v1StreamingRows() -> [DeepSeekHarnessPhysicalRow] {
+        let assistantMessage: [String: Any] = [
+            "turn": 1,
+            "step": 1,
+            "message": [
+                "id": "assistant-stream-message-1",
+                "role": "assistant",
+                "content": [["type": "text", "text": "done"]],
+                "source": ["kind": "model", "provider": "test", "model": "test"]
+            ] as [String: Any]
+        ]
+        return [
+            .event(envelope("turn/start", 0, data: ["turn": 1])),
+            .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+            .event(envelope("assistant/chunk", 2, data: [
+                "turn": 1, "step": 1,
+                "chunk": ["type": "text-delta", "index": 0, "text": "hello"]
+            ])),
+            .event(envelope("assistant/chunk", 3, data: [
+                "turn": 1, "step": 1,
+                "chunk": ["type": "text-delta", "index": 0, "text": " world"]
+            ])),
+            .event(envelope("assistant/message", 4,
+                            data: assistantMessage,
+                            sourceEventSeqs: [2, 3],
+                            surfaceOp: .append)),
+            .event(envelope("step/end", 5, data: ["turn": 1, "step": 1]))
+        ]
+    }
+
     private func v2Rows() -> [DeepSeekHarnessPhysicalRow] {
         [
             .event(envelope("turn/start", 0, data: ["turn": 1])),
@@ -149,6 +179,49 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
                 "turn": 1, "reason": ["kind": "completed"] as [String: Any]
             ]))
         ]
+    }
+
+    private func usage(_ input: Int = 10) -> [String: Any] {
+        [
+            "inputTokens": input,
+            "outputTokens": 5,
+            "cacheReadTokens": 2,
+            "cacheWriteTokens": 1,
+            "totalTokens": input + 8,
+        ]
+    }
+
+    private func assistantMessage(
+        id: String,
+        sequence: Int,
+        usage: [String: Any],
+        includeStream: Bool = true,
+        surfaceOp: DeepSeekHarnessSurfaceOp = .append
+    ) -> DeepSeekHarnessPhysicalRow {
+        var data: [String: Any] = [
+            "turn": 1,
+            "step": 1,
+            "message": [
+                "id": id,
+                "role": "assistant",
+                "content": [["type": "text", "text": id]],
+                "source": ["kind": "model", "provider": "test", "model": "dsh-test-model"]
+            ] as [String: Any],
+            "usage": usage,
+        ]
+        if includeStream { data["stream"] = [] }
+        return .event(envelope("assistant/message", sequence, data: data, surfaceOp: surfaceOp))
+    }
+
+    private func telemetry(
+        from normalized: DeepSeekHarnessNormalizedResult
+    ) throws -> SessionTelemetry {
+        try XCTUnwrap(
+            DeepSeekHarnessTelemetryAccumulator(
+                inheritedEventCount: normalized.inheritedEventCount,
+                events: normalized.events
+            ).telemetry()
+        )
     }
 
     private func canonicalJSON(_ events: [DeepSeekHarnessNormalizedEvent]) throws -> String {
@@ -244,10 +317,66 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
             inheritedEventCount: 5, skippedIgnorableTypes: [], incompleteTurn: false)
 
         let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(seeded)
+        let normalizedWithMetadata = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(seeded)
         let marker = try XCTUnwrap(normalized.first { $0.canonicalType == "session/end-seed" })
         XCTAssertLessThan(marker.envelope.sequence, 5,
                           "packed prefix must contract before v2-to-v3 receives the cut")
+        XCTAssertEqual(normalizedWithMetadata.inheritedEventCount, marker.envelope.sequence)
         XCTAssertEqual(normalized.filter { $0.canonicalType == "assistant/message" }.count, 1)
+    }
+
+    func testSeededV0MigrationKeepsInheritedUsageOutOfTelemetry() throws {
+        let seeded = DeepSeekHarnessParseResult(
+            header: header(version: 0, isSeeded: true, parentSessionID: "parent"),
+            rows: [
+                .event(envelope("turn/start", 0, data: ["turn": 1])),
+                .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+                assistantMessage(id: "inherited-v0", sequence: 2, usage: usage(), includeStream: false),
+                .event(envelope("session/end-seed", 3)),
+                assistantMessage(id: "current-v0", sequence: 4, usage: usage(20), includeStream: false),
+                .event(envelope("step/end", 5, data: ["turn": 1, "step": 1])),
+                .event(envelope("turn/end", 6, data: [
+                    "turn": 1, "reason": ["kind": "completed"] as [String: Any]
+                ])),
+            ],
+            inheritedEventCount: 3,
+            skippedIgnorableTypes: [],
+            incompleteTurn: false)
+
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(seeded)
+        let telemetry = try telemetry(from: normalized)
+        XCTAssertEqual(normalized.inheritedEventCount,
+                       normalized.events.first { $0.canonicalType == "session/end-seed" }?.envelope.sequence)
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 28)
+        XCTAssertEqual(telemetry.usageEvents.count, 1)
+        XCTAssertEqual(telemetry.usageEvents.first?.recordID, "assistant.message.usage:current-v0")
+    }
+
+    func testSeededV2MigrationKeepsInheritedUsageOutOfTelemetry() throws {
+        let seeded = DeepSeekHarnessParseResult(
+            header: header(version: 2, isSeeded: true, parentSessionID: "parent"),
+            rows: [
+                .event(envelope("turn/start", 0, data: ["turn": 1])),
+                .event(envelope("step/start", 1, data: ["turn": 1, "step": 1])),
+                assistantMessage(id: "inherited-v2", sequence: 2, usage: usage()),
+                .event(envelope("session/end-seed", 3, data: ["inherited": true])),
+                assistantMessage(id: "current-v2", sequence: 4, usage: usage(20)),
+                .event(envelope("step/end", 5, data: ["turn": 1, "step": 1])),
+                .event(envelope("turn/end", 6, data: [
+                    "turn": 1, "reason": ["kind": "completed"] as [String: Any]
+                ])),
+            ],
+            inheritedEventCount: 3,
+            skippedIgnorableTypes: [],
+            incompleteTurn: false)
+
+        let normalized = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(seeded)
+        let telemetry = try telemetry(from: normalized)
+        XCTAssertEqual(normalized.inheritedEventCount,
+                       normalized.events.first { $0.canonicalType == "session/end-seed" }?.envelope.sequence)
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 28)
+        XCTAssertEqual(telemetry.usageEvents.count, 1)
+        XCTAssertEqual(telemetry.usageEvents.first?.recordID, "assistant.message.usage:current-v2")
     }
 
     func testSeedCutBetweenPackedRunsOfOneAttemptIsRejected() throws {
@@ -293,6 +422,72 @@ final class DeepSeekHarnessHistoricalNormalizerTests: XCTestCase {
         XCTAssertTrue(normalized.contains { $0.canonicalType == "tool/ptc-dispatch-start" })
         XCTAssertTrue(normalized.contains { $0.canonicalType == "tool/ptc-dispatch" })
         XCTAssertFalse(normalized.contains { $0.canonicalType == "tool/code-dispatch" })
+    }
+
+    func testCancellationStopsNativeV4Normalization() async {
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        DeepSeekHarnessHistoricalNormalizer.testNormalizationCheckpointObserver = {
+            entered.signal()
+            release.wait()
+        }
+        let task = Task { () -> Bool in
+            let header = DeepSeekHarnessHeader(
+                version: 4, id: "cancel-v4", createdAtMilliseconds: 1_700_000_000_000,
+                cwd: "/tmp/dsh-tests", parentSessionID: nil, isSeeded: false,
+                origin: nil, delegationDepth: 0, agentPreset: nil)
+            let event = DeepSeekHarnessEnvelope(
+                type: "turn/start", sequence: 0, timeMilliseconds: 1_700_000_000_000,
+                data: ["turn": 1], ignorable: false, sourceEventSeqs: nil, surfaceOp: nil)
+            let parsed = DeepSeekHarnessParseResult(
+                header: header, rows: [.event(event)], inheritedEventCount: 0,
+                skippedIgnorableTypes: [], incompleteTurn: false)
+            do {
+                _ = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(parsed)
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        task.cancel()
+        release.signal()
+        let cancelled = await task.value
+        DeepSeekHarnessHistoricalNormalizer.testNormalizationCheckpointObserver = nil
+        XCTAssertTrue(cancelled)
+    }
+
+    func testCancellationStopsV1StreamNormalization() async throws {
+        let parsed = result(version: 1, rows: v1StreamingRows())
+        let uncancelled = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(parsed)
+        let message = try XCTUnwrap(uncancelled.events.first { $0.canonicalType == "assistant/message" })
+        let stream = try XCTUnwrap(message.data["stream"] as? [[String: Any]])
+        XCTAssertEqual(stream.count, 1)
+        XCTAssertEqual(stream.first?["texts"] as? [String], ["hello", " world"])
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        DeepSeekHarnessHistoricalNormalizer.testNormalizationCheckpointObserver = {
+            entered.signal()
+            release.wait()
+        }
+        let task = Task { () -> Bool in
+            do {
+                _ = try DeepSeekHarnessHistoricalNormalizer.normalizeWithMetadata(parsed)
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        task.cancel()
+        release.signal()
+        let cancelled = await task.value
+        DeepSeekHarnessHistoricalNormalizer.testNormalizationCheckpointObserver = nil
+        XCTAssertTrue(cancelled)
     }
 
     func testV3RequiredUnknownFailsWhileIgnorableUnknownIsRetainedForDiagnostics() throws {

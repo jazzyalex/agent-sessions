@@ -1153,7 +1153,7 @@ extension AgentSessionsApp {
                 await CrashReportingService.shared.clearPendingReports()
             }
         default:
-            break
+            await CrashReportingService.shared.deferPendingReports()
         }
     }
 

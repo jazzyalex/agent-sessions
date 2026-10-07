@@ -9,22 +9,6 @@ protocol SessionDiscovery {
     func discoverSessionFiles() -> [URL]
 }
 
-struct SessionFileStat: Equatable, Sendable {
-    let mtime: Int64
-    let size: Int64
-
-    /// Optional source-specific identity/fingerprint data. Generic sources keep
-    /// this nil; composite sources can use it to distinguish same-second,
-    /// same-size rewrites without changing the display timestamp contract.
-    let fingerprint: String?
-
-    init(mtime: Int64, size: Int64, fingerprint: String? = nil) {
-        self.mtime = mtime
-        self.size = size
-        self.fingerprint = fingerprint
-    }
-}
-
 enum SessionDeltaScope {
     case recent
     case full
@@ -44,11 +28,10 @@ struct SessionDiscoveryDelta {
 extension SessionFileStat {
     /// Stat a single session file, returning nil for non-regular files.
     static func from(_ url: URL) -> SessionFileStat? {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
-        guard values?.isRegularFile == true else { return nil }
-        let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
-        let size = Int64(values?.fileSize ?? 0)
-        return SessionFileStat(mtime: mtime, size: size)
+        guard let precise = SessionFileStat.precise(from: url) else { return nil }
+        return SessionFileStat(
+            mtime: precise.mtime / 1_000_000_000,
+            size: precise.size)
     }
 
     /// Build a stat map from a list of files, returning changed files and the full map.

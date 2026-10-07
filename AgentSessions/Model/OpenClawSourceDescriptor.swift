@@ -12,7 +12,30 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .openclaw,
-            telemetry: .allUnavailable("model/thinking-level change records exist in the logs; accumulator not built (Plan C)"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model comes from loaded Session metadata; detailed history comes from OpenClaw records"),
+                tokens: .supported,
+                cost: .unavailable("OpenClaw native cost is provider-specific and is not shown as an API-equivalent estimate"),
+                weeklyQuota: .unavailable("OpenClaw does not expose a compatible account quota feed")
+            ),
+            makeTelemetryProvider: { OpenClawTelemetryProvider() },
+            scanTelemetry: { session in
+                guard OpenClawSqliteReader.isSupportedDatabasePath(session.filePath) else { return nil }
+                return OpenClawSqliteReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                if OpenClawSqliteReader.isSupportedDatabasePath(session.filePath) {
+                    return OpenClawSqliteReader.telemetryRevision(for: session)
+                }
+                return RunwayFileSignature.read(path: session.filePath).map(SessionTelemetryRevision.file)
+            },
+            telemetryBackendAvailable: { session in
+                guard session.source == .openclaw else { return false }
+                if OpenClawSqliteReader.isSupportedDatabasePath(session.filePath) { return true }
+                let name = URL(fileURLWithPath: session.filePath).lastPathComponent
+                guard !name.lowercased().contains(".trajectory.jsonl") else { return false }
+                return name.hasSuffix(".jsonl") || name.contains(".jsonl.deleted.")
+            },
             shortLabel: "OpenClaw",
             badgeInitials: "CL",
             // Coral-orange accent, kept warm but separated from Claude/Hermes.
@@ -38,8 +61,11 @@ extension SessionSourceDescriptor {
             },
             defaultEnabled: .whenAvailable,
             parseFullByPath: { url in OpenClawSessionParser.parseFileFull(at: url) },
-            parseFullByIdentity: nil,
-            searchUsesIdentityAtURL: nil,
+            parseFullByIdentity: { url, sessionID in
+                guard OpenClawSqliteReader.isSupportedDatabaseURL(url) else { return nil }
+                return OpenClawSqliteReader.loadFullSession(databaseURL: url, sessionID: sessionID)
+            },
+            searchUsesIdentityAtURL: { OpenClawSqliteReader.isSupportedDatabaseURL($0) },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -94,7 +120,7 @@ extension SessionSourceAdapter {
                     currentSessions: { indexer.allSessions },
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
-                    searchIdentitySnapshots: .notApplicable,
+                    searchIdentitySnapshots: .provider { indexer.searchIdentitySnapshot },
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },
@@ -111,8 +137,17 @@ extension SessionSourceAdapter {
                 // Transcribed verbatim from UnifiedSessionsView.init's adapter dictionary.
                 searchAdapter: .init(
                     transcriptCache: indexer.searchTranscriptCache,
-                    update: { indexer.updateSession($0) },
-                    parseFull: { url, forcedID in OpenClawSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+                    update: { session in
+                        Task { @MainActor in
+                            indexer.updateSession(session)
+                        }
+                    },
+                    parseFull: { url, forcedID in
+                        if OpenClawSqliteReader.isSupportedDatabaseURL(url), !forcedID.isEmpty {
+                            return OpenClawSqliteReader.loadFullSession(databaseURL: url, sessionID: forcedID)
+                        }
+                        return OpenClawSessionParser.parseFileFull(at: url, forcedID: forcedID)
+                    }
                 )
             )
         }

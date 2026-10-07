@@ -160,4 +160,23 @@ final class SessionTelemetryTypesTests: XCTestCase {
         XCTAssertNil(telemetry.sessionOwnedTopLineTokens)
         XCTAssertNil(telemetry.descendantTopLineTokens)
     }
+
+    func testOwnershipTotalsFailClosedOnCrossEventOverflow() {
+        let halfMax = Int.max / 2 + 1
+        let event = { (id: String) in
+            TelemetryUsageEvent(
+                recordID: id, observedAt: nil, anchorLine: 0,
+                usageFamily: "token_count", ownership: .session,
+                model: nil, reasoningEffort: nil, speed: "standard-normalized",
+                freshInputTokens: halfMax, cacheReadTokens: 0,
+                cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+                outputTokens: 0, contextInputTokens: nil)
+        }
+        let telemetry = SessionTelemetry(
+            source: .codex, initialConfiguration: nil, currentConfiguration: nil,
+            configurationChanges: [], usageSlices: [], usageEvents: [event("one"), event("two")],
+            usageSummary: nil, costEstimate: nil)
+
+        XCTAssertNil(telemetry.sessionOwnedTopLineTokens)
+    }
 }

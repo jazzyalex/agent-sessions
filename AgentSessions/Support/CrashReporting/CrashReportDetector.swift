@@ -82,6 +82,12 @@ struct CrashReportDetector {
             return nil
         }
 
+        // XCTest injects the production app bundle into its test host. Those
+        // runs can emit DiagnosticReports with this app's bundle identifier,
+        // but they are test failures, not end-user crashes to surface on the
+        // next normal launch.
+        guard !isXCTestInjectedReport(text) else { return nil }
+
         let parsed: ParsedCrash?
         switch url.pathExtension.lowercased() {
         case "ips":
@@ -124,6 +130,13 @@ struct CrashReportDetector {
             breadcrumbs: breadcrumbs,
             rawMetadata: metadata
         )
+    }
+
+    private func isXCTestInjectedReport(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        return lowercased.contains("libxctestbundleinject")
+            || lowercased.contains("com.apple.dt.xctest")
+            || lowercased.contains("xctest.framework")
     }
 
     private func parseCrashText(_ text: String) -> ParsedCrash? {

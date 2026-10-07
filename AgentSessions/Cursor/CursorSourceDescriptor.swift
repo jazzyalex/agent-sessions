@@ -10,7 +10,24 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .cursor,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial(
+                    "current model comes from loaded Session metadata; Cursor transcripts do not record first-observed model or model-change history"),
+                tokens: .unavailable(
+                    "Cursor Agent transcript JSONL and chat metadata do not record attributable token components"),
+                cost: .unavailable(
+                    "Cursor Agent does not expose audited local pricing or billable token components"),
+                weeklyQuota: .unavailable("Cursor Agent does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                CursorTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                CursorTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                CursorTelemetryReader.isSupportedSession(session)
+            },
             shortLabel: "Cursor",
             badgeInitials: "CR",
             // Teal-ish (Cursor brand).

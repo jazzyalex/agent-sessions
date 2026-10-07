@@ -18,6 +18,12 @@ public enum TelemetryProvenance: String, Codable, Sendable {
     /// `model_change` / `thinking_level_change`, Copilot's `session.model_change`.
     /// Stronger than an inference: the provider is stating the change happened.
     case providerChangeRecord
+    /// A current/effective value read from the provider's session metadata rather
+    /// than inferred from the last message or usage record.
+    case sessionMetadata
+    /// A model or effort value observed on a provider request record, rather than
+    /// on a dedicated configuration-change event.
+    case requestRecord
 }
 
 /// Configuration fields observed at one point in a transcript. Either field may be
@@ -32,7 +38,8 @@ public struct SessionConfiguration: Equatable, Codable, Sendable {
     /// lines and replaces oversize ones with a stub, so the two diverge on any file
     /// containing either. It is stable and comparable as long as a consumer walks
     /// the file with that same reader, which is how every caller reads transcripts.
-    public let anchorLine: Int
+    /// nil means this configuration came from metadata with no transcript anchor.
+    public let anchorLine: Int?
     public let provenance: TelemetryProvenance
 
     /// Field-level evidence. These remain optional because a configuration record
@@ -48,7 +55,7 @@ public struct SessionConfiguration: Equatable, Codable, Sendable {
     public init(model: String?,
                 reasoningEffort: String?,
                 observedAt: Date?,
-                anchorLine: Int,
+                anchorLine: Int?,
                 provenance: TelemetryProvenance,
                 modelObservedAt: Date? = nil,
                 modelAnchorLine: Int? = nil,
@@ -64,6 +71,35 @@ public struct SessionConfiguration: Equatable, Codable, Sendable {
         self.modelObservedAt = model == nil ? nil : (modelObservedAt ?? observedAt)
         self.modelAnchorLine = model == nil ? nil : (modelAnchorLine ?? anchorLine)
         self.modelProvenance = model == nil ? nil : (modelProvenance ?? provenance)
+        self.reasoningEffortObservedAt = reasoningEffort == nil
+            ? nil : (reasoningEffortObservedAt ?? observedAt)
+        self.reasoningEffortAnchorLine = reasoningEffort == nil
+            ? nil : (reasoningEffortAnchorLine ?? anchorLine)
+        self.reasoningEffortProvenance = reasoningEffort == nil
+            ? nil : (reasoningEffortProvenance ?? provenance)
+    }
+
+    /// Creates a configuration whose model comes from already-loaded session
+    /// metadata rather than a record in the telemetry stream. The model is
+    /// therefore current-but-unanchored: carrying the transcript's latest
+    /// timestamp or line number onto it would falsely claim where that value
+    /// was observed.
+    init(unanchoredModel model: String,
+         reasoningEffort: String?,
+         observedAt: Date?,
+         anchorLine: Int?,
+         provenance: TelemetryProvenance,
+         reasoningEffortObservedAt: Date? = nil,
+         reasoningEffortAnchorLine: Int? = nil,
+         reasoningEffortProvenance: TelemetryProvenance? = nil) {
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.observedAt = observedAt
+        self.anchorLine = anchorLine
+        self.provenance = provenance
+        self.modelObservedAt = nil
+        self.modelAnchorLine = nil
+        self.modelProvenance = .sessionMetadata
         self.reasoningEffortObservedAt = reasoningEffort == nil
             ? nil : (reasoningEffortObservedAt ?? observedAt)
         self.reasoningEffortAnchorLine = reasoningEffort == nil
@@ -270,6 +306,10 @@ public struct TelemetryUsageSummary: Equatable, Codable, Sendable {
     public let hasComponentBreakdown: Bool
     /// The provider's own recorded total, when it states one (Codex `total_tokens`).
     public let recordedTotalTokens: Int?
+    /// A display-safe total assembled from the available row evidence. This is
+    /// distinct from `recordedTotalTokens` because a provider may give a total
+    /// on some rows and only components on others.
+    public let displayTotalTokens: Int?
     /// Which record families contributed, e.g. `["token_count"]` or
     /// `["message.usage"]`. More than one means both appeared and one was chosen
     /// as authoritative.
@@ -277,17 +317,25 @@ public struct TelemetryUsageSummary: Equatable, Codable, Sendable {
     /// True when two families both reported positive tokens — the totals come from
     /// the authoritative one, never from summing both.
     public let usageFamilyConflict: Bool
+    /// Non-nil when the provider deliberately discarded usage evidence because it
+    /// could not prove that the remaining rows belonged to this session. A partial
+    /// or fail-closed total must not be presented as a genuine zero or complete sum.
+    public let unavailableReason: String?
 
     public init(topLineTokens: Int,
                 hasComponentBreakdown: Bool,
                 recordedTotalTokens: Int?,
                 usageFamilies: [String],
-                usageFamilyConflict: Bool) {
+                usageFamilyConflict: Bool,
+                displayTotalTokens: Int? = nil,
+                unavailableReason: String? = nil) {
         self.topLineTokens = topLineTokens
         self.hasComponentBreakdown = hasComponentBreakdown
         self.recordedTotalTokens = recordedTotalTokens
+        self.displayTotalTokens = displayTotalTokens
         self.usageFamilies = usageFamilies
         self.usageFamilyConflict = usageFamilyConflict
+        self.unavailableReason = unavailableReason
     }
 }
 
@@ -410,7 +458,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 5
+    public static let parserVersion = 14
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?
@@ -424,15 +472,25 @@ public struct SessionTelemetry: Equatable, Codable, Sendable {
     public let parserVersion: Int
 
     public var sessionOwnedTopLineTokens: Int? {
-        let owned = usageEvents.filter { $0.ownership == .session }
-        guard !owned.isEmpty else { return nil }
-        return owned.reduce(0) { $0 + $1.topLineTokens }
+        guard usageSummary?.unavailableReason == nil else { return nil }
+        return summedTopLineTokens(for: .session)
     }
 
     public var descendantTopLineTokens: Int? {
-        let owned = usageEvents.filter { $0.ownership == .descendant }
+        guard usageSummary?.unavailableReason == nil else { return nil }
+        return summedTopLineTokens(for: .descendant)
+    }
+
+    private func summedTopLineTokens(for ownership: TelemetryUsageOwnership) -> Int? {
+        let owned = usageEvents.filter { $0.ownership == ownership }
         guard !owned.isEmpty else { return nil }
-        return owned.reduce(0) { $0 + $1.topLineTokens }
+        var total = 0
+        for event in owned {
+            let (next, overflow) = total.addingReportingOverflow(event.topLineTokens)
+            guard !overflow else { return nil }
+            total = next
+        }
+        return total
     }
 
     /// nil when any contributing event in that ownership class is unpriced.

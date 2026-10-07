@@ -113,10 +113,15 @@ enum TranscriptTelemetryPresentation {
     }
 
     static func tokens(_ telemetry: SessionTelemetry) -> Int? {
-        if let owned = telemetry.sessionOwnedTopLineTokens { return owned }
+        guard telemetry.usageSummary?.unavailableReason == nil else { return nil }
+        if telemetry.usageSummary?.hasComponentBreakdown == true,
+           let owned = telemetry.sessionOwnedTopLineTokens {
+            return owned
+        }
         // Some legacy Codex records contain only a total. Claude records with
         // no usage evidence must not become a plausible zero-token session.
-        return telemetry.usageSummary?.recordedTotalTokens
+        return telemetry.usageSummary?.displayTotalTokens
+            ?? telemetry.usageSummary?.recordedTotalTokens
     }
 
     // MARK: - Session activity
@@ -139,6 +144,7 @@ enum TranscriptTelemetryPresentation {
         let userBlocks: Int
         let assistantBlocks: Int
         let toolBlocks: Int
+        let usageUnavailableReason: String?
 
         /// Mean gap between consecutive timed requests. A long session with few
         /// requests was mostly waiting on a person, not on the model.
@@ -151,7 +157,13 @@ enum TranscriptTelemetryPresentation {
     static func activity(_ telemetry: SessionTelemetry,
                          blocks: [SessionTranscriptBuilder.LogicalBlock]) -> ActivitySummary {
         let owned = telemetry.usageEvents.filter { $0.ownership == .session }
-        let stamps = owned.compactMap(\.observedAt).sorted()
+        let usageUnavailableReason = telemetry.usageSummary?.unavailableReason
+            ?? (telemetry.usageSummary?.hasComponentBreakdown == false
+                ? "Request-level usage is unavailable because the provider recorded no complete component breakdown."
+                : nil)
+        let stamps = usageUnavailableReason == nil
+            ? owned.compactMap(\.observedAt).sorted()
+            : []
         let first = stamps.first
         let last = stamps.last
         var span: TimeInterval?
@@ -166,9 +178,11 @@ enum TranscriptTelemetryPresentation {
             }
         }
         return ActivitySummary(span: span, firstRequestAt: first, lastRequestAt: last,
-                               requests: owned.count, timedRequests: stamps.count,
+                               requests: usageUnavailableReason == nil ? owned.count : 0,
+                               timedRequests: stamps.count,
                                userBlocks: user, assistantBlocks: assistant,
-                               toolBlocks: tools)
+                               toolBlocks: tools,
+                               usageUnavailableReason: usageUnavailableReason)
     }
 
     /// "4h 12m", "38m", "45s". nil span reads as an em dash at the call site.
@@ -182,7 +196,12 @@ enum TranscriptTelemetryPresentation {
 
     // MARK: - Displayable values
 
-    static func costValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
+    static func costValue(_ telemetry: SessionTelemetry,
+                          capability: TelemetryCapability? = nil,
+                          locale: Locale = .current) -> Value {
+        if let reason = telemetry.usageSummary?.unavailableReason {
+            return .absent(localized("Usage unavailable: \(reason)", locale: locale))
+        }
         if let dollars = telemetry.costEstimate?.apiEquivalentUSD {
             let text: String
             if dollars > 0 && dollars < 0.01 {
@@ -195,6 +214,9 @@ enum TranscriptTelemetryPresentation {
                 help: localized(
                     "Estimated API price at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Reference value, not a subscription charge.",
                     locale: locale))
+        }
+        if case let .unavailable(reason) = capability {
+            return .absent(localized("Pricing unavailable: \(reason)", locale: locale))
         }
         let reasons = (telemetry.costEstimate?.unpricedModels ?? [])
             + (telemetry.costEstimate?.missingPriceComponents ?? [])
@@ -238,10 +260,15 @@ enum TranscriptTelemetryPresentation {
 
     static func tokensValue(_ telemetry: SessionTelemetry, locale: Locale = .current) -> Value {
         guard let total = tokens(telemetry) else {
+            if let reason = telemetry.usageSummary?.unavailableReason {
+                return .absent(localized("Usage unavailable: \(reason)", locale: locale))
+            }
             return .absent(localized("This transcript records no usage.", locale: locale))
         }
-        return Value(text: total.formatted(.number.locale(locale)),
-                     help: localized("Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.", locale: locale))
+        let help = telemetry.usageSummary?.hasComponentBreakdown == true
+            ? localized("Fresh input, cached input, cache writes and output. Reasoning tokens are counted inside output.", locale: locale)
+            : localized("The provider recorded a total token count, but the component breakdown is unavailable.", locale: locale)
+        return Value(text: total.formatted(.number.locale(locale)), help: help)
     }
 
     static func modelValue(_ value: SessionConfiguration?, locale: Locale = .current) -> Value {
@@ -365,9 +392,14 @@ enum TranscriptTelemetryPresentation {
 
     private static func configurationHelp(_ provenance: TelemetryProvenance?,
                                           locale: Locale) -> String {
-        provenance == .inferredFirstObservation
-            ? localized("Inferred from the first record, not a session-start setting.", locale: locale)
-            : localized("Recorded by the provider.", locale: locale)
+        switch provenance {
+        case .inferredFirstObservation:
+            return localized("Inferred from the first record, not a session-start setting.", locale: locale)
+        case .sessionMetadata:
+            return localized("Current value read from provider session metadata.", locale: locale)
+        default:
+            return localized("Recorded by the provider.", locale: locale)
+        }
     }
 
     static func rowAccessibilityLabel(label: String.LocalizationValue,
@@ -403,7 +435,10 @@ enum TranscriptTelemetryPresentation {
 
     /// Session-owned requests grouped by pricing identity, in first-seen order.
     /// Delegated work is excluded: it is priced against its own transcript.
-    static func pricingBasis(_ telemetry: SessionTelemetry) -> [TelemetryPricingBasis] {
+    static func pricingBasis(_ telemetry: SessionTelemetry,
+                              capability: TelemetryCapability? = nil) -> [TelemetryPricingBasis] {
+        if case .unavailable = capability { return [] }
+        if telemetry.usageSummary?.unavailableReason != nil { return [] }
         struct Key: Hashable {
             let model: String?
             let speed: String
@@ -431,6 +466,7 @@ enum TranscriptTelemetryPresentation {
     /// nil when the bar must not be drawn: no session-owned usage, no component
     /// breakdown (legacy total-only logs), or a zero total.
     static func tokenShare(_ telemetry: SessionTelemetry) -> TelemetryTokenShare? {
+        guard telemetry.usageSummary?.unavailableReason == nil else { return nil }
         guard telemetry.usageSummary?.hasComponentBreakdown == true else { return nil }
         let owned = telemetry.usageEvents.filter { $0.ownership == .session }
         guard !owned.isEmpty else { return nil }
@@ -558,9 +594,13 @@ enum TranscriptTelemetryPresentation {
     }
 
     static func turnsHelp(you: Int, agent: Int, tools: Int, requests: Int,
+                          usageUnavailableReason: String? = nil,
                           locale: Locale = .current) -> String {
-        localized(
-            "Blocks in this transcript: \(you) from you, \(agent) from the agent, \(tools) tool calls. The agent made \(requests) priced requests \u{2014} a single turn can span several.",
+        let requestText = usageUnavailableReason.map {
+            "Request total unavailable: \($0)."
+        } ?? "The transcript records \(requests) requests — a single turn can span several."
+        return localized(
+            "Blocks in this transcript: \(you) from you, \(agent) from the agent, \(tools) tool calls. \(requestText)",
             locale: locale)
     }
 }
@@ -673,7 +713,10 @@ struct TranscriptTelemetryView: View {
     /// One hero (cost) and one subhero (tokens). Two large numbers read as two
     /// competing answers; the token count explains the cost, so it sits under it.
     private func summary(_ telemetry: SessionTelemetry) -> some View {
-        let cost = TranscriptTelemetryPresentation.costValue(telemetry, locale: locale)
+        let cost = TranscriptTelemetryPresentation.costValue(
+            telemetry,
+            capability: SessionSourceRegistry.descriptor(for: telemetry.source).telemetry.cost,
+            locale: locale)
         let tokens = TranscriptTelemetryPresentation.tokensValue(telemetry, locale: locale)
         let share = TranscriptTelemetryPresentation.tokenShare(telemetry)
         let requests = telemetry.usageEvents.filter { $0.ownership == .session }.count
@@ -700,7 +743,9 @@ struct TranscriptTelemetryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if requests > 0 {
+                if requests > 0,
+                   telemetry.usageSummary?.unavailableReason == nil,
+                   telemetry.usageSummary?.hasComponentBreakdown == true {
                     Text(verbatim: localizedRequestCount(requests, locale: locale))
                         .font(SessionInfoType.caption)
                         .monospacedDigit()
@@ -823,6 +868,10 @@ struct TranscriptTelemetryView: View {
         -> TranscriptTelemetryPresentation.Value {
         guard let span = summary.span, let first = summary.firstRequestAt,
               let last = summary.lastRequestAt else {
+            if let reason = summary.usageUnavailableReason {
+                return .absent(TranscriptTelemetryPresentation.localized(
+                    "Request timing unavailable: \(reason)", locale: locale))
+            }
             return .absent(TranscriptTelemetryPresentation.localized(
                 "This transcript records fewer than two timed requests.", locale: locale))
         }
@@ -849,7 +898,8 @@ struct TranscriptTelemetryView: View {
                 tools: summary.toolBlocks, locale: locale),
             help: TranscriptTelemetryPresentation.turnsHelp(
                 you: summary.userBlocks, agent: summary.assistantBlocks,
-                tools: summary.toolBlocks, requests: summary.requests, locale: locale))
+                tools: summary.toolBlocks, requests: summary.requests,
+                usageUnavailableReason: summary.usageUnavailableReason, locale: locale))
     }
 
     private func history(_ telemetry: SessionTelemetry) -> some View {
@@ -862,26 +912,34 @@ struct TranscriptTelemetryView: View {
     }
 
     private func basis(_ telemetry: SessionTelemetry) -> some View {
-        DisclosureGroup(isExpanded: $basisExpanded) {
+        let costCapability = SessionSourceRegistry.descriptor(for: telemetry.source).telemetry.cost
+        return DisclosureGroup(isExpanded: $basisExpanded) {
             VStack(alignment: .leading, spacing: LayoutTokens.sm) {
-                ForEach(Array(TranscriptTelemetryPresentation.pricingBasis(telemetry).enumerated()),
-                        id: \.offset) { _, row in
-                    SessionInfoRow(label: "Priced as", value: pricedAsValue(row))
-                    SessionInfoRow(
-                        label: "Region",
-                        value: TranscriptTelemetryPresentation.inferenceGeoValue(
-                            row.inferenceGeo, locale: locale)
-                    )
-                    SessionInfoRow(label: "Context in", value: contextValue(row))
-                }
-                if let cost = telemetry.costEstimate {
-                    SessionInfoRow(label: "Price table",
-                                   value: .init(text: cost.priceTableUpdated,
-                                                help: copy("Date of the price manifest used.")))
-                    SessionInfoRow(label: "Revision",
-                                   value: .init(text: "r…\(String(String(cost.priceTableRevision).suffix(6)))",
-                                                help: copy("Full revision: \(cost.priceTableRevision)")))
-                    SessionInfoRow(label: "Manifest", value: manifestValue(cost))
+                if case let .unavailable(reason) = costCapability {
+                    Text("Pricing unavailable: \(reason)")
+                        .font(SessionInfoType.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(TranscriptTelemetryPresentation.pricingBasis(
+                        telemetry, capability: costCapability).enumerated()),
+                            id: \.offset) { _, row in
+                        SessionInfoRow(label: "Priced as", value: pricedAsValue(row))
+                        SessionInfoRow(
+                            label: "Region",
+                            value: TranscriptTelemetryPresentation.inferenceGeoValue(
+                                row.inferenceGeo, locale: locale)
+                        )
+                        SessionInfoRow(label: "Context in", value: contextValue(row))
+                    }
+                    if let cost = telemetry.costEstimate {
+                        SessionInfoRow(label: "Price table",
+                                       value: .init(text: cost.priceTableUpdated,
+                                                    help: copy("Date of the price manifest used.")))
+                        SessionInfoRow(label: "Revision",
+                                       value: .init(text: "r…\(String(String(cost.priceTableRevision).suffix(6)))",
+                                                    help: copy("Full revision: \(cost.priceTableRevision)")))
+                        SessionInfoRow(label: "Manifest", value: manifestValue(cost))
+                    }
                 }
                 if let weekly = telemetry.weeklyQuotaEstimate, weekly.status == .estimated {
                     // All five calibration fields stay visible: precision and the
@@ -914,9 +972,11 @@ struct TranscriptTelemetryView: View {
                                            help: copy("End of the weekly window this estimate is a share of."))
                                    } ?? .absent(copy("No reset time recorded.")))
                 }
-                Text("Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.")
-                    .font(SessionInfoType.caption)
-                    .foregroundStyle(.secondary)
+                if costCapability.isAvailable {
+                    Text("Cost is computed for each request from its model, speed, region and context size, then summed at published API rates. When Claude provides no usable inference geography, the published standard rate is used; an explicit US region receives regional pricing. “Standard” is a pricing assumption, not an observed service tier.")
+                        .font(SessionInfoType.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if telemetry.initialConfiguration?.provenance == .inferredFirstObservation {
                     Text("Started configuration is inferred from the first record, not a session-start setting.")
                         .font(SessionInfoType.caption)

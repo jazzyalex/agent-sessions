@@ -266,6 +266,18 @@ struct SessionSourceDescriptor {
     /// Source-specific transcript parser, created only for an on-demand telemetry
     /// scan. nil means this source has no audited full-telemetry provider yet.
     let makeTelemetryProvider: (@Sendable () -> any SessionTelemetryProvider)?
+    /// Source-specific scanner for a non-JSONL backend such as a shared SQLite
+    /// database. The engine supplies the whole Session so the scanner can scope
+    /// its read to one stable session identity.
+    let scanTelemetry: (@Sendable (Session) -> SessionTelemetryProviderScan?)?
+    /// Logical revision for the selected session. Shared-storage providers must
+    /// not use only the database file's physical stat because WAL writes can
+    /// leave that stat unchanged.
+    let telemetryRevision: (@Sendable (Session) -> SessionTelemetryRevision?)?
+    /// Optional session-aware backend eligibility. This is needed when one source
+    /// supports more than one storage format, but only one format has an audited
+    /// telemetry scanner.
+    let telemetryBackendAvailable: (@Sendable (Session) -> Bool)?
 
     // MARK: Labels
 
@@ -364,9 +376,21 @@ struct SessionSourceDescriptor {
     /// nil for codex/claude (fixed segmented pills).
     let otherAgentPill: PillSpec?
 
+    var hasTelemetryBackend: Bool {
+        makeTelemetryProvider != nil || scanTelemetry != nil
+    }
+
+    func hasTelemetryBackend(for session: Session) -> Bool {
+        guard hasTelemetryBackend else { return false }
+        return telemetryBackendAvailable?(session) ?? true
+    }
+
     init(source: SessionSource,
          telemetry: TelemetryCapabilities,
          makeTelemetryProvider: (@Sendable () -> any SessionTelemetryProvider)? = nil,
+         scanTelemetry: (@Sendable (Session) -> SessionTelemetryProviderScan?)? = nil,
+         telemetryRevision: (@Sendable (Session) -> SessionTelemetryRevision?)? = nil,
+         telemetryBackendAvailable: (@Sendable (Session) -> Bool)? = nil,
          shortLabel: String,
          badgeInitials: String,
          brandHue: BrandHue,
@@ -392,6 +416,9 @@ struct SessionSourceDescriptor {
         self.source = source
         self.telemetry = telemetry
         self.makeTelemetryProvider = makeTelemetryProvider
+        self.scanTelemetry = scanTelemetry
+        self.telemetryRevision = telemetryRevision
+        self.telemetryBackendAvailable = telemetryBackendAvailable
         self.shortLabel = shortLabel
         self.badgeInitials = badgeInitials
         self.brandHue = brandHue

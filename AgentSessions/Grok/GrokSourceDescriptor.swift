@@ -15,7 +15,13 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .grok,
-            telemetry: .allUnavailable("scalar model/effort metadata only; timeline and usage audit pending (Plan C)"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("model and reasoning effort are recorded on assistant records; the first value is inferred from the first observation"),
+                tokens: .unavailable("Grok transcript records do not expose token counts"),
+                cost: .unavailable("Grok transcript records do not expose priceable token components"),
+                weeklyQuota: .unavailable("Grok does not expose a compatible account quota feed")
+            ),
+            makeTelemetryProvider: { GrokTelemetryProvider() },
             shortLabel: "Grok CLI",
             badgeInitials: "GK",
             // Slate blue-grey, echoing xAI's monochrome mark while staying clear of

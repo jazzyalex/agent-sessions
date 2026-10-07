@@ -9,25 +9,34 @@ import Foundation
 enum DeepSeekHarnessArtifactReader {
     static let maxBytes = 128 * 1024 * 1024
     static let maxRecords = 1_000_000
+    private static let maxHeaderBytes = 1 * 1024 * 1024
+#if DEBUG
+    static var testReadChunkObserver: (() -> Void)?
+    static var testBeforeReadOpenObserver: (() -> Void)?
+    static var testAfterReadOpenObserver: (() -> Void)?
+#endif
 
     static func read(url: URL, compression: DeepSeekHarnessCompression) throws -> DeepSeekHarnessParseResult {
         var lastData: Data?
         for attempt in 0..<2 {
+            guard !Task.isCancelled else { throw CancellationError() }
             let before = try stat(url)
             guard before.size >= 0, before.size <= Int64(maxBytes) else {
                 throw DeepSeekHarnessFormatError.limitsExceeded("artifact bytes")
             }
-            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-            guard data.count <= maxBytes else {
-                throw DeepSeekHarnessFormatError.limitsExceeded("artifact bytes")
+            do {
+                let data = try readAll(url: url, expectedStat: before)
+                let after = try stat(url)
+                if before != after {
+                    if attempt == 0 { continue }
+                    throw DeepSeekHarnessFormatError.staleAnchor
+                }
+                lastData = data
+                break
+            } catch let error as DeepSeekHarnessFormatError {
+                if case .staleAnchor = error, attempt == 0 { continue }
+                throw error
             }
-            let after = try stat(url)
-            if before != after {
-                if attempt == 0 { continue }
-                throw DeepSeekHarnessFormatError.staleAnchor
-            }
-            lastData = data
-            break
         }
         guard let bytes = lastData else { throw DeepSeekHarnessFormatError.staleAnchor }
 
@@ -40,11 +49,51 @@ enum DeepSeekHarnessArtifactReader {
     }
 
     static func readHeader(url: URL, compression: DeepSeekHarnessCompression) throws -> DeepSeekHarnessHeader {
-        try read(url: url, compression: compression).header
+        for attempt in 0..<2 {
+            try checkCancellation()
+            let before = try stat(url)
+            guard before.size >= 0, before.size <= Int64(maxBytes) else {
+                throw DeepSeekHarnessFormatError.limitsExceeded("artifact bytes")
+            }
+
+            do {
+                let handle = try openReadHandle(url: url)
+                defer { try? handle.close() }
+                let descriptor = handle.fileDescriptor
+                guard SessionFileStat.precise(fromFileDescriptor: descriptor) == before else {
+                    throw DeepSeekHarnessFormatError.staleAnchor
+                }
+                let headerData: Data
+                switch compression {
+                case .plain:
+                    headerData = try readFirstLine(from: handle)
+                case .zstd:
+                    let frame = try DeepSeekHarnessZstdFrameReader.readFirstFrame(
+                        from: handle, decodedByteLimit: maxHeaderBytes + 1)
+                    let records = try splitLines(frame.decoded, requireSingleHeaderFrame: true,
+                                                 maxRecords: 1)
+                    guard let record = records.first else {
+                        throw DeepSeekHarnessFormatError.invalidHeader
+                    }
+                    headerData = record.data
+                }
+                let (header, _) = try decodeHeader(headerData, offset: 0)
+                guard SessionFileStat.precise(fromFileDescriptor: descriptor) == before,
+                      try stat(url) == before else {
+                    throw DeepSeekHarnessFormatError.staleAnchor
+                }
+                return header
+            } catch let error as DeepSeekHarnessFormatError {
+                if case .staleAnchor = error, attempt == 0 { continue }
+                throw error
+            }
+        }
+        throw DeepSeekHarnessFormatError.staleAnchor
     }
 
     private static func parsePlain(_ bytes: Data) throws -> DeepSeekHarnessParseResult {
-        let records = try splitLines(bytes, requireSingleHeaderFrame: false)
+        let records = try splitLines(bytes, requireSingleHeaderFrame: false,
+                                     maxRecords: maxRecords + 1)
         guard let first = records.first else { throw DeepSeekHarnessFormatError.invalidHeader }
         let (header, physicalCut) = try decodeHeader(first.data, offset: first.offset)
         let rows = try decodeRows(Array(records.dropFirst()), version: header.version)
@@ -54,13 +103,19 @@ enum DeepSeekHarnessArtifactReader {
     private static func parseZstd(_ bytes: Data) throws -> DeepSeekHarnessParseResult {
         let frames = try DeepSeekHarnessZstdFrameReader.readFrames(from: bytes)
         guard let firstFrame = frames.first else { throw DeepSeekHarnessFormatError.invalidHeader }
-        let firstLines = try splitLines(firstFrame.decoded, requireSingleHeaderFrame: true)
+        let firstLines = try splitLines(firstFrame.decoded, requireSingleHeaderFrame: true,
+                                        maxRecords: 1)
         guard firstLines.count == 1 else { throw DeepSeekHarnessFormatError.firstFrameHeaderViolation }
         let (header, physicalCut) = try decodeHeader(firstLines[0].data, offset: firstLines[0].offset)
         var rawRecords: [Record] = []
+        var remainingRecords = maxRecords
         for frame in frames.dropFirst() {
-            let records = try splitLines(frame.decoded, requireSingleHeaderFrame: false)
+            try checkCancellation()
+            let records = try splitLines(frame.decoded, requireSingleHeaderFrame: false,
+                                         maxRecords: remainingRecords)
+            remainingRecords -= records.count
             for record in records {
+                try checkCancellation()
                 rawRecords.append(Record(data: record.data,
                                          offset: frame.compressedOffset + record.offset))
             }
@@ -77,6 +132,7 @@ enum DeepSeekHarnessArtifactReader {
         var expected = 0
         var expandedCount = 0
         for record in records {
+            try checkCancellation()
             guard expandedCount < maxRecords else {
                 throw DeepSeekHarnessFormatError.limitsExceeded("JSONL records")
             }
@@ -112,17 +168,22 @@ enum DeepSeekHarnessArtifactReader {
 
     private static func assemble(header: DeepSeekHarnessHeader, rows: [DeepSeekHarnessPhysicalRow],
                                  physicalCut: Int?) throws -> DeepSeekHarnessParseResult {
-        let envelopes = rows.compactMap { row -> DeepSeekHarnessEnvelope? in
-            if case .event(let envelope) = row { return envelope }
-            return nil
-        }
-        let skipped = envelopes.filter(\.ignorable).map {
-            DeepSeekHarnessIgnorableDiagnostic(type: $0.type, sequence: $0.sequence)
-        }
-        let logicalEventCount = rows.reduce(into: 0) { count, row in
+        var envelopes: [DeepSeekHarnessEnvelope] = []
+        envelopes.reserveCapacity(rows.count)
+        var skipped: [DeepSeekHarnessIgnorableDiagnostic] = []
+        var logicalEventCount = 0
+        for row in rows {
+            try checkCancellation()
             switch row {
-            case .event: count += 1
-            case .packed(let run): count += run.eventCount
+            case .event(let envelope):
+                envelopes.append(envelope)
+                if envelope.ignorable {
+                    skipped.append(DeepSeekHarnessIgnorableDiagnostic(
+                        type: envelope.type, sequence: envelope.sequence))
+                }
+                logicalEventCount += 1
+            case .packed(let run):
+                logicalEventCount += run.eventCount
             }
         }
         let cut: Int
@@ -136,7 +197,9 @@ enum DeepSeekHarnessArtifactReader {
             cut = physicalCut
         } else {
             var lastMarker: Int?
-            for envelope in envelopes where envelope.type == "session/end-seed" {
+            for envelope in envelopes {
+                try checkCancellation()
+                guard envelope.type == "session/end-seed" else { continue }
                 if (envelope.data["inherited"] as? Bool) == true {
                     lastMarker = envelope.sequence
                 } else if envelope.data["inherited"] != nil {
@@ -161,7 +224,7 @@ enum DeepSeekHarnessArtifactReader {
         return DeepSeekHarnessParseResult(header: header, rows: rows,
                                           inheritedEventCount: cut,
                                           skippedIgnorableEvents: skipped,
-                                          incompleteTurn: hasOpenTurn(envelopes))
+                                          incompleteTurn: try hasOpenTurn(envelopes))
     }
 
     struct Record {
@@ -174,13 +237,27 @@ enum DeepSeekHarnessArtifactReader {
         }
     }
 
-    private static func splitLines(_ data: Data, requireSingleHeaderFrame: Bool) throws -> [Record] {
+    private static func splitLines(_ data: Data, requireSingleHeaderFrame: Bool,
+                                   maxRecords: Int? = nil) throws -> [Record] {
         guard !data.isEmpty else { return [] }
         var records: [Record] = []
         var lineStart = 0
-        for index in data.indices where data[index] == 0x0A {
+        var bytesSinceCancellationCheck = 0
+        for index in data.indices {
+            bytesSinceCancellationCheck += 1
+            if bytesSinceCancellationCheck >= 65_536 {
+                try checkCancellation()
+                bytesSinceCancellationCheck = 0
+            }
+            guard data[index] == 0x0A else { continue }
             let line = data[lineStart..<index]
             guard !line.isEmpty else { throw DeepSeekHarnessFormatError.invalidJSON(offset: lineStart) }
+            if requireSingleHeaderFrame, !records.isEmpty {
+                throw DeepSeekHarnessFormatError.firstFrameHeaderViolation
+            }
+            if let maxRecords, records.count >= maxRecords {
+                throw DeepSeekHarnessFormatError.limitsExceeded("JSONL records")
+            }
             records.append(Record(data: Data(line), offset: lineStart))
             lineStart = index + 1
         }
@@ -193,7 +270,78 @@ enum DeepSeekHarnessArtifactReader {
         return records
     }
 
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
+    }
+
+    private static func readAll(url: URL, expectedStat: SessionFileStat) throws -> Data {
+        let handle = try openReadHandle(url: url)
+        defer { try? handle.close() }
+        let descriptor = handle.fileDescriptor
+        guard SessionFileStat.precise(fromFileDescriptor: descriptor) == expectedStat else {
+            throw DeepSeekHarnessFormatError.staleAnchor
+        }
+        var data = Data(capacity: min(Int(expectedStat.size), maxBytes))
+        var bytesRead = 0
+        while true {
+            try checkCancellation()
+            let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if chunk.isEmpty { break }
+            bytesRead += chunk.count
+            guard bytesRead <= maxBytes else {
+                throw DeepSeekHarnessFormatError.limitsExceeded("artifact bytes")
+            }
+            data.append(chunk)
+#if DEBUG
+            testReadChunkObserver?()
+#endif
+        }
+        guard SessionFileStat.precise(fromFileDescriptor: descriptor) == expectedStat else {
+            throw DeepSeekHarnessFormatError.staleAnchor
+        }
+        return data
+    }
+
+    private static func readFirstLine(from handle: FileHandle) throws -> Data {
+        var line = Data()
+        while true {
+            try checkCancellation()
+            let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if chunk.isEmpty {
+                throw DeepSeekHarnessFormatError.tornLine(offset: line.count)
+            }
+            if let newline = chunk.firstIndex(of: 0x0A) {
+                line.append(chunk.prefix(upTo: newline))
+                guard !line.isEmpty else {
+                    throw DeepSeekHarnessFormatError.invalidJSON(offset: 0)
+                }
+                guard line.count <= maxHeaderBytes else {
+                    throw DeepSeekHarnessFormatError.limitsExceeded("header bytes")
+                }
+                return line
+            }
+            line.append(chunk)
+            guard line.count <= maxHeaderBytes else {
+                throw DeepSeekHarnessFormatError.limitsExceeded("header bytes")
+            }
+        }
+    }
+
+    private static func openReadHandle(url: URL) throws -> FileHandle {
+#if DEBUG
+        testBeforeReadOpenObserver?()
+#endif
+        let handle = try FileHandle(forReadingFrom: url)
+#if DEBUG
+        testAfterReadOpenObserver?()
+#endif
+        return handle
+    }
+
     private static func decodeHeader(_ data: Data, offset: Int) throws -> (DeepSeekHarnessHeader, Int?) {
+        guard data.count <= maxHeaderBytes else {
+            throw DeepSeekHarnessFormatError.limitsExceeded("header bytes")
+        }
         let object = try decodeObject(data, offset: offset)
         return try DeepSeekHarnessHeader.decodePhysical(object)
     }
@@ -210,15 +358,16 @@ enum DeepSeekHarnessArtifactReader {
     }
 
     private static func stat(_ url: URL) throws -> SessionFileStat {
-        let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        guard let modified = values.contentModificationDate else { throw DeepSeekHarnessFormatError.staleAnchor }
-        let nanoseconds = Int64(modified.timeIntervalSince1970 * 1_000_000_000)
-        return SessionFileStat(mtime: nanoseconds, size: Int64(values.fileSize ?? 0))
+        guard let stat = SessionFileStat.precise(from: url) else {
+            throw DeepSeekHarnessFormatError.staleAnchor
+        }
+        return stat
     }
 
-    private static func hasOpenTurn(_ envelopes: [DeepSeekHarnessEnvelope]) -> Bool {
+    private static func hasOpenTurn(_ envelopes: [DeepSeekHarnessEnvelope]) throws -> Bool {
         var depth = 0
         for envelope in envelopes {
+            try checkCancellation()
             if envelope.type == "turn/start" { depth += 1 }
             if envelope.type == "turn/end" { depth = max(0, depth - 1) }
         }

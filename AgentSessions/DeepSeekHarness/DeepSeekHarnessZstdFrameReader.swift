@@ -36,6 +36,7 @@ enum DeepSeekHarnessZstdFrameReader {
             var frames: [DeepSeekHarnessZstdFrame] = []
 
             while offset < data.count {
+                guard !Task.isCancelled else { throw CancellationError() }
                 guard frameIndex < maxFrames else {
                     throw DeepSeekHarnessFormatError.limitsExceeded("frame count")
                 }
@@ -79,6 +80,7 @@ enum DeepSeekHarnessZstdFrameReader {
                 var decoded = Data()
                 var completed = false
                 while input.pos < input.size {
+                    guard !Task.isCancelled else { throw CancellationError() }
                     var outputStorage = [UInt8](repeating: 0, count: 64 * 1024)
                     var producedBytes = 0
                     let produced = outputStorage.withUnsafeMutableBytes { outputRaw in
@@ -142,6 +144,126 @@ enum DeepSeekHarnessZstdFrameReader {
             }
             return frames
         }
+    }
+
+    /// Read only the first frame from a file. DSH reserves that frame for the
+    /// session header, so discovery does not need to map or decompress the
+    /// remainder of a large generation just to build Session metadata.
+    static func readFirstFrame(
+        from url: URL,
+        decodedByteLimit: Int = maxDecodedBytes
+    ) throws -> DeepSeekHarnessZstdFrame {
+        guard decodedByteLimit > 0, decodedByteLimit <= maxDecodedBytes else {
+            throw DeepSeekHarnessFormatError.limitsExceeded("decoded header")
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        return try readFirstFrame(from: handle, decodedByteLimit: decodedByteLimit)
+    }
+
+    static func readFirstFrame(
+        from handle: FileHandle,
+        decodedByteLimit: Int = maxDecodedBytes
+    ) throws -> DeepSeekHarnessZstdFrame {
+        guard decodedByteLimit > 0, decodedByteLimit <= maxDecodedBytes else {
+            throw DeepSeekHarnessFormatError.limitsExceeded("decoded header")
+        }
+
+        guard let stream = ZSTD_createDStream() else {
+            throw DeepSeekHarnessFormatError.corruptFrame(
+                frame: 0, offset: 0, reason: "could not allocate decoder")
+        }
+        defer { _ = ZSTD_freeDStream(stream) }
+        let initResult = ZSTD_initDStream(stream)
+        guard ZSTD_isError(initResult) == 0 else {
+            throw DeepSeekHarnessFormatError.corruptFrame(
+                frame: 0, offset: 0, reason: zstdError(initResult))
+        }
+
+        var pending = Data()
+        var pendingOffset = 0
+        var fileOffset = 0
+        var decoded = Data()
+        var decodedTotal = 0
+
+        while true {
+            try checkCancellation()
+            if pending.isEmpty {
+                pending = try handle.read(upToCount: 64 * 1024) ?? Data()
+                guard !pending.isEmpty else {
+                    throw DeepSeekHarnessFormatError.incompleteFrame(frame: 0, offset: fileOffset)
+                }
+                guard fileOffset + pending.count <= maxCompressedBytes else {
+                    throw DeepSeekHarnessFormatError.limitsExceeded("compressed artifact")
+                }
+                pendingOffset = fileOffset
+                fileOffset += pending.count
+            }
+
+            var completedLength: Int?
+            let consumed = try pending.withUnsafeBytes { rawBuffer -> Int in
+                guard let base = rawBuffer.baseAddress else { return 0 }
+                var input = ZSTD_inBuffer(
+                    src: base,
+                    size: pending.count,
+                    pos: 0
+                )
+                while input.pos < input.size {
+                    try checkCancellation()
+                    var outputStorage = [UInt8](repeating: 0, count: 64 * 1024)
+                    var producedBytes = 0
+                    let produced = outputStorage.withUnsafeMutableBytes { outputRaw in
+                        var output = ZSTD_outBuffer(
+                            dst: outputRaw.baseAddress,
+                            size: outputRaw.count,
+                            pos: 0
+                        )
+                        let result = ZSTD_decompressStream(stream, &output, &input)
+                        producedBytes = output.pos
+                        return result
+                    }
+                    if producedBytes > 0 {
+                        decoded.append(contentsOf: outputStorage.prefix(producedBytes))
+                    }
+                    guard ZSTD_isError(produced) == 0 else {
+                        throw DeepSeekHarnessFormatError.corruptFrame(
+                            frame: 0,
+                            offset: pendingOffset + Int(input.pos),
+                            reason: zstdError(produced)
+                        )
+                    }
+                    decodedTotal += producedBytes
+                    guard decodedTotal <= decodedByteLimit,
+                          decoded.count <= max(1, (pendingOffset + Int(input.pos)) * maxExpansionRatio) else {
+                        throw DeepSeekHarnessFormatError.limitsExceeded(
+                            decodedTotal > decodedByteLimit ? "decoded header" : "decoded expansion")
+                    }
+                    if produced == 0 {
+                        completedLength = pendingOffset + Int(input.pos)
+                        return Int(input.pos)
+                    }
+                }
+                return Int(input.pos)
+            }
+
+            if let completedLength {
+                return DeepSeekHarnessZstdFrame(
+                    index: 0,
+                    compressedOffset: 0,
+                    compressedLength: completedLength,
+                    decoded: decoded)
+            }
+            guard consumed > 0 else {
+                throw DeepSeekHarnessFormatError.corruptFrame(
+                    frame: 0, offset: pendingOffset, reason: "decoder consumed no input")
+            }
+            pending.removeFirst(consumed)
+            pendingOffset += consumed
+        }
+    }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
     }
 
     private static func zstdError(_ code: size_t) -> String {

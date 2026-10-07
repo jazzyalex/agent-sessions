@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Crash diagnostics no longer re-prompt for the same report after `Later`, ignore XCTest-injected test-host reports, and keep telemetry freshness checks from accessing a failed `FileHandle` descriptor after reading.
+- Session Info now reads fx's audited aggregate input/output totals and current model/effort from `session.json` through the source registry; per-turn/cache attribution, cost, and quota remain explicitly unavailable.
+
 - Session Info now paints provider-neutral source, current model, configuration, and title metadata immediately for all supported agents while detailed telemetry loads separately.
+- Session Info now reads registry-backed detailed telemetry for Antigravity and Kimi, and records Grok model and reasoning-effort changes with an explicit token-data limitation; unsupported cost and quota fields remain labeled as unavailable.
+- Session Info now reads Cline assistant model history and per-message token components through the source registry; provider-specific pricing and quota remain explicitly unavailable.
+- Session Info now reads Droid configuration through the source registry and preserves Factory's aggregate token evidence as an honest, unattributed summary; malformed or ambiguous usage remains unavailable, and pricing/quota remain unsupported.
+- Session Info now reads DeepSeek Harness v4 model history and disjoint assistant-message token components through the source registry; repeated stream usage is verified without double-counting, while cost and quota remain explicitly unavailable.
+- Session Info now reads Cursor's loaded current model through the source registry; Cursor's transcript format does not expose first-observed model history or attributable token components, so those limits remain explicit.
+- Session Info now reads Qwen Code's active-branch assistant usage and model history through the source registry; duplicated UI telemetry is ignored, rewound branches are excluded, and cost and quota remain explicitly unavailable.
+- Session Info now reads Devin's current model from the shared session registry; Devin's audited store has no per-turn model history or attributable token components, so tokens, cost, and quota remain explicitly unavailable.
 - Fixed live presence discovery for headless Codex and OpenCode CLI runs that have no controlling terminal, while keeping app-bundle processes excluded and Codex Desktop on its separate discovery path. OpenCode can join an active process to an exact per-session JSON identity when a `ses_*.json` file is open; this does not add OpenCode token telemetry or exact current-session inference for shared SQLite `opencode.db` storage.
 - Hardened the stage0 baseline rebuild helper for current OpenCode SQLite storage: declared DB mode no longer falls back to legacy JSON when `db_roots` is absent, configured databases remain bounded latest-session diagnostics, parsed-row limit checks are conservative, and DB-backed runs always fail closed and refuse fixture emission rather than claiming complete all-session coverage.
 

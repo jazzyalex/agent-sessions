@@ -32,9 +32,13 @@ final class TelemetryCapabilityTests: XCTestCase {
         }
     }
 
-    /// The sources wired to an accumulator. Everything else must remain unavailable
-    /// even after an audit proves that its store has no usable telemetry.
-    private static let dispatchableSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+    /// The sources wired to an audited telemetry provider. Everything else must
+    /// remain unavailable even after an audit proves that its store has no usable
+    /// telemetry.
+    private static let dispatchableSources: Set<SessionSource> = [
+        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid,
+        .openclaw, .cursor, .pi, .kimi, .grok, .devin, .fx, .cline, .deepseekHarness, .qwen
+    ]
 
     func testNonDispatchableSourcesDeclareNothingAvailable() {
         for source in SessionSource.allCases where !Self.dispatchableSources.contains(source) {
@@ -49,23 +53,31 @@ final class TelemetryCapabilityTests: XCTestCase {
 
     /// Every source the engine can actually dispatch must declare it, and vice
     /// versa — a mismatch means either dead code or a silently ignored source.
-    func testSupportedSourcesDeclareConfigurationAndTokens() {
+    func testSupportedSourcesDeclareConfigurationOrTokens() {
         for source in Self.dispatchableSources {
             let t = SessionSourceRegistry.descriptor(for: source).telemetry
-            if case .unavailable = t.configuration {
-                XCTFail("\(source) must produce a configuration timeline")
-            }
-            if case .unavailable = t.tokens {
-                XCTFail("\(source) must produce token usage")
-            }
+            XCTAssertTrue(t.configuration.isAvailable || t.tokens.isAvailable,
+                          "\(source) must produce at least one audited telemetry dimension")
         }
+    }
+
+    func testCursorDeclaresConfigurationOnlyWithHonestTokenBoundary() {
+        let telemetry = SessionSourceRegistry.descriptor(for: .cursor).telemetry
+        XCTAssertEqual(
+            telemetry.configuration,
+            .partial("current model comes from loaded Session metadata; Cursor transcripts do not record first-observed model or model-change history")
+        )
+        XCTAssertEqual(
+            telemetry.tokens,
+            .unavailable("Cursor Agent transcript JSONL and chat metadata do not record attributable token components")
+        )
     }
 
     func testDevinRecordsAuditedNegativeTelemetryEvidence() {
         let telemetry = SessionSourceRegistry.descriptor(for: .devin).telemetry
         XCTAssertEqual(
             telemetry.configuration,
-            .unavailable("session rows expose only scalar model/mode; no configuration timeline")
+            .partial("current model comes from the shared session row; Devin exposes no audited per-turn model or effort history")
         )
         XCTAssertEqual(
             telemetry.tokens,

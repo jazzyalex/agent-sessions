@@ -3880,6 +3880,52 @@ final class CursorSessionParserTests: XCTestCase {
 
 final class CursorChatMetaReaderTests: XCTestCase {
 
+    private func writeChatMetadataStore(at url: URL,
+                                        agentID: String,
+                                        model: String) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else {
+            sqlite3_close(db)
+            throw NSError(domain: "CursorChatMetaReaderTests", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "could not create metadata fixture"])
+        }
+        defer { sqlite3_close(db) }
+
+        var error: UnsafeMutablePointer<Int8>?
+        guard sqlite3_exec(db,
+                           "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);",
+                           nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? "unknown SQLite error"
+            sqlite3_free(error)
+            throw NSError(domain: "CursorChatMetaReaderTests", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: message])
+        }
+
+        let object: [String: Any] = [
+            "agentId": agentID,
+            "name": "Telemetry fixture",
+            "mode": "default",
+            "lastUsedModel": model,
+            "createdAt": 1_700_000_000_000
+        ]
+        let json = try JSONSerialization.data(withJSONObject: object)
+        let hex = json.map { String(format: "%02x", $0) }.joined()
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+                                 "INSERT INTO meta (key, value) VALUES ('0', ?);",
+                                 -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "CursorChatMetaReaderTests", code: 3)
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, hex, -1, transient)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw NSError(domain: "CursorChatMetaReaderTests", code: 4)
+        }
+    }
+
     func testReadMetaFromFixtureDB() {
         let fixtureDB = FixturePaths.repoRootURL()
             .appendingPathComponent("AgentSessionsTests", isDirectory: true)
@@ -3901,6 +3947,158 @@ final class CursorChatMetaReaderTests: XCTestCase {
         XCTAssertEqual(meta.mode, "default")
         XCTAssertEqual(meta.lastUsedModel, "claude-4-sonnet")
         XCTAssertEqual(meta.createdAt.timeIntervalSince1970, 1775522590.321, accuracy: 0.01)
+        XCTAssertGreaterThan(meta.metadataBytes, 0)
+        XCTAssertFalse(meta.metadataFingerprint.isEmpty)
+    }
+
+    func testCursorTelemetryUsesLoadedMetadataAsCurrentConfiguration() async throws {
+        let fixtureDB = FixturePaths.repoRootURL()
+            .appendingPathComponent("AgentSessionsTests", isDirectory: true)
+            .appendingPathComponent("Fixtures", isDirectory: true)
+            .appendingPathComponent("Cursor", isDirectory: true)
+            .appendingPathComponent("test-store.db")
+        let session = Session(id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                              source: .cursor,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: fixtureDB.path,
+                              eventCount: 0,
+                              events: [])
+
+        let revisionBefore = try XCTUnwrap(CursorTelemetryReader.telemetryRevision(for: session))
+        XCTAssertEqual(revisionBefore, CursorTelemetryReader.telemetryRevision(for: session))
+        let scan = try XCTUnwrap(CursorTelemetryReader.loadTelemetry(for: session))
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.model, "claude-4-sonnet")
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.provenance, .sessionMetadata)
+        XCTAssertNil(scan.result.telemetry.initialConfiguration)
+        XCTAssertTrue(scan.result.telemetry.configurationChanges.isEmpty)
+        XCTAssertTrue(scan.result.telemetry.usageSummary?.unavailableReason?.contains("do not record attributable token components") == true)
+        XCTAssertEqual(scan.inputRevision, CursorTelemetryReader.telemetryRevision(for: session))
+        XCTAssertGreaterThan(scan.bytesScanned, 0)
+
+        let engine = SessionTelemetryEngine(metrics: SessionInfoMetrics())
+        let telemetryValue = await engine.telemetry(for: session)
+        let telemetry = try XCTUnwrap(telemetryValue)
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "claude-4-sonnet")
+        XCTAssertEqual(telemetry.currentConfiguration?.provenance, .sessionMetadata)
+        XCTAssertNil(telemetry.costEstimate)
+    }
+
+    func testCursorTelemetryRejectsMetadataForAnotherSession() throws {
+        let fixtureDB = FixturePaths.repoRootURL()
+            .appendingPathComponent("AgentSessionsTests", isDirectory: true)
+            .appendingPathComponent("Fixtures", isDirectory: true)
+            .appendingPathComponent("Cursor", isDirectory: true)
+            .appendingPathComponent("test-store.db")
+        let session = Session(id: "different-session-id",
+                              source: .cursor,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: fixtureDB.path,
+                              eventCount: 0,
+                              events: [])
+
+        XCTAssertNil(CursorTelemetryReader.loadTelemetry(for: session))
+    }
+
+    func testCursorTelemetryDoesNotAdmitACPStorePaths() {
+        let acpPath = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("acp-sessions", isDirectory: true)
+            .appendingPathComponent("a1b2c3d4-e5f6-7890-abcd-ef1234567890", isDirectory: true)
+            .appendingPathComponent("store.db", isDirectory: false)
+        let session = Session(id: "cursor-acp:a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                              source: .cursor,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: acpPath.path,
+                              eventCount: 0,
+                              events: [])
+
+        XCTAssertFalse(CursorTelemetryReader.isSupportedSession(session))
+        XCTAssertFalse(SessionSourceRegistry.descriptor(for: .cursor)
+            .hasTelemetryBackend(for: session))
+    }
+
+    func testCursorTelemetryCacheKeyIncludesLoadedModel() async throws {
+        let fixtureDB = FixturePaths.repoRootURL()
+            .appendingPathComponent("AgentSessionsTests", isDirectory: true)
+            .appendingPathComponent("Fixtures", isDirectory: true)
+            .appendingPathComponent("Cursor", isDirectory: true)
+            .appendingPathComponent("test-store.db")
+        func session(model: String) -> Session {
+            Session(id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    source: .cursor,
+                    startTime: nil,
+                    endTime: nil,
+                    model: model,
+                    filePath: fixtureDB.path,
+                    eventCount: 0,
+                    events: [])
+        }
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false))
+
+        let firstValue = await engine.telemetry(for: session(model: "model-a"))
+        let first = try XCTUnwrap(firstValue)
+        let secondValue = await engine.telemetry(for: session(model: "model-b"))
+        let second = try XCTUnwrap(secondValue)
+
+        XCTAssertEqual(first.currentConfiguration?.model, "model-a")
+        XCTAssertEqual(second.currentConfiguration?.model, "model-b")
+        XCTAssertEqual(engine.parseCount, 2)
+    }
+
+    func testCursorTelemetryRetriesAnABASwappedMetadataStore() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cursor-telemetry-\(UUID().uuidString)", isDirectory: true)
+        let liveURL = root.appendingPathComponent("store.db", isDirectory: false)
+        let originalURL = root.appendingPathComponent("original.db", isDirectory: false)
+        let replacementURL = root.appendingPathComponent("replacement.db", isDirectory: false)
+        let sessionID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        try writeChatMetadataStore(at: originalURL, agentID: sessionID, model: "model-a")
+        try writeChatMetadataStore(at: replacementURL, agentID: sessionID, model: "model-b")
+        try FileManager.default.copyItem(at: originalURL, to: liveURL)
+
+        var didSwap = false
+        var didRestore = false
+        let previousBeforeHook = CursorTelemetryReader.testBeforeMetadataReadHook
+        let previousAfterHook = CursorTelemetryReader.testAfterMetadataReadHook
+        defer {
+            CursorTelemetryReader.testBeforeMetadataReadHook = previousBeforeHook
+            CursorTelemetryReader.testAfterMetadataReadHook = previousAfterHook
+            try? FileManager.default.removeItem(at: root)
+        }
+        CursorTelemetryReader.testBeforeMetadataReadHook = {
+            guard !didSwap else { return }
+            didSwap = true
+            try? FileManager.default.removeItem(at: liveURL)
+            try? FileManager.default.copyItem(at: replacementURL, to: liveURL)
+        }
+        CursorTelemetryReader.testAfterMetadataReadHook = {
+            guard didSwap, !didRestore else { return }
+            didRestore = true
+            try? FileManager.default.removeItem(at: liveURL)
+            try? FileManager.default.copyItem(at: originalURL, to: liveURL)
+        }
+
+        let session = Session(id: sessionID,
+                              source: .cursor,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: liveURL.path,
+                              eventCount: 0,
+                              events: [])
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false))
+        let telemetryValue = await engine.telemetry(for: session)
+        let telemetry = try XCTUnwrap(telemetryValue)
+
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "model-a")
+        XCTAssertEqual(engine.parseCount, 1)
     }
 
     func testMD5HashMatchesKnownValue() {

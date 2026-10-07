@@ -28,7 +28,23 @@ extension SessionSourceDescriptor {
 
         return SessionSourceDescriptor(
             source: .qwen,
-            telemetry: .allUnavailable("dense per-call token telemetry is retained but unparsed (Plan C)"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial(
+                    "assistant model records provide observed model history; current model is also retained from loaded Session metadata"),
+                tokens: .supported,
+                cost: .unavailable(
+                    "Qwen Code has no audited local pricing identity for an API-equivalent estimate"),
+                weeklyQuota: .unavailable("Qwen Code does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                QwenTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                QwenTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                QwenTelemetryReader.telemetryRevision(for: session) != nil
+            },
             shortLabel: "Qwen Code",
             badgeInitials: "QW",
             brandHue: .calibrated(red: 0.45, green: 0.31, blue: 0.77),

@@ -28,6 +28,31 @@ final class SessionParserTests: XCTestCase {
         try text.data(using: .utf8)!.write(to: url)
     }
 
+    @discardableResult
+    private func withProcessEnvironment<T>(
+        _ updates: [String: String?],
+        _ body: () throws -> T
+    ) rethrows -> T {
+        let original = ProcessInfo.processInfo.environment
+        for (key, value) in updates {
+            if let value {
+                setenv(key, value, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+        defer {
+            for (key, _) in updates {
+                if let value = original[key] {
+                    setenv(key, value, 1)
+                } else {
+                    unsetenv(key)
+                }
+            }
+        }
+        return try body()
+    }
+
     private func createCodexStateSQLiteFixture(at url: URL, includeGitColumns: Bool) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -186,6 +211,85 @@ final class SessionParserTests: XCTestCase {
         """)
     }
 
+    private func createOpenClawSQLiteFixture(at url: URL, compressed: Bool = false) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            return XCTFail("failed to open OpenClaw SQLite fixture")
+        }
+        defer { sqlite3_close(db) }
+
+        func exec(_ sql: String) throws {
+            var err: UnsafeMutablePointer<Int8>?
+            guard sqlite3_exec(db, sql, nil, nil, &err) == SQLITE_OK else {
+                let message = err.map { String(cString: $0) } ?? "unknown sqlite error"
+                sqlite3_free(err)
+                throw NSError(domain: "OpenClawSQLiteFixture", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: message])
+            }
+        }
+
+        func sqlString(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
+        }
+
+        let compressedColumns = compressed ? ", event_zstd BLOB, event_utf8_bytes INTEGER" : ""
+        try exec("""
+        CREATE TABLE session_windows (
+            session_id TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            started_at INTEGER,
+            ended_at INTEGER,
+            model TEXT,
+            display_name TEXT
+        );
+        CREATE TABLE transcript_events (
+            session_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            event_json TEXT,
+            created_at INTEGER NOT NULL\(compressedColumns),
+            PRIMARY KEY (session_id, seq)
+        );
+        CREATE TABLE transcript_event_identities (
+            session_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            event_id TEXT,
+            PRIMARY KEY (session_id, seq)
+        );
+        INSERT INTO session_windows
+            (session_id, created_at, updated_at, started_at, ended_at, model, display_name)
+        VALUES
+            ('sqlite-demo', 1776370000000, 1776370004000, 1776370000000, 1776370004000,
+             'metadata-model', 'OpenClaw SQLite demo');
+        """)
+
+        let header = #"{"type":"session","version":3,"id":"sqlite-demo","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
+        let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"OpenClaw SQLite fixture"}]}}"#
+        let assistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"content":[{"type":"text","text":"fixture response"}]}}"#
+        let modelChange = #"{"type":"model_change","modelId":"record-model","timestamp":"2026-04-16T00:00:03.000Z"}"#
+        let records = [header, user, assistant, modelChange]
+        for (offset, record) in records.enumerated() {
+            let sequence = offset + 1
+            let eventID = "event-\(sequence)"
+            let timestamp = 1776370000000 + (Int64(sequence) * 1000)
+            let jsonValue: String
+            if compressed && sequence == 3 {
+                jsonValue = "NULL"
+            } else {
+                jsonValue = sqlString(record)
+            }
+            let compressedValue = compressed && sequence == 3 ? ", X'789c01', 0" : (compressed ? ", NULL, \(record.utf8.count)" : "")
+            try exec("""
+            INSERT INTO transcript_events
+                (session_id, seq, event_json, created_at\(compressed ? ", event_zstd, event_utf8_bytes" : ""))
+            VALUES ('sqlite-demo', \(sequence), \(jsonValue), \(timestamp)\(compressedValue));
+            INSERT INTO transcript_event_identities (session_id, seq, event_id)
+            VALUES ('sqlite-demo', \(sequence), \(sqlString(eventID)));
+            """)
+        }
+    }
+
     private func executeSQLite(_ sql: String, at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -200,6 +304,52 @@ final class SessionParserTests: XCTestCase {
             throw NSError(domain: "SQLiteFixture", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: message])
         }
+    }
+
+    private func waitForOpenClawIndexerQuiescence(
+        _ indexer: OpenClawSessionIndexer,
+        timeout: TimeInterval = 20
+    ) {
+        let exp = expectation(description: "OpenClaw indexer quiescent")
+        var idleTicks = 0
+        func poll() {
+            if indexer.isIndexing {
+                idleTicks = 0
+            } else {
+                idleTicks += 1
+                if idleTicks >= 10 {
+                    exp.fulfill()
+                    return
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: poll)
+        }
+        DispatchQueue.main.async(execute: poll)
+        wait(for: [exp], timeout: timeout)
+    }
+
+    @MainActor
+    private func withIsolatedIndexerStore<T>(_ body: @MainActor () throws -> T) rethrows -> T {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-IndexerDB-\(UUID().uuidString)",
+            isDirectory: true)
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { root }
+        let enablementKey = AgentEnablement.enablementKey(for: .openclaw)
+        let previousEnablement = UserDefaults.standard.object(forKey: enablementKey)
+        UserDefaults.standard.set(true, forKey: enablementKey)
+        defer {
+            if let previousEnablement {
+                UserDefaults.standard.set(previousEnablement, forKey: enablementKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: enablementKey)
+            }
+            IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+            try? fm.removeItem(at: root)
+        }
+        return try body()
     }
 
     private func createHermesStateDBFixture(at url: URL) throws {
@@ -239,9 +389,33 @@ final class SessionParserTests: XCTestCase {
             tool_call_count INTEGER,
             input_tokens INTEGER,
             output_tokens INTEGER,
+            cache_read_tokens INTEGER DEFAULT 0,
+            cache_write_tokens INTEGER DEFAULT 0,
+            reasoning_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER,
             cost REAL,
-            title TEXT
+            title TEXT,
+            last_activity_at REAL
+        );
+        CREATE TABLE session_model_usage (
+            session_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            billing_provider TEXT NOT NULL DEFAULT '',
+            billing_base_url TEXT NOT NULL DEFAULT '',
+            billing_mode TEXT NOT NULL DEFAULT '',
+            task TEXT NOT NULL DEFAULT '',
+            api_call_count INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+            estimated_cost_usd REAL NOT NULL DEFAULT 0,
+            actual_cost_usd REAL NOT NULL DEFAULT 0,
+            cost_status TEXT,
+            cost_source TEXT,
+            first_seen REAL,
+            last_seen REAL
         );
         CREATE TABLE messages (
             id INTEGER PRIMARY KEY,
@@ -264,11 +438,15 @@ final class SessionParserTests: XCTestCase {
         );
         """)
 
-        let modelConfig = #"{"cwd":"/tmp/hermes-repo"}"#
+        let modelConfig = #"{"cwd":"/tmp/hermes-repo","reasoning_config":{"effort":"high"}}"#
         let toolCalls = #"[{"id":"call_hermes_1","type":"function","function":{"name":"shell","arguments":"{\"cmd\":\"pwd\"}"}}]"#
         try exec("""
-        INSERT INTO sessions (id, source, user_id, model, model_config, system_prompt, parent_session_id, started_at, ended_at, end_reason, message_count, tool_call_count, input_tokens, output_tokens, total_tokens, cost, title)
-        VALUES ('hermes_sqlite_demo', 'cli', 'user_1', 'qwen3.5-9b', \(sqlString(modelConfig)), 'system', NULL, 1780000000.0, 1780000004.0, 'complete', 3, 1, 10, 20, 30, 0.01, 'Hermes SQLite demo');
+        INSERT INTO sessions (id, source, user_id, model, model_config, system_prompt, parent_session_id, started_at, ended_at, end_reason, message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost, title, last_activity_at)
+        VALUES ('hermes_sqlite_demo', 'cli', 'user_1', 'qwen3.5-9b', \(sqlString(modelConfig)), 'system', NULL, 1780000000.0, 1780000004.0, 'complete', 3, 1, 10, 20, 0, 0, 2, 30, 0.01, 'Hermes SQLite demo', 1780000003.5);
+        INSERT INTO session_model_usage (session_id, model, task, api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES ('hermes_sqlite_demo', 'qwen3.5-9b', '', 1, 10, 20, 0, 0, 2, 1780000000.1, 1780000003.5);
+        INSERT INTO session_model_usage (session_id, model, task, api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES ('hermes_sqlite_demo', 'qwen3.5-9b', 'title_generation', 1, 999, 999, 0, 0, 0, 1780000000.0, 1780000000.0);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
         VALUES (1, 'hermes_sqlite_demo', 'user', 'Hello from Hermes SQLite', NULL, NULL, NULL, 1780000000.1, 4, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
@@ -3286,6 +3464,70 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "grep" })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("Found 1 match") })
 
+        // Session Info labels the indexed model as current. A later message
+        // must therefore replace the earlier model in both the lightweight
+        // row and the hydrated session; otherwise a model switch is silently
+        // presented as first-observed/current confusion.
+        try executeSQLite("""
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_latest_model', 'ses_sqlite_demo', 1776370003000, 1776370003000,
+                '{"role":"assistant","modelID":"latest-model","providerID":"opencode"}');
+        """, at: dbURL)
+        let switchedPreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertEqual(switchedPreview.model, "latest-model")
+        XCTAssertEqual(SessionInfoQuickFacts(session: switchedPreview).currentModel.value, "latest-model")
+        let switchedFull = try XCTUnwrap(
+            OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")
+        )
+        XCTAssertEqual(switchedFull.model, "latest-model")
+
+        // Current OpenCode schemas carry a session-level effective model. It
+        // remains authoritative even when the last assistant message predates
+        // a user-side model switch.
+        try executeSQLite("""
+        ALTER TABLE session ADD COLUMN model TEXT;
+        UPDATE session
+        SET model = '{"id":"authoritative-current","providerID":"opencode"}'
+        WHERE id = 'ses_sqlite_demo';
+        """, at: dbURL)
+        let authoritativePreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertEqual(authoritativePreview.model, "authoritative-current")
+        let authoritativeFull = try XCTUnwrap(
+            OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")
+        )
+        XCTAssertEqual(authoritativeFull.model, "authoritative-current")
+
+        try executeSQLite("""
+        UPDATE session
+        SET model = NULL
+        WHERE id = 'ses_sqlite_demo';
+        """, at: dbURL)
+        XCTAssertNil(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first?.model)
+        XCTAssertNil(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")?.model)
+
+        // A present session.model column remains authoritative even when its
+        // JSON is unrecognized or malformed. Message metadata must not be
+        // relabelled as the current model in either quick or full loading.
+        try executeSQLite("""
+        UPDATE session
+        SET model = '{"providerID":"opencode"}'
+        WHERE id = 'ses_sqlite_demo';
+        """, at: dbURL)
+        let unknownPreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertNil(unknownPreview.model)
+        let unknownFull = try XCTUnwrap(
+            OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")
+        )
+        XCTAssertNil(unknownFull.model)
+
+        try executeSQLite("""
+        UPDATE session
+        SET model = '{"id":'
+        WHERE id = 'ses_sqlite_demo';
+        """, at: dbURL)
+        XCTAssertNil(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first?.model)
+        XCTAssertNil(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")?.model)
+
         try executeSQLite("""
         UPDATE session
         SET title = 'New session - 2026-09-15T06:53:15.144Z'
@@ -3322,6 +3564,36 @@ final class SessionParserTests: XCTestCase {
         """, at: dbURL)
         let summaryFallbackPreview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
         XCTAssertEqual(summaryFallbackPreview.listTitle, "SQLite summary fallback")
+    }
+
+    func testOpenCodeSqliteReaderFindsLegacyModelBeyondQuickProbe() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-LegacyModel-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: dbURL)
+
+        let noModelMessages = (0..<21).map { index in
+            """
+            INSERT INTO message (id, session_id, time_created, time_updated, data)
+            VALUES ('msg_legacy_padding_\(index)', 'ses_sqlite_demo', \(1776370004000 + index), \(1776370004000 + index), '{"role":"assistant"}');
+            """
+        }.joined(separator: "\n")
+        try executeSQLite(noModelMessages, at: dbURL)
+        try executeSQLite("""
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_legacy_model_after_probe', 'ses_sqlite_demo', 1776370005000, 1776370005000,
+                '{"role":"assistant","modelID":"legacy-model-beyond-probe","providerID":"opencode"}');
+        """, at: dbURL)
+
+        let preview = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        XCTAssertEqual(preview.model, "legacy-model-beyond-probe")
+        let full = try XCTUnwrap(
+            OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo")
+        )
+        XCTAssertEqual(full.model, "legacy-model-beyond-probe")
     }
 
     func testOpenCodeSQLiteSearchIngestTracksIdentityUpdatesAndRemoval() async throws {
@@ -4999,6 +5271,4677 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(found.count, 2, "Default discovery should include both active and deleted sessions")
     }
 
+    func testOpenClawDiscoveryFindsAgentDatabases() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DBDiscovery-(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let mainDB = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        let otherDB = root.appendingPathComponent("agents/other/agent/openclaw-agent.sqlite")
+        let ignored = root.appendingPathComponent("agents/main/sessions/openclaw-agent.sqlite")
+        try fm.createDirectory(at: mainDB.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: otherDB.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: ignored.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeText("", to: mainDB)
+        try writeText("", to: otherDB)
+        try writeText("", to: ignored)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath),
+                       [canonicalPath(mainDB), canonicalPath(otherDB)])
+    }
+
+    func testOpenClawDiscoveryFindsConfiguredExternalAgentDirectory() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ExternalDB-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let externalAgentDir = root.appendingPathComponent("custom/worker-state", isDirectory: true)
+        let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
+        try writeText("", to: database)
+
+        let discovery = OpenClawSessionDiscovery(
+            customRoot: root.path,
+            configuredAgentDirectories: [
+                .init(agentID: "worker", path: externalAgentDir.path)
+            ])
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: database), "worker")
+    }
+
+    func testOpenClawDiscoveryResolvesJSON5IncludesForExternalAgentDirectory() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-JSON5Config-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let externalAgentDir = root.appendingPathComponent("configured-agent", isDirectory: true)
+        let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try writeText("""
+        {
+          // Valid OpenClaw JSON5 syntax.
+          agents: {
+            entries: {
+              local: { agentDir: '\(externalAgentDir.path)', },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("included.json5"))
+        try writeText("""
+        {
+          $include: './included.json5',
+          agents: {
+            entries: {},
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: database), "local")
+    }
+
+    func testOpenClawDiscoveryFailsClosedWhenIncludedSymlinkRetargetsDuringValidation() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-IncludeSymlinkTOCTOU-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
+        try fm.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(
+            at: firstDirectory.appendingPathComponent("openclaw-agent.sqlite"))
+        try createOpenClawSQLiteFixture(
+            at: secondDirectory.appendingPathComponent("openclaw-agent.sqlite"))
+
+        let firstInclude = root.appendingPathComponent("included-first.json5")
+        let secondInclude = root.appendingPathComponent("included-second.json5")
+        let lexicalInclude = root.appendingPathComponent("included.json5")
+        try writeText("""
+        { agents: { entries: { first: { agentDir: '\(firstDirectory.path)' } } } }
+        """, to: firstInclude)
+        try writeText("""
+        { agents: { entries: { second: { agentDir: '\(secondDirectory.path)' } } } }
+        """, to: secondInclude)
+        try fm.createSymbolicLink(at: lexicalInclude, withDestinationURL: firstInclude)
+        try writeText("{ $include: './included.json5' }", to: root.appendingPathComponent("openclaw.json"))
+
+        let validator = root.appendingPathComponent("validator.sh")
+        try writeText("""
+        #!/bin/sh
+        root=$(dirname "$OPENCLAW_CONFIG_PATH")
+        ln -sf "$root/included-second.json5" "$root/included.json5"
+        printf '%s\\n' '{"valid":true}'
+        """, to: validator)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: validator.path)
+
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.openClawBinaryOverride
+        let previousOverride = defaults.string(forKey: overrideKey)
+        defaults.set(validator.path, forKey: overrideKey)
+        defer {
+            if let previousOverride {
+                defaults.set(previousOverride, forKey: overrideKey)
+            } else {
+                defaults.removeObject(forKey: overrideKey)
+            }
+        }
+
+        try withProcessEnvironment(["OPENCLAW_CONFIG_PATH": nil]) {
+            let result = OpenClawSessionDiscovery(customRoot: root.path)
+                .discoverSessionDatabaseResult()
+            XCTAssertTrue(result.databases.isEmpty)
+            XCTAssertFalse(result.isAuthoritative,
+                           "validation must not bless a different include target")
+        }
+    }
+
+    func testOpenClawDiscoveryFiltersBlockedWorkspaceDotEnvKeysBeforeValidation() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-WorkspaceDotEnv-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let state = root.appendingPathComponent("state", isDirectory: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        let agentDirectory = state.appendingPathComponent("worker", isDirectory: true)
+        try fm.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(
+            at: agentDirectory.appendingPathComponent("openclaw-agent.sqlite"))
+
+        let allowedVariable = "AGENT_SESSIONS_WORKSPACE_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
+        try writeText("""
+        OPENAI_API_KEY=blocked-secret
+        CODEX_API_KEY=blocked-codex-secret
+        ANTHROPIC_ADMIN_API_KEY=blocked-admin-secret
+        PLUGIN_CREDENTIALS=blocked-plugin-secret
+        PROJECT_API_BASE_URL=blocked-route
+        NODE_OPTIONS=--require /tmp/workspace-payload.cjs
+        NODE_PATH=/tmp/workspace-node-modules
+        NODE_EXTRA_CA_CERTS=/tmp/workspace-ca.pem
+        ACME_AUTH=blocked-plugin-auth
+        BASH_ENV=/tmp/workspace-shell
+        OPENSSL_CONF=/tmp/workspace-openssl.cnf
+        NPM_CONFIG_REGISTRY=https://workspace.example.invalid
+        DYLD_INSERT_LIBRARIES=/tmp/workspace-injected.dylib
+        \(allowedVariable)=\(agentDirectory.path)
+        """, to: workspace.appendingPathComponent(".env"))
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              worker: { agentDir: '${\(allowedVariable)}' },
+            },
+          },
+        }
+        """, to: state.appendingPathComponent("openclaw.json"))
+
+        let validator = root.appendingPathComponent("validator.sh")
+        try writeText("""
+        #!/bin/sh
+        if [ -n "$OPENAI_API_KEY" ] || [ -n "$CODEX_API_KEY" ] || \
+           [ -n "$ANTHROPIC_ADMIN_API_KEY" ] || [ -n "$PLUGIN_CREDENTIALS" ] || \
+           [ -n "$PROJECT_API_BASE_URL" ] || [ -n "$NODE_OPTIONS" ] || \
+           [ -n "$NODE_PATH" ] || [ -n "$NODE_EXTRA_CA_CERTS" ] || \
+           [ -n "$ACME_AUTH" ] || \
+           [ -n "$BASH_ENV" ] || [ -n "$OPENSSL_CONF" ] || \
+           [ -n "$NPM_CONFIG_REGISTRY" ] || \
+           [ -n "$DYLD_INSERT_LIBRARIES" ]; then
+            printf '%s\\n' '{"valid":false}'
+            exit 1
+        fi
+        printf '%s\\n' '{"valid":true}'
+        """, to: validator)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: validator.path)
+
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.openClawBinaryOverride
+        let previousOverride = defaults.string(forKey: overrideKey)
+        defaults.set(validator.path, forKey: overrideKey)
+        let previousDirectory = fm.currentDirectoryPath
+        XCTAssertTrue(fm.changeCurrentDirectoryPath(workspace.path))
+        defer {
+            _ = fm.changeCurrentDirectoryPath(previousDirectory)
+            if let previousOverride {
+                defaults.set(previousOverride, forKey: overrideKey)
+            } else {
+                defaults.removeObject(forKey: overrideKey)
+            }
+        }
+
+        try withProcessEnvironment([
+            "OPENCLAW_CONFIG_PATH": nil,
+            "OPENAI_API_KEY": nil,
+            "CODEX_API_KEY": nil,
+            "ANTHROPIC_ADMIN_API_KEY": nil,
+            "PLUGIN_CREDENTIALS": nil,
+            "PROJECT_API_BASE_URL": nil,
+            "NODE_OPTIONS": nil,
+            "NODE_PATH": nil,
+            "NODE_EXTRA_CA_CERTS": nil,
+            "ACME_AUTH": nil,
+            "BASH_ENV": nil,
+            "OPENSSL_CONF": nil,
+            "NPM_CONFIG_REGISTRY": nil,
+            "DYLD_INSERT_LIBRARIES": nil
+        ]) {
+            let result = OpenClawSessionDiscovery(customRoot: state.path)
+                .discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [
+                canonicalPath(agentDirectory.appendingPathComponent("openclaw-agent.sqlite"))
+            ])
+            XCTAssertTrue(result.isAuthoritative,
+                          "ordinary workspace variables remain usable while blocked keys stay out of validation")
+        }
+    }
+
+    func testOpenClawDiscoveryBoundsValidatorThatIgnoresTermination() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ValidatorTimeout-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let state = root.appendingPathComponent("state", isDirectory: true)
+        try fm.createDirectory(
+            at: state.appendingPathComponent("agents/main/agent", isDirectory: true),
+            withIntermediateDirectories: true)
+        try writeText("{ agents: { entries: {} } }",
+                      to: state.appendingPathComponent("openclaw.json"))
+
+        let validator = root.appendingPathComponent("validator.sh")
+        try writeText("""
+        #!/bin/sh
+        trap '' TERM
+        while :; do :; done
+        """, to: validator)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: validator.path)
+
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.openClawBinaryOverride
+        let previousOverride = defaults.string(forKey: overrideKey)
+        defaults.set(validator.path, forKey: overrideKey)
+        defer {
+            if let previousOverride {
+                defaults.set(previousOverride, forKey: overrideKey)
+            } else {
+                defaults.removeObject(forKey: overrideKey)
+            }
+        }
+
+        let started = Date()
+        let result = OpenClawSessionDiscovery(customRoot: state.path)
+            .discoverSessionDatabaseResult()
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative)
+        XCTAssertLessThan(elapsed, 4.0,
+                          "a validator that ignores SIGTERM must not block discovery")
+    }
+
+    func testOpenClawDiscoveryDrainsValidatorPipesBeforeWaiting() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ValidatorPipeDrain-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let state = root.appendingPathComponent("state", isDirectory: true)
+        try fm.createDirectory(
+            at: state.appendingPathComponent("agents/main/agent", isDirectory: true),
+            withIntermediateDirectories: true)
+        try writeText("{ agents: { entries: {} } }",
+                      to: state.appendingPathComponent("openclaw.json"))
+
+        let validator = root.appendingPathComponent("validator.sh")
+        try writeText("""
+        #!/bin/sh
+        dd if=/dev/zero bs=262144 count=1 2>/dev/null
+        dd if=/dev/zero bs=262144 count=1 1>&2 2>/dev/null
+        exit 0
+        """, to: validator)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: validator.path)
+
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.openClawBinaryOverride
+        let previousOverride = defaults.string(forKey: overrideKey)
+        defaults.set(validator.path, forKey: overrideKey)
+        defer {
+            if let previousOverride {
+                defaults.set(previousOverride, forKey: overrideKey)
+            } else {
+                defaults.removeObject(forKey: overrideKey)
+            }
+        }
+
+        let started = Date()
+        let result = OpenClawSessionDiscovery(customRoot: state.path)
+            .discoverSessionDatabaseResult()
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative)
+        XCTAssertLessThan(elapsed, 4.0,
+                          "validator output larger than a pipe buffer must not deadlock discovery")
+    }
+
+    func testOpenClawDiscoveryResolvesLegacyAgentListExternalDirectory() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-LegacyAgentList-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let externalAgentDir = root.appendingPathComponent("legacy-agent", isDirectory: true)
+        let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try writeText("""
+        {
+          agents: {
+            list: [
+              { id: 'legacy', agentDir: '\(externalAgentDir.path)', },
+            ],
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: database), "legacy")
+    }
+
+    func testOpenClawDiscoveryExpandsEnvironmentVariableExternalDirectory() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-EnvironmentAgentDirectory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let externalAgentDir = root.appendingPathComponent("environment-agent", isDirectory: true)
+        let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        let variable = "AGENT_SESSIONS_OPENCLAW_AGENT_DIR_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
+        setenv(variable, externalAgentDir.path, 1)
+        defer { unsetenv(variable) }
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              environment: { agentDir: '${\(variable)}', },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: database), "environment")
+    }
+
+    func testOpenClawDiscoveryConcatenatesIncludedLegacyAgentLists() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-IncludedAgentLists-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
+        let firstDatabase = firstDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let secondDatabase = secondDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        try writeText("""
+        {
+          agents: { list: [{ id: 'first', agentDir: '\(firstDirectory.path)' }] },
+        }
+        """, to: root.appendingPathComponent("first.json5"))
+        try writeText("""
+        {
+          agents: { list: [{ id: 'second', agentDir: '\(secondDirectory.path)' }] },
+        }
+        """, to: root.appendingPathComponent("second.json5"))
+        try writeText("""
+        {
+          $include: ['./first.json5', './second.json5'],
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        XCTAssertEqual(discovery.discoverSessionDatabases().map(canonicalPath),
+                       [canonicalPath(firstDatabase), canonicalPath(secondDatabase)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: firstDatabase), "first")
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: secondDatabase), "second")
+    }
+
+    func testOpenClawDiscoveryMarksUnresolvedConfiguredDirectoryNonAuthoritative() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-UnresolvedAgentDirectory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let validDirectory = root.appendingPathComponent("valid-agent", isDirectory: true)
+        let validDatabase = validDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: validDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: validDatabase)
+        let variable = "AGENT_SESSIONS_OPENCLAW_UNRESOLVED_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
+        unsetenv(variable)
+        defer { unsetenv(variable) }
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              valid: { agentDir: '\(validDirectory.path)' },
+              unresolved: { agentDir: '${\(variable)}' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(validDatabase)])
+        XCTAssertFalse(result.isAuthoritative)
+    }
+
+    func testOpenClawDiscoveryMarksMalformedAgentRosterNonAuthoritative() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-MalformedAgentRoster-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent("valid-agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              valid: 'not-an-agent-object',
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertFalse(result.isAuthoritative)
+        XCTAssertTrue(result.databases.isEmpty)
+    }
+
+    func testOpenClawDiscoverySupportsJSON5HexEscapeInAgentDirectory() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-HexEscape-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let externalAgentDir = root.appendingPathComponent("hex-agent", isDirectory: true)
+        let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        let json5Path = externalAgentDir.path.replacingOccurrences(of: "/", with: "\\x2f")
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              hex: { agentDir: '\(json5Path)' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(result.agentID(forDatabaseURL: database), "hex")
+        XCTAssertTrue(result.isAuthoritative)
+    }
+
+    func testOpenClawDiscoveryKeepsDatabaseOwnerFromOneSnapshot() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-SnapshotOwner-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
+        let firstDatabase = firstDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let secondDatabase = secondDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        let config = root.appendingPathComponent("openclaw.json")
+        try writeText("""
+        { agents: { entries: { first: { agentDir: '\(firstDirectory.path)' } } } }
+        """, to: config)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let snapshot = discovery.discoverSessionDatabaseResult()
+        try writeText("""
+        { agents: { entries: { second: { agentDir: '\(secondDirectory.path)' } } } }
+        """, to: config)
+
+        XCTAssertEqual(snapshot.agentID(forDatabaseURL: firstDatabase), "first")
+        XCTAssertEqual(snapshot.databases.map(canonicalPath), [canonicalPath(firstDatabase)])
+        XCTAssertEqual(discovery.agentID(forDatabaseURL: secondDatabase), "second")
+    }
+
+    func testOpenClawDiscoveryConfiguredOwnerOverridesLayoutInference() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ConfiguredOwner-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let inferredDirectory = root.appendingPathComponent("agents/legacy/agent", isDirectory: true)
+        let database = inferredDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: inferredDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              configured: { agentDir: '\(inferredDirectory.path)' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(result.agentID(forDatabaseURL: database), "configured")
+        XCTAssertTrue(result.isAuthoritative)
+    }
+
+    func testOpenClawConfiguredAgentDirectoryReplacesObsoleteDefaultStore() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ConfiguredStoreWins-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let defaultDirectory = root.appendingPathComponent("agents/worker/agent", isDirectory: true)
+        let configuredDirectory = root.appendingPathComponent("external/worker", isDirectory: true)
+        let defaultDatabase = defaultDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let configuredDatabase = configuredDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: configuredDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: defaultDatabase)
+        try createOpenClawSQLiteFixture(at: configuredDatabase)
+        try writeText("""
+        { agents: { entries: { WORKER: { agentDir: '\(configuredDirectory.path)' } } } }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let configuredResult = discovery.discoverSessionDatabaseResult()
+        XCTAssertEqual(configuredResult.databases.map(canonicalPath), [canonicalPath(configuredDatabase)])
+        XCTAssertEqual(configuredResult.agentID(forDatabaseURL: configuredDatabase), "worker")
+        XCTAssertTrue(configuredResult.isAuthoritative)
+
+        try fm.removeItem(at: configuredDatabase)
+        let missingConfiguredResult = discovery.discoverSessionDatabaseResult()
+        XCTAssertTrue(missingConfiguredResult.databases.isEmpty)
+        XCTAssertFalse(missingConfiguredResult.isAuthoritative,
+                       "a missing configured replacement must not authorize retirement of the inferred store")
+    }
+
+    func testOpenClawConfiguredExternalStoreMoveFailsClosedBeforeReplacementAppears() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ExternalStoreMove-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("external/first", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("external/second", isDirectory: true)
+        let firstDatabase = firstDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let config = root.appendingPathComponent("openclaw.json")
+        try fm.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try writeText("""
+        { agents: { entries: { worker: { agentDir: '\(firstDirectory.path)' } } } }
+        """, to: config)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let initial = discovery.discoverSessionDatabaseResult()
+        XCTAssertEqual(initial.databases.map(canonicalPath), [canonicalPath(firstDatabase)])
+        XCTAssertTrue(initial.isAuthoritative)
+
+        try writeText("""
+        { agents: { entries: { worker: { agentDir: '\(secondDirectory.path)' } } } }
+        """, to: config)
+        let duringMove = discovery.discoverSessionDatabaseResult()
+        XCTAssertTrue(duringMove.databases.isEmpty)
+        XCTAssertFalse(duringMove.isAuthoritative,
+                       "an external A-to-B move must not retire A while B is absent")
+    }
+
+    @MainActor
+    func testOpenClawIndexerUsesConfiguredStoreDuringProductionRefresh() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-IndexerConfiguredStore-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let defaultDatabase = root.appendingPathComponent(
+            "agents/worker/agent/openclaw-agent.sqlite")
+        let configuredDatabase = root.appendingPathComponent(
+            "external/worker/openclaw-agent.sqlite")
+        try fm.createDirectory(at: defaultDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: configuredDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: defaultDatabase)
+        try createOpenClawSQLiteFixture(at: configuredDatabase)
+        try writeText("""
+        {
+          agents: {
+            ownership: 'explicit',
+            entries: {
+              worker: { agentDir: '\(configuredDatabase.deletingLastPathComponent().path)' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let fixtureSessions = indexer.allSessions.filter { $0.filePath.hasPrefix(root.path) }
+            XCTAssertEqual(fixtureSessions.map(\.id), ["openclaw:worker:sqlite-demo"])
+            XCTAssertEqual(fixtureSessions.first?.filePath, configuredDatabase.path,
+                           "the production indexer must replace the inferred default store with the configured store")
+            XCTAssertFalse(indexer.allSessions.contains { $0.filePath == defaultDatabase.path })
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshPreservesSearchPublicationAfterEpochBaseline() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-FinalRefreshSearchRace-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(discovery: discovery)
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+
+            let finalProofReached = expectation(description: "final-refresh token proof captured")
+            let releaseFinalProof = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeFinalPublicationHookForTesting {
+                finalProofReached.fulfill()
+                if releaseFinalProof.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("final-refresh token proof gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseFinalProof.signal()
+                indexer.setRefreshBeforeFinalPublicationHookForTesting(nil)
+            }
+
+            let searchPublished = expectation(description: "search publication survives final refresh")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                        $0.text == "search race publication"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in searchPublished.fulfill() }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [finalProofReached], timeout: 5)
+
+            // Commit after the final token sample. The search publication below
+            // must prove and preserve this newer SQLite snapshot instead of
+            // being downgraded by the stale final candidate.
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"database write publication"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let parsed = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+            var replacedEvent = false
+            var updatedEvents = parsed.events.map { event -> SessionEvent in
+                guard !replacedEvent, event.text != nil else { return event }
+                replacedEvent = true
+                return SessionEvent(
+                    id: event.id,
+                    timestamp: event.timestamp,
+                    kind: event.kind,
+                    role: event.role,
+                    text: "search race publication",
+                    toolName: event.toolName,
+                    toolInput: event.toolInput,
+                    toolOutput: event.toolOutput,
+                    messageID: event.messageID,
+                    parentID: event.parentID,
+                    isDelta: event.isDelta,
+                    rawJSON: event.rawJSON)
+            }
+            XCTAssertTrue(replacedEvent)
+            var searchSession = Session(
+                id: parsed.id,
+                source: .openclaw,
+                startTime: parsed.startTime,
+                endTime: parsed.endTime,
+                model: parsed.model,
+                filePath: parsed.filePath,
+                fileSizeBytes: parsed.fileSizeBytes,
+                eventCount: updatedEvents.count,
+                events: updatedEvents)
+            searchSession.sourceStorageIdentity = parsed.sourceStorageIdentity
+            searchSession.sourceStorageRevision = parsed.sourceStorageRevision
+            indexer.updateSession(searchSession)
+
+            wait(for: [searchPublished], timeout: 5)
+            cancellable?.cancel()
+            releaseFinalProof.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            XCTAssertTrue(indexer.allSessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                $0.text == "search race publication"
+            } == true,
+            "a search publication made after the final epoch baseline must not be clobbered")
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshPreservesHydrationPublicationAndTranscriptCache() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-HydrationFinalRefreshRace-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let parsed = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            var replacedEvent = false
+            let updatedEvents = parsed.events.map { event -> SessionEvent in
+                guard !replacedEvent, event.text != nil else { return event }
+                replacedEvent = true
+                return SessionEvent(
+                    id: event.id,
+                    timestamp: event.timestamp,
+                    kind: event.kind,
+                    role: event.role,
+                    text: "hydration race publication",
+                    toolName: event.toolName,
+                    toolInput: event.toolInput,
+                    toolOutput: event.toolOutput,
+                    messageID: event.messageID,
+                    parentID: event.parentID,
+                    isDelta: event.isDelta,
+                    rawJSON: event.rawJSON)
+            }
+            XCTAssertTrue(replacedEvent)
+            var searchSession = Session(
+                id: parsed.id,
+                source: .openclaw,
+                startTime: parsed.startTime,
+                endTime: parsed.endTime,
+                model: parsed.model,
+                filePath: parsed.filePath,
+                fileSizeBytes: parsed.fileSizeBytes,
+                eventCount: updatedEvents.count,
+                events: updatedEvents)
+            searchSession.sourceStorageIdentity = parsed.sourceStorageIdentity
+            searchSession.sourceStorageRevision = parsed.sourceStorageRevision
+
+            let initialFullPublished = expectation(description: "full search publication is cached before refresh")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                        $0.text == "hydration race publication"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialFullPublished.fulfill() }
+            indexer.updateSession(searchSession)
+            wait(for: [initialFullPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let hydrationWindowEvents = searchSession.events.map { event -> SessionEvent in
+                guard event.text == "hydration race publication" else { return event }
+                return SessionEvent(
+                    id: event.id,
+                    timestamp: event.timestamp,
+                    kind: event.kind,
+                    role: event.role,
+                    text: "hydration window publication",
+                    toolName: event.toolName,
+                    toolInput: event.toolInput,
+                    toolOutput: event.toolOutput,
+                    messageID: event.messageID,
+                    parentID: event.parentID,
+                    isDelta: event.isDelta,
+                    rawJSON: event.rawJSON)
+            }
+            var hydrationWindowSession = Session(
+                id: searchSession.id,
+                source: searchSession.source,
+                startTime: searchSession.startTime,
+                endTime: searchSession.endTime,
+                model: searchSession.model,
+                filePath: searchSession.filePath,
+                fileSizeBytes: searchSession.fileSizeBytes,
+                eventCount: hydrationWindowEvents.count,
+                events: hydrationWindowEvents)
+            hydrationWindowSession.sourceStorageIdentity = searchSession.sourceStorageIdentity
+            hydrationWindowSession.sourceStorageRevision = searchSession.sourceStorageRevision
+
+            // This refresh starts with a fully loaded current row. Hydration
+            // must not downgrade it before the final scan gets a chance to
+            // decide whether the database revision is still current.
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let retainedBeforeRace = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(retainedBeforeRace.events.contains { $0.text == "hydration race publication" })
+            let retainedTranscript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                session: retainedBeforeRace,
+                filters: .current(showTimestamps: false, showMeta: false),
+                mode: .normal)
+            XCTAssertEqual(indexer.searchTranscriptCache.getCached(baselineSession.id), retainedTranscript)
+
+            let hydrationStarted = expectation(description: "hydration reaches publication gate")
+            let releaseHydration = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeHydrationPublicationHookForTesting {
+                hydrationStarted.fulfill()
+                if releaseHydration.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("hydration publication gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseHydration.signal()
+                indexer.setRefreshBeforeHydrationPublicationHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [hydrationStarted], timeout: 3)
+
+            let searchPublished = expectation(description: "search publication is visible before hydration release")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                        $0.text == "hydration window publication"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in searchPublished.fulfill() }
+            indexer.updateSession(hydrationWindowSession)
+            wait(for: [searchPublished], timeout: 5)
+            cancellable?.cancel()
+
+            releaseHydration.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(finalSession.events.contains { $0.text == "hydration window publication" },
+                          "the final lightweight row must not replace a newer hydration-window publication")
+            let expectedTranscript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                session: finalSession,
+                filters: .current(showTimestamps: false, showMeta: false),
+                mode: .normal)
+            XCTAssertEqual(indexer.searchTranscriptCache.getCached(baselineSession.id), expectedTranscript,
+                           "the final handoff must preserve the transcript cache for the retained full row")
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshDoesNotRepromoteStalePreview() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-StalePreviewFinalRefresh-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "full preview race baseline is published")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let finalProofReached = expectation(description: "final token proof captured")
+            let releaseFinalProof = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeFinalPublicationHookForTesting {
+                finalProofReached.fulfill()
+                if releaseFinalProof.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("final token proof gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseFinalProof.signal()
+                indexer.setRefreshBeforeFinalPublicationHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [finalProofReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"stale preview update"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            indexer.refreshPreview(id: baselineSession.id)
+
+            let stalePreviewReached = expectation(description: "preview marks full row stale")
+            var stalePreviewCancellable: AnyCancellable?
+            stalePreviewCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in stalePreviewReached.fulfill() }
+            wait(for: [stalePreviewReached], timeout: 5)
+            stalePreviewCancellable?.cancel()
+            releaseFinalProof.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(finalSession.events.isEmpty,
+                          "a stale preview must not be republished as a proven full row")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "downgrading a stale full row must evict its transcript cache")
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshDoesNotRepromoteStaleJSONLPreview() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-StaleJSONLFinalRefresh-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionURL = root.appendingPathComponent(
+            "agents/main/sessions/jsonl-session.jsonl")
+        try fm.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let header = #"{"type":"session","version":3,"id":"jsonl-session","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
+        let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"JSONL fixture"}]}}"#
+        let assistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","content":[{"type":"text","text":"fixture response"}]}}"#
+        try writeText([header, user, assistant].joined(separator: "\n") + "\n", to: sessionURL)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSessionParser.parseFileFull(
+                    at: sessionURL,
+                    forcedID: baselineSession.id))
+
+            let fullPublished = expectation(description: "JSONL preview baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            try writeText([header, user,
+                           #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","content":[{"type":"text","text":"updated JSONL response"}]}}"#]
+                .joined(separator: "\n") + "\n", to: sessionURL)
+
+            let staleReached = expectation(description: "JSONL preview marks full row stale")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in staleReached.fulfill() }
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [staleReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            let previewRefreshDowngraded = expectation(description: "stale JSONL refresh preview is downgraded")
+            var previewRefreshCancellable: AnyCancellable?
+            previewRefreshCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == true
+                }
+                .prefix(1)
+                .sink { _ in previewRefreshDowngraded.fulfill() }
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [previewRefreshDowngraded], timeout: 5)
+            previewRefreshCancellable?.cancel()
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "a JSONL refresh preview must not clear an accepted stale verdict")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "a JSONL refresh preview must not reinstall the stale transcript")
+
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(finalSession.events.isEmpty,
+                          "a stale JSONL preview must not be republished as a full row")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "downgrading a stale JSONL row must evict its transcript cache")
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshDoesNotBindNewJSONLStatToOlderPublication() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-JSONLStatHandoff-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionURL = root.appendingPathComponent(
+            "agents/main/sessions/jsonl-stat-session.jsonl")
+        try fm.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let header = #"{"type":"session","version":3,"id":"jsonl-stat-session","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
+        let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"JSONL stat fixture"}]}}"#
+        let assistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","content":[{"type":"text","text":"old JSONL response"}]}}"#
+        try writeText([header, user, assistant].joined(separator: "\n") + "\n", to: sessionURL)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSessionParser.parseFileFull(
+                    at: sessionURL,
+                    forcedID: baselineSession.id))
+
+            let fullPublished = expectation(description: "JSONL stat baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let statsReached = expectation(description: "final refresh stat sample is delayed")
+            let releaseStats = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeFinalStatsHookForTesting {
+                statsReached.fulfill()
+                if releaseStats.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("final refresh stats gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseStats.signal()
+                indexer.setRefreshBeforeFinalStatsHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [statsReached], timeout: 5)
+
+            let updatedAssistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","content":[{"type":"text","text":"new JSONL response"}]}}"#
+            try writeText([header, user, updatedAssistant].joined(separator: "\n") + "\n", to: sessionURL)
+            releaseStats.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(finalSession.events.isEmpty,
+                          "final refresh must not pair the new JSONL stat with the older full transcript")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "final refresh must evict the transcript when its file proof no longer matches")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadRejectsAliasRetargetAroundStableJSONLParse() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-JSONLAliasABA-\(UUID().uuidString)",
+            isDirectory: true)
+        let targetRoot = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-JSONLAliasABATargets-\(UUID().uuidString)",
+            isDirectory: true)
+        defer {
+            try? fm.removeItem(at: root)
+            try? fm.removeItem(at: targetRoot)
+        }
+
+        let aliasURL = root.appendingPathComponent(
+            "agents/main/sessions/alias-session.jsonl")
+        let firstURL = targetRoot.appendingPathComponent("first.jsonl")
+        let secondURL = targetRoot.appendingPathComponent("second.jsonl")
+        try fm.createDirectory(at: aliasURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"jsonl-alias-session","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
+        let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"alias fixture"}]}}"#
+        let firstAssistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"first-model","content":[{"type":"text","text":"first target"}]}}"#
+        let secondAssistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"second-model","content":[{"type":"text","text":"second target"}]}}"#
+        try writeText([header, user, firstAssistant].joined(separator: "\n") + "\n", to: firstURL)
+        try writeText([header, user, secondAssistant].joined(separator: "\n") + "\n", to: secondURL)
+        try fm.createSymbolicLink(at: aliasURL, withDestinationURL: firstURL)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(
+                indexer.allSessions.first(where: {
+                    $0.filePath.hasSuffix("/agents/main/sessions/alias-session.jsonl")
+                }))
+            XCTAssertTrue(baselineSession.events.isEmpty,
+                          "alias ABA regression must start from a lightweight row")
+            XCTAssertTrue(baselineSession.filePath.hasSuffix(
+                "/agents/main/sessions/alias-session.jsonl"),
+                          "alias ABA regression must reload through the lexical symlink")
+
+            let reloadHookReached = expectation(description: "alias reload reaches parse gate")
+            indexer.setReloadBeforeParseHookForTesting {
+                try? fm.removeItem(at: aliasURL)
+                try? fm.createSymbolicLink(at: aliasURL, withDestinationURL: secondURL)
+                reloadHookReached.fulfill()
+            }
+            let parserHookReached = expectation(description: "parser reaches descriptor proof gate")
+            OpenClawSessionParser.setFullParseBeforeEndStatHookForTesting {
+                try? fm.removeItem(at: aliasURL)
+                try? fm.createSymbolicLink(at: aliasURL, withDestinationURL: firstURL)
+                parserHookReached.fulfill()
+            }
+            let reloadTerminalReached = expectation(description: "alias reload reaches terminal handoff")
+            indexer.setReloadTerminalHookForTesting {
+                reloadTerminalReached.fulfill()
+            }
+            defer {
+                indexer.setReloadBeforeParseHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+                OpenClawSessionParser.setFullParseBeforeEndStatHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: baselineSession.id,
+                                  force: true,
+                                  reason: .manualRefresh)
+            wait(for: [reloadHookReached, parserHookReached, reloadTerminalReached], timeout: 5)
+            XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: aliasURL.path), firstURL.path,
+                           "the parser proof hook must restore the original alias target")
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let current = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(current.events.isEmpty,
+                          "a stable parse through a retargeted alias must not publish the wrong target")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "an alias-retargeted parse must not install a transcript cache")
+        }
+    }
+
+    @MainActor
+    func testOpenClawLightweightPreviewRejectsAliasRetargetBetweenOuterStats() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-JSONLLightAliasABA-\(UUID().uuidString)",
+            isDirectory: true)
+        let targetRoot = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-JSONLLightAliasABATargets-\(UUID().uuidString)",
+            isDirectory: true)
+        defer {
+            try? fm.removeItem(at: root)
+            try? fm.removeItem(at: targetRoot)
+        }
+
+        let aliasURL = root.appendingPathComponent(
+            "agents/main/sessions/alias-session.jsonl")
+        let firstURL = targetRoot.appendingPathComponent("first.jsonl")
+        let secondURL = targetRoot.appendingPathComponent("second.jsonl")
+        try fm.createDirectory(at: aliasURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"jsonl-light-alias-session","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
+        let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"alias fixture"}]}}"#
+        let firstAssistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"first-model","content":[{"type":"text","text":"first target"}]}}"#
+        let secondAssistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"second-model","content":[{"type":"text","text":"second target"}]}}"#
+        try writeText([header, user, firstAssistant].joined(separator: "\n") + "\n", to: firstURL)
+        try writeText([header, user, secondAssistant].joined(separator: "\n") + "\n", to: secondURL)
+        try fm.createSymbolicLink(at: aliasURL, withDestinationURL: firstURL)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(
+                indexer.allSessions.first(where: {
+                    $0.filePath.hasSuffix("/agents/main/sessions/alias-session.jsonl")
+                }))
+            XCTAssertEqual(baselineSession.model, "first-model")
+
+            let beforeOpenReached = expectation(description: "lightweight parser opens after outer stat")
+            let beforeEndReached = expectation(description: "lightweight parser reaches proof gate")
+            let previewTerminalReached = expectation(description: "lightweight preview reaches terminal handoff")
+            let hookLock = NSLock()
+            var beforeOpenDidFulfill = false
+            var beforeEndDidFulfill = false
+            OpenClawSessionParser.setLightParseBeforeOpenStatHookForTesting {
+                try? fm.removeItem(at: aliasURL)
+                try? fm.createSymbolicLink(at: aliasURL, withDestinationURL: secondURL)
+                hookLock.lock()
+                let shouldFulfill = !beforeOpenDidFulfill
+                beforeOpenDidFulfill = true
+                hookLock.unlock()
+                if shouldFulfill { beforeOpenReached.fulfill() }
+            }
+            OpenClawSessionParser.setLightParseBeforeEndStatHookForTesting {
+                try? fm.removeItem(at: aliasURL)
+                try? fm.createSymbolicLink(at: aliasURL, withDestinationURL: firstURL)
+                hookLock.lock()
+                let shouldFulfill = !beforeEndDidFulfill
+                beforeEndDidFulfill = true
+                hookLock.unlock()
+                if shouldFulfill { beforeEndReached.fulfill() }
+            }
+            indexer.setRefreshPreviewTerminalHookForTesting {
+                previewTerminalReached.fulfill()
+            }
+            defer {
+                OpenClawSessionParser.setLightParseBeforeOpenStatHookForTesting(nil)
+                OpenClawSessionParser.setLightParseBeforeEndStatHookForTesting(nil)
+                indexer.setRefreshPreviewTerminalHookForTesting(nil)
+            }
+
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [beforeOpenReached, beforeEndReached, previewTerminalReached], timeout: 5)
+
+            let current = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertEqual(current.model, "first-model",
+                           "a lightweight parse through a retargeted alias must not publish B metadata")
+            XCTAssertTrue(current.events.isEmpty,
+                          "the lightweight preview must remain lightweight after proof rejection")
+        }
+    }
+
+    @MainActor
+    func testOpenClawHydrationDoesNotClearStalePreviewVerdict() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-HydrationStalePreview-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+            let fullPublished = expectation(description: "hydration stale baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let hydrationReached = expectation(description: "hydration publication is delayed")
+            let releaseHydration = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeHydrationPublicationHookForTesting {
+                hydrationReached.fulfill()
+                if releaseHydration.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("hydration stale gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseHydration.signal()
+                indexer.setRefreshBeforeHydrationPublicationHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [hydrationReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"hydration stale preview"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let staleReached = expectation(description: "hydration stale verdict is visible")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in staleReached.fulfill() }
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [staleReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            releaseHydration.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "hydration must not clear an accepted stale preview verdict")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "hydration must not reinstall a stale transcript")
+        }
+    }
+
+    @MainActor
+    func testOpenClawOlderPreviewStalenessCannotClearNewerStalePreviewProof() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-PreviewStalenessRace-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "preview staleness baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let oldProofReached = expectation(description: "older preview proof is delayed")
+            let oldProofSettled = expectation(description: "older preview proof settled")
+            let releaseOldProof = DispatchSemaphore(value: 0)
+            indexer.setPreviewStalenessBeforePublicationHookForTesting {
+                oldProofReached.fulfill()
+                if releaseOldProof.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("older preview proof gate timed out before explicit release")
+                }
+            }
+            indexer.setPreviewStalenessTerminalHookForTesting {
+                oldProofSettled.fulfill()
+            }
+            defer {
+                releaseOldProof.signal()
+                indexer.setPreviewStalenessBeforePublicationHookForTesting(nil)
+                indexer.setPreviewStalenessTerminalHookForTesting(nil)
+            }
+
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [oldProofReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"newer stale preview"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let stalePreviewReached = expectation(description: "newer preview proof marks row stale")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in stalePreviewReached.fulfill() }
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [stalePreviewReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            releaseOldProof.signal()
+            wait(for: [oldProofSettled], timeout: 2)
+
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "an older fresh proof must not clear a newer stale preview verdict")
+        }
+    }
+
+    @MainActor
+    func testOpenClawUnprovableSQLiteStalenessMarksFreshLoadedRowStale() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-UnprovableFreshStaleness-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath.hasSuffix("openclaw-agent.sqlite") }))
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "fresh unprovable baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+            XCTAssertFalse(indexer.previewStaleByID[baselineSession.id] == true,
+                           "the accepted full row must begin fresh")
+
+            try fm.removeItem(at: database)
+            let unprovableReached = expectation(description: "fresh unprovable SQLite check reaches publication")
+            let unprovableSettled = expectation(description: "fresh unprovable SQLite check settles")
+            indexer.setPreviewStalenessBeforePublicationHookForTesting {
+                unprovableReached.fulfill()
+            }
+            indexer.setPreviewStalenessTerminalHookForTesting {
+                unprovableSettled.fulfill()
+            }
+            defer {
+                indexer.setPreviewStalenessBeforePublicationHookForTesting(nil)
+                indexer.setPreviewStalenessTerminalHookForTesting(nil)
+            }
+
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [unprovableReached, unprovableSettled], timeout: 5)
+
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "an unprovable SQLite revision must mark a fresh loaded row stale")
+        }
+    }
+
+    @MainActor
+    func testOpenClawUnprovableSQLiteStalenessDoesNotClearConfirmedStaleVerdict() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-UnprovableStaleness-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "unprovable staleness baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"confirmed stale revision"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let staleReached = expectation(description: "SQLite revision mismatch marks row stale")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in staleReached.fulfill() }
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [staleReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            // Remove the lexical path so the next revision read is unprovable.
+            // The cached SQLite handle must not turn that absence into a fresh verdict.
+            try fm.removeItem(at: database)
+            let unprovableReached = expectation(description: "unprovable SQLite check reaches publication")
+            let unprovableSettled = expectation(description: "unprovable SQLite check settles")
+            indexer.setPreviewStalenessBeforePublicationHookForTesting {
+                unprovableReached.fulfill()
+            }
+            indexer.setPreviewStalenessTerminalHookForTesting {
+                unprovableSettled.fulfill()
+            }
+            defer {
+                indexer.setPreviewStalenessBeforePublicationHookForTesting(nil)
+                indexer.setPreviewStalenessTerminalHookForTesting(nil)
+            }
+
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [unprovableReached, unprovableSettled], timeout: 5)
+
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "an unprovable SQLite revision must not clear a confirmed stale verdict")
+        }
+    }
+
+    @MainActor
+    func testOpenClawNewerRefreshPreviewSupersedesOlderProof() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-RefreshPreviewGeneration-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "refresh preview generation baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let firstProofReached = expectation(description: "first preview proof is delayed")
+            let previewsSettled = expectation(description: "competing previews settled")
+            let releaseFirstProof = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            var terminalCalls = 0
+            var terminalExpectationFulfilled = false
+            indexer.setRefreshPreviewAfterProofHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                let isFirst = hookCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    firstProofReached.fulfill()
+                    if releaseFirstProof.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("first preview proof gate timed out before explicit release")
+                    }
+                }
+            }
+            indexer.setRefreshPreviewTerminalHookForTesting {
+                hookLock.lock()
+                terminalCalls += 1
+                let shouldFulfill = terminalCalls >= 2 && !terminalExpectationFulfilled
+                terminalExpectationFulfilled = terminalExpectationFulfilled || shouldFulfill
+                hookLock.unlock()
+                if shouldFulfill { previewsSettled.fulfill() }
+            }
+            defer {
+                releaseFirstProof.signal()
+                indexer.setRefreshPreviewAfterProofHookForTesting(nil)
+                indexer.setRefreshPreviewTerminalHookForTesting(nil)
+            }
+
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [firstProofReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"newer refresh preview"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let stalePreviewReached = expectation(description: "newer preview reports stale")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in stalePreviewReached.fulfill() }
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [stalePreviewReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            releaseFirstProof.signal()
+            wait(for: [previewsSettled], timeout: 5)
+
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "an older refresh preview must not suppress a newer stale proof")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "the newer stale proof must not leave the old transcript cached")
+        }
+    }
+
+    @MainActor
+    func testOpenClawNewerPreviewStalenessSupersedesOlderRefreshPreview() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-PreviewReverseRace-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+            let initialPublished = expectation(description: "reverse preview baseline is full")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in initialPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"first preview revision"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let firstRevision = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+            let firstRevisionPublished = expectation(description: "first preview revision is full")
+            var firstRevisionCancellable: AnyCancellable?
+            firstRevisionCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                        $0.text == "first preview revision"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in firstRevisionPublished.fulfill() }
+            indexer.updateSession(firstRevision)
+            wait(for: [firstRevisionPublished], timeout: 5)
+            firstRevisionCancellable?.cancel()
+
+            let oldPreviewReached = expectation(description: "older refresh preview proof is delayed")
+            let oldPreviewSettled = expectation(description: "older refresh preview settled")
+            let newerStalenessSettled = expectation(description: "newer staleness proof settled")
+            let releaseOldPreview = DispatchSemaphore(value: 0)
+            indexer.setRefreshPreviewAfterProofHookForTesting {
+                oldPreviewReached.fulfill()
+                if releaseOldPreview.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("older refresh preview gate timed out before explicit release")
+                }
+            }
+            indexer.setRefreshPreviewTerminalHookForTesting {
+                oldPreviewSettled.fulfill()
+            }
+            indexer.setPreviewStalenessTerminalHookForTesting {
+                newerStalenessSettled.fulfill()
+            }
+            defer {
+                releaseOldPreview.signal()
+                indexer.setRefreshPreviewAfterProofHookForTesting(nil)
+                indexer.setRefreshPreviewTerminalHookForTesting(nil)
+                indexer.setPreviewStalenessTerminalHookForTesting(nil)
+            }
+
+            indexer.refreshPreview(id: baselineSession.id)
+            wait(for: [oldPreviewReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"second preview revision"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let staleReached = expectation(description: "newer staleness proof is visible")
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$previewStaleByID
+                .filter { $0[baselineSession.id] == true }
+                .prefix(1)
+                .sink { _ in staleReached.fulfill() }
+            _ = indexer.isPreviewStale(id: baselineSession.id)
+            wait(for: [staleReached], timeout: 5)
+            staleCancellable?.cancel()
+
+            releaseOldPreview.signal()
+            wait(for: [oldPreviewSettled, newerStalenessSettled], timeout: 5)
+
+            XCTAssertTrue(indexer.previewStaleByID[baselineSession.id] == true,
+                          "a newer staleness verdict must invalidate an older fresh preview")
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                         "a newer stale verdict must evict the older preview transcript")
+        }
+    }
+
+    @MainActor
+    func testOpenClawFinalRefreshDoesNotDowngradePublicationAfterHandoffSnapshot() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-FinalRefreshLatePublication-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let baselineSession = try XCTUnwrap(indexer.allSessions.first)
+            let full = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+
+            let fullPublished = expectation(description: "late publication baseline is full")
+            var fullCancellable: AnyCancellable?
+            fullCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in fullPublished.fulfill() }
+            indexer.updateSession(full)
+            wait(for: [fullPublished], timeout: 5)
+            fullCancellable?.cancel()
+
+            let handoffReached = expectation(description: "final handoff snapshot captured")
+            let releaseHandoff = DispatchSemaphore(value: 0)
+            indexer.setRefreshAfterHandoffSnapshotHookForTesting {
+                handoffReached.fulfill()
+                if releaseHandoff.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("refresh handoff gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseHandoff.signal()
+                indexer.setRefreshAfterHandoffSnapshotHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [handoffReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"late handoff publication"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let newer = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: baselineSession.id))
+            let newerPublished = expectation(description: "late newer publication is visible")
+            var newerCancellable: AnyCancellable?
+            newerCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == baselineSession.id })?.events.contains {
+                        $0.text == "late handoff publication"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in newerPublished.fulfill() }
+            indexer.updateSession(newer)
+            wait(for: [newerPublished], timeout: 5)
+            newerCancellable?.cancel()
+
+            releaseHandoff.signal()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == baselineSession.id }))
+            XCTAssertTrue(finalSession.events.contains { $0.text == "late handoff publication" },
+                          "a publication after handoff validation must not be downgraded")
+            XCTAssertNotNil(indexer.searchTranscriptCache.getCached(baselineSession.id),
+                            "the retained late publication must keep its transcript cache")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadRequestedAfterRefreshGenerationChangeIsNotDropped() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadGeneration-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == database.path })?.id)
+
+            let firstReloadStarted = expectation(description: "first reload reaches parse gate")
+            let firstReloadRelease = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                let isFirst = hookCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    firstReloadStarted.fulfill()
+                    if firstReloadRelease.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("first reload generation gate timed out before explicit release")
+                    }
+                }
+            }
+            defer {
+                firstReloadRelease.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .focusedSessionMonitor)
+            wait(for: [firstReloadStarted], timeout: 3)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"updated transcript"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            // This advances the refresh token while the old reload is still
+            // in flight. The second request must replace the obsolete worker,
+            // not coalesce into a request that will be rejected as stale.
+            let secondReloadFinished = expectation(description: "new-generation reload reaches terminal handoff")
+            let terminalLock = NSLock()
+            var terminalCount = 0
+            indexer.setReloadTerminalHookForTesting {
+                terminalLock.lock()
+                terminalCount += 1
+                let isSecond = terminalCount == 2
+                terminalLock.unlock()
+                if isSecond {
+                    secondReloadFinished.fulfill()
+                }
+            }
+            defer {
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+            indexer.refresh(mode: .fullReconcile)
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .selection)
+            firstReloadRelease.signal()
+
+            wait(for: [secondReloadFinished], timeout: 20)
+            waitForOpenClawIndexerQuiescence(indexer)
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "updated transcript"
+                } == true,
+                "a stale final-refresh publication must not clobber the newer reload")
+            hookLock.lock()
+            let reloadCount = hookCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(reloadCount, 2,
+                                        "the reload requested after refresh must run as a separate worker")
+        }
+    }
+
+    @MainActor
+    func testOpenClawIdenticalReloadDuringSourceDriftIsRetried() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadSourceDriftRetry-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialFullPublished = expectation(description: "full baseline is visible before coalescing race")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "fixture response"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialFullPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialFullPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let firstReloadStarted = expectation(description: "source-drift reload reaches parse gate")
+            let releaseFirstReload = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var parseHookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                parseHookCalls += 1
+                let isFirst = parseHookCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    firstReloadStarted.fulfill()
+                    if releaseFirstReload.wait(timeout: .now() + 20) == .timedOut {
+                        XCTFail("source-drift reload gate timed out before explicit release")
+                    }
+                }
+            }
+            let secondReloadFinished = expectation(description: "coalesced source-drift reload is retried")
+            let pendingReloadRecorded = expectation(description: "identical reload is recorded as pending")
+            let weakerReloadAttemptedDuringTerminalCleanup = expectation(
+                description: "weaker reload is attempted before terminal cleanup")
+            let terminalLock = NSLock()
+            var terminalCount = 0
+            let terminalCleanupLock = NSLock()
+            var terminalCleanupCount = 0
+            indexer.setReloadPendingRecordedHookForTesting {
+                pendingReloadRecorded.fulfill()
+            }
+            indexer.setReloadBeforeTerminalCleanupHookForTesting {
+                terminalCleanupLock.lock()
+                terminalCleanupCount += 1
+                let isFirst = terminalCleanupCount == 1
+                terminalCleanupLock.unlock()
+                if isFirst {
+                    // Exercise the window in which the old implementation had
+                    // already removed the strong worker from its map but had
+                    // not yet consumed the pending request.
+                    indexer.reloadSession(id: sessionID, force: false, reason: .selection)
+                    weakerReloadAttemptedDuringTerminalCleanup.fulfill()
+                }
+            }
+            indexer.setReloadTerminalHookForTesting {
+                terminalLock.lock()
+                terminalCount += 1
+                let isSecond = terminalCount == 2
+                terminalLock.unlock()
+                if isSecond {
+                    secondReloadFinished.fulfill()
+                }
+            }
+            defer {
+                releaseFirstReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+                indexer.setReloadPendingRecordedHookForTesting(nil)
+                indexer.setReloadBeforeTerminalCleanupHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [firstReloadStarted], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"retried source drift"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            // The identical request coalesces with the worker that still
+            // carries the pre-write proof. Its pending request must be
+            // replayed after that worker rejects the drifted snapshot.
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [pendingReloadRecorded], timeout: 5)
+            releaseFirstReload.signal()
+
+            wait(for: [weakerReloadAttemptedDuringTerminalCleanup, secondReloadFinished], timeout: 20)
+            waitForOpenClawIndexerQuiescence(indexer)
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "retried source drift"
+                } == true,
+                "a coalesced request must be retried after its worker rejects a drifted proof")
+            hookLock.lock()
+            let reloadCount = parseHookCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(reloadCount, 2)
+        }
+    }
+
+    @MainActor
+    func testOpenClawPendingReloadSurvivesSupersedingGeneration() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-PendingReloadOwner-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialPublished = expectation(description: "full baseline is visible")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "fixture response"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let firstReloadStarted = expectation(description: "first generation reaches parse gate")
+            let secondReloadStarted = expectation(description: "superseding generation reaches parse gate")
+            let releaseFirstReload = DispatchSemaphore(value: 0)
+            let releaseSecondReload = DispatchSemaphore(value: 0)
+            let parseLock = NSLock()
+            var parseHookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                parseLock.lock()
+                parseHookCalls += 1
+                let call = parseHookCalls
+                parseLock.unlock()
+                if call == 1 {
+                    firstReloadStarted.fulfill()
+                    if releaseFirstReload.wait(timeout: .now() + 20) == .timedOut {
+                        XCTFail("first generation gate timed out before explicit release")
+                    }
+                } else if call == 2 {
+                    secondReloadStarted.fulfill()
+                    if releaseSecondReload.wait(timeout: .now() + 20) == .timedOut {
+                        XCTFail("second generation gate timed out before explicit release")
+                    }
+                }
+            }
+
+            let pendingRecorded = expectation(description: "pending request is owned by second generation")
+            indexer.setReloadPendingRecordedHookForTesting {
+                pendingRecorded.fulfill()
+            }
+            let firstTerminal = expectation(description: "superseded first generation reaches terminal handoff")
+            let terminalLock = NSLock()
+            var terminalCount = 0
+            indexer.setReloadTerminalHookForTesting {
+                terminalLock.lock()
+                terminalCount += 1
+                let isFirst = terminalCount == 1
+                terminalLock.unlock()
+                if isFirst {
+                    firstTerminal.fulfill()
+                }
+            }
+            defer {
+                releaseFirstReload.signal()
+                releaseSecondReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+                indexer.setReloadPendingRecordedHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [firstReloadStarted], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"generation two baseline"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let generationTwo = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let generationTwoPublished = expectation(description: "second generation baseline is published")
+            var generationTwoCancellable: AnyCancellable?
+            generationTwoCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "generation two baseline"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in generationTwoPublished.fulfill() }
+            indexer.updateSession(generationTwo)
+            wait(for: [generationTwoPublished], timeout: 10)
+            generationTwoCancellable?.cancel()
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [secondReloadStarted], timeout: 5)
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [pendingRecorded], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"generation three retry"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            releaseFirstReload.signal()
+            wait(for: [firstTerminal], timeout: 10)
+
+            XCTAssertTrue(
+                indexer.pendingReloadIsOwnedByLatestGenerationForTesting(id: sessionID),
+                "the superseded first generation must not consume the second generation's pending request")
+            parseLock.lock()
+            let parseCallsBeforeSecondRelease = parseHookCalls
+            parseLock.unlock()
+            XCTAssertEqual(
+                parseCallsBeforeSecondRelease,
+                2,
+                "the first generation must not launch the pending request while the second remains blocked")
+
+            let retriedPublication = expectation(description: "second generation pending request is replayed")
+            var retriedCancellable: AnyCancellable?
+            retriedCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "generation three retry"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in retriedPublication.fulfill() }
+            releaseSecondReload.signal()
+            wait(for: [retriedPublication], timeout: 20)
+            retriedCancellable?.cancel()
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            parseLock.lock()
+            let observedParseHookCalls = parseHookCalls
+            parseLock.unlock()
+            XCTAssertGreaterThanOrEqual(observedParseHookCalls, 3,
+                                        "the owned pending request must launch a retry after the superseded worker fails")
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "generation three retry"
+                } == true)
+        }
+    }
+
+    @MainActor
+    func testOpenClawPendingReloadSurvivesRefreshTokenInvalidation() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-PendingReloadRefreshToken-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialPublished = expectation(description: "full baseline is visible")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "fixture response"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let firstReloadStarted = expectation(description: "first generation reaches parse gate")
+            let secondReloadStarted = expectation(description: "pending request replays under new refresh token")
+            let releaseFirstReload = DispatchSemaphore(value: 0)
+            let parseLock = NSLock()
+            var parseHookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                parseLock.lock()
+                parseHookCalls += 1
+                let call = parseHookCalls
+                parseLock.unlock()
+                if call == 1 {
+                    firstReloadStarted.fulfill()
+                    if releaseFirstReload.wait(timeout: .now() + 20) == .timedOut {
+                        XCTFail("first generation gate timed out before explicit release")
+                    }
+                } else if call == 2 {
+                    secondReloadStarted.fulfill()
+                }
+            }
+            let pendingRecorded = expectation(description: "identical request is recorded as pending")
+            indexer.setReloadPendingRecordedHookForTesting {
+                pendingRecorded.fulfill()
+            }
+            defer {
+                releaseFirstReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+                indexer.setReloadPendingRecordedHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [firstReloadStarted], timeout: 5)
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [pendingRecorded], timeout: 5)
+
+            // Advancing the refresh token without starting another reload must
+            // not let the terminal handoff discard the pending request.
+            indexer.refresh(mode: .fullReconcile)
+            releaseFirstReload.signal()
+
+            wait(for: [secondReloadStarted], timeout: 20)
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            parseLock.lock()
+            let observedParseHookCalls = parseHookCalls
+            parseLock.unlock()
+            XCTAssertGreaterThanOrEqual(
+                observedParseHookCalls,
+                2,
+                "refresh-token invalidation must replay the owned pending reload")
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "fixture response"
+                } == true)
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadPublicationCommitRejectsLateSupersession() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-LatePublicationSupersession-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialPublished = expectation(description: "full baseline is visible")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "fixture response"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialPublished], timeout: 5)
+            initialCancellable?.cancel()
+            let baselineTranscript = try XCTUnwrap(
+                indexer.searchTranscriptCache.getCached(sessionID))
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"generation one"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let hookLock = NSLock()
+            var commitCalls = 0
+            var parseCalls = 0
+            var terminalCalls = 0
+            var mutationError: Error?
+            let lateSupersessionInjected = expectation(description: "G2 supersedes G1 after G1's latest check")
+            let secondParseStarted = expectation(description: "G2 is held before its publication")
+            let releaseSecondParse = DispatchSemaphore(value: 0)
+            let firstTerminal = expectation(description: "G1 completes terminal cleanup before G2 publishes")
+            let winnerPublished = expectation(description: "G2 publishes the newer revision")
+            var stalePublicationCount = 0
+            var staleCancellable: AnyCancellable?
+            staleCancellable = indexer.$allSessions.sink { sessions in
+                guard sessions.first(where: { $0.id == sessionID })?.events.contains(where: {
+                    $0.text == "generation one"
+                }) == true else { return }
+                hookLock.lock()
+                stalePublicationCount += 1
+                hookLock.unlock()
+            }
+            var winnerCancellable: AnyCancellable?
+            winnerCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "generation two winner"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in winnerPublished.fulfill() }
+
+            indexer.setReloadBeforePublicationCommitHookForTesting {
+                hookLock.lock()
+                commitCalls += 1
+                let call = commitCalls
+                hookLock.unlock()
+                if call == 1 {
+                    do {
+                        try self.executeSQLite("""
+                        UPDATE transcript_events
+                        SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"generation two winner"}]}}'
+                        WHERE session_id = 'sqlite-demo' AND seq = 2;
+                        """, at: database)
+                    } catch {
+                        mutationError = error
+                    }
+                    // This call is intentionally made from the commit hook:
+                    // G1 has passed its earlier latest-generation check, so
+                    // the stronger G2 registration lands in the exact window
+                    // before publication bookkeeping.
+                    indexer.reloadSession(id: sessionID,
+                                          force: true,
+                                          reason: .manualRefresh)
+                    lateSupersessionInjected.fulfill()
+                }
+            }
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                parseCalls += 1
+                let call = parseCalls
+                hookLock.unlock()
+                if call == 2 {
+                    secondParseStarted.fulfill()
+                    if releaseSecondParse.wait(timeout: .now() + 20) == .timedOut {
+                        XCTFail("G2 parse gate timed out before explicit release")
+                    }
+                }
+            }
+            indexer.setReloadTerminalHookForTesting {
+                hookLock.lock()
+                terminalCalls += 1
+                let call = terminalCalls
+                hookLock.unlock()
+                if call == 1 {
+                    firstTerminal.fulfill()
+                }
+            }
+            defer {
+                releaseSecondParse.signal()
+                staleCancellable?.cancel()
+                winnerCancellable?.cancel()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+                indexer.setReloadBeforePublicationCommitHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [lateSupersessionInjected], timeout: 10)
+            wait(for: [secondParseStarted, firstTerminal], timeout: 10)
+            hookLock.lock()
+            let observedStalePublicationCount = stalePublicationCount
+            hookLock.unlock()
+            XCTAssertEqual(
+                observedStalePublicationCount,
+                0,
+                "G1 must not publish even transiently while G2 is held before publication")
+            XCTAssertEqual(
+                indexer.searchTranscriptCache.getCached(sessionID),
+                baselineTranscript,
+                "G1 must not overwrite the baseline transcript cache")
+
+            releaseSecondParse.signal()
+            wait(for: [winnerPublished], timeout: 20)
+            waitForOpenClawIndexerQuiescence(indexer)
+
+            let finalSession = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == sessionID }))
+            XCTAssertNil(mutationError, "the late-supersession fixture mutation must succeed")
+            XCTAssertTrue(finalSession.events.contains { $0.text == "generation two winner" })
+            XCTAssertFalse(finalSession.events.contains { $0.text == "generation one" },
+                           "a late-superseded G1 must not publish over G2")
+            hookLock.lock()
+            let observedCommitCalls = commitCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(observedCommitCalls, 2)
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadFillsHydratedLightweightRowWithMatchingDatabaseVersion() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadHydrationProof-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"hydrated proof branch"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+
+            let hydrationReached = expectation(description: "refresh reaches hydration publication gate")
+            let releaseHydration = DispatchSemaphore(value: 0)
+            indexer.setRefreshBeforeHydrationPublicationHookForTesting {
+                hydrationReached.fulfill()
+                if releaseHydration.wait(timeout: .now() + 20) == .timedOut {
+                    XCTFail("hydration publication gate timed out before explicit release")
+                }
+            }
+            let reloadProofReached = expectation(description: "reload proves the current SQLite snapshot")
+            let releaseReload = DispatchSemaphore(value: 0)
+            indexer.setReloadBeforePublicationHookForTesting {
+                reloadProofReached.fulfill()
+                if releaseReload.wait(timeout: .now() + 20) == .timedOut {
+                    XCTFail("reload publication gate timed out before explicit release")
+                }
+            }
+            let reloadFinished = expectation(description: "reload reaches terminal handoff")
+            indexer.setReloadTerminalHookForTesting {
+                reloadFinished.fulfill()
+            }
+            defer {
+                releaseHydration.signal()
+                releaseReload.signal()
+                indexer.setRefreshBeforeHydrationPublicationHookForTesting(nil)
+                indexer.setReloadBeforePublicationHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.refresh(mode: .fullReconcile)
+            wait(for: [hydrationReached], timeout: 5)
+
+            let lightweightPublished = expectation(description: "hydration publishes a proofed lightweight row")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .dropFirst()
+                .filter { sessions in
+                    guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                        return false
+                    }
+                    return session.events.isEmpty
+                        && session.sourceStorageRevision == nil
+                        && session.sourceStorageDatabaseVersion != nil
+                }
+                .prefix(1)
+                .sink { _ in lightweightPublished.fulfill() }
+
+            // The refresh token is current while hydration is paused, so the
+            // reload must be allowed to fill the row that hydration publishes.
+            indexer.reloadSession(id: sessionID, force: true, reason: .manualRefresh)
+            wait(for: [reloadProofReached], timeout: 5)
+            releaseHydration.signal()
+            wait(for: [lightweightPublished], timeout: 10)
+            cancellable?.cancel()
+
+            releaseReload.signal()
+            wait(for: [reloadFinished], timeout: 10)
+            waitForOpenClawIndexerQuiescence(indexer)
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "hydrated proof branch"
+                } == true,
+                "a full reload must fill a hydration row when the database-version proof matches")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadRejectsSourceChangeAfterProof() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadPublicationProof-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialFullPublished = expectation(description: "initial full transcript is visible")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "fixture response"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in initialFullPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialFullPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let proofReached = expectation(description: "reload reaches publication proof gate")
+            let reloadFinished = expectation(description: "proof-rejected reload reaches terminal handoff")
+            let mutationLock = NSLock()
+            var mutationError: Error?
+            indexer.setReloadBeforePublicationHookForTesting {
+                // This mutation happens after the worker's parse-time proof
+                // and before the MainActor publication boundary.
+                do {
+                    try self.executeSQLite("""
+                    UPDATE transcript_events
+                    SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"post-proof drift"}]}}'
+                    WHERE session_id = 'sqlite-demo' AND seq = 2;
+                    """, at: database)
+                } catch {
+                    mutationLock.lock()
+                    mutationError = error
+                    mutationLock.unlock()
+                }
+                proofReached.fulfill()
+            }
+            indexer.setReloadTerminalHookForTesting {
+                reloadFinished.fulfill()
+            }
+            defer {
+                indexer.setReloadBeforePublicationHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [proofReached, reloadFinished], timeout: 10)
+            waitForOpenClawIndexerQuiescence(indexer)
+            mutationLock.lock()
+            let observedMutationError = mutationError
+            mutationLock.unlock()
+            XCTAssertNil(observedMutationError, "post-proof source mutation must succeed")
+
+            let published = try XCTUnwrap(indexer.allSessions.first(where: { $0.id == sessionID }))
+            XCTAssertTrue(published.events.contains { $0.text == "fixture response" },
+                          "the prior accepted transcript remains visible after proof rejection")
+            XCTAssertFalse(published.events.contains { $0.text == "post-proof drift" },
+                           "a source mutation after parse proof must not publish that stale result")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadDoesNotOverwriteNewerSameStorePublication() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadSameStorePublication-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let proofReached = expectation(description: "reload proves the old snapshot")
+            let oldReloadSettled = expectation(description: "old reload handoff settled")
+            let releaseReload = DispatchSemaphore(value: 0)
+            indexer.setReloadBeforePublicationHookForTesting {
+                proofReached.fulfill()
+                if releaseReload.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("reload publication gate timed out before explicit release")
+                }
+            }
+            indexer.setReloadTerminalHookForTesting {
+                oldReloadSettled.fulfill()
+            }
+            defer {
+                releaseReload.signal()
+                indexer.setReloadBeforePublicationHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .selection)
+            wait(for: [proofReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"newer same-store publication"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let newer = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+
+            let newerPublished = expectation(description: "newer same-store publication is visible")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "newer same-store publication"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in newerPublished.fulfill() }
+            indexer.updateSession(newer)
+            wait(for: [newerPublished], timeout: 5)
+            cancellable?.cancel()
+
+            releaseReload.signal()
+            wait(for: [oldReloadSettled], timeout: 5)
+
+            XCTAssertTrue(
+                indexer.allSessions.first(where: { $0.id == sessionID })?.events.contains {
+                    $0.text == "newer same-store publication"
+                } == true,
+                "a reload proved against an older same-store snapshot must not clobber a newer publication")
+        }
+    }
+
+    @MainActor
+    func testOpenClawOlderFullReloadCannotOverwriteNewerLightweightSQLitePublication() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadLightweightPublicationRace-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+
+            let initialFull = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: database,
+                    sessionID: sessionID))
+            let initialFullPublished = expectation(description: "R1 full reload is visible")
+            var initialCancellable: AnyCancellable?
+            initialCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.isEmpty == false
+                }
+                .prefix(1)
+                .sink { _ in initialFullPublished.fulfill() }
+            indexer.updateSession(initialFull)
+            wait(for: [initialFullPublished], timeout: 5)
+            initialCancellable?.cancel()
+
+            let oldProofReached = expectation(description: "R1 full reload reaches publication gate")
+            let oldReloadSettled = expectation(description: "R1 full reload reaches terminal handoff")
+            let releaseOldReload = DispatchSemaphore(value: 0)
+            indexer.setReloadBeforePublicationHookForTesting {
+                oldProofReached.fulfill()
+                if releaseOldReload.wait(timeout: .now() + 20) == .timedOut {
+                    XCTFail("R1 full reload gate timed out before explicit release")
+                }
+            }
+            indexer.setReloadTerminalHookForTesting {
+                oldReloadSettled.fulfill()
+            }
+            defer {
+                releaseOldReload.signal()
+                indexer.setReloadBeforePublicationHookForTesting(nil)
+                indexer.setReloadTerminalHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID, force: true, reason: .manualRefresh)
+            wait(for: [oldProofReached], timeout: 5)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"newer lightweight revision"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: database)
+            let newerLightweight = try XCTUnwrap(
+                OpenClawSqliteReader.listSessionWithProof(
+                    databaseURL: database,
+                    sessionID: sessionID)?.session)
+            let newerRevisionKey = try XCTUnwrap(newerLightweight.sourceStorageRevision)
+            XCTAssertTrue(newerLightweight.events.isEmpty)
+
+            let lightweightPublished = expectation(description: "R2 lightweight publication is visible")
+            var lightweightCancellable: AnyCancellable?
+            lightweightCancellable = indexer.$allSessions
+                .filter { sessions in
+                    guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                        return false
+                    }
+                    return session.events.isEmpty
+                        && session.sourceStorageRevision == newerRevisionKey
+                }
+                .prefix(1)
+                .sink { _ in lightweightPublished.fulfill() }
+            indexer.updateSession(newerLightweight)
+            wait(for: [lightweightPublished], timeout: 25)
+            lightweightCancellable?.cancel()
+
+            releaseOldReload.signal()
+            wait(for: [oldReloadSettled], timeout: 5)
+
+            let current = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == sessionID }))
+            XCTAssertTrue(current.events.isEmpty,
+                          "an older full reload must not repopulate a newer lightweight row")
+            XCTAssertEqual(current.sourceStorageRevision, newerRevisionKey,
+                           "the newer lightweight logical revision must remain authoritative")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadRequestedAfterSameRefreshStoreMoveIsNotCoalesced() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-SameRefreshStoreMove-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        let replacementDatabase = root.appendingPathComponent(
+            "relocated/main/openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: replacementDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: replacementDatabase)
+        try executeSQLite("""
+        UPDATE transcript_events
+        SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"same-refresh replacement"}]}}'
+        WHERE session_id = 'sqlite-demo' AND seq = 2;
+        """, at: replacementDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == firstDatabase.path })?.id)
+
+            let firstReloadStarted = expectation(description: "first reload reaches parse gate")
+            let firstReloadRelease = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                let isFirst = hookCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    firstReloadStarted.fulfill()
+                    if firstReloadRelease.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("first reload store-move gate timed out before explicit release")
+                    }
+                }
+            }
+            defer {
+                firstReloadRelease.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .focusedSessionMonitor)
+            wait(for: [firstReloadStarted], timeout: 3)
+
+            // Model a same-refresh discovery publication that has already
+            // moved the stable session identity from A to B. The second
+            // request must not coalesce with the in-flight A worker merely
+            // because the refresh token is unchanged.
+            indexer.replaceSessionStoragePathForTesting(
+                id: sessionID,
+                path: replacementDatabase.path)
+            let updated = expectation(description: "same-refresh replacement reload publishes")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                        return false
+                    }
+                    return session.filePath == replacementDatabase.path
+                        && session.events.contains { $0.text == "same-refresh replacement" }
+                }
+                .prefix(1)
+                .sink { _ in updated.fulfill() }
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .selection)
+            firstReloadRelease.signal()
+
+            wait(for: [updated], timeout: 5)
+            cancellable?.cancel()
+            hookLock.lock()
+            let reloadCount = hookCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(reloadCount, 2,
+                                        "a same-refresh store move must start a replacement reload")
+            XCTAssertEqual(indexer.allSessions.first(where: { $0.id == sessionID })?.filePath,
+                           replacementDatabase.path)
+        }
+    }
+
+    @MainActor
+    func testOpenClawDelayedReloadRegistrationCannotReplaceNewerStorageRequest() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-DelayedReloadRegistration-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        let replacementDatabase = root.appendingPathComponent(
+            "relocated/main/openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: replacementDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: replacementDatabase)
+        try executeSQLite("""
+        UPDATE transcript_events
+        SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"delayed replacement"}]}}'
+        WHERE session_id = 'sqlite-demo' AND seq = 2;
+        """, at: replacementDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == firstDatabase.path })?.id)
+
+            let firstSnapshotCaptured = expectation(description: "old reload captures A before registration")
+            let releaseFirstRegistration = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            indexer.setReloadBeforeRegistrationHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                let isFirst = hookCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    firstSnapshotCaptured.fulfill()
+                    if releaseFirstRegistration.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("first registration gate timed out before explicit release")
+                    }
+                }
+            }
+            defer {
+                releaseFirstRegistration.signal()
+                indexer.setReloadBeforeRegistrationHookForTesting(nil)
+            }
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                indexer.reloadSession(id: sessionID,
+                                      force: true,
+                                      reason: .focusedSessionMonitor)
+            }
+            wait(for: [firstSnapshotCaptured], timeout: 3)
+
+            // B is published and registered while the delayed A caller is
+            // paused between its snapshot and in-flight registration. The A
+            // caller must retry/coalesce, never overwrite B's request.
+            indexer.replaceSessionStoragePathForTesting(
+                id: sessionID,
+                path: replacementDatabase.path)
+            let updated = expectation(description: "newer B request publishes")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                        return false
+                    }
+                    return session.filePath == replacementDatabase.path
+                        && session.events.contains { $0.text == "delayed replacement" }
+                }
+                .prefix(1)
+                .sink { _ in updated.fulfill() }
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .selection)
+            releaseFirstRegistration.signal()
+
+            wait(for: [updated], timeout: 5)
+            cancellable?.cancel()
+            hookLock.lock()
+            let registrationCount = hookCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(registrationCount, 3,
+                                        "the delayed A caller must observe B and retry instead of replacing it")
+            XCTAssertEqual(indexer.allSessions.first(where: { $0.id == sessionID })?.filePath,
+                           replacementDatabase.path)
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadRequestsWithDifferentStrengthDoNotCoalesce() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadStrength-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == database.path })?.id)
+
+            let firstReloadStarted = expectation(description: "weaker reload reaches parse gate")
+            let secondReloadStarted = expectation(description: "stronger reload reaches parse gate")
+            let releaseFirstReload = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                let call = hookCalls
+                hookLock.unlock()
+                if call == 1 {
+                    firstReloadStarted.fulfill()
+                    if releaseFirstReload.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("first reload gate timed out before explicit release")
+                    }
+                } else if call == 2 {
+                    secondReloadStarted.fulfill()
+                }
+            }
+            defer {
+                releaseFirstReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .focusedSessionMonitor)
+            wait(for: [firstReloadStarted], timeout: 3)
+
+            // A manual refresh has stronger execution semantics than the
+            // focused-session shortcut even when path, token, and revision
+            // are identical. It must replace the weaker in-flight request.
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .manualRefresh)
+            releaseFirstReload.signal()
+
+            wait(for: [secondReloadStarted], timeout: 5)
+            hookLock.lock()
+            let observedHookCalls = hookCalls
+            hookLock.unlock()
+            XCTAssertGreaterThanOrEqual(observedHookCalls, 2,
+                                        "a stronger manual refresh must not coalesce into a focused-session reload")
+        }
+    }
+
+    @MainActor
+    func testOpenClawWeakerReloadDoesNotSupersedeManualRefresh() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ReloadStrengthInverse-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try executeSQLite("""
+        UPDATE transcript_events
+        SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"manual refresh wins"}]}}'
+        WHERE session_id = 'sqlite-demo' AND seq = 2;
+        """, at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == database.path })?.id)
+
+            let manualReloadStarted = expectation(description: "manual reload reaches parse gate")
+            let manualReloadPublished = expectation(description: "manual reload still publishes")
+            let releaseManualReload = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var hookCalls = 0
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                hookCalls += 1
+                hookLock.unlock()
+                manualReloadStarted.fulfill()
+                if releaseManualReload.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("manual reload gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseManualReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "manual refresh wins"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in manualReloadPublished.fulfill() }
+
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .manualRefresh)
+            wait(for: [manualReloadStarted], timeout: 3)
+
+            // A normal selection request is weaker and must leave the
+            // already-running forced manual refresh as the latest generation.
+            indexer.reloadSession(id: sessionID,
+                                  force: false,
+                                  reason: .selection)
+            releaseManualReload.signal()
+
+            wait(for: [manualReloadPublished], timeout: 5)
+            cancellable?.cancel()
+            hookLock.lock()
+            let observedHookCalls = hookCalls
+            hookLock.unlock()
+            XCTAssertEqual(observedHookCalls, 1,
+                           "a weaker selection reload must not supersede a forced manual refresh")
+        }
+    }
+
+    @MainActor
+    func testOpenClawReloadDoesNotResurrectOldSQLiteAlias() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-CanonicalAlias-\(UUID().uuidString)",
+            isDirectory: true)
+        let canonicalRoot = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-CanonicalTarget-\(UUID().uuidString)",
+            isDirectory: true)
+        defer {
+            try? fm.removeItem(at: root)
+            try? fm.removeItem(at: canonicalRoot)
+        }
+
+        let canonicalDatabase = canonicalRoot.appendingPathComponent(
+            "agent/openclaw-agent.sqlite")
+        let aliasDatabase = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: canonicalDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: canonicalDatabase)
+        try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: canonicalDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+            XCTAssertEqual(indexer.allSessions.first?.filePath, canonicalDatabase.path,
+                           "discovery should publish the canonical SQLite target")
+
+            // Start an old reload through the lexical symlink alias. Then
+            // model discovery publishing the canonical target while it parses.
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"canonical alias reload"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: canonicalDatabase)
+            indexer.replaceSessionStoragePathForTesting(id: sessionID,
+                                                        path: aliasDatabase.path)
+
+            let oldReloadStarted = expectation(description: "alias reload reaches parse gate")
+            let releaseOldReload = DispatchSemaphore(value: 0)
+            indexer.setReloadBeforeParseHookForTesting {
+                oldReloadStarted.fulfill()
+                if releaseOldReload.wait(timeout: .now() + 5) == .timedOut {
+                    XCTFail("old reload alias gate timed out before explicit release")
+                }
+            }
+            defer {
+                releaseOldReload.signal()
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            let canonicalReloadPublished = expectation(description: "canonical path survives old reload")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    guard let session = sessions.first(where: { $0.id == sessionID }) else {
+                        return false
+                    }
+                    return session.filePath == canonicalDatabase.path
+                        && session.events.contains { $0.text == "canonical alias reload" }
+                }
+                .prefix(1)
+                .sink { _ in canonicalReloadPublished.fulfill() }
+
+            indexer.reloadSession(id: sessionID,
+                                  force: true,
+                                  reason: .focusedSessionMonitor)
+            wait(for: [oldReloadStarted], timeout: 3)
+            indexer.replaceSessionStoragePathForTesting(id: sessionID,
+                                                        path: canonicalDatabase.path)
+            releaseOldReload.signal()
+
+            wait(for: [canonicalReloadPublished], timeout: 5)
+            cancellable?.cancel()
+            XCTAssertEqual(indexer.allSessions.first(where: { $0.id == sessionID })?.filePath,
+                           canonicalDatabase.path,
+                           "an old lexical alias must not be published over the canonical SQLite path")
+        }
+    }
+
+    @MainActor
+    func testOpenClawSearchUpdatePreservesCanonicalSQLitePath() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-SearchCanonicalAlias-\(UUID().uuidString)",
+            isDirectory: true)
+        let canonicalRoot = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-SearchCanonicalTarget-\(UUID().uuidString)",
+            isDirectory: true)
+        defer {
+            try? fm.removeItem(at: root)
+            try? fm.removeItem(at: canonicalRoot)
+        }
+
+        let canonicalDatabase = canonicalRoot.appendingPathComponent(
+            "agent/openclaw-agent.sqlite")
+        let aliasDatabase = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: canonicalDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: canonicalDatabase)
+        try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: canonicalDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let sessionID = try XCTUnwrap(indexer.allSessions.first?.id)
+            XCTAssertEqual(indexer.allSessions.first?.filePath, canonicalDatabase.path)
+
+            try executeSQLite("""
+            UPDATE transcript_events
+            SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"search alias update"}]}}'
+            WHERE session_id = 'sqlite-demo' AND seq = 2;
+            """, at: canonicalDatabase)
+            let parsedThroughAlias = try XCTUnwrap(
+                OpenClawSqliteReader.loadFullSession(
+                    databaseURL: aliasDatabase,
+                    sessionID: sessionID))
+            XCTAssertEqual(parsedThroughAlias.filePath, aliasDatabase.path)
+
+            // SearchCoordinator publishes through updateSession after parsing.
+            // Discovery has already won with the canonical target, so this
+            // equivalent alias must update content without changing identity.
+            let updated = expectation(description: "search update publishes")
+            var updateCancellable: AnyCancellable?
+            updateCancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == sessionID })?.events.contains {
+                        $0.text == "search alias update"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in updated.fulfill() }
+            indexer.updateSession(parsedThroughAlias)
+            wait(for: [updated], timeout: 5)
+            updateCancellable?.cancel()
+            let current = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.id == sessionID }))
+            XCTAssertEqual(current.filePath, canonicalDatabase.path,
+                           "search publication must retain the canonical SQLite path")
+            XCTAssertTrue(current.events.contains { $0.text == "search alias update" })
+        }
+    }
+
+    @MainActor
+    func testOpenClawRetiredSessionRejectsLateSearchCachePublication() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-RetiredSearchCache-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let retiredSession = try XCTUnwrap(indexer.allSessions.first)
+
+            try fm.removeItem(at: database)
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            XCTAssertFalse(indexer.allSessions.contains { $0.id == retiredSession.id })
+
+            // This simulates SearchCoordinator finishing the parse it started
+            // before the authoritative refresh retired the row.
+            indexer.updateSession(retiredSession)
+            XCTAssertNil(indexer.searchTranscriptCache.getCached(retiredSession.id),
+                         "a retired session must not reseed the transcript cache")
+        }
+    }
+
+    @MainActor
+    func testOpenClawPartialPublicationDoesNotInvalidateUnrelatedInFlightReload() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-PartialPublicationReload-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent(
+            "agents/first/agent/openclaw-agent.sqlite")
+        let secondDatabase = root.appendingPathComponent(
+            "agents/second/agent/openclaw-agent.sqlite")
+        let replacementFirstDatabase = root.appendingPathComponent(
+            "relocated/first/openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createDirectory(at: replacementFirstDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        try createOpenClawSQLiteFixture(at: replacementFirstDatabase)
+        try executeSQLite("""
+        UPDATE transcript_events
+        SET event_json = '{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"newer second transcript"}]}}'
+        WHERE session_id = 'sqlite-demo' AND seq = 2;
+        """, at: secondDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            let firstID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == firstDatabase.path })?.id)
+            let secondID = try XCTUnwrap(
+                indexer.allSessions.first(where: { $0.filePath == secondDatabase.path })?.id)
+
+            let oldSecondSnapshot = expectation(description: "old second reload pauses before registration")
+            let releaseOldSecond = DispatchSemaphore(value: 0)
+            let newSecondParse = expectation(description: "new second reload reaches parse")
+            let releaseNewSecond = DispatchSemaphore(value: 0)
+            let hookLock = NSLock()
+            var registrationCalls = 0
+            var parseCalls = 0
+            indexer.setReloadBeforeRegistrationHookForTesting {
+                hookLock.lock()
+                registrationCalls += 1
+                let isFirst = registrationCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    oldSecondSnapshot.fulfill()
+                    if releaseOldSecond.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("old second-session gate timed out before explicit release")
+                    }
+                }
+            }
+            indexer.setReloadBeforeParseHookForTesting {
+                hookLock.lock()
+                parseCalls += 1
+                let isFirst = parseCalls == 1
+                hookLock.unlock()
+                if isFirst {
+                    newSecondParse.fulfill()
+                    if releaseNewSecond.wait(timeout: .now() + 5) == .timedOut {
+                        XCTFail("new second-session gate timed out before explicit release")
+                    }
+                }
+            }
+            defer {
+                releaseOldSecond.signal()
+                releaseNewSecond.signal()
+                indexer.setReloadBeforeRegistrationHookForTesting(nil)
+                indexer.setReloadBeforeParseHookForTesting(nil)
+            }
+
+            // The old B caller has captured its path but has not registered.
+            DispatchQueue.global(qos: .userInitiated).async {
+                indexer.reloadSession(id: secondID,
+                                      force: true,
+                                      reason: .focusedSessionMonitor)
+            }
+            wait(for: [oldSecondSnapshot], timeout: 3)
+
+            // Register a newer B request at the original B storage version.
+            // It is held in parsing so an unrelated A publication overlaps it.
+            indexer.reloadSession(id: secondID,
+                                  force: true,
+                                  reason: .focusedSessionMonitor)
+            wait(for: [newSecondParse], timeout: 3)
+
+            // This is intentionally a singleton publication. It must update A
+            // without pruning B's path/version or invalidating B's request.
+            indexer.replaceSessionStoragePathForTesting(
+                id: firstID,
+                path: replacementFirstDatabase.path)
+            let updated = expectation(description: "newer B request publishes")
+            var cancellable: AnyCancellable?
+            cancellable = indexer.$allSessions
+                .filter { sessions in
+                    sessions.first(where: { $0.id == secondID })?.events.contains {
+                        $0.text == "newer second transcript"
+                    } == true
+                }
+                .prefix(1)
+                .sink { _ in updated.fulfill() }
+            releaseOldSecond.signal()
+            releaseNewSecond.signal()
+            wait(for: [updated], timeout: 5)
+            cancellable?.cancel()
+
+            hookLock.lock()
+            let observedParseCalls = parseCalls
+            hookLock.unlock()
+            XCTAssertEqual(observedParseCalls, 1,
+                           "A's singleton publication must not cause the older B caller to replace the newer B reload")
+            XCTAssertEqual(indexer.allSessions.first(where: { $0.id == secondID })?.events.first {
+                $0.text == "newer second transcript"
+            }?.text, "newer second transcript")
+        }
+    }
+
+    @MainActor
+    func testOpenClawIndexerReconcilesReadableDatabaseWhenSiblingIsUnreadable() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-IndexerPartialSnapshot-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let readableDatabase = root.appendingPathComponent(
+            "agents/readable/agent/openclaw-agent.sqlite")
+        let unreadableDatabase = root.appendingPathComponent(
+            "agents/unreadable/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: readableDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: unreadableDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: readableDatabase)
+        try createOpenClawSQLiteFixture(at: unreadableDatabase)
+
+        try withIsolatedIndexerStore {
+            let indexer = OpenClawSessionIndexer(
+                discovery: OpenClawSessionDiscovery(customRoot: root.path))
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            var fixtureSessions = indexer.allSessions.filter { $0.filePath.hasPrefix(root.path) }
+            XCTAssertEqual(
+                Set(fixtureSessions.map(\.id)),
+                Set(["openclaw:readable:sqlite-demo", "openclaw:unreadable:sqlite-demo"]))
+
+            try executeSQLite(
+                "DELETE FROM session_windows WHERE session_id = 'sqlite-demo';",
+                at: readableDatabase)
+            try Data("not a SQLite database".utf8).write(to: unreadableDatabase, options: .atomic)
+
+            indexer.refresh(mode: .fullReconcile)
+            waitForOpenClawIndexerQuiescence(indexer)
+            fixtureSessions = indexer.allSessions.filter { $0.filePath.hasPrefix(root.path) }
+
+            XCTAssertEqual(fixtureSessions.map(\.id), ["openclaw:unreadable:sqlite-demo"],
+                           "a readable sibling must reconcile independently while an unreadable store remains hydrated")
+            XCTAssertEqual(fixtureSessions.first?.filePath, unreadableDatabase.path)
+        }
+    }
+
+    func testOpenClawDiscoveryCanonicalizesSymlinkAliasesAndRejectsConflictingOwners() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-SymlinkAlias-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let agentDirectory = root.appendingPathComponent("agents/main/agent", isDirectory: true)
+        let database = agentDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let aliasesDirectory = root.appendingPathComponent("aliases", isDirectory: true)
+        let aliasDirectory = aliasesDirectory.appendingPathComponent("alias", isDirectory: true)
+        try fm.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasesDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try fm.createSymbolicLink(at: aliasDirectory, withDestinationURL: agentDirectory)
+
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              alias: { agentDir: '\(aliasDirectory.path)' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let aliasResult = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(aliasResult.databases.map(canonicalPath), [canonicalPath(database)])
+        XCTAssertEqual(aliasResult.agentID(forDatabaseURL: database), "alias")
+        XCTAssertTrue(aliasResult.isAuthoritative)
+
+        try writeText("""
+        {
+          agents: {
+            entries: {
+              alias: { agentDir: '\(aliasDirectory.path)' },
+              conflict: { agentDir: '\(agentDirectory.path)' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+        let conflictResult = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(conflictResult.databases.map(canonicalPath), [canonicalPath(database)])
+        XCTAssertFalse(conflictResult.isAuthoritative)
+        XCTAssertTrue(conflictResult.isOwnershipAmbiguous(forDatabaseURL: database))
+        XCTAssertNil(conflictResult.agentID(forDatabaseURL: database),
+                     "ambiguous stores must not mint a fresh owner identity")
+    }
+
+    func testOpenClawDiscoveryRejectsConflictingInferredSymlinkOwners() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-InferredSymlinkConflict-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent(
+            "agents/first/agent/openclaw-agent.sqlite")
+        let secondAgentDirectory = root.appendingPathComponent("agents/second/agent")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try fm.createDirectory(at: secondAgentDirectory.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: secondAgentDirectory,
+                                  withDestinationURL: firstDatabase.deletingLastPathComponent())
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path)
+            .discoverSessionDatabaseResult()
+        XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(firstDatabase)])
+        XCTAssertFalse(result.isAuthoritative)
+        XCTAssertTrue(result.isOwnershipAmbiguous(forDatabaseURL: firstDatabase))
+        XCTAssertNil(result.agentID(forDatabaseURL: firstDatabase),
+                     "conflicting inferred aliases must not choose an enumeration-order owner")
+    }
+
+    func testOpenClawDiscoveryTreatsBrokenAgentDirectorySymlinkAsIndeterminate() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-BrokenAgentSymlink-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let agentDirectory = root.appendingPathComponent("agents/main/agent", isDirectory: true)
+        let missingTarget = root.appendingPathComponent("moved-agent", isDirectory: true)
+        try fm.createDirectory(at: agentDirectory.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: agentDirectory, withDestinationURL: missingTarget)
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path)
+            .discoverSessionDatabaseResult()
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative,
+                       "a broken agent-directory alias must preserve the prior indexed snapshot")
+    }
+
+    func testOpenClawDiscoveryTreatsAgentSymlinkReplacementDuringProbeAsIndeterminate() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-AgentSymlinkTransition-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let realAgentDirectory = root.appendingPathComponent("real-agent", isDirectory: true)
+        let database = realAgentDirectory.appendingPathComponent(
+            "agent/openclaw-agent.sqlite")
+        let aliasDirectory = root.appendingPathComponent("agents/main", isDirectory: true)
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasDirectory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try fm.createSymbolicLink(at: aliasDirectory, withDestinationURL: realAgentDirectory)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        discovery.setBeforeDatabaseProbeHookForTesting {
+            try? fm.removeItem(at: aliasDirectory)
+        }
+        defer { discovery.setBeforeDatabaseProbeHookForTesting(nil) }
+
+        let result = discovery.discoverSessionDatabaseResult()
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative,
+                       "an agent alias that disappears during probing must not authorize SQLite retirement")
+    }
+
+    func testOpenClawDiscoveryTreatsDatabaseDirectorySymlinkReplacementAsIndeterminate() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-DatabaseSymlinkTransition-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
+        let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
+        let agentDirectory = root.appendingPathComponent("agents/main", isDirectory: true)
+        let databaseAlias = agentDirectory.appendingPathComponent("agent", isDirectory: true)
+        let firstDatabase = firstDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let secondDatabase = secondDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        try fm.createSymbolicLink(at: databaseAlias, withDestinationURL: firstDirectory)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        discovery.setBeforeDatabaseProbeHookForTesting {
+            try? fm.removeItem(at: databaseAlias)
+            try? fm.createSymbolicLink(at: databaseAlias, withDestinationURL: secondDirectory)
+        }
+        defer { discovery.setBeforeDatabaseProbeHookForTesting(nil) }
+
+        let result = discovery.discoverSessionDatabaseResult()
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative,
+                       "a database-directory alias retarget must not authorize SQLite retirement")
+    }
+
+    func testOpenClawDiscoveryHonorsOpenClawHome() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-Home-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw/agents/home-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryHonorsOpenClawProfile() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-Profile-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw-research/agents/profile-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": "research",
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryTreatsDefaultProfileAsUnprofiled() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-DefaultProfile-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw/agents/default-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": "DEFAULT",
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryAcceptsMixedCaseNamedProfile() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-MixedCaseProfile-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw-Research/agents/profile-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": "ReSeArCh",
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryDoesNotFallBackWhenOpenClawRootExistsWithoutAgents() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ExistingRoot-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let openClawRoot = home.appendingPathComponent(".openclaw", isDirectory: true)
+        let legacyDatabase = home.appendingPathComponent(
+            ".clawdbot/agents/legacy-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: openClawRoot, withIntermediateDirectories: true)
+        try fm.createDirectory(at: legacyDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: legacyDatabase)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertTrue(result.databases.isEmpty)
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryUsesDefaultConfigWhenConfigPathIsBlank() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-BlankConfigPath-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let externalDirectory = home.appendingPathComponent("external-agent", isDirectory: true)
+        let database = externalDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: externalDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        let stateRoot = home.appendingPathComponent(".openclaw", isDirectory: true)
+        try fm.createDirectory(at: stateRoot, withIntermediateDirectories: true)
+        try writeText("""
+        { agents: { entries: { worker: { agentDir: '\(externalDirectory.path)' } } } }
+        """, to: stateRoot.appendingPathComponent("openclaw.json"))
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": "   "
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertEqual(result.agentID(forDatabaseURL: database), "worker")
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryTreatsMissingExplicitConfigPathAsNonAuthoritative() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-MissingExplicitConfig-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let inferredDatabase = root.appendingPathComponent(
+            "agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: inferredDatabase.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: inferredDatabase)
+        let missingConfig = root.appendingPathComponent("selected/openclaw.json")
+
+        try withProcessEnvironment([
+            "OPENCLAW_CONFIG_PATH": missingConfig.path
+        ]) {
+            let result = OpenClawSessionDiscovery(customRoot: root.path)
+                .discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(inferredDatabase)])
+            XCTAssertFalse(result.isAuthoritative,
+                           "a selected config path that disappears must not retire the prior ownership map")
+        }
+    }
+
+    func testOpenClawDiscoveryRejectsOwnerlessInferredDatabase() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-OwnerlessDatabase-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent(
+            "agents/!!!/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path)
+            .discoverSessionDatabaseResult()
+        XCTAssertTrue(result.databases.isEmpty)
+        XCTAssertFalse(result.isAuthoritative,
+                       "an inferred store without a normalizable owner must not mint an identity")
+        XCTAssertNil(result.agentID(forDatabaseURL: database))
+    }
+
+    func testOpenClawDiscoveryFallsBackFromNullHomeToHomeEnvironment() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-NullHome-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw/agents/null-home-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": "null",
+            "HOME": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryFallsBackFromMissingHomeToUserProfile() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-UserProfile-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw/agents/user-profile-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": nil,
+            "HOME": nil,
+            "USERPROFILE": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryRejectsInvalidProfileWithoutTrustingDefaultNamespace() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-InvalidProfile-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".openclaw/agents/invalid-profile-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": "bad.profile",
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertFalse(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawNamedProfileDoesNotFallBackToLegacyProfileNamespace() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-NoLegacyProfileFallback-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let legacyDatabase = home.appendingPathComponent(
+            ".clawdbot-research/agents/legacy-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: legacyDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: legacyDatabase)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": "research",
+            "OPENCLAW_STATE_DIR": nil,
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertTrue(result.databases.isEmpty)
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryResolvesTildeStateDirAgainstOpenClawHome() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-TildeHome-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+
+        let database = home.appendingPathComponent(
+            ".state/agents/tilde-agent/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+
+        try withProcessEnvironment([
+            "OPENCLAW_HOME": home.path,
+            "OPENCLAW_PROFILE": nil,
+            "OPENCLAW_STATE_DIR": "~/.state",
+            "OPENCLAW_CONFIG_PATH": nil
+        ]) {
+            let result = OpenClawSessionDiscovery().discoverSessionDatabaseResult()
+            XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(database)])
+            XCTAssertTrue(result.isAuthoritative)
+        }
+    }
+
+    func testOpenClawDiscoveryUsesStateDotEnvBeforeConfigEnvVarsAndHonorsEscapes() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-EnvironmentPrecedence-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let stateDirectory = root.appendingPathComponent("state-agent", isDirectory: true)
+        let configDirectory = root.appendingPathComponent("config-agent", isDirectory: true)
+        let escapedDirectory = root.appendingPathComponent("escaped-agent", isDirectory: true)
+        let stateDatabase = stateDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let configDatabase = configDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        let escapedDatabase = escapedDirectory.appendingPathComponent("openclaw-agent.sqlite")
+        try fm.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: escapedDirectory, withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: stateDatabase)
+        try createOpenClawSQLiteFixture(at: configDatabase)
+        try createOpenClawSQLiteFixture(at: escapedDatabase)
+
+        let variable = "AGENT_SESSIONS_OPENCLAW_PRECEDENCE_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
+        unsetenv(variable)
+        defer { unsetenv(variable) }
+        try writeText("\(variable)=\(stateDirectory.path)\n", to: root.appendingPathComponent(".env"))
+        try writeText("""
+        {
+          env: { vars: { \(variable): '\(configDirectory.path)' } },
+          agents: {
+            entries: {
+              state: { agentDir: '${\(variable)}' },
+              fallback: { agentDir: '${MISSING_\(variable):-\(stateDirectory.path)}' },
+              escaped: { agentDir: '$${\(variable)}' },
+            },
+          },
+        }
+        """, to: root.appendingPathComponent("openclaw.json"))
+
+        let result = OpenClawSessionDiscovery(customRoot: root.path).discoverSessionDatabaseResult()
+        XCTAssertEqual(result.databases.map(canonicalPath), [canonicalPath(stateDatabase)])
+        // Both `state` and `fallback` resolve to the same physical store with
+        // different explicit owners. Discovery must preserve the data but fail
+        // closed instead of silently choosing one owner.
+        XCTAssertFalse(result.isAuthoritative)
+    }
+
+    func testOpenClawReadableDatabaseReconcilesRemovedSessionMeta() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-RemovedIdentity-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try executeSQLite("""
+        INSERT INTO session_windows
+            (session_id, created_at, updated_at, started_at, ended_at, model, display_name)
+        VALUES
+            ('sqlite-removed', 1776370005000, 1776370006000, 1776370005000,
+             1776370006000, 'removed-model', 'Removed session');
+        """, at: database)
+
+        let initialSessions = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: database))
+        XCTAssertEqual(Set(initialSessions.map(\.id)), [
+            "openclaw:main:sqlite-demo",
+            "openclaw:main:sqlite-removed"
+        ])
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        try await indexDB.begin()
+        for session in initialSessions {
+            try await indexDB.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+        }
+        try await indexDB.commit()
+
+        try executeSQLite("DELETE FROM session_windows WHERE session_id = 'sqlite-removed';", at: database)
+        let currentSessions = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: database))
+        XCTAssertEqual(currentSessions.map(\.id), ["openclaw:main:sqlite-demo"])
+
+        try await indexDB.begin()
+        let retired = try await indexDB.deleteSessionsNotPresentAtPaths(
+            source: SessionSource.openclaw.rawValue,
+            currentSessionIDsByPath: [database.path: Set(currentSessions.map(\.id))])
+        try await indexDB.commit()
+
+        XCTAssertEqual(retired, ["openclaw:main:sqlite-removed"])
+        let hydratedRows = try await indexDB.fetchSessionMeta(for: SessionSource.openclaw.rawValue)
+        XCTAssertEqual(hydratedRows.map(\.sessionID), ["openclaw:main:sqlite-demo"])
+    }
+
+    func testOpenClawSqliteReaderListsAndScansSessionScopedTelemetry() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-SQLite-(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL)
+
+        let sessions = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL))
+        let session = try XCTUnwrap(sessions.first)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(session.id, "openclaw:main:sqlite-demo")
+        XCTAssertEqual(session.filePath, dbURL.path)
+        XCTAssertEqual(session.model, "metadata-model")
+        XCTAssertEqual(session.eventCount, 4)
+        XCTAssertEqual(SessionInfoQuickFacts(session: session).currentModel.value, "metadata-model")
+
+        let firstRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: session))
+        let scan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: session))
+        XCTAssertGreaterThan(scan.bytesScanned, 0)
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.model, "metadata-model")
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.modelProvenance, .sessionMetadata)
+        XCTAssertEqual(scan.result.telemetry.usageSummary?.displayTotalTokens, 2)
+        XCTAssertNil(scan.result.telemetry.costEstimate)
+
+        let full = try XCTUnwrap(OpenClawSqliteReader.loadFullSession(databaseURL: dbURL, sessionID: session.id))
+        XCTAssertEqual(full.id, session.id)
+        XCTAssertEqual(full.filePath, dbURL.path)
+        XCTAssertEqual(full.model, "metadata-model")
+        XCTAssertEqual(full.sourceStorageIdentity, canonicalPath(dbURL))
+        let fullRevision = try XCTUnwrap(OpenClawSqliteReader.sessionRevision(for: full))
+        XCTAssertNotNil(full.sourceStorageRevision)
+        XCTAssertEqual(fullRevision, firstRevision,
+                       "full-load provenance must come from the same logical snapshot")
+        XCTAssertTrue(full.events.contains { $0.kind == .user && ($0.text ?? "").contains("SQLite fixture") })
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("fixture response") })
+
+        try executeSQLite("UPDATE session_windows SET display_name = 'Renamed SQLite fixture' WHERE session_id = 'sqlite-demo';", at: dbURL)
+        let renamed = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let renamedRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: renamed))
+        XCTAssertNotEqual(firstRevision, renamedRevision,
+                          "display-name-only edits must invalidate the session revision")
+
+        try executeSQLite("UPDATE session_windows SET display_name = '<null>' WHERE session_id = 'sqlite-demo';", at: dbURL)
+        let sentinelName = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let sentinelRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: sentinelName))
+        XCTAssertNotEqual(renamedRevision, sentinelRevision,
+                          "SQL NULL and a literal sentinel title must not collide in the revision")
+
+        try executeSQLite("UPDATE session_windows SET updated_at = 1776370005000 WHERE session_id = 'sqlite-demo';", at: dbURL)
+        let refreshed = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let secondRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: refreshed))
+        XCTAssertNotEqual(firstRevision, secondRevision)
+    }
+
+    func testOpenClawStorageRevisionTokenUsesCapturedPhysicalIdentity() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-CapturedStorageToken-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent("first/openclaw-agent.sqlite")
+        let secondDatabase = root.appendingPathComponent("second/openclaw-agent.sqlite")
+        let aliasDatabase = root.appendingPathComponent("alias/openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: firstDatabase)
+
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: aliasDatabase)?.first)
+        XCTAssertEqual(session.sourceStorageIdentity, canonicalPath(firstDatabase))
+        let firstToken = try XCTUnwrap(OpenClawSqliteReader.storageRevisionToken(for: session))
+
+        try fm.removeItem(at: aliasDatabase)
+        try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: secondDatabase)
+
+        let capturedToken = try XCTUnwrap(OpenClawSqliteReader.storageRevisionToken(for: session))
+        let secondSession = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: secondDatabase)?.first)
+        let secondToken = try XCTUnwrap(OpenClawSqliteReader.storageRevisionToken(for: secondSession))
+        XCTAssertEqual(capturedToken, firstToken,
+                       "a retargeted lexical alias must continue using the row's captured store identity")
+        XCTAssertNotEqual(capturedToken, secondToken,
+                          "a token from the retargeted store must not be paired with the old identity")
+    }
+
+    func testOpenClawCachedRevisionFailsClosedWhenStoreChangesAtBoundary() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-CachedRevisionBoundary-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        let replacement = root.appendingPathComponent("replacement/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: replacement.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try createOpenClawSQLiteFixture(at: replacement)
+        try executeSQLite(
+            "UPDATE session_windows SET display_name = 'replacement cache database' WHERE session_id = 'sqlite-demo';",
+            at: replacement)
+
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: database)?.first)
+        let originalRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: session))
+
+        var mutationError: Error?
+        OpenClawSqliteReader.setCacheHitBeforeBoundaryProbeHookForTesting {
+            do {
+                try fm.removeItem(at: database)
+                try fm.moveItem(at: replacement, to: database)
+            } catch {
+                mutationError = error
+            }
+        }
+        defer { OpenClawSqliteReader.setCacheHitBeforeBoundaryProbeHookForTesting(nil) }
+
+        XCTAssertNil(OpenClawSqliteReader.telemetryRevision(for: session),
+                     "a cache hit must fail closed when the store changes before its boundary probe")
+        XCTAssertNil(mutationError, "the cache-boundary database replacement must succeed")
+        let replacementRevision = try XCTUnwrap(OpenClawSqliteReader.telemetryRevision(for: session))
+        XCTAssertNotEqual(originalRevision, replacementRevision,
+                          "the next read must establish a revision for the replacement database")
+    }
+
+    func testOpenClawListSessionsKeepsReadPathIdentityAcrossAliasRetarget() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ListAliasRetarget-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let firstDatabase = root.appendingPathComponent("first/openclaw-agent.sqlite")
+        let secondDatabase = root.appendingPathComponent("second/openclaw-agent.sqlite")
+        let aliasDatabase = root.appendingPathComponent("alias/openclaw-agent.sqlite")
+        try fm.createDirectory(at: firstDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: secondDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: aliasDatabase.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: firstDatabase)
+        try createOpenClawSQLiteFixture(at: secondDatabase)
+        try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: firstDatabase)
+
+        let aliasMutationLock = NSLock()
+        var aliasMutationError: Error?
+        OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting {
+            do {
+                try fm.removeItem(at: aliasDatabase)
+                try fm.createSymbolicLink(at: aliasDatabase, withDestinationURL: secondDatabase)
+            } catch {
+                aliasMutationLock.lock()
+                aliasMutationError = error
+                aliasMutationLock.unlock()
+            }
+        }
+        defer { OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting(nil) }
+
+        let session = try XCTUnwrap(
+            OpenClawSqliteReader.listSessions(databaseURL: aliasDatabase, agentID: "alias")?.first)
+        OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting(nil)
+        aliasMutationLock.lock()
+        let observedAliasMutationError = aliasMutationError
+        aliasMutationLock.unlock()
+        XCTAssertNil(observedAliasMutationError, "the alias retarget must succeed")
+        XCTAssertEqual(canonicalPath(aliasDatabase), canonicalPath(secondDatabase),
+                       "the lexical alias must point at the replacement database")
+        XCTAssertEqual(session.filePath, aliasDatabase.path,
+                       "the lexical path remains the published display path")
+        XCTAssertEqual(session.sourceStorageIdentity, canonicalPath(firstDatabase),
+                       "row metadata must describe the database that was actually read")
+    }
+
+    func testOpenClawListSessionsFailsClosedWhenDatabaseIsReplacedDuringRead() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenClaw-ListReplacement-\(UUID().uuidString)",
+            isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let database = root.appendingPathComponent("current/openclaw-agent.sqlite")
+        let replacement = root.appendingPathComponent("replacement/openclaw-agent.sqlite")
+        try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: replacement.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: database)
+        try createOpenClawSQLiteFixture(at: replacement)
+        try executeSQLite(
+            "UPDATE session_windows SET display_name = 'replacement database' WHERE session_id = 'sqlite-demo';",
+            at: replacement)
+
+        let replacementLock = NSLock()
+        var replacementError: Error?
+        OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting {
+            do {
+                try fm.removeItem(at: database)
+                try fm.moveItem(at: replacement, to: database)
+            } catch {
+                replacementLock.lock()
+                replacementError = error
+                replacementLock.unlock()
+            }
+        }
+
+        let result = OpenClawSqliteReader.listSessionsWithStorageIdentity(databaseURL: database)
+        OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting(nil)
+        replacementLock.lock()
+        let observedReplacementError = replacementError
+        replacementLock.unlock()
+        XCTAssertNil(observedReplacementError, "the replacement database must be installed")
+        XCTAssertNil(
+            result,
+            "rows read from the unlinked database must not be paired with the replacement path")
+
+        let replacementSession = try XCTUnwrap(
+            OpenClawSqliteReader.listSessions(databaseURL: database)?.first)
+        XCTAssertEqual(replacementSession.lightweightTitle, "replacement database")
+    }
+
+    func testOpenClawSqliteReaderFailsClosedForCompressedEvents() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Compressed-(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL, compressed: true)
+
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let scan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: session))
+        XCTAssertGreaterThan(scan.bytesScanned, 0)
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.model, "metadata-model")
+        XCTAssertTrue(scan.result.telemetry.usageSummary?.unavailableReason?.contains("compressed") == true)
+        XCTAssertTrue(scan.result.telemetry.usageEvents.isEmpty)
+    }
+
+    func testOpenClawSqliteReaderAcceptsNullableSessionMetadata() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-NullableMetadata-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL)
+        try executeSQLite("UPDATE session_windows SET model = NULL, display_name = NULL WHERE session_id = 'sqlite-demo';", at: dbURL)
+
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        XCTAssertNil(session.model)
+        XCTAssertNil(session.lightweightTitle)
+        XCTAssertEqual(session.eventCount, 4)
+        let scan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: session))
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.model, "record-model")
+        XCTAssertEqual(scan.result.telemetry.currentConfiguration?.modelProvenance, .providerChangeRecord)
+
+        let staleSession = Session(
+            id: session.id,
+            source: session.source,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            model: "stale-model",
+            filePath: session.filePath,
+            fileSizeBytes: session.fileSizeBytes,
+            eventCount: session.eventCount,
+            events: session.events,
+            cwd: session.cwd,
+            repoName: session.repoName,
+            lightweightTitle: session.lightweightTitle,
+            lightweightCommands: session.lightweightCommands)
+        let staleScan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: staleSession))
+        XCTAssertEqual(staleScan.result.telemetry.currentConfiguration?.model, "record-model")
+        XCTAssertEqual(staleScan.result.telemetry.currentConfiguration?.modelProvenance, .providerChangeRecord)
+    }
+
+    func testOpenClawSqliteReaderFailsClosedForColdStoredTranscript() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ColdStorage-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL)
+        try executeSQLite("""
+        CREATE TABLE session_transcript_cold_archives (
+            session_id TEXT PRIMARY KEY,
+            generation TEXT NOT NULL,
+            archive_name TEXT NOT NULL,
+            archive_sha256 TEXT NOT NULL,
+            event_count INTEGER NOT NULL,
+            raw_bytes INTEGER NOT NULL,
+            archive_bytes INTEGER NOT NULL,
+            last_seq INTEGER NOT NULL,
+            archived_at INTEGER NOT NULL,
+            storage TEXT NOT NULL,
+            archive_blob BLOB
+        );
+        INSERT INTO session_transcript_cold_archives
+            (session_id, generation, archive_name, archive_sha256, event_count, raw_bytes,
+             archive_bytes, last_seq, archived_at, storage, archive_blob)
+        VALUES ('sqlite-demo', 'generation-1', 'sqlite-demo.cold',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                4, 1000, 600, 4, 1776370005000, 'sqlite', X'789c01');
+        DELETE FROM transcript_events WHERE session_id = 'sqlite-demo';
+        """, at: dbURL)
+
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        XCTAssertEqual(session.eventCount, 4, "cold metadata must not be presented as an empty transcript")
+        let scan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: session))
+        XCTAssertTrue(scan.result.telemetry.usageSummary?.unavailableReason?.contains("cold storage") == true)
+        XCTAssertNil(OpenClawSqliteReader.loadFullSession(databaseURL: dbURL, sessionID: session.id))
+        XCTAssertNotNil(OpenClawSqliteReader.telemetryRevision(for: session))
+    }
+
+    func testOpenClawSqliteSessionRevisionSeesWALPayloadChanges() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-WALRevision-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL)
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let firstRevision = try XCTUnwrap(OpenClawSqliteReader.sessionRevision(for: session))
+
+        try executeSQLite("""
+        PRAGMA journal_mode = WAL;
+        PRAGMA wal_autocheckpoint = 0;
+        UPDATE transcript_events
+        SET event_json = '{"type":"message","id":"assistant-1","message":{"role":"assistant","model":"record-model","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"content":[{"type":"text","text":"WAL revision"}]}}'
+        WHERE session_id = 'sqlite-demo' AND seq = 3;
+        """, at: dbURL)
+
+        let secondRevision = try XCTUnwrap(OpenClawSqliteReader.sessionRevision(for: session))
+        XCTAssertNotEqual(firstRevision, secondRevision)
+    }
+
+    func testOpenClawTelemetryReadsConfigurationAndUsageWithoutPricing() {
+        let lines = [
+            #"{"type":"session","version":3,"id":"openclaw-test","timestamp":"2026-08-16T16:00:00.000Z","cwd":"/tmp"}"#,
+            #"{"type":"message","id":"assistant-0","timestamp":"2026-08-16T16:00:00.000Z","message":{"role":"assistant","model":"claude-sonnet-4-5","thinkingLevel":"high","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"content":[]}}"#,
+            #"{"type":"model_change","modelId":"claude-sonnet-4-5","timestamp":"2026-08-16T16:00:01.000Z"}"#,
+            #"{"type":"thinking_level_change","thinkingLevel":"high","timestamp":"2026-08-16T16:00:02.000Z"}"#,
+            #"{"type":"message","id":"assistant-1","timestamp":1786896003000,"message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":100,"output":20,"cacheRead":30,"cacheWrite":4,"totalTokens":154},"content":[]}}"#
+        ]
+
+        let telemetry = OpenClawTelemetryProvider.accumulate(lines: lines)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "claude-sonnet-4-5")
+        XCTAssertEqual(telemetry.initialConfiguration?.reasoningEffort, "high")
+        XCTAssertEqual(telemetry.initialConfiguration?.provenance, .inferredFirstObservation)
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "claude-sonnet-4-5")
+        XCTAssertEqual(telemetry.currentConfiguration?.reasoningEffort, "high")
+        XCTAssertEqual(telemetry.configurationChanges, [])
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 156)
+        XCTAssertEqual(telemetry.usageSummary?.displayTotalTokens, 156)
+        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["openclaw.message.usage"])
+        XCTAssertNil(telemetry.costEstimate)
+        XCTAssertEqual(telemetry.usageEvents.count, 2)
+        XCTAssertEqual(telemetry.usageEvents.last?.contextInputTokens, 134)
+    }
+
+    func testOpenClawTelemetryRecordsSameModelSwitchAndDoesNotDoubleCountDuplicate() {
+        let lines = [
+            #"{"type":"message","id":"assistant-1","timestamp":"2026-08-16T16:00:00.000Z","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15}}}"#,
+            #"{"type":"model_change","modelId":"model-b","timestamp":"2026-08-16T16:00:01.000Z"}"#,
+            #"{"type":"message","id":"assistant-2","timestamp":"2026-08-16T16:00:02.000Z","message":{"role":"assistant","model":"model-b","usage":{"input":20,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":25}}}"#,
+            #"{"type":"model_change","modelId":"model-a","timestamp":"2026-08-16T16:00:03.000Z"}"#,
+            #"{"type":"message","id":"assistant-3","timestamp":"2026-08-16T16:00:04.000Z","message":{"id":"nested-a","role":"assistant","model":"model-a","usage":{"input":30,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":35}}}"#,
+            #"{"type":"message","id":"assistant-3","timestamp":"2026-08-16T16:00:04.000Z","message":{"id":"nested-b","role":"assistant","model":"model-a","usage":{"input":30,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":35}}}"#
+        ]
+
+        let telemetry = OpenClawTelemetryProvider.accumulate(lines: lines)
+        XCTAssertEqual(telemetry.configurationChanges.count, 2)
+        XCTAssertEqual(telemetry.configurationChanges[0].field, .model)
+        XCTAssertEqual(telemetry.configurationChanges[0].oldValue, "model-a")
+        XCTAssertEqual(telemetry.configurationChanges[0].newValue, "model-b")
+        XCTAssertEqual(telemetry.configurationChanges[1].field, .model)
+        XCTAssertEqual(telemetry.configurationChanges[1].oldValue, "model-b")
+        XCTAssertEqual(telemetry.configurationChanges[1].newValue, "model-a")
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "model-a")
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 75)
+        XCTAssertEqual(telemetry.usageEvents.count, 3)
+        XCTAssertNil(telemetry.usageSummary?.unavailableReason)
+    }
+
+    func testOpenClawTelemetryFailsClosedForInconsistentOrConflictingUsage() {
+        let inconsistent = [
+            #"{"type":"message","id":"assistant-1","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":99}}}"#
+        ]
+        let inconsistentTelemetry = OpenClawTelemetryProvider.accumulate(lines: inconsistent)
+        XCTAssertNotNil(inconsistentTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(inconsistentTelemetry.usageEvents.isEmpty)
+
+        let conflicting = [
+            #"{"type":"message","id":"assistant-1","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15}}}"#,
+            #"{"type":"message","id":"assistant-1","message":{"role":"assistant","model":"model-b","usage":{"input":11,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":16}}}"#
+        ]
+        let conflictingTelemetry = OpenClawTelemetryProvider.accumulate(lines: conflicting)
+        XCTAssertNotNil(conflictingTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(conflictingTelemetry.usageEvents.isEmpty)
+        XCTAssertEqual(conflictingTelemetry.currentConfiguration?.model, "model-a")
+        XCTAssertEqual(conflictingTelemetry.configurationChanges, [])
+    }
+
+    func testOpenClawTelemetryPreservesOneHourCacheWrites() {
+        let lines = [
+            #"{"type":"message","id":"assistant-cache","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":2,"cacheWrite":10,"cacheWrite1h":4,"totalTokens":27}}}"#
+        ]
+
+        let telemetry = OpenClawTelemetryProvider.accumulate(lines: lines)
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 27)
+        XCTAssertEqual(telemetry.usageEvents.first?.cacheWrite5mTokens, 6)
+        XCTAssertEqual(telemetry.usageEvents.first?.cacheWrite1hTokens, 4)
+        XCTAssertEqual(telemetry.usageSlices.first?.cacheWrite5mTokens, 6)
+        XCTAssertEqual(telemetry.usageSlices.first?.cacheWrite1hTokens, 4)
+    }
+
+    func testOpenClawTelemetryUsesExplicitContextUsageWhenPresent() {
+        let available = [
+            #"{"type":"message","id":"assistant-context","message":{"role":"assistant","model":"model-a","usage":{"input":100,"output":20,"cacheRead":30,"cacheWrite":4,"totalTokens":154,"contextUsage":{"state":"available","promptTokens":40,"totalTokens":154}}}}"#
+        ]
+        let availableTelemetry = OpenClawTelemetryProvider.accumulate(lines: available)
+        XCTAssertEqual(availableTelemetry.usageEvents.first?.contextInputTokens, 40)
+
+        let unavailable = [
+            #"{"type":"message","id":"assistant-context-unavailable","message":{"role":"assistant","model":"model-a","usage":{"input":100,"output":20,"cacheRead":30,"cacheWrite":4,"totalTokens":154,"contextUsage":{"state":"unavailable"}}}}"#
+        ]
+        let unavailableTelemetry = OpenClawTelemetryProvider.accumulate(lines: unavailable)
+        XCTAssertNil(unavailableTelemetry.usageEvents.first?.contextInputTokens)
+
+        let conflicting = [
+            #"{"type":"message","id":"assistant-context-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"contextUsage":{"state":"available","promptTokens":10,"totalTokens":15}}}}"#,
+            #"{"type":"message","id":"assistant-context-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"contextUsage":{"state":"available","promptTokens":11,"totalTokens":15}}}}"#
+        ]
+        let conflictingTelemetry = OpenClawTelemetryProvider.accumulate(lines: conflicting)
+        XCTAssertNotNil(conflictingTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(conflictingTelemetry.usageEvents.isEmpty)
+
+        let malformed = [
+            #"{"type":"message","id":"assistant-context-malformed","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"contextUsage":{"state":"available","promptTokens":20,"totalTokens":15}}}}"#
+        ]
+        let malformedTelemetry = OpenClawTelemetryProvider.accumulate(lines: malformed)
+        XCTAssertNotNil(malformedTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(malformedTelemetry.usageEvents.isEmpty)
+    }
+
+    func testOpenClawTelemetryUsesServingResponseModelAndHonestCacheState() {
+        let routed = [
+            #"{"type":"message","id":"assistant-routed","message":{"role":"assistant","model":"router/auto","responseModel":"provider/served-model","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"cacheTelemetry":{"state":"available"}}}}"#
+        ]
+        let routedTelemetry = OpenClawTelemetryProvider.accumulate(lines: routed)
+        XCTAssertEqual(routedTelemetry.currentConfiguration?.model, "router/auto")
+        XCTAssertEqual(routedTelemetry.usageEvents.first?.model, "provider/served-model")
+        XCTAssertEqual(routedTelemetry.usageSlices.first?.model, "provider/served-model")
+
+        let unavailableCache = [
+            #"{"type":"message","id":"assistant-cache-unavailable","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cacheTelemetry":{"state":"unavailable"}}}}"#
+        ]
+        let unavailableTelemetry = OpenClawTelemetryProvider.accumulate(lines: unavailableCache)
+        XCTAssertNotNil(unavailableTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(unavailableTelemetry.usageEvents.isEmpty)
+
+        let malformedCache = [
+            #"{"type":"message","id":"assistant-cache-malformed","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cacheTelemetry":{"state":"unknown"}}}}"#
+        ]
+        let malformedTelemetry = OpenClawTelemetryProvider.accumulate(lines: malformedCache)
+        XCTAssertNotNil(malformedTelemetry.usageSummary?.unavailableReason)
+
+        let conflictingCacheProvenance = [
+            #"{"type":"message","id":"assistant-cache-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#,
+            #"{"type":"message","id":"assistant-cache-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cacheTelemetry":{"state":"available"}}}}"#
+        ]
+        let conflictingTelemetry = OpenClawTelemetryProvider.accumulate(lines: conflictingCacheProvenance)
+        XCTAssertNotNil(conflictingTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(conflictingTelemetry.usageEvents.isEmpty)
+
+        let requestedModelConflict = [
+            #"{"type":"message","id":"assistant-requested-model-conflict","message":{"role":"assistant","model":"router/auto-a","responseModel":"provider/served-model","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#,
+            #"{"type":"message","id":"assistant-requested-model-conflict","message":{"role":"assistant","model":"router/auto-b","responseModel":"provider/served-model","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#
+        ]
+        let requestedModelConflictTelemetry = OpenClawTelemetryProvider.accumulate(lines: requestedModelConflict)
+        XCTAssertNotNil(requestedModelConflictTelemetry.usageSummary?.unavailableReason)
+
+        let contextTotalConflict = [
+            #"{"type":"message","id":"assistant-context-total-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"contextUsage":{"state":"available","promptTokens":5,"totalTokens":15}}}}"#,
+            #"{"type":"message","id":"assistant-context-total-conflict","message":{"role":"assistant","model":"model-a","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"contextUsage":{"state":"available","promptTokens":5,"totalTokens":16}}}}"#
+        ]
+        let contextTotalConflictTelemetry = OpenClawTelemetryProvider.accumulate(lines: contextTotalConflict)
+        XCTAssertNotNil(contextTotalConflictTelemetry.usageSummary?.unavailableReason)
+    }
+
+    func testOpenClawTelemetryRejectsMalformedUsageBooleansAndOverflow() {
+        let mixed = [
+            #"{"type":"message","id":"assistant-valid","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#,
+            #"{"type":"message","id":"assistant-malformed","message":{"role":"assistant","model":"model-a","usage":true}}"#,
+            #"{"type":"message","id":"assistant-after-failure","message":{"role":"assistant","model":"model-c","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#
+        ]
+        let malformedTelemetry = OpenClawTelemetryProvider.accumulate(lines: mixed)
+        XCTAssertNotNil(malformedTelemetry.usageSummary?.unavailableReason)
+        XCTAssertNil(malformedTelemetry.usageSummary?.displayTotalTokens)
+        XCTAssertTrue(malformedTelemetry.usageSlices.isEmpty)
+        XCTAssertTrue(malformedTelemetry.usageEvents.isEmpty)
+        XCTAssertEqual(malformedTelemetry.currentConfiguration?.model, "model-c")
+
+        for rawValue in ["true", "false"] {
+            let booleanLine = #"{"type":"message","id":"assistant-boolean","message":{"role":"assistant","model":"model-a","usage":{"input":"VALUE","output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":1}}}"#
+                .replacingOccurrences(of: "VALUE", with: rawValue)
+            let booleanTelemetry = OpenClawTelemetryProvider.accumulate(lines: [booleanLine])
+            XCTAssertNotNil(booleanTelemetry.usageSummary?.unavailableReason, rawValue)
+            XCTAssertTrue(booleanTelemetry.usageEvents.isEmpty, rawValue)
+        }
+
+        let overflow = [
+            #"{"type":"message","id":"assistant-overflow","message":{"role":"assistant","model":"model-a","usage":{"input":9223372036854775807,"output":1,"cacheRead":0,"cacheWrite":0}}}"#
+        ]
+        let overflowTelemetry = OpenClawTelemetryProvider.accumulate(lines: overflow)
+        XCTAssertNotNil(overflowTelemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(overflowTelemetry.usageSlices.isEmpty)
+        XCTAssertTrue(overflowTelemetry.usageEvents.isEmpty)
+    }
+
+    func testOpenClawTelemetryKeepsPostFailureDuplicateIdentityCanonical() {
+        let lines = [
+            #"{"type":"message","id":"bad","timestamp":"2026-08-16T16:00:00.000Z","message":{"role":"assistant","model":"model-a","usage":[]}}"#,
+            #"{"type":"message","id":"same","timestamp":"2026-08-16T16:00:01.000Z","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#,
+            #"{"type":"message","id":"same","timestamp":"2026-08-16T16:00:02.000Z","message":{"role":"assistant","model":"model-b","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#
+        ]
+
+        let telemetry = OpenClawTelemetryProvider.accumulate(lines: lines)
+        XCTAssertTrue(telemetry.usageSummary?.unavailableReason?.contains("conflicting raw usage evidence") == true)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "model-a")
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "model-a")
+        XCTAssertTrue(telemetry.configurationChanges.isEmpty)
+    }
+
+    func testOpenClawTelemetryCanonicalizesIdentityBeforeSemanticValidation() {
+        let lines = [
+            #"{"type":"message","id":"same","timestamp":"2026-08-16T16:00:00.000Z","message":{"role":"assistant","model":"model-a","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":99}}}"#,
+            #"{"type":"message","id":"same","timestamp":"2026-08-16T16:00:01.000Z","message":{"role":"assistant","model":"model-c","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}"#
+        ]
+
+        let telemetry = OpenClawTelemetryProvider.accumulate(lines: lines)
+        XCTAssertTrue(telemetry.usageSummary?.unavailableReason?.contains("conflicting raw usage evidence") == true)
+        XCTAssertNil(telemetry.initialConfiguration)
+        XCTAssertNil(telemetry.currentConfiguration)
+        XCTAssertTrue(telemetry.configurationChanges.isEmpty)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+    }
+
     func testClaudeDesktopMetadataPrefersWorktreePathForProjectDisplay() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopWorktree-\(UUID().uuidString)", isDirectory: true)
@@ -5636,6 +10579,343 @@ final class SessionParserTests: XCTestCase {
         let sessionMeta = try XCTUnwrap(full.events.first { $0.kind == .meta && $0.role == "session_meta" })
         XCTAssertNil(sessionMeta.text)
         XCTAssertFalse(sessionMeta.rawJSON.isEmpty)
+    }
+
+    func testHermesTelemetryReadsModelUsageWithoutTitleGenerationDoubleCount() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let scan = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session))
+        let telemetry = scan.result.telemetry
+        XCTAssertGreaterThan(scan.bytesScanned, 0)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "qwen3.5-9b")
+        XCTAssertEqual(telemetry.initialConfiguration?.provenance, .inferredFirstObservation)
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "qwen3.5-9b")
+        XCTAssertEqual(telemetry.currentConfiguration?.reasoningEffort, "high")
+        XCTAssertEqual(telemetry.currentConfiguration?.provenance, .sessionMetadata)
+        XCTAssertEqual(telemetry.configurationChanges, [])
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 30)
+        XCTAssertEqual(telemetry.usageSummary?.displayTotalTokens, 30)
+        XCTAssertTrue(telemetry.usageSummary?.hasComponentBreakdown == true)
+        XCTAssertEqual(telemetry.usageEvents.count, 1)
+        XCTAssertEqual(telemetry.usageEvents.first?.outputTokens, 20)
+        XCTAssertEqual(telemetry.usageEvents.first?.reasoningOutputTokens, 2)
+        XCTAssertEqual(telemetry.usageSlices.first?.model, "qwen3.5-9b")
+        XCTAssertEqual(SessionSourceRegistry.descriptor(for: .hermes).telemetry.cost,
+                       .unavailable("Hermes native cost is provider-specific and is not shown as an API-equivalent estimate"))
+    }
+
+    func testHermesTelemetryKeepsAuxiliaryUsageSeparateFromSessionAggregate() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Auxiliary-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        INSERT INTO session_model_usage
+            (session_id, model, task, api_call_count, input_tokens, output_tokens,
+             cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES ('hermes_sqlite_demo', 'vision-model', 'vision', 1, 2, 3, 0, 0, 0,
+                1780000002.5, 1780000002.5);
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "qwen3.5-9b")
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 35)
+        XCTAssertEqual(telemetry.usageEvents.count, 2)
+        XCTAssertTrue(telemetry.usageSlices.contains { $0.model == "vision-model" })
+    }
+
+    func testHermesTelemetryDoesNotFallbackWhenRollupContainsOnlyBookkeepingRows() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Bookkeeping-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("DELETE FROM session_model_usage WHERE task = '';", at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+        XCTAssertTrue(telemetry.usageSlices.isEmpty)
+        XCTAssertNil(telemetry.usageSummary?.displayTotalTokens)
+        XCTAssertTrue(telemetry.usageSummary?.unavailableReason?.contains("only bookkeeping rows") == true)
+    }
+
+    func testHermesTelemetryLabelsAuxiliaryOnlyRollupWithoutClaimingBookkeeping() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Auxiliary-Only-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        DELETE FROM session_model_usage WHERE task = '';
+        INSERT INTO session_model_usage
+            (session_id, model, task, api_call_count, input_tokens, output_tokens,
+             cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES ('hermes_sqlite_demo', 'vision-model', 'vision', 1, 2, 3, 0, 0, 0,
+                1780000002.5, 1780000002.5);
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+        XCTAssertTrue(telemetry.usageSummary?.unavailableReason?.contains("no main-loop rollup rows") == true)
+        XCTAssertFalse(telemetry.usageSummary?.unavailableReason?.contains("only bookkeeping rows") == true)
+    }
+
+    func testHermesTelemetryLegacyAggregateFallbackIsUnattributed() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Legacy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("DROP TABLE session_model_usage;", at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["hermes.sessions"])
+        XCTAssertEqual(telemetry.usageEvents.count, 1)
+        XCTAssertEqual(telemetry.usageEvents.first?.usageFamily, "hermes.sessions")
+        XCTAssertNil(telemetry.usageEvents.first?.model)
+        XCTAssertNil(telemetry.usageSlices.first?.model)
+    }
+
+    func testHermesTelemetryFailsClosedWhenCombinedTopLineOverflows() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Overflow-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        UPDATE sessions
+        SET input_tokens = 9223372036854775807, output_tokens = 1,
+            cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0
+        WHERE id = 'hermes_sqlite_demo';
+        UPDATE session_model_usage
+        SET input_tokens = 9223372036854775807, output_tokens = 1,
+            cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0
+        WHERE task = '';
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+        XCTAssertTrue(telemetry.usageSlices.isEmpty)
+        XCTAssertEqual(telemetry.usageSummary?.displayTotalTokens, nil)
+        XCTAssertTrue(telemetry.usageSummary?.unavailableReason?.contains("integer range") == true)
+    }
+
+    func testHermesLegacyAggregateOverflowKeepsSessionProvenance() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Legacy-Overflow-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        DROP TABLE session_model_usage;
+        UPDATE sessions
+        SET input_tokens = 9223372036854775807, output_tokens = 1,
+            cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0
+        WHERE id = 'hermes_sqlite_demo';
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["hermes.sessions"])
+        XCTAssertNil(telemetry.usageSummary?.displayTotalTokens)
+    }
+
+    func testHermesTelemetryKeepsKnownFirstObservationAheadOfUnknownTimestamp() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Ordering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        UPDATE session_model_usage
+        SET model = 'unknown-time-model', first_seen = NULL, last_seen = 1780000003.5,
+            input_tokens = 10, output_tokens = 20
+        WHERE task = '';
+        INSERT INTO session_model_usage
+            (session_id, model, task, api_call_count, input_tokens, output_tokens,
+             cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES ('hermes_sqlite_demo', 'known-time-model', '', 1, 0, 0, 0, 0, 0,
+                1780000000.2, 1780000000.2);
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "known-time-model")
+        XCTAssertEqual(telemetry.configurationChanges, [])
+    }
+
+    func testHermesTelemetryDoesNotInferInitialModelWhenAllFirstObservationsAreUnknown() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Unknown-Ordering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        UPDATE session_model_usage
+        SET model = 'unknown-time-model', first_seen = NULL, last_seen = 1780000003.5
+        WHERE task = '';
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertNil(telemetry.initialConfiguration)
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "qwen3.5-9b")
+    }
+
+    func testHermesTelemetryDoesNotInventModelChangesFromPerModelRollup() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-ModelHistory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("""
+        UPDATE sessions
+        SET model = 'model-c', input_tokens = 4, output_tokens = 4,
+            cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0
+        WHERE id = 'hermes_sqlite_demo';
+        UPDATE session_model_usage
+        SET model = 'model-a', input_tokens = 1, output_tokens = 1,
+            cache_read_tokens = 0, cache_write_tokens = 0, reasoning_tokens = 0,
+            first_seen = 1780000000.1, last_seen = 1780000000.1
+        WHERE task = '';
+        INSERT INTO session_model_usage
+            (session_id, model, task, api_call_count, input_tokens, output_tokens,
+             cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
+        VALUES
+            ('hermes_sqlite_demo', 'model-b', '', 1, 1, 1, 0, 0, 0, 1780000001.0, 1780000001.0),
+            ('hermes_sqlite_demo', 'model-a', '', 1, 1, 1, 0, 0, 0, 1780000002.0, 1780000002.0),
+            ('hermes_sqlite_demo', 'model-c', '', 1, 1, 1, 0, 0, 0, 1780000003.0, 1780000003.0);
+        """, at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.initialConfiguration?.model, "model-a")
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "model-c")
+        XCTAssertEqual(telemetry.configurationChanges, [])
+    }
+
+    func testHermesTelemetryRevisionIsSessionScopedAndLogical() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Revision-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+        let revision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+        XCTAssertEqual(revision, HermesTelemetryReader.telemetryRevision(for: session))
+
+        try executeSQLite("""
+        INSERT INTO sessions
+            (id, source, user_id, model, model_config, system_prompt, parent_session_id,
+             started_at, ended_at, end_reason, message_count, tool_call_count,
+             input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+             reasoning_tokens, total_tokens, cost, title, last_activity_at)
+        VALUES
+            ('hermes_sqlite_other', 'cli', 'user_1', 'qwen3.5-9b', NULL, NULL, NULL,
+             1780000010.0, 1780000011.0, 'complete', 0, 0, 0, 0, 0, 0, 0, 0, 0,
+             'Other', 1780000010.5);
+        """, at: dbURL)
+        let other = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first { $0.id == "hermes_sqlite_other" })
+        let otherRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: other))
+        XCTAssertNotEqual(revision, otherRevision)
+
+        let fractionalRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+        try executeSQLite("UPDATE sessions SET last_activity_at = 1780000003.9 WHERE id = 'hermes_sqlite_demo';", at: dbURL)
+        let changedFractionalRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+        XCTAssertNotEqual(fractionalRevision, changedFractionalRevision)
+
+        try executeSQLite("DROP TABLE session_model_usage;", at: dbURL)
+        let legacyRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+        XCTAssertNotEqual(revision, legacyRevision)
+    }
+
+    func testHermesTelemetryFailsClosedForMalformedSQLiteStorageClasses() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Malformed-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let taskRoot = root.appendingPathComponent("task", isDirectory: true)
+        try fm.createDirectory(at: taskRoot, withIntermediateDirectories: true)
+        let taskDBURL = taskRoot.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: taskDBURL)
+        try executeSQLite("UPDATE session_model_usage SET task = CAST('vision' AS BLOB) WHERE task = '';", at: taskDBURL)
+        let taskSession = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: taskDBURL).first)
+        XCTAssertNil(HermesTelemetryReader.loadTelemetry(for: taskSession))
+        XCTAssertNil(HermesTelemetryReader.telemetryRevision(for: taskSession))
+
+        let timestampRoot = root.appendingPathComponent("timestamp", isDirectory: true)
+        try fm.createDirectory(at: timestampRoot, withIntermediateDirectories: true)
+        let timestampDBURL = timestampRoot.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: timestampDBURL)
+        try executeSQLite("UPDATE sessions SET last_activity_at = CAST('1780000003.9' AS BLOB) WHERE id = 'hermes_sqlite_demo';", at: timestampDBURL)
+        let timestampSession = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: timestampDBURL).first)
+        XCTAssertNil(HermesTelemetryReader.loadTelemetry(for: timestampSession))
+        XCTAssertNil(HermesTelemetryReader.telemetryRevision(for: timestampSession))
+    }
+
+    func testHermesTelemetryFailsClosedForEmbeddedNULInSQLiteText() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Embedded-NUL-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        try executeSQLite("UPDATE session_model_usage SET task = CAST(X'00766973696F6E' AS TEXT) WHERE task = '';", at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+
+        XCTAssertNil(HermesTelemetryReader.loadTelemetry(for: session))
+        XCTAssertNil(HermesTelemetryReader.telemetryRevision(for: session))
+    }
+
+    func testHermesTelemetryRevisionDistinguishesNullAndLiteralNullText() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Revision-Null-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+        let nullRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+
+        try executeSQLite("UPDATE session_model_usage SET task = '<null>' WHERE task = '';", at: dbURL)
+        let literalNullRevision = try XCTUnwrap(HermesTelemetryReader.telemetryRevision(for: session))
+        XCTAssertNotEqual(nullRevision, literalNullRevision)
     }
 
     func testHermesParserKeepsOfflinePathMetadata() throws {

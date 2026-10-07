@@ -69,6 +69,24 @@ final class SessionInfoQuickFactsTests: XCTestCase {
             filePath: "/tmp/claude.jsonl",
             eventCount: 0,
             events: [])
+        let sqliteBacked = Session(
+            id: "opencode-session",
+            source: .opencode,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/opencode.db",
+            eventCount: 0,
+            events: [])
+        let legacyOpenCode = Session(
+            id: "opencode-legacy-session",
+            source: .opencode,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/opencode-session.json",
+            eventCount: 0,
+            events: [])
 
         XCTAssertEqual(
             SessionInfoQuickFacts(session: unsupported).firstObservedModel.unavailableReason,
@@ -76,6 +94,12 @@ final class SessionInfoQuickFactsTests: XCTestCase {
         XCTAssertEqual(
             SessionInfoQuickFacts(session: supported).firstObservedModel.unavailableReason,
             .notLoaded)
+        XCTAssertEqual(
+            SessionInfoQuickFacts(session: sqliteBacked).firstObservedModel.unavailableReason,
+            .notLoaded)
+        XCTAssertEqual(
+            SessionInfoQuickFacts(session: legacyOpenCode).firstObservedModel.unavailableReason,
+            .unsupported)
     }
 
     func testQuickFactsPreferCustomTitleAndDoNotUseEmptyMetadata() {
@@ -190,5 +214,22 @@ final class SessionInfoMetricsTests: XCTestCase {
 
         metrics.endTelemetry(path: "/tmp/session.jsonl")
         metrics.endTranscript(path: "/tmp/session.jsonl")
+    }
+
+    func testSessionIdentityKeepsOverlapAccountingSeparateForSharedDatabasePaths() {
+        let metrics = SessionInfoMetrics()
+        let first = SessionInfoMetricsIdentity(source: .opencode, sessionID: "session-a")
+        let second = SessionInfoMetricsIdentity(source: .opencode, sessionID: "session-b")
+
+        metrics.beginTranscript(identity: first)
+        metrics.beginTelemetry(identity: second)
+        XCTAssertEqual(metrics.snapshot.transcriptTelemetryOverlapCount, 0)
+
+        metrics.beginTelemetry(identity: first)
+        XCTAssertEqual(metrics.snapshot.transcriptTelemetryOverlapCount, 1)
+
+        metrics.endTelemetry(identity: first)
+        metrics.endTelemetry(identity: second)
+        metrics.endTranscript(identity: first)
     }
 }

@@ -193,9 +193,25 @@ enum QwenSessionParser {
         guard let loaded = loadRecords(from: url) else { return nil }
         let allRecords = loaded.records
         guard !allRecords.isEmpty else { return nil }
-        guard allRecords.allSatisfy({
-            $0.sessionID.caseInsensitiveCompare(expectedSessionID) == .orderedSame
+        // A repeated UUID can have a stale fragment from an abandoned branch. Allow
+        // that fragment to carry a different session identity only when the same UUID
+        // also has a record for this transcript; unique off-session records remain a
+        // hard identity failure.
+        let recordsByUUID = Dictionary(grouping: allRecords, by: \.uuid)
+        guard recordsByUUID.values.allSatisfy({ fragments in
+            fragments.contains {
+                $0.sessionID.caseInsensitiveCompare(expectedSessionID) == .orderedSame
+            }
         }) else { return nil }
+        var identityConflictUUIDs: Set<String> = []
+        for fragments in recordsByUUID.values {
+            guard let first = fragments.first else { continue }
+            if fragments.dropFirst().contains(where: {
+                first.sessionID.caseInsensitiveCompare($0.sessionID) != .orderedSame
+            }) {
+                identityConflictUUIDs.insert(first.uuid)
+            }
+        }
 
         let conversationRecords = allRecords.filter { !$0.isArtifact }
         guard let leafUUID = conversationRecords.last?.uuid else { return nil }
@@ -204,21 +220,29 @@ enum QwenSessionParser {
         var firstByUUID: [String: Record] = [:]
         for record in conversationRecords {
             fragmentsByUUID[record.uuid, default: []].append(record)
-            if firstByUUID[record.uuid] == nil { firstByUUID[record.uuid] = record }
+            if firstByUUID[record.uuid] == nil {
+                firstByUUID[record.uuid] = record
+            }
         }
 
         var reverseChain: [String] = []
         var visited: Set<String> = []
         var current: String? = leafUUID
+        var activeIdentityConflict = false
         while let uuid = current, !uuid.isEmpty {
             guard !visited.contains(uuid) else { break }
             visited.insert(uuid)
+            if identityConflictUUIDs.contains(uuid) {
+                activeIdentityConflict = true
+            }
             guard let record = firstByUUID[uuid] else { break }
             reverseChain.append(uuid)
             guard let parent = record.parentUUID, !parent.isEmpty else { break }
             guard firstByUUID[parent] != nil else { break }
             current = parent
         }
+
+        guard !activeIdentityConflict else { return nil }
 
         let chainUUIDs = Array(reverseChain.reversed())
         let selectedRecords = chainUUIDs.compactMap { uuid in
@@ -306,10 +330,7 @@ enum QwenSessionParser {
                   !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return value
         }.first
-        let model = selectedRecords.reversed().compactMap { record -> String? in
-            guard let value = record.object["model"] as? String, !value.isEmpty else { return nil }
-            return value
-        }.first
+        let model = selectedRecords.reversed().compactMap(model(from:)).first
         let customTitle = selectedRecords.reversed().compactMap { record -> String? in
             guard record.type == "system", record.subtype == "custom_title",
                   let payload = record.object["systemPayload"] as? [String: Any],
@@ -706,6 +727,27 @@ enum QwenSessionParser {
         }
         if data.count > 32_768 { return "[OMITTED large JSON payload bytes=\(data.count)]" }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func model(from record: Record) -> String? {
+        if record.type == "system", record.subtype == "session_model",
+           let payload = record.object["systemPayload"] as? [String: Any] {
+            if let modelID = payload["modelId"] as? String,
+               !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return modelID
+            }
+            if let model = payload["model"] as? String,
+               !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return model
+            }
+        }
+        if let modelID = record.object["modelId"] as? String,
+           !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return modelID
+        }
+        guard let model = record.object["model"] as? String,
+              !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return model
     }
 
     private static func timestamp(from object: [String: Any]) -> Date? {

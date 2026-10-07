@@ -8,7 +8,26 @@ extension SessionSourceDescriptor {
         let isBinaryInstalled: (AvailabilityContext) -> Bool = { $0.detectBinary("dsh") }
         return SessionSourceDescriptor(
             source: .deepseekHarness,
-            telemetry: .allUnavailable("DeepSeek telemetry not yet audited"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial(
+                    "request/header, request/context, and model-selection records provide model history; first and current provenance remain explicit"),
+                tokens: .partial(
+                    "assistant/message uses top-level usage when present, otherwise one final stream usage sample; input, cache-read, cache-write, and output totals stay disjoint and repeated stream samples are not double-counted"),
+                cost: .unavailable(
+                    "DeepSeek Harness has no audited local price identity for API-equivalent cost"),
+                weeklyQuota: .unavailable("DeepSeek Harness does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                DeepSeekHarnessTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                DeepSeekHarnessTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                guard session.source == .deepseekHarness else { return false }
+                return DeepSeekHarnessDiscovery.parseGenerationFilename(
+                    URL(fileURLWithPath: session.filePath).lastPathComponent) != nil
+            },
             shortLabel: "DeepSeek",
             badgeInitials: "DS",
             // DSH true-color brand ink #4D6BFE. The shared calibrated path preserves

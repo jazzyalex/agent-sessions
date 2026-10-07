@@ -197,6 +197,7 @@ enum PreferencesKey {
     enum Diagnostics {
         static let lastSeenCrashID = "DiagnosticsLastSeenCrashID"
         static let seenCrashIDs = "DiagnosticsSeenCrashIDs"
+        static let dismissedCrashIDs = "DiagnosticsDismissedCrashIDs"
         static let lastSendAt = "DiagnosticsLastSendAt"
         static let lastSendError = "DiagnosticsLastSendError"
     }

@@ -35,7 +35,22 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .cline,
-            telemetry: .allUnavailable("Cline transcript telemetry not yet audited"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model comes from loaded Session metadata; detailed history comes from Cline assistant modelInfo records"),
+                tokens: .supported,
+                cost: .unavailable("Cline provider pricing is provider-specific and is not shown as an API-equivalent estimate"),
+                weeklyQuota: .unavailable("Cline does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                ClineTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                ClineTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                session.source == .cline
+                    && ClineSessionDiscovery.sessionID(forManifest: URL(fileURLWithPath: session.filePath)) != nil
+            },
             shortLabel: "Cline",
             badgeInitials: "CN",
             // Sky blue, clear of Codex's deep blue, Cursor's teal and Kimi/Qwen violets.

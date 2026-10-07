@@ -11,6 +11,14 @@ struct CursorSessionMeta {
     let mode: String             // "default"
     let workspaceHash: String    // MD5 of project path (parent directory name)
     let dbPath: String           // absolute path to the store.db file
+    /// Bytes in the hex-encoded metadata value read from SQLite. This is the
+    /// payload evidence used by the telemetry scan metric; it is not the size
+    /// of the whole database file.
+    let metadataBytes: UInt64
+    /// Digest of the decoded JSON payload read from the same SQLite snapshot.
+    /// Telemetry uses this to bind a scan to the metadata it actually consumed,
+    /// rather than relying only on a pathname stat.
+    let metadataFingerprint: String
 }
 
 /// Read-only metadata extraction from Cursor per-session chat SQLite databases.
@@ -21,6 +29,14 @@ struct CursorSessionMeta {
 ///
 /// Opens databases per call using SQLITE_OPEN_READONLY to avoid WAL lock contention.
 struct CursorChatMetaReader {
+
+    /// Cursor's metadata value is a small session header. Keep malformed or
+    /// unexpectedly large values from turning a cancellation into an unbounded
+    /// String/Character/Data allocation.
+    private static let maximumMetadataHexBytes = 1_048_576
+    /// Leave a small amount of room for SQLite's string representation while
+    /// enforcing the metadata bound before a TEXT value is materialized.
+    private static let sqliteTextLengthLimit = maximumMetadataHexBytes + 4_096
 
     // MARK: - Public
 
@@ -58,13 +74,21 @@ struct CursorChatMetaReader {
     }
 
     /// Returns metadata for a single session database.
-    static func sessionMeta(dbPath: String) -> CursorSessionMeta? {
+    static func sessionMeta(dbPath: String,
+                            expectedAgentID: String? = nil) -> CursorSessionMeta? {
         // Extract workspace hash from path: .../chats/<hash>/<uuid>/store.db
         let url = URL(fileURLWithPath: dbPath)
         let sessionDir = url.deletingLastPathComponent()
         let workspaceDir = sessionDir.deletingLastPathComponent()
         let workspaceHash = workspaceDir.lastPathComponent
-        return readMeta(dbPath: dbPath, workspaceHash: workspaceHash)
+        guard let metadata = readMeta(dbPath: dbPath, workspaceHash: workspaceHash) else {
+            return nil
+        }
+        if let expectedAgentID {
+            let expected = expectedAgentID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !expected.isEmpty, metadata.agentId == expected else { return nil }
+        }
+        return metadata
     }
 
     /// Resolve a workspace hash to a project path by checking known project directories.
@@ -89,6 +113,13 @@ struct CursorChatMetaReader {
         }
         defer { sqlite3_close(db) }
 
+        // Apply the same bound at the SQLite connection level. The later
+        // sqlite3_column_bytes check is still required, but by itself it can
+        // run after SQLite has already materialized an oversized TEXT value.
+        guard sqlite3_limit(db, SQLITE_LIMIT_LENGTH, Int32(sqliteTextLengthLimit)) > 0 else {
+            return nil
+        }
+
         // Meta table has key TEXT PRIMARY KEY, value TEXT.
         // The main metadata is stored at key "0" as hex-encoded JSON.
         var stmt: OpaquePointer?
@@ -98,11 +129,18 @@ struct CursorChatMetaReader {
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
 
         guard let rawPtr = sqlite3_column_text(stmt, 0) else { return nil }
-        let hexString = String(cString: rawPtr)
+        let rawByteCount = Int(sqlite3_column_bytes(stmt, 0))
+        guard rawByteCount > 0,
+              rawByteCount <= maximumMetadataHexBytes,
+              !Task.isCancelled else { return nil }
+        let hexBytes = UnsafeBufferPointer(start: rawPtr, count: rawByteCount)
+        let hexString = String(decoding: hexBytes, as: UTF8.self)
 
         // Decode hex → JSON bytes → parse
         guard let jsonData = dataFromHex(hexString) else { return nil }
+        guard !Task.isCancelled else { return nil }
         guard let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { return nil }
+        guard !Task.isCancelled else { return nil }
 
         guard let agentId = obj["agentId"] as? String else { return nil }
         let name = obj["name"] as? String ?? ""
@@ -123,23 +161,36 @@ struct CursorChatMetaReader {
             lastUsedModel: lastUsedModel,
             mode: mode,
             workspaceHash: workspaceHash,
-            dbPath: dbPath
+            dbPath: dbPath,
+            metadataBytes: UInt64(rawByteCount),
+            metadataFingerprint: SHA256.hash(data: jsonData).map { String(format: "%02x", $0) }.joined()
         )
     }
 
     // MARK: - Hex Decoding
 
     private static func dataFromHex(_ hex: String) -> Data? {
-        let chars = Array(hex)
-        guard chars.count % 2 == 0 else { return nil }
-        var data = Data(capacity: chars.count / 2)
-        var i = 0
-        while i < chars.count {
-            guard let byte = UInt8(String(chars[i...i+1]), radix: 16) else { return nil }
-            data.append(byte)
-            i += 2
+        let bytes = hex.utf8
+        guard bytes.count % 2 == 0 else { return nil }
+        var data = Data(capacity: bytes.count / 2)
+        var iterator = bytes.makeIterator()
+        while let high = iterator.next() {
+            guard let low = iterator.next(),
+                  let highNibble = hexNibble(high),
+                  let lowNibble = hexNibble(low),
+                  !Task.isCancelled else { return nil }
+            data.append((highNibble << 4) | lowNibble)
         }
         return data
+    }
+
+    private static func hexNibble(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 48...57: return byte - 48
+        case 65...70: return byte - 55
+        case 97...102: return byte - 87
+        default: return nil
+        }
     }
 
     // MARK: - MD5 Hashing

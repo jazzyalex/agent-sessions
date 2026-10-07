@@ -10,7 +10,22 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .droid,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model and effort come from the same Droid settings snapshot; stream system records provide first observations"),
+                tokens: .partial("Droid exposes aggregate token evidence without audited request attribution or cache normalization"),
+                cost: .unavailable("Droid provider routing and pricing are not stable enough for an API-equivalent estimate"),
+                weeklyQuota: .unavailable("Droid does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                DroidTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                DroidTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                session.source == .droid
+                    && SessionFileStat.precise(from: URL(fileURLWithPath: session.filePath)) != nil
+            },
             shortLabel: "Droid",
             badgeInitials: "D",
             // Green brand (disambiguation handled via styling, not hue).

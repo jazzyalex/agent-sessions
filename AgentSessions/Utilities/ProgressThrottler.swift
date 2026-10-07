@@ -2,7 +2,7 @@ import Dispatch
 import Foundation
 
 /// Coalesces high-frequency progress updates into a lower-frequency "flush" signal.
-final class ProgressThrottler {
+final class ProgressThrottler: @unchecked Sendable {
     private let lock = NSLock()
     private var lastFlush = DispatchTime.now()
     private var pendingTicks = 0

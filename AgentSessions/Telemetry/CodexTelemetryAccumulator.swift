@@ -374,6 +374,7 @@ struct UsageSliceTable {
     /// Adds a contribution whose components are already separated by the provider.
     /// Only Claude distinguishes cache-write TTLs; the others pass write1h: 0.
     mutating func addComponents(fresh: Int, cacheRead: Int, write5m: Int, write1h: Int, output: Int,
+                            reasoning: Int = 0,
                             model: String?, effort: String?, speed: String,
                             inferenceGeo: String? = nil) {
         let key = Key(model: model, effort: effort, speed: speed, inferenceGeo: inferenceGeo)
@@ -383,6 +384,7 @@ struct UsageSliceTable {
         slice.cacheWrite5mTokens += write5m
         slice.cacheWrite1hTokens += write1h
         slice.outputTokens += output
+        slice.reasoningOutputTokens += reasoning
         totals[key] = slice
     }
 

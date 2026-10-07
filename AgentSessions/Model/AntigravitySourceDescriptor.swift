@@ -14,7 +14,13 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .antigravity,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model comes from loaded Session metadata; planner records do not state a model"),
+                tokens: .supported,
+                cost: .unavailable("Antigravity native cost is provider-specific and is not shown as an API-equivalent estimate"),
+                weeklyQuota: .unavailable("Antigravity does not expose a compatible account quota feed")
+            ),
+            makeTelemetryProvider: { AntigravityTelemetryProvider() },
             shortLabel: "Antigravity",
             badgeInitials: "AG",
             // Teal. Calibrated to what `systemTeal` drew in light mode through macOS 15;

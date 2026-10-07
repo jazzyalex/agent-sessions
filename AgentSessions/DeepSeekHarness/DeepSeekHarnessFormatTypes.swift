@@ -327,6 +327,7 @@ struct DeepSeekHarnessEnvelope {
         var output: [Int] = []
         var hasRange = false
         for entry in entries {
+            try checkCancellation()
             if let pair = entry as? [Any], !(entry is Bool) {
                 guard pair.count == 2,
                       let start = DeepSeekHarnessJSON.count(pair[0]),
@@ -336,7 +337,10 @@ struct DeepSeekHarnessEnvelope {
                 guard end >= start, end - start + 1 <= seq - output.count else {
                     throw DeepSeekHarnessFormatError.invalidReference("\(label) sourceEventSeqs range exceeds its event seq")
                 }
-                for member in start...end { output.append(member) }
+                for member in start...end {
+                    try checkCancellation()
+                    output.append(member)
+                }
                 hasRange = true
                 continue
             }
@@ -349,11 +353,18 @@ struct DeepSeekHarnessEnvelope {
             output.append(member)
         }
         if hasRange {
-            for index in 1..<output.count where output[index] <= output[index - 1] {
-                throw DeepSeekHarnessFormatError.invalidReference("\(label) sourceEventSeqs ranges must be strictly increasing")
+            for index in 1..<output.count {
+                try checkCancellation()
+                guard output[index] > output[index - 1] else {
+                    throw DeepSeekHarnessFormatError.invalidReference("\(label) sourceEventSeqs ranges must be strictly increasing")
+                }
             }
         }
         return output
+    }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
     }
 
     static func decodeSurfaceOp(_ value: Any, seq: Int, label: String) throws -> DeepSeekHarnessSurfaceOp {
@@ -446,14 +457,23 @@ struct DeepSeekHarnessPackedRun {
               let index = DeepSeekHarnessJSON.count(data["index"]),
               let gaps = DeepSeekHarnessJSON.array(data["dt"]),
               let members = DeepSeekHarnessJSON.array(data[isTool ? "args" : "texts"]),
-              !members.isEmpty, members.allSatisfy({ $0 is String }),
-              gaps.count == members.count - 1,
-              gaps.allSatisfy({ DeepSeekHarnessJSON.safeInt($0) != nil }) else {
+              !members.isEmpty,
+              gaps.count == members.count - 1 else {
             throw DeepSeekHarnessFormatError.invalidPayload("packed \(type) row has a malformed payload")
+        }
+        var texts: [String] = []
+        texts.reserveCapacity(members.count)
+        for member in members {
+            try checkCancellation()
+            guard let text = member as? String else {
+                throw DeepSeekHarnessFormatError.invalidPayload("packed \(type) row has a malformed payload")
+            }
+            texts.append(text)
         }
         var lastTime = time0
         var decodedGaps: [Int] = []
         for gap in gaps {
+            try checkCancellation()
             guard let step = DeepSeekHarnessJSON.safeInt(gap),
                   let next = DeepSeekHarnessJSON.safeAdd(lastTime, step) else {
                 throw DeepSeekHarnessFormatError.invalidPayload("packed \(type) row has invalid member times")
@@ -475,7 +495,6 @@ struct DeepSeekHarnessPackedRun {
                 name = text
             }
         }
-        let texts = members.map { $0 as! String }
         guard seq0 + texts.count - 1 <= DeepSeekHarnessJSON.maxSafeInteger else {
             throw DeepSeekHarnessFormatError.invalidPayload("packed \(type) row exceeds the sequence range")
         }
@@ -485,6 +504,10 @@ struct DeepSeekHarnessPackedRun {
                                         index: index, gaps: decodedGaps, payload: texts,
                                         callID: callID, name: name, rawObject: object,
                                         firstTime: time0)
+    }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
     }
 
     private init(kind: Kind, firstSeq: Int, eventCount: Int, turn: Int, step: Int,

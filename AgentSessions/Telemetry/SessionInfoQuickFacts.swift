@@ -189,7 +189,7 @@ public struct SessionInfoQuickFacts: Hashable, Sendable {
             session.model,
             provenance: .currentModel,
             missing: .notRecorded)
-        self.firstObservedModel = Self.firstObservedModelField(for: session.source)
+        self.firstObservedModel = Self.firstObservedModelField(for: session)
         self.reasoningEffort = Self.field(
             session.reasoningEffort,
             provenance: .currentConfiguration,
@@ -228,12 +228,14 @@ public struct SessionInfoQuickFacts: Hashable, Sendable {
     }
 
     private static func firstObservedModelField(
-        for source: SessionSource
+        for session: Session
     ) -> SessionInfoField<String> {
         // A source without a registry-owned telemetry provider can never move
         // this field from its pending state. Mark that boundary immediately so
         // the quick surface does not promise a scan that the engine cannot run.
-        guard SessionSourceRegistry.descriptor(for: source).makeTelemetryProvider != nil else {
+        let descriptor = SessionSourceRegistry.descriptor(for: session.source)
+        guard descriptor.telemetry.configuration.isAvailable,
+              descriptor.hasTelemetryBackend(for: session) else {
             return .unavailable(.unsupported)
         }
         return .unavailable(.notLoaded)

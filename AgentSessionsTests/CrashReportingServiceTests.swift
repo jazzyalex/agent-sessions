@@ -84,6 +84,60 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(seenAfterClear.contains(pendingID))
     }
 
+    func testLaterSuppressesTheSameCrashOnNextLaunchWhileRetainingTheReport() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("Agent Sessions_2026-02-10-121500.crash")
+        try makeCrashReportFile(at: reportURL)
+
+        let storeURL = tempRoot.appendingPathComponent("pending.json")
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: storeURL, maxPendingCount: 1)
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "2.11.2",
+            appBuild: "21",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        let defaults = testDefaults("CrashReportingServiceTests.defer")
+        let firstLaunchService = CrashReportingService(
+            store: store,
+            detector: detector,
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let firstDetectedCount = await firstLaunchService.detectAndQueueOnLaunch()
+        XCTAssertEqual(firstDetectedCount, 1)
+        let pendingAfterFirstLaunch = await store.pending()
+        let pendingID = try XCTUnwrap(pendingAfterFirstLaunch.first?.id)
+
+        await firstLaunchService.deferPendingReports()
+
+        let dismissedIDs = defaults.stringArray(forKey: PreferencesKey.Diagnostics.dismissedCrashIDs) ?? []
+        XCTAssertEqual(dismissedIDs, [pendingID])
+        let pendingCountAfterDefer = await store.pendingCount()
+        XCTAssertEqual(pendingCountAfterDefer, 1)
+
+        let secondLaunchService = CrashReportingService(
+            store: store,
+            detector: detector,
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let secondDetectedCount = await secondLaunchService.detectAndQueueOnLaunch()
+        XCTAssertEqual(secondDetectedCount, 0)
+        let pendingCountAfterSecondLaunch = await store.pendingCount()
+        XCTAssertEqual(pendingCountAfterSecondLaunch, 1)
+    }
+
     func testClearPendingReportsMarksAllPendingIDsAsSeen() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -439,6 +493,36 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertEqual(report.terminationSummary, "EXC_BREAKPOINT | SIGTRAP")
         XCTAssertEqual(report.topFrames.first, "Agent Sessions CrashReportDetector.parseIPS")
         XCTAssertEqual(report.crashTimestamp, ISO8601DateFormatter().date(from: "2026-04-28T12:12:42Z"))
+    }
+
+    func testDetectOnLaunchIgnoresXCTestInjectedIPSReport() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-test-host.ips")
+        let text = """
+        {"bundleID":"com.triada.AgentSessions","procName":"AgentSessions","timestamp":"2026-10-07T12:00:00Z"}
+        {
+          "usedImages" : [
+            {"path":"/Applications/Xcode.app/Contents/Developer/usr/lib/libXCTestBundleInject.dylib"}
+          ]
+        }
+        """
+        try text.write(to: reportURL, atomically: true, encoding: .utf8)
+
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "2.11.2",
+            appBuild: "21",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        XCTAssertTrue(detector.detectRecentCrashes().isEmpty)
     }
 
     func testSupportEmailDraftWithoutPendingReportsHasTemplateBody() async throws {

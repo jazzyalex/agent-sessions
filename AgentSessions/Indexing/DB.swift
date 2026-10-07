@@ -27,6 +27,43 @@ enum IndexDBTestHooks {
 }
 #endif
 
+/// Coordinates a refresh generation with the synchronous SQLite COMMIT that
+/// publishes it. The lock is never held across an actor suspension: callers
+/// either change the generation or run the commit entirely within one
+/// synchronous critical section.
+final class IndexDBCommitGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentGeneration = UUID()
+
+    func beginGeneration() -> UUID {
+        lock.lock()
+        defer { lock.unlock() }
+        let generation = UUID()
+        currentGeneration = generation
+        return generation
+    }
+
+    func isCurrent(_ generation: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentGeneration == generation
+    }
+
+    func current() -> UUID {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentGeneration
+    }
+
+    func commitIfCurrent(_ generation: UUID, commit: () throws -> Void) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard currentGeneration == generation else { return false }
+        try commit()
+        return true
+    }
+}
+
 /// Lightweight SQLite helper wrapped in an actor for thread-safety.
 /// Schema stores file scan state, per-session daily metrics and day rollups.
 actor IndexDB {
@@ -651,6 +688,16 @@ actor IndexDB {
 
     func begin() throws { try exec("BEGIN IMMEDIATE;") }
     func commit() throws { try exec("COMMIT;") }
+
+    /// Check the refresh generation and publish the transaction without an
+    /// actor suspension between the check and COMMIT. The caller owns the
+    /// rollback when this returns false.
+    func commitIfCurrent(_ generation: UUID, gate: IndexDBCommitGate) throws -> Bool {
+        try gate.commitIfCurrent(generation) {
+            try self.exec("COMMIT;")
+        }
+    }
+
     func rollbackSilently() { try? exec("ROLLBACK;") }
 
     // MARK: - Simple query helpers
@@ -2257,6 +2304,38 @@ actor IndexDB {
             }
             try recomputeRollupsForDays(affectedDays, source: source)
         }
+    }
+
+    /// Remove identities that disappeared from a shared, readable storage path.
+    ///
+    /// A shared SQLite file can outlive one of its session rows, so path-only
+    /// retirement is insufficient. The caller supplies the complete current
+    /// identity set for each readable path from one stable provider snapshot.
+    /// Unreadable paths must be omitted; their last known rows remain protected.
+    @discardableResult
+    func deleteSessionsNotPresentAtPaths(source: String,
+                                         currentSessionIDsByPath: [String: Set<String>]) throws -> [String] {
+        guard !currentSessionIDsByPath.isEmpty else { return [] }
+        var canonicalIDsByPath: [String: Set<String>] = [:]
+        for (path, ids) in currentSessionIDsByPath {
+            let canonicalPath = URL(fileURLWithPath: path)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .path
+            canonicalIDsByPath[canonicalPath, default: []].formUnion(ids)
+        }
+        let rows = try fetchSessionMeta(for: source)
+        let staleIDs = rows.compactMap { row -> String? in
+            let path = URL(fileURLWithPath: row.path).standardizedFileURL.resolvingSymlinksInPath().path
+            guard let currentIDs = canonicalIDsByPath[path],
+                  !currentIDs.contains(row.sessionID) else {
+                return nil
+            }
+            return row.sessionID
+        }
+        let uniqueIDs = Array(Set(staleIDs)).sorted()
+        try deleteSessionsByIdentity(source: source, sessionIDs: uniqueIDs)
+        return uniqueIDs
     }
 
     /// Session ids whose `session_search` row is CURRENT — i.e. the mtime/size/format_version

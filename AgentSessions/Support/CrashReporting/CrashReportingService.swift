@@ -35,8 +35,9 @@ actor CrashReportingService {
         guard !detected.isEmpty else { return 0 }
 
         let seenHistory = loadedSeenCrashIDHistory()
-        let seenIDs = Set(seenHistory)
-        let filtered = detected.filter { !seenIDs.contains($0.id) }
+        let dismissedIDs = Set(loadedDismissedCrashIDHistory())
+        let handledIDs = Set(seenHistory).union(dismissedIDs)
+        let filtered = detected.filter { !handledIDs.contains($0.id) }
         guard !filtered.isEmpty else { return 0 }
 
         guard let newestUnseen = filtered.first else { return 0 }
@@ -71,6 +72,22 @@ actor CrashReportingService {
         let seenHistory = loadedSeenCrashIDHistory()
         let updatedSeenHistory = mergedSeenCrashIDHistory(existing: seenHistory, newlySeenIDsByRecency: pendingIDsByRecency)
         persistSeenCrashIDHistory(updatedSeenHistory, lastSeenID: pendingIDsByRecency.first)
+        removeDismissedCrashIDs(pendingIDsByRecency)
+    }
+
+    /// Suppress the startup prompt for the currently queued reports without
+    /// deleting them. They remain available from Preferences for export or
+    /// clearing, while a genuinely new crash still prompts on the next launch.
+    func deferPendingReports() async {
+        let pendingIDs = (await store.pending()).map(\.id).filter { !$0.isEmpty }
+        guard !pendingIDs.isEmpty else { return }
+
+        let dismissedHistory = loadedDismissedCrashIDHistory()
+        let updatedDismissedHistory = mergedSeenCrashIDHistory(
+            existing: dismissedHistory,
+            newlySeenIDsByRecency: pendingIDs
+        )
+        persistDismissedCrashIDHistory(updatedDismissedHistory)
     }
 
     func exportLatestPendingReport(to url: URL) async throws {
@@ -155,6 +172,29 @@ actor CrashReportingService {
         } else {
             userDefaults.removeObject(forKey: PreferencesKey.Diagnostics.lastSeenCrashID)
         }
+    }
+
+    private func loadedDismissedCrashIDHistory() -> [String] {
+        let history = userDefaults.stringArray(forKey: PreferencesKey.Diagnostics.dismissedCrashIDs) ?? []
+        return deduplicatedIDsPreservingOrder(history.filter { !$0.isEmpty })
+    }
+
+    private func persistDismissedCrashIDHistory(_ dismissedHistory: [String]) {
+        let normalized = deduplicatedIDsPreservingOrder(dismissedHistory.filter { !$0.isEmpty })
+        let capped = Array(normalized.prefix(Self.maxSeenCrashHistory))
+        if capped.isEmpty {
+            userDefaults.removeObject(forKey: PreferencesKey.Diagnostics.dismissedCrashIDs)
+        } else {
+            userDefaults.set(capped, forKey: PreferencesKey.Diagnostics.dismissedCrashIDs)
+        }
+    }
+
+    private func removeDismissedCrashIDs(_ ids: [String]) {
+        let idsToRemove = Set(ids.filter { !$0.isEmpty })
+        guard !idsToRemove.isEmpty else { return }
+
+        let remaining = loadedDismissedCrashIDHistory().filter { !idsToRemove.contains($0) }
+        persistDismissedCrashIDHistory(remaining)
     }
 
     private func deduplicatedIDsPreservingOrder(_ ids: [String]) -> [String] {

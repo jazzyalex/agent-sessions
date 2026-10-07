@@ -168,6 +168,41 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertFalse(TranscriptTelemetryPresentation.weeklyValue(telemetry).help.isEmpty)
     }
 
+    func testTotalOnlyUsagePrefersRecordedTotalOverZeroValuedEvents() {
+        let telemetry = SessionTelemetry(
+            source: .opencode,
+            initialConfiguration: nil,
+            currentConfiguration: nil,
+            configurationChanges: [],
+            usageSlices: [],
+            usageEvents: [TelemetryUsageEvent(
+                recordID: "legacy-total-only", observedAt: nil, anchorLine: 0,
+                usageFamily: "opencode.message.tokens", ownership: .session,
+                model: "shared-model", reasoningEffort: nil, speed: "standard-normalized",
+                freshInputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0,
+                cacheWrite1hTokens: 0, outputTokens: 0, contextInputTokens: 0)],
+            usageSummary: .init(topLineTokens: 0, hasComponentBreakdown: false,
+                                recordedTotalTokens: 4_242,
+                                usageFamilies: ["opencode.message.tokens"],
+                                usageFamilyConflict: false,
+                                displayTotalTokens: 4_242),
+            costEstimate: nil)
+
+        XCTAssertEqual(TranscriptTelemetryPresentation.tokens(telemetry), 4_242)
+        XCTAssertEqual(TranscriptTelemetryPresentation.tokensValue(telemetry).text, "4,242")
+        XCTAssertTrue(TranscriptTelemetryPresentation.tokensValue(telemetry).help.contains(
+            "component breakdown is unavailable"))
+        let activity = TranscriptTelemetryPresentation.activity(telemetry, blocks: [block(0, record: 1)])
+        XCTAssertEqual(activity.requests, 0)
+        XCTAssertTrue(activity.usageUnavailableReason?.contains("Request-level usage is unavailable") == true)
+        let turnsHelp = TranscriptTelemetryPresentation.turnsHelp(
+            you: 0, agent: 1, tools: 0, requests: activity.requests,
+            usageUnavailableReason: activity.usageUnavailableReason,
+            locale: Locale(identifier: "en"))
+        XCTAssertTrue(turnsHelp.contains("Request total unavailable"))
+        XCTAssertFalse(turnsHelp.contains("records 0 requests"))
+    }
+
     @MainActor
     func testLongMarkersReserveMoreHeightAtNarrowWidth() {
         let text = String(repeating: "Model changed: long-model-name → another-model-name ", count: 3)
@@ -403,6 +438,13 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         )
     }
 
+    func testActivityHelpUsesProviderNeutralRecordedRequestLanguage() {
+        let help = TranscriptTelemetryPresentation.turnsHelp(
+            you: 1, agent: 2, tools: 3, requests: 4, locale: Locale(identifier: "en"))
+        XCTAssertTrue(help.contains("records 4 requests"))
+        XCTAssertFalse(help.contains("priced"))
+    }
+
     func testSessionInfoCompleteSentencesPluralizeWithoutNounPhraseInsertion() {
         let locale = Locale(identifier: "en")
         XCTAssertEqual(
@@ -544,6 +586,66 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
                                   priceTableRevision: 7)))
         XCTAssertEqual(value.text, "—")
         XCTAssertTrue(value.help.contains("mystery-model"))
+    }
+
+    func testUnsupportedPricingExplainsCapabilityInsteadOfClaimingNoUsage() {
+        let telemetry = SessionTelemetry(
+            source: .opencode,
+            initialConfiguration: nil,
+            currentConfiguration: nil,
+            configurationChanges: [],
+            usageSlices: [],
+            usageEvents: [TelemetryUsageEvent(
+                recordID: "step-1", observedAt: nil, anchorLine: 0,
+                usageFamily: "opencode.step-finish.tokens", ownership: .session,
+                model: "big-pickle", reasoningEffort: nil, speed: "standard-normalized",
+                freshInputTokens: 10, cacheReadTokens: 0, cacheWrite5mTokens: 0,
+                cacheWrite1hTokens: 0, outputTokens: 5, contextInputTokens: 10)],
+            usageSummary: .init(topLineTokens: 15, hasComponentBreakdown: true,
+                                recordedTotalTokens: 15,
+                                usageFamilies: ["opencode.step-finish.tokens"],
+                                usageFamilyConflict: false),
+            costEstimate: nil)
+
+        let value = TranscriptTelemetryPresentation.costValue(
+            telemetry,
+            capability: .unavailable("OpenCode native pricing is not yet audited"))
+        XCTAssertEqual(value.text, "—")
+        XCTAssertTrue(value.help.contains("OpenCode native pricing is not yet audited"))
+        XCTAssertFalse(value.help.contains("No priceable usage"))
+        XCTAssertTrue(TranscriptTelemetryPresentation.pricingBasis(
+            telemetry,
+            capability: .unavailable("OpenCode native pricing is not yet audited")).isEmpty,
+                       "unsupported pricing must not render pricing-specific basis rows")
+    }
+
+    func testUnavailableUsageDoesNotPresentFailClosedEvidenceAsEmptyTotals() {
+        let reason = "OpenCode fork usage is unavailable because the session creation boundary is missing."
+        let telemetry = SessionTelemetry(
+            source: .opencode,
+            initialConfiguration: nil,
+            currentConfiguration: nil,
+            configurationChanges: [],
+            usageSlices: [],
+            usageEvents: [],
+            usageSummary: .init(topLineTokens: 0, hasComponentBreakdown: false,
+                                recordedTotalTokens: nil, usageFamilies: [],
+                                usageFamilyConflict: false, unavailableReason: reason),
+            costEstimate: nil)
+
+        XCTAssertNil(TranscriptTelemetryPresentation.tokens(telemetry))
+        XCTAssertEqual(TranscriptTelemetryPresentation.tokensValue(telemetry).text, "—")
+        XCTAssertTrue(TranscriptTelemetryPresentation.tokensValue(telemetry).help.contains(reason))
+        XCTAssertTrue(TranscriptTelemetryPresentation.costValue(telemetry).help.contains(reason))
+        XCTAssertTrue(TranscriptTelemetryPresentation.pricingBasis(telemetry).isEmpty)
+        XCTAssertNil(TranscriptTelemetryPresentation.tokenShare(telemetry))
+
+        let activityHelp = TranscriptTelemetryPresentation.turnsHelp(
+            you: 1, agent: 2, tools: 3, requests: 4,
+            usageUnavailableReason: reason, locale: Locale(identifier: "en"))
+        XCTAssertTrue(activityHelp.contains("Request total unavailable"))
+        XCTAssertTrue(activityHelp.contains(reason))
+        XCTAssertFalse(activityHelp.contains("records 4 requests"))
     }
 
     // MARK: - Task 7: jump-target contract

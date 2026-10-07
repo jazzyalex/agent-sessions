@@ -124,6 +124,39 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         XCTAssertTrue(DeepSeekHarnessArchiveBackfill.authoritativeURLs(from: result).isEmpty)
     }
 
+    func testRevisionResolverRefusesVisibleNonRegularSuccessor() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-revision-successor"
+        let older = try writeGeneration(root: root, cwd: cwd, id: "revision-successor", version: 2)
+        let newer = DeepSeekHarnessDiscovery.canonicalGenerationURL(
+            root: root, cwd: cwd, id: "revision-successor", version: 3, compression: .plain)
+        try fileManager.createDirectory(at: newer, withIntermediateDirectories: false)
+
+        XCTAssertNil(
+            DeepSeekHarnessDiscovery.resolveArtifactRevision(forSelectedURL: older),
+            "a visible non-regular successor must not permit stale revision fallback")
+    }
+
+    func testRevisionResolverRefusesSymlinkedProjectAncestor() throws {
+        let root = try temporarySessionsRoot()
+        let cwd = "/tmp/dsh-revision-symlink"
+        let selected = try writeGeneration(
+            root: root, cwd: cwd, id: "revision-symlink", version: 2)
+        let project = selected.deletingLastPathComponent().deletingLastPathComponent()
+        let outsideProject = root.deletingLastPathComponent()
+            .appendingPathComponent("DeepSeekHarnessRevisionOutside-\(UUID().uuidString)",
+                                    isDirectory: true)
+        try fileManager.moveItem(at: project, to: outsideProject)
+        addTeardownBlock { [fileManager] in
+            try? fileManager.removeItem(at: outsideProject)
+        }
+        try fileManager.createSymbolicLink(at: project, withDestinationURL: outsideProject)
+
+        XCTAssertNil(
+            DeepSeekHarnessDiscovery.resolveArtifactRevision(forSelectedURL: selected),
+            "a symlinked project ancestor must not move revision scanning outside the admitted root")
+    }
+
     func testRecognizesOnlyExactCanonicalGenerationFilenames() {
         let accepted: [(String, Int, DeepSeekHarnessCompression)] = [
             ("session.jsonl", 0, .plain),
@@ -301,6 +334,14 @@ final class DeepSeekHarnessDiscoveryTests: XCTestCase {
         let repeatResult = try XCTUnwrap(discover(at: root).candidates.first)
         XCTAssertEqual(first.manifestRevision, repeatResult.manifestRevision)
         XCTAssertEqual(first.selectedURL.standardizedFileURL, generationOne.standardizedFileURL)
+        let resolvedRevision = try XCTUnwrap(
+            DeepSeekHarnessDiscovery.resolveArtifactRevision(forSelectedURL: generationOne)
+        )
+        XCTAssertEqual(
+            first.manifestRevision,
+            resolvedRevision.manifestRevision,
+            "revision identity must not depend on whether siblings were discovery- or generation-sorted"
+        )
 
         var changedSibling = try Data(contentsOf: generationZero)
         changedSibling.append(contentsOf: Data("\n".utf8))

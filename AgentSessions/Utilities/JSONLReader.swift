@@ -5,15 +5,18 @@ final class JSONLReader {
     private let chunkSize: Int
     private let maximumBytes: UInt64?
     private let propagatesReadErrors: Bool
+    private let readChunk: ((FileHandle, Int) throws -> Data)?
 
     init(url: URL,
          chunkSize: Int = 64 * 1024,
          maximumBytes: UInt64? = nil,
-         propagatesReadErrors: Bool = false) {
+         propagatesReadErrors: Bool = false,
+         readChunk: ((FileHandle, Int) throws -> Data)? = nil) {
         self.url = url
         self.chunkSize = chunkSize
         self.maximumBytes = maximumBytes
         self.propagatesReadErrors = propagatesReadErrors
+        self.readChunk = readChunk
     }
 
     func readLines() throws -> [String] {
@@ -31,6 +34,17 @@ final class JSONLReader {
         }, reportBytesRead: nil)
     }
 
+    /// Read from a caller-owned descriptor. The descriptor stays open and is
+    /// positioned by this reader; callers can therefore capture descriptor
+    /// metadata before and after the exact bytes consumed by the parser.
+    func forEachLine(using fileHandle: FileHandle,
+                     _ handleLine: (String) -> Void) throws {
+        _ = try forEachLineCore({ line in
+            handleLine(line)
+            return true
+        }, reportBytesRead: nil, fileHandle: fileHandle)
+    }
+
     /// Streaming line reader that can stop early by returning `false`.
     /// Useful for lightweight preview scans without reading the full file.
     @discardableResult
@@ -38,21 +52,63 @@ final class JSONLReader {
         try forEachLineCore(shouldContinue, reportBytesRead: nil)
     }
 
+    /// Streaming line reader using a caller-owned descriptor. The caller can
+    /// capture descriptor metadata before and after a bounded preview scan.
+    @discardableResult
+    func forEachLineWhile(using fileHandle: FileHandle,
+                          _ shouldContinue: (String) -> Bool) throws -> Bool {
+        try forEachLineCore(
+            shouldContinue,
+            reportBytesRead: nil,
+            fileHandle: fileHandle)
+    }
+
+    /// Streaming line reader using a caller-owned descriptor and reporting the
+    /// exact physical bytes consumed from that descriptor.
+    @discardableResult
+    func forEachLineWhile(using fileHandle: FileHandle,
+                          _ shouldContinue: (String) -> Bool,
+                          reportBytesRead: @escaping (UInt64) -> Void,
+                          reportMalformedLine: (() -> Void)? = nil) throws -> Bool {
+        try forEachLineCore(
+            shouldContinue,
+            reportBytesRead: reportBytesRead,
+            reportMalformedLine: reportMalformedLine,
+            fileHandle: fileHandle)
+    }
+
     /// Streaming line reader with the number of physical bytes consumed by the
     /// bounded read. The callback runs once on every exit path, including a
     /// reader error or an early stop.
     @discardableResult
     func forEachLineWhile(_ shouldContinue: (String) -> Bool,
-                          reportBytesRead: @escaping (UInt64) -> Void) throws -> Bool {
-        try forEachLineCore(shouldContinue, reportBytesRead: reportBytesRead)
+                          reportBytesRead: @escaping (UInt64) -> Void,
+                          reportMalformedLine: (() -> Void)? = nil) throws -> Bool {
+        try forEachLineCore(shouldContinue,
+                            reportBytesRead: reportBytesRead,
+                            reportMalformedLine: reportMalformedLine)
     }
 
     // Core implementation shared by both APIs.
     @discardableResult
     private func forEachLineCore(_ shouldContinue: (String) -> Bool,
-                                 reportBytesRead: ((UInt64) -> Void)?) throws -> Bool {
-        let fh = try FileHandle(forReadingFrom: url)
-        defer { try? fh.close() }
+                                 reportBytesRead: ((UInt64) -> Void)?,
+                                 reportMalformedLine: (() -> Void)? = nil,
+                                 fileHandle: FileHandle? = nil) throws -> Bool {
+        let fh: FileHandle
+        let ownsFileHandle: Bool
+        if let fileHandle {
+            fh = fileHandle
+            ownsFileHandle = false
+        } else {
+            fh = try FileHandle(forReadingFrom: url)
+            ownsFileHandle = true
+        }
+        defer {
+            if ownsFileHandle {
+                try? fh.close()
+            }
+        }
         var buffer = Data()
         let nl = Data([0x0A]) // \n
         var stoppedEarly = false
@@ -73,7 +129,11 @@ final class JSONLReader {
             }
             let data: Data
             do {
-                data = try fh.read(upToCount: requestedCount) ?? Data()
+                if let readChunk {
+                    data = try readChunk(fh, requestedCount)
+                } else {
+                    data = try fh.read(upToCount: requestedCount) ?? Data()
+                }
             } catch {
                 if propagatesReadErrors { readError = error }
                 return false
@@ -129,6 +189,8 @@ final class JSONLReader {
                             stoppedEarly = true
                             return false
                         }
+                    } else {
+                        reportMalformedLine?()
                     }
                     range = nlRange.upperBound..<buffer.endIndex
                 }
@@ -151,6 +213,8 @@ final class JSONLReader {
                 if !trimmed.isEmpty {
                     _ = shouldContinue(trimmed)
                 }
+            } else {
+                reportMalformedLine?()
             }
         }
         return true

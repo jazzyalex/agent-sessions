@@ -10,7 +10,22 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .opencode,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model comes from session metadata; first observation comes from message records"),
+                tokens: .supported,
+                cost: .unavailable("OpenCode native pricing is not yet audited"),
+                weeklyQuota: .unavailable("OpenCode does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                OpenCodeSqliteReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                OpenCodeSqliteReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                session.source == .opencode
+                    && URL(fileURLWithPath: session.filePath).lastPathComponent == "opencode.db"
+            },
             shortLabel: "OpenCode",
             badgeInitials: "OC",
             // Purple. Calibrated from `systemPurple`, same reasoning as antigravity's teal.

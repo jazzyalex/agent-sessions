@@ -36,14 +36,24 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
         XCTAssertNil(descriptor.searchUsesIdentityAtURL)
     }
 
-    func testTelemetryUsesTheExactUnauditedReason() {
+    func testTelemetryDeclaresAuditedConfigurationAndTokenBoundaries() {
         let telemetry = source.descriptor.telemetry
-        let reason = "DeepSeek telemetry not yet audited"
 
-        XCTAssertEqual(telemetry.configuration, .unavailable(reason))
-        XCTAssertEqual(telemetry.tokens, .unavailable(reason))
-        XCTAssertEqual(telemetry.cost, .unavailable(reason))
-        XCTAssertEqual(telemetry.weeklyQuota, .unavailable("no account-level quota feed"))
+        guard case let .partial(configurationReason) = telemetry.configuration else {
+            return XCTFail("DeepSeek configuration should expose the audited partial path")
+        }
+        XCTAssertTrue(configurationReason.contains("request/header"))
+        guard case let .partial(tokenReason) = telemetry.tokens else {
+            return XCTFail("DeepSeek assistant usage should expose the audited partial path")
+        }
+        XCTAssertTrue(tokenReason.contains("assistant/message"))
+        guard case .unavailable = telemetry.cost else {
+            return XCTFail("DeepSeek pricing is intentionally unavailable")
+        }
+        guard case .unavailable = telemetry.weeklyQuota else {
+            return XCTFail("DeepSeek account quota is intentionally unavailable")
+        }
+        XCTAssertTrue(source.descriptor.hasTelemetryBackend)
     }
 
     func testBrandInkUsesResolvedAdaptiveColor() {

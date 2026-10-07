@@ -33,26 +33,53 @@ final class SessionSourceRegistryTests: XCTestCase {
             let descriptor = SessionSourceRegistry.descriptor(for: source)
             let declaresTelemetry = descriptor.telemetry.configuration.isAvailable
                 || descriptor.telemetry.tokens.isAvailable
-            XCTAssertEqual(descriptor.makeTelemetryProvider != nil, declaresTelemetry, "\(source)")
+            XCTAssertEqual(descriptor.hasTelemetryBackend, declaresTelemetry, "\(source)")
         }
     }
 
+    func testOpenClawTelemetryEligibilityRejectsArchivedTrajectoryArtifacts() {
+        let descriptor = SessionSourceRegistry.descriptor(for: .openclaw)
+        func session(fileName: String) -> Session {
+            Session(id: "openclaw:test:\(fileName)",
+                    source: .openclaw,
+                    startTime: nil,
+                    endTime: nil,
+                    model: nil,
+                    filePath: "/virtual/sessions/\(fileName)",
+                    eventCount: 0,
+                    events: [],
+                    cwd: nil,
+                    repoName: nil,
+                    lightweightTitle: nil)
+        }
+
+        XCTAssertTrue(descriptor.hasTelemetryBackend(for: session(fileName: "session.jsonl")))
+        XCTAssertTrue(descriptor.hasTelemetryBackend(for: session(fileName: "session.jsonl.deleted.1704067200")))
+        XCTAssertTrue(descriptor.hasTelemetryBackend(for: session(fileName: "openclaw-agent.sqlite")))
+        XCTAssertFalse(descriptor.hasTelemetryBackend(for: session(fileName: "session.trajectory.jsonl")))
+        XCTAssertFalse(descriptor.hasTelemetryBackend(for: session(fileName: "session.trajectory.jsonl.deleted.1704067200")))
+        XCTAssertFalse(descriptor.hasTelemetryBackend(for: session(fileName: "session.trajectory.jsonl.reset.1704067200")))
+    }
+
     func testTelemetryDispatchBoundaryIsPinnedToAuditedProviders() {
-        let expected: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+        let expected: Set<SessionSource> = [
+            .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid,
+            .openclaw, .cursor, .pi, .kimi, .grok, .devin, .fx, .cline, .deepseekHarness, .qwen
+        ]
 
         XCTAssertEqual(SessionTelemetryEngine.dispatchableSources, expected)
-        XCTAssertEqual(expected.count, 4)
+        XCTAssertEqual(expected.count, 17)
 
         for source in SessionSource.allCases {
             let descriptor = SessionSourceRegistry.descriptor(for: source)
             if expected.contains(source) {
-                XCTAssertNotNil(descriptor.makeTelemetryProvider, "\(source)")
+                XCTAssertTrue(descriptor.hasTelemetryBackend, "\(source)")
                 XCTAssertTrue(
                     descriptor.telemetry.configuration.isAvailable
                         || descriptor.telemetry.tokens.isAvailable,
                     "audited provider must declare telemetry: \(source)")
             } else {
-                XCTAssertNil(descriptor.makeTelemetryProvider, "\(source)")
+                XCTAssertFalse(descriptor.hasTelemetryBackend, "\(source)")
                 XCTAssertFalse(
                     descriptor.telemetry.configuration.isAvailable,
                     "unaudited provider must not advertise configuration telemetry: \(source)")
@@ -501,6 +528,10 @@ final class SessionSourceRegistryTests: XCTestCase {
             URL(fileURLWithPath: "/tmp/state.db")) == true)
         XCTAssertFalse(SessionSource.hermes.descriptor.searchUsesIdentityAtURL?(
             URL(fileURLWithPath: "/tmp/session.json")) == true)
+        XCTAssertTrue(SessionSource.openclaw.descriptor.searchUsesIdentityAtURL?(
+            URL(fileURLWithPath: "/tmp/openclaw-agent.sqlite")) == true)
+        XCTAssertFalse(SessionSource.openclaw.descriptor.searchUsesIdentityAtURL?(
+            URL(fileURLWithPath: "/tmp/session.jsonl")) == true)
     }
 
     // MARK: - Helpers

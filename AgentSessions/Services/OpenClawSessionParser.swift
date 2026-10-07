@@ -12,6 +12,10 @@ import CryptoKit
 final class OpenClawSessionParser {
     private static let previewScanLimit = 2_000
     private static let systemOriginLabel = "system"
+    private static let testingHookLock = NSLock()
+    private static var lightParseBeforeOpenStatHookForTesting: (() -> Void)?
+    private static var lightParseBeforeEndStatHookForTesting: (() -> Void)?
+    private static var fullParseBeforeEndStatHookForTesting: (() -> Void)?
 
     enum TitleStrategy: String {
         case promptOnly
@@ -20,11 +24,53 @@ final class OpenClawSessionParser {
         case promptThenOrigin
     }
 
-    static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
-        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+    static func setFullParseBeforeEndStatHookForTesting(_ hook: (() -> Void)?) {
+        testingHookLock.lock()
+        fullParseBeforeEndStatHookForTesting = hook
+        testingHookLock.unlock()
+    }
 
+    static func setLightParseBeforeOpenStatHookForTesting(_ hook: (() -> Void)?) {
+        testingHookLock.lock()
+        lightParseBeforeOpenStatHookForTesting = hook
+        testingHookLock.unlock()
+    }
+
+    static func setLightParseBeforeEndStatHookForTesting(_ hook: (() -> Void)?) {
+        testingHookLock.lock()
+        lightParseBeforeEndStatHookForTesting = hook
+        testingHookLock.unlock()
+    }
+
+    private static func lightParseBeforeOpenStatHook() -> (() -> Void)? {
+        testingHookLock.lock()
+        defer { testingHookLock.unlock() }
+        return lightParseBeforeOpenStatHookForTesting
+    }
+
+    private static func lightParseBeforeEndStatHook() -> (() -> Void)? {
+        testingHookLock.lock()
+        defer { testingHookLock.unlock() }
+        return lightParseBeforeEndStatHookForTesting
+    }
+
+    private static func fullParseBeforeEndStatHook() -> (() -> Void)? {
+        testingHookLock.lock()
+        defer { testingHookLock.unlock() }
+        return fullParseBeforeEndStatHookForTesting
+    }
+
+    static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
+        Self.lightParseBeforeOpenStatHook()?()
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
+            return nil
+        }
+        let descriptor = fileHandle.fileDescriptor
+        guard let parseStartStat = SessionFileStat.precise(fromFileDescriptor: descriptor) else {
+            try? fileHandle.close()
+            return nil
+        }
+        defer { try? fileHandle.close() }
         let reader = JSONLReader(url: url)
 
         var sessionID: String? = nil
@@ -44,7 +90,7 @@ final class OpenClawSessionParser {
         var sawHeartbeatPrompt = false
 
         do {
-            try reader.forEachLineWhile { rawLine in
+            try reader.forEachLineWhile(using: fileHandle) { rawLine in
                 idx += 1
                 guard idx <= previewScanLimit else { return false }
                 guard let obj = decodeObject(rawLine) else { return true }
@@ -123,9 +169,15 @@ final class OpenClawSessionParser {
                 }
                 return true
             }
-            } catch {
-                return nil
-            }
+        } catch {
+            return nil
+        }
+
+        Self.lightParseBeforeEndStatHook()?()
+        guard let parseEndStat = SessionFileStat.precise(fromFileDescriptor: descriptor),
+              parseStartStat == parseEndStat else {
+            return nil
+        }
 
         let meta = deletedFileMetadata(for: url)
         let agentID = agentIDFromPath(url)
@@ -146,14 +198,14 @@ final class OpenClawSessionParser {
         // If we only saw housekeeping scaffolding, mark as housekeeping so default filters hide it.
         let isHousekeeping = !sawNonHousekeepingUser && sawHeartbeatPrompt
 
-        return Session(
+        var session = Session(
             id: id,
             source: .openclaw,
-            startTime: tmin ?? mtime,
-            endTime: tmax ?? mtime,
+            startTime: tmin ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
+            endTime: tmax ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
             model: model,
             filePath: url.path,
-            fileSizeBytes: size >= 0 ? size : nil,
+            fileSizeBytes: Int(clamping: parseStartStat.size),
             eventCount: max(0, estimatedEvents),
             events: [],
             cwd: cwd,
@@ -163,11 +215,20 @@ final class OpenClawSessionParser {
             isHousekeeping: isHousekeeping,
             deletedAt: meta.deletedAt
         )
+        session.sourceFileStat = parseStartStat
+        return session
     }
 
     static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
+            return nil
+        }
+        let descriptor = fileHandle.fileDescriptor
+        guard let parseStartStat = SessionFileStat.precise(fromFileDescriptor: descriptor) else {
+            try? fileHandle.close()
+            return nil
+        }
+        defer { try? fileHandle.close() }
         let reader = JSONLReader(url: url)
 
         var events: [SessionEvent] = []
@@ -185,7 +246,7 @@ final class OpenClawSessionParser {
         var idx = 0
 
             do {
-            try reader.forEachLine { rawLine in
+            try reader.forEachLine(using: fileHandle) { rawLine in
                 idx += 1
                 guard let obj = decodeObject(rawLine) else { return }
                 let type = normalizedType(obj["type"])
@@ -424,6 +485,16 @@ final class OpenClawSessionParser {
             return nil
         }
 
+        Self.fullParseBeforeEndStatHook()?()
+
+        // A parser-carried proof must describe the bytes that were actually read.
+        // Reject a result if the JSONL changed while the reader was consuming it;
+        // a later stat sample must never be allowed to bless an older transcript.
+        guard let parseEndStat = SessionFileStat.precise(fromFileDescriptor: descriptor),
+              parseStartStat == parseEndStat else {
+            return nil
+        }
+
         let meta = deletedFileMetadata(for: url)
         let agentID = agentIDFromPath(url)
         let pathBaseID = meta.baseName
@@ -435,7 +506,7 @@ final class OpenClawSessionParser {
             return "openclaw:\(agentID):\(baseID)"
         }()
 
-        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+        let mtime = Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000)
         let start = tmin ?? mtime
         let end = tmax ?? mtime
         let isHousekeeping = !sawNonHousekeepingUser && sawHeartbeatPrompt
@@ -443,14 +514,14 @@ final class OpenClawSessionParser {
             title = firstToolName
         }
 
-        return Session(
+        var session = Session(
             id: id,
             source: .openclaw,
             startTime: start,
             endTime: end,
             model: model,
             filePath: url.path,
-            fileSizeBytes: size >= 0 ? size : nil,
+            fileSizeBytes: Int(clamping: parseStartStat.size),
             eventCount: max(events.filter { $0.kind != .meta }.count, 0),
             events: events,
             cwd: cwd,
@@ -460,6 +531,8 @@ final class OpenClawSessionParser {
             isHousekeeping: isHousekeeping,
             deletedAt: meta.deletedAt
         )
+        session.sourceFileStat = parseStartStat
+        return session
     }
 
     // MARK: - Title helpers

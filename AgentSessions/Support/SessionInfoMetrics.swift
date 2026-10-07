@@ -35,6 +35,19 @@ public struct SessionInfoMetricsSnapshot: Equatable, Sendable {
     }
 }
 
+/// Stable activity identity for a session-backed source. Unlike a database
+/// path, this distinguishes two sessions that share one SQLite file without
+/// exporting filesystem locations in metrics.
+public struct SessionInfoMetricsIdentity: Hashable, Sendable {
+    public let source: SessionSource
+    public let sessionID: String
+
+    public init(source: SessionSource, sessionID: String) {
+        self.source = source
+        self.sessionID = sessionID
+    }
+}
+
 /// Lock-guarded instrumentation for the two Session Info paths.
 ///
 /// The singleton is the production sink. Tests and future benchmarks can use a
@@ -44,8 +57,12 @@ public final class SessionInfoMetrics: @unchecked Sendable {
 
     private let lock = NSLock()
     private var values = SessionInfoMetricsSnapshot()
-    private var activeTranscriptPathCounts = [String: Int]()
-    private var activeTelemetryPathCounts = [String: Int]()
+    private enum ActivityIdentity: Hashable {
+        case path(String)
+        case session(SessionInfoMetricsIdentity)
+    }
+    private var activeTranscriptCounts = [ActivityIdentity: Int]()
+    private var activeTelemetryCounts = [ActivityIdentity: Int]()
 
     public init() {}
 
@@ -85,6 +102,24 @@ public final class SessionInfoMetrics: @unchecked Sendable {
             modelFirstPaintCount: values.modelFirstPaintCount,
             modelFirstPaintTotalMilliseconds: values.modelFirstPaintTotalMilliseconds,
             telemetryRequestCount: values.telemetryRequestCount + 1,
+            telemetryDurationTotalMilliseconds: values.telemetryDurationTotalMilliseconds + Self.milliseconds(duration),
+            telemetryBytesScanned: values.telemetryBytesScanned + bytesScanned,
+            cacheHitCount: values.cacheHitCount,
+            inFlightJoinCount: values.inFlightJoinCount,
+            duplicateParseCount: values.duplicateParseCount,
+            transcriptTelemetryOverlapCount: values.transcriptTelemetryOverlapCount)
+        lock.unlock()
+    }
+
+    /// Accounts for source-specific freshness work performed before the shared
+    /// telemetry worker starts. It contributes to duration and bytes without
+    /// pretending that a cache-key check was a second telemetry request.
+    public func recordTelemetryPreparation(duration: TimeInterval, bytesScanned: UInt64) {
+        lock.lock()
+        values = SessionInfoMetricsSnapshot(
+            modelFirstPaintCount: values.modelFirstPaintCount,
+            modelFirstPaintTotalMilliseconds: values.modelFirstPaintTotalMilliseconds,
+            telemetryRequestCount: values.telemetryRequestCount,
             telemetryDurationTotalMilliseconds: values.telemetryDurationTotalMilliseconds + Self.milliseconds(duration),
             telemetryBytesScanned: values.telemetryBytesScanned + bytesScanned,
             cacheHitCount: values.cacheHitCount,
@@ -140,47 +175,80 @@ public final class SessionInfoMetrics: @unchecked Sendable {
     }
 
     /// Marks a full transcript parse. If telemetry is already scanning the same
-    /// path, this is one observed overlap event.
+    /// artifact, this is one observed overlap event.
     public func beginTranscript(path: String) {
+        beginTranscript(identity: .path(path))
+    }
+
+    public func beginTranscript(identity: SessionInfoMetricsIdentity) {
+        beginTranscript(identity: .session(identity))
+    }
+
+    private func beginTranscript(identity: ActivityIdentity) {
         lock.lock()
-        if activeTranscriptPathCounts[path, default: 0] == 0,
-           activeTelemetryPathCounts[path, default: 0] > 0 {
+        if activeTranscriptCounts[identity, default: 0] == 0,
+           activeTelemetryCounts[identity, default: 0] > 0 {
             values = Self.incrementOverlap(values)
         }
-        activeTranscriptPathCounts[path, default: 0] += 1
+        activeTranscriptCounts[identity, default: 0] += 1
         lock.unlock()
     }
 
     public func endTranscript(path: String) {
+        endTranscript(identity: .path(path))
+    }
+
+    public func endTranscript(identity: SessionInfoMetricsIdentity) {
+        endTranscript(identity: .session(identity))
+    }
+
+    private func endTranscript(identity: ActivityIdentity) {
         lock.lock()
-        Self.decrement(path: path, in: &activeTranscriptPathCounts)
+        Self.decrement(identity: identity, in: &activeTranscriptCounts)
         lock.unlock()
     }
 
     /// Marks a telemetry scan. If a transcript is already parsing the same
-    /// path, this is one observed overlap event.
+    /// artifact, this is one observed overlap event.
     public func beginTelemetry(path: String) {
+        beginTelemetry(identity: .path(path))
+    }
+
+    public func beginTelemetry(identity: SessionInfoMetricsIdentity) {
+        beginTelemetry(identity: .session(identity))
+    }
+
+    private func beginTelemetry(identity: ActivityIdentity) {
         lock.lock()
-        if activeTelemetryPathCounts[path, default: 0] == 0,
-           activeTranscriptPathCounts[path, default: 0] > 0 {
+        if activeTelemetryCounts[identity, default: 0] == 0,
+           activeTranscriptCounts[identity, default: 0] > 0 {
             values = Self.incrementOverlap(values)
         }
-        activeTelemetryPathCounts[path, default: 0] += 1
+        activeTelemetryCounts[identity, default: 0] += 1
         lock.unlock()
     }
 
     public func endTelemetry(path: String) {
+        endTelemetry(identity: .path(path))
+    }
+
+    public func endTelemetry(identity: SessionInfoMetricsIdentity) {
+        endTelemetry(identity: .session(identity))
+    }
+
+    private func endTelemetry(identity: ActivityIdentity) {
         lock.lock()
-        Self.decrement(path: path, in: &activeTelemetryPathCounts)
+        Self.decrement(identity: identity, in: &activeTelemetryCounts)
         lock.unlock()
     }
 
-    private static func decrement(path: String, in counts: inout [String: Int]) {
-        guard let count = counts[path] else { return }
+    private static func decrement(identity: ActivityIdentity,
+                                  in counts: inout [ActivityIdentity: Int]) {
+        guard let count = counts[identity] else { return }
         if count <= 1 {
-            counts.removeValue(forKey: path)
+            counts.removeValue(forKey: identity)
         } else {
-            counts[path] = count - 1
+            counts[identity] = count - 1
         }
     }
 

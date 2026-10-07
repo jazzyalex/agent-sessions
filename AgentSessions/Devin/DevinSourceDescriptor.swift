@@ -17,11 +17,20 @@ extension SessionSourceDescriptor {
         return SessionSourceDescriptor(
             source: .devin,
             telemetry: TelemetryCapabilities(
-                configuration: .unavailable("session rows expose only scalar model/mode; no configuration timeline"),
+                configuration: .partial("current model comes from the shared session row; Devin exposes no audited per-turn model or effort history"),
                 tokens: .unavailable("3000.6.7 audit: num_tokens is always null; num_tokens_preceding is a context cursor"),
                 cost: .unavailable("3000.6.7 audit: cogs_json is configuration and recorded cost fields are always zero"),
                 weeklyQuota: .unavailable("no account-level quota feed")
             ),
+            scanTelemetry: { session in
+                DevinTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                DevinTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                DevinTelemetryReader.isSupported(session)
+            },
             shortLabel: "Devin CLI",
             badgeInitials: "DV",
             // Warm amber, clear of Claude's brown and OpenClaw's orange.

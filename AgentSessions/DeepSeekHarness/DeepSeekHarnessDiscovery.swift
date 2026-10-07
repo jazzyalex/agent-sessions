@@ -3,6 +3,20 @@ import CryptoKit
 
 /// Bounded filesystem discovery for the DSH session persistence layout.
 final class DeepSeekHarnessDiscovery: SessionDiscovery {
+    private struct CachedContentFingerprint {
+        let stat: SessionFileStat
+        let value: String
+    }
+
+    private static let contentFingerprintCacheLimit = 2_048
+    private static let contentFingerprintCacheLock = NSLock()
+    private static var contentFingerprintCache: [String: CachedContentFingerprint] = [:]
+#if DEBUG
+    static var testManifestFingerprintHashObserver: ((URL) -> Void)?
+    static var testManifestFingerprintBeforeOpenObserver: ((URL) -> Void)?
+    static var testManifestFingerprintAfterOpenObserver: ((URL) -> Void)?
+#endif
+
     private let customRoot: String?
     private let homeDirectory: URL
     private let environment: [String: String]
@@ -69,6 +83,9 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
             )
         }
         for projectDirectory in projectDirectories {
+            guard !Task.isCancelled else {
+                return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+            }
             let projectType: FileAttributeType
             do { projectType = try fileType(projectDirectory) }
             catch { issues.append(.filesystemAccess(projectDirectory.path)); continue }
@@ -77,6 +94,9 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
             do { sessionEntries = try directChildren(of: projectDirectory) }
             catch { issues.append(.filesystemAccess(projectDirectory.path)); continue }
             for child in sessionEntries {
+                guard !Task.isCancelled else {
+                    return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+                }
                 let childType: FileAttributeType
                 do { childType = try fileType(child) }
                 catch { issues.append(.filesystemAccess(child.path)); continue }
@@ -90,6 +110,9 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
                 do { sessionArtifacts = try directChildren(of: child) }
                 catch { issues.append(.filesystemAccess(child.path)); continue }
                 for artifact in sessionArtifacts {
+                    guard !Task.isCancelled else {
+                        return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+                    }
                     let artifactType: FileAttributeType
                     do { artifactType = try fileType(artifact) }
                     catch { issues.append(.filesystemAccess(artifact.path)); continue }
@@ -113,6 +136,9 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
 
         var candidates: [DeepSeekHarnessSessionCandidate] = []
         for (sessionDirectory, members) in grouped {
+            guard !Task.isCancelled else {
+                return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
+            }
             let sorted = members.sorted { lhs, rhs in
                 if lhs.generation != rhs.generation { return lhs.generation > rhs.generation }
                 return lhs.url.path < rhs.url.path
@@ -161,6 +187,8 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
                 ))
             } catch let error as DeepSeekHarnessFormatError {
                 issues.append(error)
+            } catch is CancellationError {
+                return DeepSeekHarnessDiscoveryResult(candidates: [], issues: [], encoding: nil)
             } catch {
                 issues.append(.invalidHeader)
             }
@@ -267,35 +295,80 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
     /// `SessionSourceDescriptor.artifactRevision`.
     ///
     /// Derives the logical sessions root from a previously selected canonical
-    /// generation URL (`<root>/<project>/<session>/<generation>`), rescans it, and
-    /// returns the same session candidate's currently selected generation. Fail-closed:
+    /// generation URL (`<root>/<project>/<session>/<generation>`), inspects only
+    /// that session directory, and returns its currently selected generation.
+    /// Fail-closed:
     /// nil for non-canonical URLs, session directories that do not look like
     /// generation containers, root problems, ambiguity, or an unreadable selected
     /// file. The root always derives from the given URL — resolution never falls back
     /// to the default root, so a failure here can never redirect a scan at `~/.dsh`.
     static func resolveArtifactRevision(forSelectedURL url: URL) -> SessionArtifactRevision? {
-        guard parseGenerationFilename(url.lastPathComponent) != nil else { return nil }
+        guard !Task.isCancelled, parseGenerationFilename(url.lastPathComponent) != nil else { return nil }
         let sessionDirectory = url.deletingLastPathComponent()
         let fileManager = FileManager.default
-        var isDir: ObjCBool = false
-        guard fileManager.fileExists(atPath: sessionDirectory.path, isDirectory: &isDir),
-              isDir.boolValue else { return nil }
+        let projectDirectory = sessionDirectory.deletingLastPathComponent()
+        let root = projectDirectory.deletingLastPathComponent()
+        for directory in [root, projectDirectory, sessionDirectory] {
+            guard let attributes = try? fileManager.attributesOfItem(atPath: directory.path),
+                  let type = attributes[.type] as? FileAttributeType,
+                  type == .typeDirectory else {
+                return nil
+            }
+        }
         // The session directory must itself contain a generation file; otherwise a
         // non-canonical ancestry would derive a bogus root and scan an unrelated tree.
-        let members = (try? fileManager.contentsOfDirectory(at: sessionDirectory,
-                                                            includingPropertiesForKeys: nil,
-                                                            options: [])) ?? []
-        guard members.contains(where: { parseGenerationFilename($0.lastPathComponent) != nil }) else {
+        guard let members = try? fileManager.contentsOfDirectory(at: sessionDirectory,
+                                                                  includingPropertiesForKeys: nil,
+                                                                  options: []) else {
             return nil
         }
-        let root = sessionDirectory.deletingLastPathComponent().deletingLastPathComponent()
-        let candidates = DeepSeekHarnessDiscovery(customRoot: root.path).discover().candidates
-        guard let candidate = candidates.first(where: {
-            $0.sessionDirectory.standardizedFileURL == sessionDirectory.standardizedFileURL
-        }) else { return nil }
-        guard let stat = SessionFileStat.from(candidate.selectedURL) else { return nil }
-        return SessionArtifactRevision(selectedURL: candidate.selectedURL,
-                                       manifestRevision: candidate.manifestRevision,
+        var artifacts: [(url: URL, generation: Int, compression: DeepSeekHarnessCompression)] = []
+        for member in members {
+            guard !Task.isCancelled else { return nil }
+            guard let parsed = parseGenerationFilename(member.lastPathComponent) else { continue }
+            // A visible canonical generation that is not a regular file must
+            // block revision resolution; silently skipping it could select an
+            // older generation and publish stale telemetry.
+            guard let attributes = try? fileManager.attributesOfItem(atPath: member.path),
+                  let type = attributes[.type] as? FileAttributeType,
+                  type == .typeRegular else { return nil }
+            artifacts.append((member, parsed.generation, parsed.compression))
+        }
+        guard !artifacts.isEmpty,
+              Set(artifacts.map { $0.compression }).count == 1 else { return nil }
+        let sorted = artifacts.sorted {
+            if $0.generation != $1.generation { return $0.generation > $1.generation }
+            return $0.url.path < $1.url.path
+        }
+        guard let selected = sorted.first,
+              !sorted.dropFirst().contains(where: { $0.generation == selected.generation }) else {
+            return nil
+        }
+
+        let header: DeepSeekHarnessHeader
+        do {
+            header = try DeepSeekHarnessArtifactReader.readHeader(
+                url: selected.url, compression: selected.compression)
+        } catch {
+            return nil
+        }
+        guard header.version == selected.generation else { return nil }
+        let canonical = canonicalGenerationURL(root: root,
+                                               cwd: header.cwd,
+                                               id: header.id,
+                                               version: header.version,
+                                               compression: selected.compression)
+        let canonicalPath = canonical.standardizedFileURL
+        let selectedPath = selected.url.standardizedFileURL
+        guard canonicalPath == selectedPath
+                || canonicalPath.resolvingSymlinksInPath() == selectedPath.resolvingSymlinksInPath()
+        else { return nil }
+
+        let siblings = sorted.map { $0.url }
+        guard let manifestRevision = try? manifestRevision(siblings: siblings),
+              let stat = SessionFileStat.from(selected.url) else { return nil }
+        return SessionArtifactRevision(selectedURL: selected.url,
+                                       manifestRevision: manifestRevision,
                                        physicalStat: stat)
     }
 
@@ -319,13 +392,85 @@ final class DeepSeekHarnessDiscovery: SessionDiscovery {
     }
 
     private static func manifestRevision(siblings: [URL]) throws -> String {
-        let rows = try siblings.map { url -> String in
-            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-            let mtime = Int64((values.contentModificationDate ?? .distantPast).timeIntervalSince1970)
-            let size = values.fileSize ?? 0
-            return "\(url.lastPathComponent)\u{0}\(mtime)\u{0}\(size)"
-        }.joined(separator: "\n")
-        return SHA256.hash(data: Data(rows.utf8)).map { String(format: "%02x", $0) }.joined()
+        let canonicalSiblings = siblings.sorted { lhs, rhs in
+            if lhs.lastPathComponent != rhs.lastPathComponent {
+                return lhs.lastPathComponent < rhs.lastPathComponent
+            }
+            return lhs.standardizedFileURL.path < rhs.standardizedFileURL.path
+        }
+        var rows: [String] = []
+        rows.reserveCapacity(canonicalSiblings.count)
+        for url in canonicalSiblings {
+            try checkCancellation()
+            guard let stat = SessionFileStat.precise(from: url) else {
+                throw CocoaError(.fileReadNoSuchFile)
+            }
+            let contentFingerprint = try manifestContentFingerprint(for: url, stat: stat)
+            rows.append("\(url.lastPathComponent)\u{0}\(stat.mtime)\u{0}\(stat.size)\u{0}\(stat.fingerprint ?? "")\u{0}\(contentFingerprint)")
+        }
+        let serialized = rows.joined(separator: "\n")
+        return SHA256.hash(data: Data(serialized.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func manifestContentFingerprint(for url: URL, stat expectedStat: SessionFileStat) throws -> String {
+        try checkCancellation()
+        guard expectedStat.size >= 0,
+              expectedStat.size <= Int64(DeepSeekHarnessArtifactReader.maxBytes) else {
+            throw DeepSeekHarnessFormatError.limitsExceeded("manifest artifact bytes")
+        }
+        let key = url.standardizedFileURL.path
+        contentFingerprintCacheLock.lock()
+        let cached = contentFingerprintCache[key]
+        contentFingerprintCacheLock.unlock()
+        if let cached, cached.stat == expectedStat {
+            return cached.value
+        }
+
+        #if DEBUG
+        testManifestFingerprintBeforeOpenObserver?(url)
+        #endif
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        #if DEBUG
+        testManifestFingerprintAfterOpenObserver?(url)
+        #endif
+        let descriptor = handle.fileDescriptor
+        guard SessionFileStat.precise(fromFileDescriptor: descriptor) == expectedStat else {
+            throw DeepSeekHarnessFormatError.staleAnchor
+        }
+        var hasher = SHA256()
+        var bytesRead: Int64 = 0
+        while true {
+            try checkCancellation()
+            let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if chunk.isEmpty { break }
+            bytesRead += Int64(chunk.count)
+            guard bytesRead <= Int64(DeepSeekHarnessArtifactReader.maxBytes) else {
+                throw DeepSeekHarnessFormatError.limitsExceeded("manifest artifact bytes")
+            }
+            hasher.update(data: chunk)
+#if DEBUG
+            testManifestFingerprintHashObserver?(url)
+#endif
+        }
+        guard SessionFileStat.precise(fromFileDescriptor: descriptor) == expectedStat,
+              let finalStat = SessionFileStat.precise(from: url), finalStat == expectedStat else {
+            throw DeepSeekHarnessFormatError.staleAnchor
+        }
+        let value = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        contentFingerprintCacheLock.lock()
+        if contentFingerprintCache.count >= contentFingerprintCacheLimit,
+           contentFingerprintCache[key] == nil,
+           let evictedKey = contentFingerprintCache.keys.first {
+            contentFingerprintCache.removeValue(forKey: evictedKey)
+        }
+        contentFingerprintCache[key] = CachedContentFingerprint(stat: expectedStat, value: value)
+        contentFingerprintCacheLock.unlock()
+        return value
+    }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
     }
 
     private static func normalized(_ value: String?) -> String? {

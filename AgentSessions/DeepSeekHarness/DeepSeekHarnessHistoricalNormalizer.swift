@@ -8,6 +8,14 @@ struct DeepSeekHarnessNormalizedEvent {
     var data: [String: Any] { envelope.data }
 }
 
+struct DeepSeekHarnessNormalizedResult {
+    let events: [DeepSeekHarnessNormalizedEvent]
+    /// Prefix length in the final normalized sequence. Historical migrations
+    /// may insert or coalesce rows, so the physical parse cut is not enough for
+    /// telemetry ownership decisions.
+    let inheritedEventCount: Int
+}
+
 /// Ordered, in-memory-only normalization of released DSH formats. Physical
 /// v0/v1 packed rows survive until the v1-to-v2 edge so they are folded once
 /// into the embedded Assistant streams used by v2 and v3.
@@ -28,6 +36,10 @@ enum DeepSeekHarnessHistoricalNormalizer {
     }
 
     static func normalize(_ result: DeepSeekHarnessParseResult) throws -> [DeepSeekHarnessNormalizedEvent] {
+        try normalizeWithMetadata(result).events
+    }
+
+    static func normalizeWithMetadata(_ result: DeepSeekHarnessParseResult) throws -> DeepSeekHarnessNormalizedResult {
         var rows = result.rows
         var version = result.header.version
         var inheritedEventCount = result.inheritedEventCount
@@ -46,12 +58,15 @@ enum DeepSeekHarnessHistoricalNormalizer {
             inheritedEventCount = migrated.inheritedEventCount
             version = 2
         } else {
-            events = try rows.map { row in
+            events = []
+            events.reserveCapacity(rows.count)
+            for row in rows {
+                try checkCancellation()
                 guard case .event(let event) = row else {
                     throw DeepSeekHarnessFormatError.unsupportedMigration(
                         "format v\(version) cannot contain released packed Assistant rows")
                 }
-                return event
+                events.append(event)
             }
         }
 
@@ -60,10 +75,13 @@ enum DeepSeekHarnessHistoricalNormalizer {
             // payload cannot become accepted merely because migration
             // drops or transforms the offending field.
             for event in events {
+                try checkCancellation()
                 try DeepSeekHarnessPayloadValidator.assertV2EventPreMigration(event)
             }
-            events = try migrateV2ToV3(events, header: result.header,
-                                       inheritedEventCount: inheritedEventCount)
+            let migrated = try migrateV2ToV3(events, header: result.header,
+                                              inheritedEventCount: inheritedEventCount)
+            events = migrated.events
+            inheritedEventCount = migrated.inheritedEventCount
             version = 3
         }
         if version == 4 {
@@ -71,7 +89,8 @@ enum DeepSeekHarnessHistoricalNormalizer {
             try validateV4(events, header: v4Header)
             try DeepSeekHarnessRelationshipValidator.assertPublishableRelationships(
                 events, header: v4Header)
-            return events.map { event in
+            let normalized = try events.map { event in
+                try checkCancellation()
                 let unknownIgnorable = !DeepSeekHarnessVocabulary.v4Known.contains(event.type)
                     && event.ignorable
                 return DeepSeekHarnessNormalizedEvent(
@@ -80,6 +99,9 @@ enum DeepSeekHarnessHistoricalNormalizer {
                     diagnosticOnly: event.type == "assistant/attempt" || unknownIgnorable
                 )
             }
+            return DeepSeekHarnessNormalizedResult(
+                events: normalized,
+                inheritedEventCount: try inheritedCutForV4(events, header: v4Header))
         }
         guard version == 3 else { throw DeepSeekHarnessFormatError.unsupportedVersion(version) }
 
@@ -87,7 +109,8 @@ enum DeepSeekHarnessHistoricalNormalizer {
         try validateV3(events, header: v3Header)
         try DeepSeekHarnessRelationshipValidator.assertPublishableRelationships(
             events, header: v3Header)
-        return events.map { event in
+        let normalized = try events.map { event in
+            try checkCancellation()
             let unknownIgnorable = !DeepSeekHarnessVocabulary.v3Known.contains(event.type) && event.ignorable
             return DeepSeekHarnessNormalizedEvent(
                 envelope: event,
@@ -95,7 +118,17 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 diagnosticOnly: event.type == "assistant/attempt" || unknownIgnorable
             )
         }
+        return DeepSeekHarnessNormalizedResult(
+            events: normalized,
+            inheritedEventCount: inheritedEventCount)
     }
+
+    private static func checkCancellation() throws {
+        guard !Task.isCancelled else { throw CancellationError() }
+    }
+#if DEBUG
+    static var testNormalizationCheckpointObserver: (() -> Void)?
+#endif
 
     // MARK: v0 -> v1
 
@@ -112,6 +145,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
     ) throws -> [DeepSeekHarnessPhysicalRow] {
         var state = V0State()
         return try rows.map { row in
+            try checkCancellation()
             guard case .event(let source) = row else { return row }
             var event = source
             switch event.type {
@@ -433,20 +467,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
     /// same name presence/value). Empty tool-call identities, block
     /// boundaries, usage, and finish payloads stay raw `chunk` records.
     private struct AssistantStreamAccumulator {
-        private struct Record {
-            var type: String
-            var time0: Int64
-            var index: Int
-            var dt: [Int]
-            var texts: [String]
-            var id: String?
-            var name: String?
-            var hasName: Bool
-            var chunk: [String: Any]?
-            var lastTime: Int64
-        }
-
-        private var records: [Record] = []
+        private var records: [StreamEntry] = []
 
         mutating func push(time: Int64, chunk: [String: Any]) throws {
             guard let chunkType = chunk["type"] as? String else {
@@ -462,18 +483,17 @@ enum DeepSeekHarnessHistoricalNormalizer {
                     throw DeepSeekHarnessFormatError.invalidPayload("\(chunkType) text must be a string")
                 }
                 let type = chunkType == "text-delta" ? "text-chunks" : "reasoning-chunks"
-                let previous = records.last
-                let gap = previous.flatMap {
-                    $0.type == type ? safeStreamGap($0.lastTime, time) : nil
-                }
-                if let previous, previous.type == type, previous.index == index, let gap {
-                    records[records.count - 1].dt.append(gap)
-                    records[records.count - 1].texts.append(text)
-                    records[records.count - 1].lastTime = time
+                if let lastIndex = records.indices.last,
+                   records[lastIndex].type == type,
+                   records[lastIndex].index == index,
+                   let gap = safeStreamGap(records[lastIndex].lastTime, time) {
+                    records[lastIndex].dt.append(gap)
+                    records[lastIndex].texts.append(text)
+                    records[lastIndex].lastTime = time
                 } else {
-                    records.append(Record(type: type, time0: time, index: index, dt: [],
-                                          texts: [text], id: nil, name: nil, hasName: false,
-                                          chunk: nil, lastTime: time))
+                    records.append(StreamEntry(type: type, time0: time, index: index, dt: [],
+                                               texts: [text], id: nil, name: nil, hasName: false,
+                                               chunk: nil, lastTime: time))
                 }
             case "tool-call-delta":
                 guard let index = DeepSeekHarnessJSON.count(chunk["index"]) else {
@@ -493,60 +513,130 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 let hasName = chunk.keys.contains("name")
                 let name = chunk["name"] as? String
                 if id.isEmpty || (hasName && name?.isEmpty != false) {
-                    records.append(Record(type: "chunk", time0: time, index: 0, dt: [],
-                                          texts: [], id: nil, name: nil, hasName: false,
-                                          chunk: chunk, lastTime: time))
+                    records.append(StreamEntry(type: "chunk", time0: time, index: 0, dt: [],
+                                               texts: [], id: nil, name: nil, hasName: false,
+                                               chunk: chunk, lastTime: time))
                     return
                 }
-                let previous = records.last
-                let gap = previous.flatMap {
-                    $0.type == "tool-call-chunks" ? safeStreamGap($0.lastTime, time) : nil
-                }
-                let previousName: String? = previous?.name ?? nil
-                let sameName = previous?.type == "tool-call-chunks"
-                    && previous?.hasName == hasName && previousName == name
-                if let previous, previous.type == "tool-call-chunks",
-                   previous.index == index, previous.id == id, sameName, let gap {
-                    records[records.count - 1].dt.append(gap)
-                    records[records.count - 1].texts.append(delta)
-                    records[records.count - 1].lastTime = time
+                if let lastIndex = records.indices.last,
+                   records[lastIndex].type == "tool-call-chunks",
+                   records[lastIndex].index == index,
+                   records[lastIndex].id == id,
+                   records[lastIndex].hasName == hasName,
+                   records[lastIndex].name == name,
+                   let gap = safeStreamGap(records[lastIndex].lastTime, time) {
+                    records[lastIndex].dt.append(gap)
+                    records[lastIndex].texts.append(delta)
+                    records[lastIndex].lastTime = time
                 } else {
-                    records.append(Record(type: "tool-call-chunks", time0: time, index: index,
-                                          dt: [], texts: [delta], id: id, name: name,
-                                          hasName: hasName, chunk: nil, lastTime: time))
+                    records.append(StreamEntry(type: "tool-call-chunks", time0: time, index: index,
+                                               dt: [], texts: [delta], id: id, name: name,
+                                               hasName: hasName, chunk: nil, lastTime: time))
                 }
             case "block-start", "block-end", "usage", "finish":
-                records.append(Record(type: "chunk", time0: time, index: 0, dt: [],
-                                      texts: [], id: nil, name: nil, hasName: false,
-                                      chunk: chunk, lastTime: time))
+                records.append(StreamEntry(type: "chunk", time0: time, index: 0, dt: [],
+                                           texts: [], id: nil, name: nil, hasName: false,
+                                           chunk: chunk, lastTime: time))
             default:
                 throw DeepSeekHarnessFormatError.invalidPayload(
                     "unsupported assistant stream chunk type \(chunkType)")
             }
         }
 
-        func snapshot() -> [[String: Any]] {
-            records.map { record in
-                switch record.type {
-                case "chunk":
-                    return ["type": "chunk", "time": record.time0, "chunk": record.chunk ?? [:]]
-                case "tool-call-chunks":
-                    var result: [String: Any] = ["type": record.type, "time0": record.time0,
-                                                 "index": record.index, "dt": record.dt,
-                                                 "id": record.id ?? "", "args": record.texts]
-                    if record.hasName, let name = record.name { result["name"] = name }
-                    return result
-                default:
-                    return ["type": record.type, "time0": record.time0, "index": record.index,
-                            "dt": record.dt, "texts": record.texts]
-                }
-            }
+        mutating func drain() throws -> [StreamEntry] {
+            try DeepSeekHarnessHistoricalNormalizer.checkCancellation()
+#if DEBUG
+            DeepSeekHarnessHistoricalNormalizer.testNormalizationCheckpointObserver?()
+#endif
+            try DeepSeekHarnessHistoricalNormalizer.checkCancellation()
+            let drained = records
+            records.removeAll(keepingCapacity: false)
+            return drained
         }
     }
 
     private struct StreamEntry {
-        var record: [String: Any]
+        let type: String
+        let time0: Int64
+        let index: Int
+        var dt: [Int]
+        var texts: [String]
+        let id: String?
+        let name: String?
+        let hasName: Bool
+        let chunk: [String: Any]?
         var lastTime: Int64
+
+        init(type: String, time0: Int64, index: Int, dt: [Int], texts: [String],
+             id: String?, name: String?, hasName: Bool, chunk: [String: Any]?,
+             lastTime: Int64) {
+            self.type = type
+            self.time0 = time0
+            self.index = index
+            self.dt = dt
+            self.texts = texts
+            self.id = id
+            self.name = name
+            self.hasName = hasName
+            self.chunk = chunk
+            self.lastTime = lastTime
+        }
+
+        init(record: [String: Any], lastTime: Int64) throws {
+            guard let type = record["type"] as? String else {
+                throw DeepSeekHarnessFormatError.invalidPayload("assistant stream record lacks a type")
+            }
+            switch type {
+            case "chunk":
+                self.init(type: type,
+                          time0: Int64(DeepSeekHarnessJSON.safeInt(record["time"]) ?? 0),
+                          index: 0, dt: [], texts: [], id: nil, name: nil,
+                          hasName: false, chunk: record["chunk"] as? [String: Any] ?? [:],
+                          lastTime: lastTime)
+            case "text-chunks", "reasoning-chunks":
+                guard let time0 = DeepSeekHarnessJSON.safeInt(record["time0"]),
+                      let index = DeepSeekHarnessJSON.count(record["index"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "assistant stream record has invalid coordinates")
+                }
+                self.init(type: type, time0: Int64(time0), index: index,
+                          dt: try DeepSeekHarnessHistoricalNormalizer.integerArray(record["dt"]),
+                          texts: try DeepSeekHarnessHistoricalNormalizer.stringArray(record["texts"]),
+                          id: nil, name: nil, hasName: false, chunk: nil,
+                          lastTime: lastTime)
+            case "tool-call-chunks":
+                guard let time0 = DeepSeekHarnessJSON.safeInt(record["time0"]),
+                      let index = DeepSeekHarnessJSON.count(record["index"]) else {
+                    throw DeepSeekHarnessFormatError.invalidPayload(
+                        "tool-call stream record has invalid coordinates")
+                }
+                self.init(type: type, time0: Int64(time0), index: index,
+                          dt: try DeepSeekHarnessHistoricalNormalizer.integerArray(record["dt"]),
+                          texts: try DeepSeekHarnessHistoricalNormalizer.stringArray(record["args"]),
+                          id: record["id"] as? String, name: record["name"] as? String,
+                          hasName: record.keys.contains("name"), chunk: nil,
+                          lastTime: lastTime)
+            default:
+                throw DeepSeekHarnessFormatError.invalidPayload(
+                    "unsupported assistant stream record type \(type)")
+            }
+        }
+
+        func rawRecord() -> [String: Any] {
+            switch type {
+            case "chunk":
+                return ["type": type, "time": time0, "chunk": chunk ?? [:]]
+            case "tool-call-chunks":
+                var result: [String: Any] = ["type": type, "time0": time0,
+                                             "index": index, "dt": dt,
+                                             "id": id ?? "", "args": texts]
+                if hasName, let name { result["name"] = name }
+                return result
+            default:
+                return ["type": type, "time0": time0, "index": index,
+                        "dt": dt, "texts": texts]
+            }
+        }
     }
 
     /// One in-progress assistant attempt: coalesced packed stream records
@@ -601,6 +691,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
             lastTime: header.createdAtMilliseconds
         )
         for row in rows {
+            try checkCancellation()
             switch row {
             case .packed(let run): try appendPackedRun(run, state: &state)
             case .event(let event): try consumeV1(event, state: &state)
@@ -630,21 +721,21 @@ enum DeepSeekHarnessHistoricalNormalizer {
         if state.pending == nil {
             state.pending = StreamingAttempt(group: attemptGroup(turn: run.turn, step: run.step))
         }
-        guard var pending = state.pending else { return }
+        guard state.pending != nil else { return }
         if (run.firstSeq < state.sourceCut) != (run.lastSeq < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
-        let first = pending.group.spans.first?.firstSeq ?? run.firstSeq
+        let first = state.pending!.group.spans.first?.firstSeq ?? run.firstSeq
         if (first < state.sourceCut) != (run.lastSeq < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
-        flushAccumulator(&pending.group)
-        appendStreamRecord(&pending.group, source: run.streamRecord, lastTime: Int64(run.lastTime))
-        recordChunkSpan(&pending.group, firstSeq: run.firstSeq,
+        try flushAccumulator(&state.pending!.group)
+        try appendStreamRecord(&state.pending!.group, source: run.streamRecord,
+                               lastTime: Int64(run.lastTime))
+        recordChunkSpan(&state.pending!.group, firstSeq: run.firstSeq,
                         eventCount: run.eventCount, lastTime: Int64(run.lastTime))
-        state.pending = pending
     }
 
     private static func consumeV1(
@@ -740,19 +831,19 @@ enum DeepSeekHarnessHistoricalNormalizer {
         if state.pending == nil {
             state.pending = StreamingAttempt(group: attemptGroup(turn: turn, step: step))
         }
-        guard var pending = state.pending else { return }
-        let first = pending.group.spans.first?.firstSeq ?? event.sequence
+        guard state.pending != nil else { return }
+        let first = state.pending!.group.spans.first?.firstSeq ?? event.sequence
         if (first < state.sourceCut) != (event.sequence < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
-        var accumulator = pending.group.accumulator ?? AssistantStreamAccumulator()
-        try accumulator.push(time: event.timeMilliseconds, chunk: chunk)
-        pending.group.accumulator = accumulator
-        recordChunkSpan(&pending.group, firstSeq: event.sequence,
+        if state.pending!.group.accumulator == nil {
+            state.pending!.group.accumulator = AssistantStreamAccumulator()
+        }
+        try state.pending!.group.accumulator!.push(time: event.timeMilliseconds, chunk: chunk)
+        recordChunkSpan(&state.pending!.group, firstSeq: event.sequence,
                         eventCount: 1, lastTime: event.timeMilliseconds)
-        if chunk["type"] as? String == "finish" { pending.group.terminal = true }
-        state.pending = pending
+        if chunk["type"] as? String == "finish" { state.pending!.group.terminal = true }
     }
 
     private static func transformMessage(
@@ -771,16 +862,16 @@ enum DeepSeekHarnessHistoricalNormalizer {
             // validation then refuses its turn/step mismatch.
             try finishAttempt(state: &state)
             var fresh = attemptGroup(turn: turn, step: step)
-            try emitSource(messageEvent(event, group: &fresh), state: &state)
+            try emitSource(try messageEvent(event, group: &fresh), state: &state)
             return
         }
-        guard var pending = state.pending else {
+        guard state.pending != nil else {
             if let cited = event.sourceEventSeqs, !cited.isEmpty {
                 throw DeepSeekHarnessFormatError.unsupportedMigration(
                     "assistant/message \(event.sequence) chunk references are not one complete ordered attempt")
             }
             var fresh = attemptGroup(turn: turn, step: step)
-            try emitSource(messageEvent(event, group: &fresh), state: &state)
+            try emitSource(try messageEvent(event, group: &fresh), state: &state)
             return
         }
         guard let cited = event.sourceEventSeqs else {
@@ -790,26 +881,25 @@ enum DeepSeekHarnessHistoricalNormalizer {
         if cited.isEmpty {
             try finishAttempt(state: &state)
             var fresh = attemptGroup(turn: turn, step: step)
-            try emitSource(messageEvent(event, group: &fresh), state: &state)
+            try emitSource(try messageEvent(event, group: &fresh), state: &state)
             return
         }
-        guard matchesChunkSources(pending.group, cited) else {
+        guard try matchesChunkSources(state.pending!.group, cited) else {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "assistant/message \(event.sequence) chunk references are not one complete ordered attempt")
         }
-        let first = pending.group.spans.first?.firstSeq ?? event.sequence
+        let first = state.pending!.group.spans.first?.firstSeq ?? event.sequence
         if (first < state.sourceCut) != (event.sequence < state.sourceCut) {
             throw DeepSeekHarnessFormatError.unsupportedMigration(
                 "inherited cut \(state.sourceCut) splits one Assistant attempt")
         }
-        pending.group.terminal = true
-        state.pending = pending
+        state.pending!.group.terminal = true
         try flushBuffered(state: &state)
-        guard var flushed = state.pending else {
+        guard state.pending != nil else {
             throw DeepSeekHarnessFormatError.invalidPayload(
                 "assistant/message \(event.sequence) lost its chunk attempt")
         }
-        let message = messageEvent(event, group: &flushed.group)
+        let message = try messageEvent(event, group: &state.pending!.group)
         try emitSource(message, state: &state)
         state.pending = nil
     }
@@ -893,11 +983,12 @@ enum DeepSeekHarnessHistoricalNormalizer {
         group.lastChunkTime = lastTime
     }
 
-    private static func matchesChunkSources(_ group: AttemptGroup, _ sources: [Int]) -> Bool {
+    private static func matchesChunkSources(_ group: AttemptGroup, _ sources: [Int]) throws -> Bool {
         guard sources.count == group.chunkCount else { return false }
         var index = 0
         for span in group.spans {
             for offset in 0..<span.eventCount {
+                try checkCancellation()
                 guard index < sources.count, sources[index] == span.firstSeq + offset else {
                     return false
                 }
@@ -914,100 +1005,118 @@ enum DeepSeekHarnessHistoricalNormalizer {
     /// Swift value semantics give each group its own copy, matching the
     /// upstream detached-copy flush of accumulator records behind an owned
     /// packed prefix. Ported from staged `appendStreamRecord`.
+    private static func integerArray(_ value: Any?) throws -> [Int] {
+        guard let values = value as? [Any] else { return [] }
+        var result: [Int] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            try checkCancellation()
+            if let integer = DeepSeekHarnessJSON.safeInt(value) { result.append(integer) }
+        }
+        return result
+    }
+
+    private static func stringArray(_ value: Any?) throws -> [String] {
+        guard let values = value as? [Any] else { return [] }
+        var result: [String] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            try checkCancellation()
+            if let string = value as? String { result.append(string) }
+        }
+        return result
+    }
+
     private static func appendStreamRecord(
         _ group: inout AttemptGroup,
         source: [String: Any],
         lastTime: Int64
-    ) {
-        let sourceType = source["type"] as? String
-        if group.stream.isEmpty || sourceType == "chunk"
-            || group.stream[group.stream.count - 1].record["type"] as? String != sourceType {
-            group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+    ) throws {
+        try appendStreamEntry(&group, source: StreamEntry(record: source, lastTime: lastTime))
+    }
+
+    private static func appendStreamEntry(
+        _ group: inout AttemptGroup,
+        source: StreamEntry
+    ) throws {
+        try checkCancellation()
+        guard let lastIndex = group.stream.indices.last,
+              source.type != "chunk",
+              group.stream[lastIndex].type == source.type else {
+            group.stream.append(source)
             return
         }
-        var previous = group.stream[group.stream.count - 1]
-        guard let previousIndex = DeepSeekHarnessJSON.count(previous.record["index"]),
-              let sourceIndex = DeepSeekHarnessJSON.count(source["index"]),
-              previousIndex == sourceIndex,
-              let sourceTime = DeepSeekHarnessJSON.safeInt(source["time0"]),
-              let gap = safeStreamGap(previous.lastTime, Int64(sourceTime)) else {
-            group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+        guard group.stream[lastIndex].index == source.index,
+              let gap = safeStreamGap(group.stream[lastIndex].lastTime, source.time0) else {
+            group.stream.append(source)
             return
         }
-        if sourceType == "tool-call-chunks" {
-            let previousHasName = previous.record.keys.contains("name")
-            let sourceHasName = source.keys.contains("name")
-            guard (previous.record["id"] as? String) == (source["id"] as? String),
-                  previousHasName == sourceHasName,
-                  (previous.record["name"] as? String) == (source["name"] as? String) else {
-                group.stream.append(StreamEntry(record: source, lastTime: lastTime))
+        if source.type == "tool-call-chunks" {
+            guard group.stream[lastIndex].id == source.id,
+                  group.stream[lastIndex].hasName == source.hasName,
+                  group.stream[lastIndex].name == source.name else {
+                group.stream.append(source)
                 return
             }
-            var dt = (previous.record["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) }
-            dt.append(gap)
-            dt.append(contentsOf: (source["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) })
-            var args = (previous.record["args"] as? [Any] ?? []).compactMap { $0 as? String }
-            args.append(contentsOf: (source["args"] as? [Any] ?? []).compactMap { $0 as? String })
-            previous.record["dt"] = dt
-            previous.record["args"] = args
-        } else {
-            var dt = (previous.record["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) }
-            dt.append(gap)
-            dt.append(contentsOf: (source["dt"] as? [Any] ?? []).compactMap { DeepSeekHarnessJSON.safeInt($0) })
-            var texts = (previous.record["texts"] as? [Any] ?? []).compactMap { $0 as? String }
-            texts.append(contentsOf: (source["texts"] as? [Any] ?? []).compactMap { $0 as? String })
-            previous.record["dt"] = dt
-            previous.record["texts"] = texts
         }
-        previous.lastTime = lastTime
-        group.stream[group.stream.count - 1] = previous
+        // Mutate the stored element directly. Copying a prior dictionary and its
+        // growing arrays here made a long compatible packed run quadratic.
+        group.stream[lastIndex].dt.append(gap)
+        try appendChecked(source.dt, to: &group.stream[lastIndex].dt)
+        try appendChecked(source.texts, to: &group.stream[lastIndex].texts)
+        group.stream[lastIndex].lastTime = source.lastTime
     }
 
-    private static func flushAccumulator(_ group: inout AttemptGroup) {
-        guard let accumulator = group.accumulator else { return }
-        for record in accumulator.snapshot() {
-            appendStreamRecord(&group, source: record, lastTime: recordLastTime(record))
-        }
+    private static func flushAccumulator(_ group: inout AttemptGroup) throws {
+        guard group.accumulator != nil else { return }
+        let records = try group.accumulator!.drain()
         group.accumulator = nil
+        for record in records {
+            try checkCancellation()
+            try appendStreamEntry(&group, source: record)
+        }
     }
 
-    private static func streamOf(_ group: inout AttemptGroup) -> [[String: Any]] {
-        flushAccumulator(&group)
-        return group.stream.map(\.record)
+    private static func streamOf(_ group: inout AttemptGroup) throws -> [[String: Any]] {
+        try flushAccumulator(&group)
+        var records: [[String: Any]] = []
+        records.reserveCapacity(group.stream.count)
+        for entry in group.stream {
+            try checkCancellation()
+            records.append(entry.rawRecord())
+        }
+        return records
     }
 
     private static func messageEvent(
         _ source: DeepSeekHarnessEnvelope,
         group: inout AttemptGroup
-    ) -> DeepSeekHarnessEnvelope {
+    ) throws -> DeepSeekHarnessEnvelope {
         var data = source.data
-        data["stream"] = streamOf(&group)
+        data["stream"] = try streamOf(&group)
         return replacing(source, data: data, dropSourceEventSeqs: true)
     }
 
-    private static func attemptEvent(_ group: inout AttemptGroup) -> DeepSeekHarnessEnvelope {
+    private static func attemptEvent(_ group: inout AttemptGroup) throws -> DeepSeekHarnessEnvelope {
         guard let lastChunkSeq = group.lastChunkSeq, let lastChunkTime = group.lastChunkTime else {
             // Unreachable: a pending group always covers at least one chunk.
             return DeepSeekHarnessEnvelope(
                 type: "assistant/attempt", sequence: 0, timeMilliseconds: 0,
-                data: ["turn": group.turn, "step": group.step, "stream": streamOf(&group)])
+                data: ["turn": group.turn, "step": group.step, "stream": try streamOf(&group)])
         }
         return DeepSeekHarnessEnvelope(
             type: "assistant/attempt", sequence: lastChunkSeq,
             timeMilliseconds: lastChunkTime,
-            data: ["turn": group.turn, "step": group.step, "stream": streamOf(&group)]
+            data: ["turn": group.turn, "step": group.step, "stream": try streamOf(&group)]
         )
     }
 
-    private static func recordLastTime(_ record: [String: Any]) -> Int64 {
-        guard (record["type"] as? String) != "chunk" else {
-            return Int64(DeepSeekHarnessJSON.safeInt(record["time"]) ?? 0)
+    private static func appendChecked<T>(_ source: [T], to destination: inout [T]) throws {
+        for (index, value) in source.enumerated() {
+            if index.isMultiple(of: 1_024) { try checkCancellation() }
+            destination.append(value)
         }
-        var time = Int64(DeepSeekHarnessJSON.safeInt(record["time0"]) ?? 0)
-        for gap in (record["dt"] as? [Any] ?? []).compactMap({ DeepSeekHarnessJSON.safeInt($0) }) {
-            time = time &+ Int64(gap)
-        }
-        return time
+        try checkCancellation()
     }
 
     private static func safeStreamGap(_ previous: Int64, _ next: Int64) -> Int? {
@@ -1025,23 +1134,24 @@ enum DeepSeekHarnessHistoricalNormalizer {
     }
 
     private static func finishAttempt(state: inout V1State) throws {
-        guard let pending = state.pending else { return }
-        var group = pending.group
-        guard let origin = group.lastChunkSeq else {
+        guard state.pending != nil else { return }
+        guard let origin = state.pending!.group.lastChunkSeq else {
             throw DeepSeekHarnessFormatError.invalidPayload("assistant attempt covers no chunks")
         }
-        let attempt = attemptEvent(&group)
+        let attempt = try attemptEvent(&state.pending!.group)
         try emitGenerated(attempt, origin: origin, state: &state)
         try flushBuffered(state: &state)
         state.pending = nil
     }
 
     private static func flushBuffered(state: inout V1State) throws {
-        guard var pending = state.pending else { return }
-        let buffered = pending.afterLastChunk
-        pending.afterLastChunk.removeAll(keepingCapacity: true)
-        state.pending = pending
-        for event in buffered { try emitSource(event, state: &state) }
+        guard state.pending != nil else { return }
+        let buffered = state.pending!.afterLastChunk
+        state.pending!.afterLastChunk.removeAll(keepingCapacity: false)
+        for event in buffered {
+            try checkCancellation()
+            try emitSource(event, state: &state)
+        }
     }
 
     private static func emitSource(
@@ -1109,13 +1219,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
         _ events: [DeepSeekHarnessEnvelope],
         header: DeepSeekHarnessHeader,
         inheritedEventCount: Int
-    ) throws -> [DeepSeekHarnessEnvelope] {
+    ) throws -> (events: [DeepSeekHarnessEnvelope], inheritedEventCount: Int) {
         var state = V2State(
             header: header,
             sourceCut: header.isSeeded ? nil : 0,
             targetCut: header.isSeeded ? nil : 0
         )
         for event in events {
+            try checkCancellation()
             guard event.sequence == state.mapping.count else {
                 throw DeepSeekHarnessFormatError.sequence(
                     expected: state.mapping.count, actual: event.sequence)
@@ -1171,7 +1282,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 }
             }
 
-            source = renamePTC(source)
+            source = try renamePTC(source)
             state.mapping[event.sequence] = state.output.count
             state.output.append(try remap(source, targetSequence: state.output.count,
                                           mapping: state.mapping, surfaceVersion: 3))
@@ -1202,7 +1313,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
             throw DeepSeekHarnessFormatError.invalidReference(
                 "current-generation delivery marker names the wrong session")
         }
-        return state.output
+        return (state.output, state.targetCut ?? 0)
     }
 
     private static func emitSystem(
@@ -1265,6 +1376,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
             messages = event.data["messages"] as? [[String: Any]] ?? []
         }
         for message in messages {
+            try checkCancellation()
             guard let id = message["id"] as? String, !id.isEmpty else {
                 throw DeepSeekHarnessFormatError.invalidPayload(
                     "\(event.type) \(event.sequence) contains a message without identity")
@@ -1277,7 +1389,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
         }
     }
 
-    private static func renamePTC(_ event: DeepSeekHarnessEnvelope) -> DeepSeekHarnessEnvelope {
+    private static func renamePTC(_ event: DeepSeekHarnessEnvelope) throws -> DeepSeekHarnessEnvelope {
         switch event.type {
         case "agent-preset/selected":
             guard event.data["agentPreset"] as? String == "code" else { return event }
@@ -1291,7 +1403,13 @@ enum DeepSeekHarnessHistoricalNormalizer {
             let key = event.type == "agent/inbox/spliced" ? "inserted" : "messages"
             guard let messages = event.data[key] as? [[String: Any]] else { return event }
             var data = event.data
-            data[key] = messages.map(renameMessageSource)
+            var renamedMessages: [[String: Any]] = []
+            renamedMessages.reserveCapacity(messages.count)
+            for message in messages {
+                try checkCancellation()
+                renamedMessages.append(renameMessageSource(message))
+            }
+            data[key] = renamedMessages
             return replacing(event, data: data)
         default: return event
         }
@@ -1325,8 +1443,11 @@ enum DeepSeekHarnessHistoricalNormalizer {
 
         var sources: [Int]?
         if let values = source.sourceEventSeqs {
-            sources = try values.map {
-                try one($0, "\(source.type) \(source.sequence) sourceEventSeqs")
+            sources = []
+            sources?.reserveCapacity(values.count)
+            for value in values {
+                try checkCancellation()
+                sources?.append(try one(value, "\(source.type) \(source.sequence) sourceEventSeqs"))
             }
         }
         var operation = source.surfaceOp
@@ -1354,26 +1475,34 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 "start": try one(start, "\(source.type) shadowedRange start"),
                 "end": try one(end, "\(source.type) shadowedRange end")
             ]
-            data["shadowedSeqs"] = try seqs.map { value in
+            var mappedSequences: [Int] = []
+            mappedSequences.reserveCapacity(seqs.count)
+            for value in seqs {
+                try checkCancellation()
                 guard let seq = DeepSeekHarnessJSON.count(value) else {
                     throw DeepSeekHarnessFormatError.invalidReference(
                         "\(source.type) shadowedSeqs contains a non-sequence")
                 }
-                return try one(seq, "\(source.type) shadowedSeqs")
+                mappedSequences.append(try one(seq, "\(source.type) shadowedSeqs"))
             }
+            data["shadowedSeqs"] = mappedSequences
         }
         if source.type == "session/title" || source.type == "session/title-llm-request" {
             guard let seqs = data["messageSeqs"] as? [Any] else {
                 throw DeepSeekHarnessFormatError.invalidPayload(
                     "\(source.type) \(source.sequence) messageSeqs must be an array")
             }
-            data["messageSeqs"] = try seqs.map { value in
+            var mappedSequences: [Int] = []
+            mappedSequences.reserveCapacity(seqs.count)
+            for value in seqs {
+                try checkCancellation()
                 guard let seq = DeepSeekHarnessJSON.count(value) else {
                     throw DeepSeekHarnessFormatError.invalidReference(
                         "\(source.type) messageSeqs contains a non-sequence")
                 }
-                return try one(seq, "\(source.type) messageSeqs")
+                mappedSequences.append(try one(seq, "\(source.type) messageSeqs"))
             }
+            data["messageSeqs"] = mappedSequences
         }
         return DeepSeekHarnessEnvelope(
             type: source.type, sequence: targetSequence,
@@ -1390,6 +1519,11 @@ enum DeepSeekHarnessHistoricalNormalizer {
         var systemHead: Int?
         var hasSurface = false
         for (index, event) in events.enumerated() {
+            try checkCancellation()
+#if DEBUG
+            testNormalizationCheckpointObserver?()
+#endif
+            try checkCancellation()
             guard event.sequence == index else {
                 throw DeepSeekHarnessFormatError.sequence(expected: index, actual: event.sequence)
             }
@@ -1484,7 +1618,13 @@ enum DeepSeekHarnessHistoricalNormalizer {
         var ownCatalogChildren = Set<String>()
         var surface: [Int] = []
         var systemHead: Int?
+        let inheritedCut = try inheritedCutForV4(events, header: header)
         for (index, event) in events.enumerated() {
+            try checkCancellation()
+#if DEBUG
+            testNormalizationCheckpointObserver?()
+#endif
+            try checkCancellation()
             guard event.sequence == index else {
                 throw DeepSeekHarnessFormatError.sequence(expected: index, actual: event.sequence)
             }
@@ -1528,7 +1668,7 @@ enum DeepSeekHarnessHistoricalNormalizer {
                 throw DeepSeekHarnessFormatError.invalidReference(
                     "compaction cannot shadow the protected system head")
             }
-            if event.type == "subagent/catalog", event.sequence >= inheritedCutForV4(events, header: header) {
+            if event.type == "subagent/catalog", event.sequence >= inheritedCut {
                 guard let version = DeepSeekHarnessJSON.safeInt(event.data["version"]),
                       version == 0 || version == 1,
                       let childID = DeepSeekHarnessJSON.nonEmptyString(event.data["childId"]),
@@ -1557,8 +1697,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
     ) throws {
         guard let message = event.data["message"] as? [String: Any],
               let blocks = message["content"] as? [Any] else { return }
-        let additions = blocks.compactMap { $0 as? [String: Any] }
-            .filter { $0["type"] as? String == "tool-addition" }
+        var additions: [[String: Any]] = []
+        additions.reserveCapacity(blocks.count)
+        for block in blocks {
+            try checkCancellation()
+            guard let block = block as? [String: Any],
+                  block["type"] as? String == "tool-addition" else { continue }
+            additions.append(block)
+        }
         guard !additions.isEmpty else { return }
         guard let headerSeq = DeepSeekHarnessJSON.count(event.data["headerSeq"]),
               headerSeq < event.sequence, headerSeq < events.count,
@@ -1568,10 +1714,17 @@ enum DeepSeekHarnessHistoricalNormalizer {
             throw DeepSeekHarnessFormatError.invalidPayload(
                 "developer/message tool additions require an earlier request/header")
         }
-        let tools = rawTools.compactMap { $0 as? [String: Any] }
+        var toolsByName: [String: [[String: Any]]] = [:]
+        for rawTool in rawTools {
+            try checkCancellation()
+            guard let tool = rawTool as? [String: Any],
+                  let name = tool["name"] as? String else { continue }
+            toolsByName[name, default: []].append(tool)
+        }
         for addition in additions {
+            try checkCancellation()
             let name = addition["toolName"] as? String
-            let matches = tools.filter { $0["name"] as? String == name }
+            let matches = name.flatMap { toolsByName[$0] } ?? []
             guard matches.count == 1,
                   matches[0]["description"] is String,
                   matches[0]["parameters"] is [String: Any] else {
@@ -1584,19 +1737,31 @@ enum DeepSeekHarnessHistoricalNormalizer {
     private static func inheritedCutForV4(
         _ events: [DeepSeekHarnessEnvelope],
         header: DeepSeekHarnessHeader
-    ) -> Int {
+    ) throws -> Int {
         guard header.isSeeded else { return 0 }
-        return events.last(where: {
-            $0.type == "session/end-seed" && ($0.data["inherited"] as? Bool) == true
-        })?.sequence ?? 0
+        for event in events.reversed() {
+            try checkCancellation()
+            if event.type == "session/end-seed",
+               (event.data["inherited"] as? Bool) == true {
+                return event.sequence
+            }
+        }
+        return 0
     }
 
     private static func validateEarlierReferences(_ event: DeepSeekHarnessEnvelope) throws {
         if let sources = event.sourceEventSeqs {
-            guard !sources.isEmpty, Set(sources).count == sources.count,
-                  sources.allSatisfy({ $0 >= 0 && $0 < event.sequence }) else {
+            guard !sources.isEmpty else {
                 throw DeepSeekHarnessFormatError.invalidReference(
                     "\(event.type) \(event.sequence) sourceEventSeqs must be unique earlier events")
+            }
+            var seen = Set<Int>()
+            for source in sources {
+                try checkCancellation()
+                guard source >= 0, source < event.sequence, seen.insert(source).inserted else {
+                    throw DeepSeekHarnessFormatError.invalidReference(
+                        "\(event.type) \(event.sequence) sourceEventSeqs must be unique earlier events")
+                }
             }
         }
         if let start = event.surfaceOp?.startValue, let end = event.surfaceOp?.endValue {

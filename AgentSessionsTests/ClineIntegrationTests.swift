@@ -39,13 +39,24 @@ final class ClineIntegrationTests: XCTestCase {
         XCTAssertNotNil(d.archive)
         XCTAssertNotNil(d.otherAgentPill)
         XCTAssertNil(d.otherAgentPill?.shortcut)
-        // Telemetry is declared unavailable until the format is fully audited.
         let t = d.telemetry
-        for cap in [t.configuration, t.tokens, t.cost, t.weeklyQuota] {
-            guard case .unavailable = cap else {
-                return XCTFail("cline telemetry must be unavailable until fully implemented")
-            }
+        guard case .partial(let configurationReason) = t.configuration else {
+            return XCTFail("Cline configuration must identify its loaded-session provenance")
         }
+        XCTAssertTrue(configurationReason.contains("loaded Session metadata"))
+        guard case .supported = t.tokens else {
+            return XCTFail("Cline token telemetry should be supported by assistant metric records")
+        }
+        guard case .unavailable(let costReason) = t.cost else {
+            return XCTFail("Cline cost must remain explicitly unavailable")
+        }
+        XCTAssertTrue(costReason.contains("provider-specific"))
+        guard case .unavailable(let quotaReason) = t.weeklyQuota else {
+            return XCTFail("Cline quota must remain explicitly unavailable")
+        }
+        XCTAssertTrue(quotaReason.contains("quota"))
+        XCTAssertNotNil(d.scanTelemetry)
+        XCTAssertNotNil(d.telemetryRevision)
     }
 
     func testAvailabilityUsesInjectedFilesystem() {

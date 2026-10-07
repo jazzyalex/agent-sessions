@@ -24,7 +24,14 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .fx,
-            telemetry: .allUnavailable("scalar model/effort metadata only; timeline and usage audit pending (Plan C)"),
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("current model and effort come from fx session.json; fx exposes no audited configuration-change timeline"),
+                tokens: .partial("fx session.json records aggregate input/output totals without per-turn or cache-component attribution"),
+                cost: .unavailable("fx records no audited pricing identity or cache-component split"),
+                weeklyQuota: .unavailable("fx does not expose a compatible account quota feed")),
+            scanTelemetry: { FxTelemetryReader.loadTelemetry(for: $0) },
+            telemetryRevision: { FxTelemetryReader.telemetryRevision(for: $0) },
+            telemetryBackendAvailable: { FxTelemetryReader.isSupported($0) },
             shortLabel: "fx",
             badgeInitials: "FX",
             // fx ships no usable brand chroma — its mark and site are monochrome —

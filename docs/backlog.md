@@ -48,7 +48,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ## Cross-Surface Session Storage
 
 ### Cursor Desktop conversations are never discovered
-> **open** · sev: med · urg: low · verified 2026-08-18
+> **partial** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The v5.5.1 release added supported Cursor ACP history, but a current source search still finds no state.vscdb reader in AgentSessions/. The original ItemTable/cursorDiskKV family and its join to ACP or ~/.cursor records remain unresolved. Recommendation: keep partial; map the storage families and prove ID joins before adding another reader.
+- **Evidence:** docs/CHANGELOG.md:22; `rg -nF state.vscdb AgentSessions/` returns no matches.
 
 - **What:** the Cursor reader covers `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`
   and `~/.cursor/chats/**/store.db`. Cursor Desktop also stores conversations in
@@ -80,7 +82,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   unparsed families so a new vendor path cannot disappear silently.
 
 ### Claude cross-root joins and deduplication were never certified
-> **open** · sev: low · urg: low · verified 2026-09-25
+> **partial** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** Claude discovery scans standard config roots and Cowork/local-agent transcript roots, and tests cover discovery and surface repair. The weekly monitor still fingerprints only ~/.claude/projects, and no end-to-end test proves transcript-to-sidecar joins, cross-root deduplication, or missing-sidecar behavior. Recommendation: keep partial certification work; handle monitor coverage separately.
+- **Evidence:** AgentSessions/Services/SessionDiscovery.swift:473-483,550-604; docs/agent-support/agent-watch-config.json:73.
 
 - **What:** Claude writes to three roots — standard transcripts under
   `~/.claude/projects`, Desktop Code metadata under
@@ -240,7 +244,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   and a parser change that never displays private mirror identifiers.
 
 ### Telemetry: Kimi, Qwen and OpenClaw all carry token telemetry — build the accumulators
-> **open** · sev: med · urg: med · verified 2026-09-26
+> **open** · sev: med · urg: med · verified 2026-10-01
+- **Review 2026-10-01:** The engine still dispatches only Codex, Claude, Pi, and Copilot; Kimi, Qwen, and OpenClaw descriptors still declare telemetry unavailable. Recommendation: keep open and implement after choosing each provider's authoritative usage layer and overlap/deduplication rules.
+- **Evidence:** AgentSessions/Telemetry/SessionTelemetryEngine.swift:91,182-203; AgentSessions/Kimi/KimiSourceDescriptor.swift:13; AgentSessions/Qwen/QwenSourceDescriptor.swift:31; AgentSessions/Model/OpenClawSourceDescriptor.swift:15.
 
 - **What:** `SessionTelemetry` covers Codex, Claude, Pi and Copilot. These three were
   deferred on a fixture key scan that found "a model name and no token counts at all".
@@ -288,7 +294,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   `unavailable`, so the engine returns nil for them and no number is ever shown.
 
 ### Telemetry: the seven "near-empty" sources, measured — five have data, two do not
-> **partial** · sev: low · urg: med · verified 2026-09-01
+> **partial** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** Rechecked descriptors leave OpenCode, Hermes, and fx telemetry unavailable; measured Devin, Cursor, and Antigravity remain valid negative capabilities, while Grok still depends on its unread sidecar. Source measurements are complete, but positive sources are not surfaced. Recommendation: keep partial, prioritize Hermes/OpenCode reads, and retain negative findings unless their stores change.
+- **Evidence:** AgentSessions/OpenCode/OpenCodeSourceDescriptor.swift:13; AgentSessions/Hermes/HermesSourceDescriptor.swift:13; AgentSessions/Fx/FxSourceDescriptor.swift:27; AgentSessions/Grok/GrokSourceDescriptor.swift:18.
 
 - **What it said:** a key scan across every stage0 fixture found no model or token data for
   **Antigravity, OpenCode and fx**, only a bare `model` for **Cursor, Devin, Hermes**, and
@@ -369,7 +377,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   explains Grok and blocks it.
 
 ### Telemetry: Copilot subagent tokens may be invisible to the shutdown summary
-> **open** · sev: med · urg: low · verified 2026-08-31
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** CopilotTelemetryAccumulator still consumes session.shutdown and session.model_change only; it does not read agentMetrics or subagent.completed. No real Copilot subagent sample in this checkout proves whether shutdown totals already include those tokens. Recommendation: keep open as verify-first; compare a real subagent session before changing accounting.
+- **Evidence:** AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift:46-57,99-143; `rg -n 'agentMetrics|subagent\.completed' AgentSessions/` returns no matches.
 
 - **What:** `CopilotTelemetryAccumulator` reads tokens only from `session.shutdown`, taking
   `data.modelMetrics[*].usage` when present and falling back to `data.tokenDetails`. Two
@@ -411,7 +421,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   which uses the observed numbers and fails loudly if anyone switches the convention.
 
 ### Codex 0.151 moved subagent identity off `agent_role` and 28% of badges went blank
-> **open** · sev: med · urg: low · verified 2026-08-30
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The two Codex session-indexing parse paths still derive subagentType from agent_role; agent_nickname is read by the runway path but does not supply the session-list badge. Recommendation: keep open; add one shared decoder with agent_path then nickname fallbacks, preserving parent_thread_id as the hierarchy edge.
+- **Evidence:** AgentSessions/Services/SessionIndexer.swift:2381-2383,2846-2848; AgentSessions/CodexStatus/CodexRunwayModel.swift:2153; AgentSessions/Views/UnifiedSessionsView.swift:4423.
 
 - **What:** in `session_meta.payload.source.subagent.thread_spawn`, Codex 0.151 leaves
   `agent_role` null and carries the identity in new siblings `agent_path`
@@ -422,19 +434,19 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   (161), `worker` (26), `default` (20). Those 80 sessions nest correctly and render
   **unlabeled**.
 - **Where:** `subagentType` is set only from `agent_role` at
-  [SessionIndexer.swift:2040](../AgentSessions/Services/SessionIndexer.swift:2040),
-  duplicated at [:2320](../AgentSessions/Services/SessionIndexer.swift:2320); the badge is
+  [SessionIndexer.swift:2383](../AgentSessions/Services/SessionIndexer.swift:2383),
+  duplicated at [:2848](../AgentSessions/Services/SessionIndexer.swift:2848); the badge is
   gated on it at
-  [UnifiedSessionsView.swift:4295-4303](../AgentSessions/Views/UnifiedSessionsView.swift:4295).
+  [UnifiedSessionsView.swift:4423](../AgentSessions/Views/UnifiedSessionsView.swift:4423).
   `agent_path`, `subagent_history_start_ordinal`, `thread_source`, `multi_agent_version`
   and `forked_from_id` appear nowhere in `AgentSessions/`. **`agent_nickname` has exactly
   one reader —
-  [CodexRunwayModel.swift:1899](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1899) —
+  [CodexRunwayModel.swift:2153](../AgentSessions/CodexStatus/CodexRunwayModel.swift:2153) —
   so the Runway HUD names these subagents while the session list beside it shows them
   blank.**
 - **Not the problem — do not build this:** the hierarchy already works. Children carry
   `source.subagent.thread_spawn.parent_thread_id`, already read at
-  [SessionIndexer.swift:2039](../AgentSessions/Services/SessionIndexer.swift:2039) into
+  [SessionIndexer.swift:2382](../AgentSessions/Services/SessionIndexer.swift:2382) into
   `Session.parentSessionID` and nested by
   [SubagentHierarchyBuilder](../AgentSessions/Services/SubagentHierarchyBuilder.swift:57).
   The new `agent_thread_id` on `SubAgentActivity` items does resolve — 27 of 27 (100%)
@@ -443,9 +455,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Fix shape:** fall `subagentType` back to the last component of `agent_path`, then
   `agent_nickname`, when `agent_role` is null. Codex's `source.subagent` is decoded in
   **three** hand-maintained copies —
-  [SessionIndexer.swift:2034](../AgentSessions/Services/SessionIndexer.swift:2034),
-  [:2313](../AgentSessions/Services/SessionIndexer.swift:2313), and
-  [CodexRunwayModel.swift:1980](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1980),
+  [SessionIndexer.swift:2381](../AgentSessions/Services/SessionIndexer.swift:2381),
+  [:2846](../AgentSessions/Services/SessionIndexer.swift:2846), and
+  [CodexRunwayModel.swift:2240](../AgentSessions/CodexStatus/CodexRunwayModel.swift:2240),
   whose comment says it is *"Kept identical to SessionIndexer's two parse blocks"* — so
   extract one decoder and fix it once rather than patching three.
 - **Risk if wrong:** `agent_thread_id` is **not** a child pointer. A child's transcript
@@ -578,7 +590,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   workspace scope, with duplicate and missing roots handled explicitly.
 
 ### Weekly Codex monitoring omits archived transcript roots
-> **open** · sev: low · urg: low · verified 2026-09-25
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** App discovery still scans archived_sessions, but the v5.5.1 archive change applies to Quota Meter calibration; weekly format monitoring still configures only the active sessions roots. Recommendation: keep open as a monitor-coverage gap and test active/archive discovery without duplicate paths.
+- **Evidence:** AgentSessions/Services/SessionDiscovery.swift:136-147; docs/agent-support/agent-watch-config.json:18; docs/CHANGELOG.md:25.
 
 - **What:** app discovery scans both `sessions` and the sibling `archived_sessions`
   directory, but weekly format monitoring samples only the active `sessions` roots.
@@ -656,43 +670,135 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ---
 
+## Session Info, startup and crash diagnostics
+
+### Enabling every provider can fan out into a multi-thousand-session scan and block paging
+> **open** · sev: high · urg: high · verified 2026-10-07
+
+- **What:** enabling all 17 providers at once can make the indexer fan out across roughly
+  4,500 sessions. During the manual smoke test, the Session list stopped responding while
+  paging and the UI automation scroll operation timed out after 120 seconds.
+- **Evidence:** manual built-app smoke test on 2026-10-07: the one-provider checks stayed
+  usable, while the all-provider configuration reached about 4,540 sessions and became
+  unresponsive during paging. The new timing and coalescing counters are recorded by
+  [SessionInfoMetrics.swift](../AgentSessions/Support/SessionInfoMetrics.swift), but the
+  indexer does not yet expose an equivalent bounded-scan or backpressure result for this
+  startup fan-out.
+- **Fix shape:** make broad discovery incremental and cancellable, bound concurrent source
+  work, keep the visible page responsive, and publish an explicit indexing state while the
+  remaining sources are still loading. Add a regression fixture for a large mixed-provider
+  library and measure first paint separately from full indexing completion.
+- **Why deferred:** the current work made Session Info telemetry lazy and coalesced, but did
+  not yet redesign the provider indexer's all-source scheduling or page backpressure.
+- **Risk if wrong:** users with several enabled providers can mistake a long scan for a hung
+  app and cannot reliably inspect or switch sessions during the scan.
+- **To close:** a mixed-provider stress test proves bounded concurrency, cancellation, and
+  responsive paging; the manual run records first-row and settled-index timings without a
+  UI automation timeout.
+
+### Detailed telemetry can remain in Loading while quick info is already available
+> **open** · sev: med · urg: med · verified 2026-10-07
+
+- **What:** the provider-neutral quick facts now paint independently, but a detailed scan can
+  remain in `Loading` for a long-lived or large transcript. Codex stayed in that state during
+  the manual check even though its current model was already visible.
+- **Evidence:** manual built-app smoke test on 2026-10-07: Codex showed current model
+  metadata while detailed telemetry remained `Loading` during the observation window. The
+  split is implemented in [SessionTelemetryEngine.swift](../AgentSessions/Telemetry/SessionTelemetryEngine.swift)
+  and [SessionInfoQuickFacts.swift](../AgentSessions/Telemetry/SessionInfoQuickFacts.swift).
+- **Fix shape:** enforce a visible timeout/cancellation outcome, surface scan progress or a
+  precise unavailable reason, and retain the quick facts without presenting an indefinite
+  spinner. Add a cold-start Codex fixture that exercises the same path.
+- **Why deferred:** the first implementation established the immediate-vs-detailed split and
+  in-flight coalescing; the provider-specific latency budget and UI timeout policy remain to
+  be chosen.
+- **Risk if wrong:** users cannot distinguish a slow scan from unsupported telemetry or a
+  broken provider reader.
+- **To close:** the detailed panel reaches success, unsupported, cancelled, or failed within
+  a bounded policy and tests cover cancellation during the first scan.
+
+### Provider metadata can contain prompt text or raw storage labels
+> **open** · sev: med · urg: med · verified 2026-10-07
+
+- **What:** manual checks found user-facing metadata that is not a clean model or title:
+  Antigravity's model value included appended prompt instructions; Hermes and Copilot titles
+  exposed raw prompt/system text; Cursor displayed a timestamp-only/raw markup title.
+- **Evidence:** manual built-app smoke test on 2026-10-07 across the enabled providers;
+  the affected values were visible in the Session Info/session list surfaces. The relevant
+  source adapters are [AntigravitySourceDescriptor.swift](../AgentSessions/Model/AntigravitySourceDescriptor.swift),
+  [HermesSourceDescriptor.swift](../AgentSessions/Hermes/HermesSourceDescriptor.swift),
+  [CopilotSessionParser.swift](../AgentSessions/Services/CopilotSessionParser.swift), and
+  [CursorChatMetaReader.swift](../AgentSessions/Cursor/CursorChatMetaReader.swift).
+- **Fix shape:** validate model fields against the provider's model grammar, strip known
+  prompt-wrapper/instruction suffixes, and use a deterministic title fallback that prefers a
+  clean user prompt over raw serialized metadata. Preserve the raw value only for diagnostics.
+- **Why deferred:** the values are provider-format-specific and need fixtures before a shared
+  sanitizer can be made safely without truncating legitimate model names or titles.
+- **Risk if wrong:** the app can display instructions as if they were configuration, or expose
+  internal prompt text in a title.
+- **To close:** redacted fixtures reproduce each shape, sanitization is source-scoped, and
+  the UI never shows prompt-wrapper text as a model or default title.
+
+### Startup indexing can show an empty intermediate state before a provider settles
+> **open** · sev: low · urg: med · verified 2026-10-07
+
+- **What:** Grok briefly showed zero sessions while its source was still indexing, then
+  populated after roughly ten seconds. This is an ambiguous state rather than a confirmed
+  empty library.
+- **Evidence:** manual built-app smoke test on 2026-10-07: the provider initially rendered
+  an empty result while the indexer reported work, then settled to approximately ten sessions.
+- **Fix shape:** show the provider's indexing state and prior/partial count explicitly, and
+  reserve the empty state for a completed scan with zero results.
+- **Why deferred:** the current indexer has source-level progress but the list's empty-state
+  copy does not consistently consume it for every provider.
+- **Risk if wrong:** users may conclude that a provider has no history or that enabling it
+  failed.
+- **To close:** cold-start tests distinguish indexing, cancelled, unavailable, and completed
+  empty states for every source.
+
+### Crash diagnostics surfaced XCTest test-host aborts as end-user crashes
+> **partial** · sev: high · urg: high · verified 2026-10-07
+
+- **What:** the app repeatedly showed a crash report after restart because choosing `Later`
+  left the queued report eligible for detection on every launch. The queued reports were not
+  equivalent product crashes: one was an XCTest expectation assertion, and another was a
+  Foundation `FileHandle` exception raised while `DroidTelemetryReader` was scanning.
+- **Evidence:**
+  `~/Library/Logs/DiagnosticReports/AgentSessions-2026-10-06-210056.ips` contains
+  `libXCTestBundleInject`, `_XCTTerminateHandler`, and
+  `XCTestExpectation fulfill`; `AgentSessions-2026-10-07-025119.ips` contains
+  `NSConcreteFileHandle readDataUpToLength:error:`,
+  `SessionFileStat.precise(from:)`, `DroidTelemetryReader.loadTelemetry`, and
+  `SessionTelemetryEngine.compute`. The startup prompt is in
+  [AgentSessionsApp.swift](../AgentSessions/AgentSessionsApp.swift), report filtering is in
+  [CrashReportDetector.swift](../AgentSessions/Support/CrashReporting/CrashReportDetector.swift),
+  and the file-stat helper is in [Session.swift](../AgentSessions/Model/Session.swift).
+- **Fix applied:** `Later` now persists a dismissed report ID without deleting the report;
+  XCTest-injected DiagnosticReports are ignored; telemetry readers capture the POSIX file
+  descriptor before reading and use `fstat` for the post-read freshness check. Regression
+  coverage was added to [CrashReportingServiceTests.swift](../AgentSessionsTests/CrashReportingServiceTests.swift).
+- **Why it escaped / why it was not fixed earlier:** these were two separate paths found on
+  different launches. The restart loop was a prompt-state bug, not the crash root cause;
+  the abort was only reproducible when a telemetry read failed inside `FileHandle`, and the
+  existing tests did not force that failed-read path. The detector also matched the app
+  bundle inside XCTest, so a test-host abort was mistaken for a product crash. With no
+  regression covering those combinations, the normal build/test path stayed green while
+  the diagnostic prompt kept resurfacing.
+- **Risk if wrong:** a normal restart can repeatedly interrupt the user with a stale prompt,
+  while a malformed or concurrently changing transcript can abort the host process instead
+  of being reported as unavailable.
+- **To close:** the stable test suite is green, a fresh manual restart produces no repeated
+  prompt for the known test-host reports, and a changing/failed telemetry file returns an
+  unavailable result without aborting the app.
+
+---
+
 ## Transcript UI
 
-### Transcript jump arrows are disconnected from Rich/block mode
-> **open** · sev: high · urg: med · verified 2026-09-21
-
-- **What:** the transcript's up arrow is often absent, and the down arrow can
-  disappear on click without moving the transcript. This is one regression in the
-  shared floating-control path, not two independent buttons.
-- **Where:** [TranscriptPlainView.swift:908-909](../AgentSessions/Views/TranscriptPlainView.swift:908)
-  renders the controls for both modes, but [TranscriptPlainView.swift:1454-1467](../AgentSessions/Views/TranscriptPlainView.swift:1454)
-  passes top/bottom proximity callbacks and `scrollToBottomToken` only to
-  `PlainTextScrollView`. [TranscriptBlockListView.swift:148-243](../AgentSessions/Views/TranscriptBlockListView.swift:148)
-  has no corresponding proximity callbacks or bottom-scroll token. The up-arrow
-  visibility then stays driven by the initial `isNearTranscriptTop` value
-  ([TranscriptPlainView.swift:1105-1106](../AgentSessions/Views/TranscriptPlainView.swift:1105)),
-  while the down action only changes state and increments a token
-  ([TranscriptPlainView.swift:1121-1125](../AgentSessions/Views/TranscriptPlainView.swift:1121)).
-- **Confirmed failure:** Rich mode never reports that the viewport left the top or
-  reached the bottom, so the up arrow can remain hidden and the down arrow remains
-  eligible from the `unknown` bottom state. Clicking down marks the parent as near
-  bottom, which hides the button, but the Rich block list receives no scroll intent,
-  so the viewport does not move.
-- **Fix shape:** give the block-list path the same top/bottom proximity reporting
-  and a consumable jump-to-latest intent, or move both modes behind one shared
-  scroll-intent/proximity contract. Cover both modes and the remount/session-switch
-  cases; do not infer a successful jump from the button's visibility change.
-- **Why still open:** the implementation and validation are complete in the current
-  worktree; leave the entry open until the user records a commit/release.
-- **Risk if wrong:** transcript navigation is visibly broken, and a user can lose
-  their place in a long session or mistake a hidden control for a completed jump.
-- **To close:** in plain, terminal, and Rich modes, the up arrow appears after
-  scrolling away from the top and returns to the first prompt; the down arrow
-  appears away from the bottom and actually reaches the latest row before hiding.
-  Add state/intent tests plus one manual check of each rendered mode.
-
 ### Session info does not expose known models for most agents
-> **open** · sev: med · urg: med · verified 2026-09-18
+> **partial** · sev: med · urg: med · verified 2026-10-07
+- **Review 2026-10-07:** provider-neutral quick facts now use loaded `Session` metadata for all registered sources, while detailed telemetry remains source-specific. Keep partial for the remaining raw-metadata, latency, and unsupported-history gaps recorded above.
+- **Evidence:** [SessionInfoQuickFacts.swift](../AgentSessions/Telemetry/SessionInfoQuickFacts.swift), [SessionTelemetryEngine.swift](../AgentSessions/Telemetry/SessionTelemetryEngine.swift), and [SessionSourceRegistry.swift](../AgentSessions/Model/SessionSourceRegistry.swift).
 
 - **What:** Session info currently shows model facts and model-change history only
   when the source produces `SessionTelemetry`. OpenCode and most other agents fall
@@ -724,10 +830,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   existing history timeline. Sources with no model evidence should still have a
   consistent Session info surface with an honest unavailable reason, rather than
   disappearing behind a generic telemetry failure.
-- **Why deferred:** this turn is backlog-only; the source formats and provenance
-  rules need to be scoped before implementation. The existing telemetry backlog
-  covers token/cost accumulators, which is related but does not by itself satisfy
-  model visibility.
+- **Why deferred:** the immediate model/configuration phase is implemented. The remaining
+  work is source-specific history, metadata sanitization, and bounded detailed-scan UX.
 - **Risk if wrong:** users cannot tell which model produced an agent session, and
   labeling a last/current model as the starting model would create false historical
   evidence.
@@ -806,7 +910,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   record with a Responses summary and an assistant record with no `reasoningBlocks` at all.
 
 ### Copilot 1.0.89 model and effort can exist only on the user message
-> **open** · sev: med · urg: low · verified 2026-09-29
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The Copilot parser and telemetry accumulator still read explicit session.model_change records; neither consumes user.message.data.responsesReasoning. Recommendation: keep open and use that record only as an initial/current fallback, preserving explicit model changes as authoritative transitions.
+- **Evidence:** AgentSessions/Services/CopilotSessionParser.swift:54,142,307; AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift:46; `rg -nF responsesReasoning AgentSessions/` returns no matches.
 
 - **What:** a fresh 1.0.89 session emitted no `session.model_change`. Its effective
   `model`, `effort`, and `initialEffort` were instead recorded under
@@ -1080,7 +1186,9 @@ the latter is tracked separately above until its lifecycle semantics are known.
 ## Agent Source Plumbing
 
 ### OpenClaw monitoring unions roots that app discovery selects by precedence
-> **open** · sev: low · urg: low · verified 2026-09-25
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The watcher still unions OPENCLAW_STATE_DIR, ~/.openclaw, and ~/.clawdbot; app discovery selects one custom/environment/canonical-or-legacy root. Recommendation: keep open and align watcher root selection with app precedence to avoid sampling ignored stores.
+- **Evidence:** docs/agent-support/agent-watch-config.json:353-356; AgentSessions/Services/OpenClawSessionDiscovery.swift:18-39.
 
 - **What:** weekly monitoring unions `OPENCLAW_STATE_DIR`, `~/.openclaw`, and
   `~/.clawdbot`, while app discovery selects a custom root first, then the environment
@@ -1124,11 +1232,13 @@ the latter is tracked separately above until its lifecycle semantics are known.
 - **To close:** annotate `runBootstrapScan`, decide the isolation for the three closures,
   and confirm a Release build emits none of the four.
 
-### Newest-5 sampling gives a thin-store agent a verdict about nothing
-> **open** · sev: med · urg: low · verified 2026-08-31
+### Newest-5 sampling can still miss informative evidence in thin stores
+> **partial** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The monitor still unions five newest sessions, but v5.2 changed thin, stale, or inconclusive checks to cannot-check rather than a clean verdict or version bump. Older informative Antigravity sessions can still be excluded by the newest-five window. Recommendation: keep partial at low priority; consider adaptive sampling only when this blocks a real format-verification decision.
+- **Evidence:** scripts/agent_watch.py:653-657; docs/CHANGELOG.md:131.
 
 - **What:** `_LOCAL_SCHEMA_SAMPLE_COUNT = 5`
-  ([agent_watch.py:562](../scripts/agent_watch.py:562)) is a global constant, and the
+  ([agent_watch.py:657](../scripts/agent_watch.py:657)) is a global constant, and the
   weekly unions the **newest** five sessions. For an agent whose store is mostly tiny
   sessions that window can miss every informative transcript it has. **Measured
   2026-08-31 for antigravity:** 31 transcripts on disk, **29 of them under 10 lines**;
@@ -1161,7 +1271,9 @@ the latter is tracked separately above until its lifecycle semantics are known.
 
 
 ### `rebuild_stage0_baseline.py` is blind to `db_roots`, so it sweeps the wrong OpenCode store
-> **open** · sev: med · urg: low · verified 2026-08-21
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The _all_sessions() helper still reads roots, glob, exclude_globs, and required_types only; it never reads OpenCode's configured db_roots. Recommendation: keep open and fix before trusting the next OpenCode baseline rebuild; the false-clean risk remains.
+- **Evidence:** scripts/rebuild_stage0_baseline.py:107-117; docs/agent-support/agent-watch-config.json:131.
 
 - **What:** the rebuild tool reported "opencode: fixture already covers every bucket/key
   on disk" while the same day's weekly reported `part.patch` as drift. Both ran; only one
@@ -1171,7 +1283,7 @@ the latter is tracked separately above until its lifecycle semantics are known.
   `opencode.db`, which holds ~8,900 parts. The tool then reports full coverage, which is
   the most dangerous possible answer: a false clean from an instrument aimed at the wrong
   corpus.
-- **Where:** [rebuild_stage0_baseline.py:104](../scripts/rebuild_stage0_baseline.py:104)
+- **Where:** [rebuild_stage0_baseline.py:107](../scripts/rebuild_stage0_baseline.py:107)
   (`_all_sessions`); OpenCode's `db_roots` is declared in
   [agent-watch-config.json](../docs/agent-support/agent-watch-config.json) under
   `agents.opencode.weekly.local_schema`. Weekly reads it via the
@@ -1389,7 +1501,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
 ## Codex Usage Meter
 
 ### Transient-failure cooldowns lock out both live sources with no reachable bypass
-> **open** · sev: med · urg: low · verified 2026-08-14
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The OAuth failure cooldown remains 30 minutes and the CLI-RPC failure cooldown remains 60 minutes. Refresh now still uses the regular gates; explicit recheck clears OAuth retry state but does not clear CodexCLIRPCProbe.lastProbeFailed, and the transient footer chip has no action. Recommendation: keep open; add a reachable retry that clears both sources, with tests for both clocks and fallback order.
+- **Evidence:** AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:123,176; AgentSessions/CodexStatus/CodexCLIRPCProbe.swift:46-51; AgentSessions/CodexStatus/CodexStatusService.swift:2293-2319; AgentSessions/Views/CockpitFooterView.swift:418.
 
 - **What:** After a failed usage fetch, `CodexOAuthUsageFetcher` sets a 30-minute
   failure cooldown, and the CLI-RPC probe it falls through to sets a **60-minute**
@@ -1397,36 +1511,36 @@ this. The entry sat `verified —` and read as open work for two weeks.
   sources — the RPC probe for a full hour — while the ~3-minute poll keeps being
   rejected by the gate.
 - **Where:** the cooldown gates — **two** in the OAuth fetcher, one per API:
-  [`fetchUsage`:126](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:126)
-  and [`fetchUsageResult`:177](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:177)
+  [`fetchUsage`:123](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:123)
+  and [`fetchUsageResult`:176](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:176)
   (the live polling path), sharing actor state; plus
-  [CodexCLIRPCProbe.swift:47](../AgentSessions/CodexStatus/CodexCLIRPCProbe.swift:47);
+  [CodexCLIRPCProbe.swift:46](../AgentSessions/CodexStatus/CodexCLIRPCProbe.swift:46);
   the fallthrough at
-  [CodexStatusService.swift:2511](../AgentSessions/CodexStatus/CodexStatusService.swift:2511);
+  [CodexStatusService.swift:2675](../AgentSessions/CodexStatus/CodexStatusService.swift:2675);
   `refreshNow` in `CodexStatusService.swift` and its only user-facing caller,
   [PreferencesView+Usage.swift:77](../AgentSessions/Views/Preferences/PreferencesView+Usage.swift:77).
 
 #### Re-verified 2026-08-14 — the original entry was partly stale and partly understated
 - **A bypass has since landed, but it does not cover this case.**
   `resetForUserRecheck()`
-  ([:95](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:95))
+  ([:96](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:96))
   clears `lastFetchAt` / `lastFetchFailed` / `rateLimitedUntil`, reached via
   `recheckAuthNow`. But it sits behind `AuthRemediationBanner`, which only replaces
   the meter when the auth verdict is **alarming**. A transient network failure is not
   alarming, so the user gets `FooterRetryChip` instead — a spinning "Codex —
   reconnecting…" with **no Button and no gesture**
-  ([CockpitFooterView.swift:390](../AgentSessions/Views/CockpitFooterView.swift:390)).
+  ([CockpitFooterView.swift:418](../AgentSessions/Views/CockpitFooterView.swift:418)).
   The one control a user would actually reach for, Preferences → Usage → "Refresh
   now", routes through `refreshNow` straight into the gate.
 - **The recovery path only half-clears.** `recheckAuthNow` calls
   `resetForUserRecheck()` on the OAuth fetcher but passes the RPC probe merely
   `cooldownSuccess: 0`
-  ([:2145](../AgentSessions/CodexStatus/CodexStatusService.swift:2145)) —
+  ([:2319](../AgentSessions/CodexStatus/CodexStatusService.swift:2319)) —
   `lastProbeFailed` stays set, so the 60-minute *failure* cooldown still rejects it.
   `CodexCLIRPCProbe` has no `resetForUserRecheck` equivalent. The "authoritative
   recovery attempt" therefore cannot recover the source with the longer lockout.
 - **The silent auto-recovery does not apply.** `shouldSilentlyRecheckAuth`
-  ([:755](../AgentSessions/CodexStatus/CodexStatusService.swift:755)) fires only on
+  ([:858](../AgentSessions/CodexStatus/CodexStatusService.swift:858)) fires only on
   `.unauthorized`, never on `.transient` — correctly, since retrying a dead network
   immediately is pointless.
 - **Severity is lower than first written.** The JSONL fallback still runs (local
@@ -1454,7 +1568,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   without that suite.
 
 ### `.idle` can mislabel a cold-start transient failure
-> **open** · sev: low · urg: low · verified —
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** With a present token, the classifier maps .transient to .ok, then the no-data promotion publishes .idle; testCompletedFetchWithNoDataPublishesIdle covers that path. No Codex-side 429 or user-visible mislabel is recorded in this checkout. Recommendation: keep as a low-priority watch and change it only after a real cold-start failure demonstrates that .idle is misleading.
+- **Evidence:** AgentSessions/CodexStatus/CodexAuthClassifier.swift:35-38; AgentSessions/CodexStatus/CodexStatusService.swift:826-850; AgentSessionsTests/CodexUsageModelAuthWiringTests.swift:122; AgentSessionsTests/CodexAuthClassifierTests.swift:23.
 
 - **What:** `CodexUsageModel.handleAuthFetchResult` promotes `.ok` → `.idle`
   ("No active Codex session") when a completed fetch returned nothing and nothing
@@ -1490,7 +1606,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
 ## Claude Cloud Sessions
 
 ### `bridge-session` carries the local↔bridge join key the dedup rule only assumes
-> **open** · sev: low · urg: low · verified 2026-08-21
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** A source search still finds no bridge-session/bridgeSessionId parser. The cloud catalog continues to exclude non-anthropic_cloud rows without joining bridge IDs to local transcripts. Recommendation: keep as verification before adding a bridge badge or changing cloud-row inclusion.
+- **Evidence:** AgentSessions/ClaudeCloud/ClaudeCloudSessionCatalog.swift:23; `rg -n 'bridge-session|bridgeSessionId' AgentSessions/` returns no matches.
 
 - **What:** Claude transcripts now carry a `bridge-session` record — 569 of them across
   13 of 60 recent sessions — holding `sessionId`, `bridgeSessionId` (`cse_…`),
@@ -1618,7 +1736,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   per-source reclaimable-by-rule figures traceable to the bench manifest.
 
 ### Kimi and DeepSeek Harness report measured token counts that nothing surfaces
-> **open** · sev: low · urg: low · verified 2026-09-29
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** Kimi token-counting records and DSH message usage still do not feed app Analytics; the v5.5 notes explicitly keep DSH source usage out of Analytics. Recommendation: fold Kimi into the shared telemetry work in the Kimi/Qwen/OpenClaw entry, and keep DSH as separate lower-priority scope with message/stream deduplication evidence.
+- **Evidence:** AgentSessions/Kimi/KimiSourceDescriptor.swift:13; docs/CHANGELOG.md:40.
 
 - **What:** Kimi 0.38.0 added `token_counting.measured` and
   `token_counting.turn_recorded`, carrying `tokens`, `length`, `turnId` and `time`. This
@@ -1648,7 +1768,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   usage accurately.
 
 ### Qwen already reports its own token usage and we discard it
-> **open** · sev: med · urg: low · verified 2026-08-17
+> **open** · sev: med · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** Qwen still declares telemetry unavailable, and its system telemetry records remain parser metadata rather than usage events. Recommendation: keep this as the Qwen acceptance case for shared accumulator work in the Kimi/Qwen/OpenClaw entry; do not create a second accounting path.
+- **Evidence:** AgentSessions/Qwen/QwenSourceDescriptor.swift:31; AgentSessions/Telemetry/SessionTelemetryEngine.swift:91.
 
 - **What:** every Qwen transcript carries complete per-call token accounting that nothing
   reads. The records are `type: system` / `subtype: ui_telemetry`, and
@@ -1673,7 +1795,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   claims the surface is unavailable.
 
 ### Verify the Claude Web API usage source actually works
-> **open** · sev: low · urg: low · verified —
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The Web API client and Safari cookie resolver remain implemented, but source inspection cannot establish that a signed-in production app has successfully served a Web API-only reading. Recommendation: keep verification-only and perform the controlled Web API-only check before treating this fallback as operational.
+- **Evidence:** AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebUsageClient.swift and AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebCookieResolver.swift; these source files cannot establish a live signed-in result.
 
 - **What:** The Web API fallback (`claudeWebApiEnabled`; "Web API only" mode) is
   implemented — `ClaudeWebUsageClient.swift` + `ClaudeWebCookieResolver.swift`
@@ -1741,7 +1865,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
 ## QM / Runway
 
 ### Headless Codex and OpenCode CLI sessions disappear from live presence discovery
-> **open** · sev: med · urg: high · verified 2026-09-18
+> **open** · sev: med · urg: high · verified 2026-10-01
+- **Review 2026-10-01:** Current PresenceEngine builds a headless allowlist for Claude only. Codex discovery receives a Desktop allowlist but no headless PID set, and OpenCode receives neither; the shared parser defaults headlessEligiblePIDs to empty. Recommendation: keep open at high urgency; add headless eligibility for Codex/OpenCode and test no-TTY admission plus Desktop exclusion.
+- **Evidence:** AgentSessions/Services/PresenceEngine.swift:1253-1278; AgentSessions/Services/CodexActiveSessionsModel.swift:3192.
 
 - **What:** The process fallback admits a no-TTY process only when its PID is in
   `headlessEligiblePIDs`. `PresenceEngine` builds and passes that allowlist only for
@@ -1749,11 +1875,11 @@ this. The entry sat `verified —` and read as open work for two weeks.
   the same TTY-only `ps` filter. Therefore a headless Codex or OpenCode CLI session
   without a fresh registry presence is dropped before live rows are built, so its
   current session and live token usage cannot appear in Quota Meter.
-- **Where:** [`PresenceEngine.swift:1157`](../AgentSessions/Services/PresenceEngine.swift:1157)
-  builds only `claudeHeadlessPIDs`; [`PresenceEngine.swift:1185`](../AgentSessions/Services/PresenceEngine.swift:1185)
-  calls Codex discovery without an allowlist; [`PresenceEngine.swift:1164`](../AgentSessions/Services/PresenceEngine.swift:1164)
+- **Where:** [`PresenceEngine.swift:1253`](../AgentSessions/Services/PresenceEngine.swift:1253)
+  builds only `claudeHeadlessPIDs`; [`PresenceEngine.swift:1278`](../AgentSessions/Services/PresenceEngine.swift:1278)
+  calls Codex discovery without an allowlist; [`PresenceEngine.swift:1257`](../AgentSessions/Services/PresenceEngine.swift:1257)
   applies the TTY guard to OpenCode; the shared admission rule is
-  [`CodexActiveSessionsModel.swift:3172`](../AgentSessions/Services/CodexActiveSessionsModel.swift:3172).
+  [`CodexActiveSessionsModel.swift:3192`](../AgentSessions/Services/CodexActiveSessionsModel.swift:3192).
 - **Fix shape:** derive headless PID sets for Codex and OpenCode using the existing
   app-bundle exclusion, pass them to `discoverLsofPIDInfos`, and mark those presences
   as headless. TTY remains metadata, never the CLI identity test. Keep the OpenCode
@@ -1768,7 +1894,9 @@ this. The entry sat `verified —` and read as open work for two weeks.
   current session.
 
 ### Quota Meter v2 needs one immutable, end-to-end evidence contract
-> **open** · sev: high · urg: low · verified 2026-09-08
+> **partial** · sev: high · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** The v5.2/v5.3 work shipped substantial safeguards: immutable price snapshots, manifest revisions, scoped account/window provenance, event deduplication, and incomplete-coverage rejection. The current Codex ledger still accepts token events and prices them during ingestion, while bootstrap persists aggregate dollars and provenance separately; there is no shared immutable priced-event record consumed by display, live calibration, and bootstrap. Recommendation: keep partial as one coordinated schema/migration project; do not split the remaining contract across independent fixes.
+- **Evidence:** AgentSessions/CodexStatus/RunwayPriceTable.swift:135-147; AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift:29-54,353-425; AgentSessions/CodexStatus/WeeklyQuotaBootstrap.swift:21-54,307-321; docs/CHANGELOG.md:122,135.
 
 - **What:** replace the remaining parallel display, live-calibration and bootstrap pricing
   representations with one immutable priced-event contract. Each event must carry its model,
@@ -1793,70 +1921,6 @@ this. The entry sat `verified —` and read as open work for two weeks.
   source/root/coverage invalidation tests, bounded quantization tests, semantic-price migration
   tests, and preservation tests for 5h, weekly, token, dollar, cache, child-session, idle and
   stopped behavior. Record a full XCResult and exact test-name delta.
-
-### Weekly quota pricing and calibration need immutable, scoped v2 evidence
-> **partial** · sev: high · urg: med · verified 2026-09-08
-
-- **2026-09-08 investigation and correction:** historical bootstrap and live ledger reported
-  conflicting dollar denominators for apparently nested intervals. Bootstrap used per-turn
-  usage while live ingestion differenced cumulative counters, live events were assigned to
-  discovery polls, and historical scans admitted post-observation records. The historical
-  event set is no longer recoverable, so neither denominator is treated as the oracle; the
-  earlier screenshot replay also omitted the bootstrap quantization midpoint. The scoped
-  [spec](superpowers/specs/2026-09-08-codex-weekly-calibration-integrity.md) and
-  [implementation plan](superpowers/plans/2026-09-08-codex-weekly-calibration-integrity.md)
-  record the evidence, accounting contract, implementation and regression gates.
-
-- **What is fixed locally:** the `Wk` path no longer annualizes and holds the newest
-  10-second token pair. It uses a weekly-only, linearly decayed five-minute window with
-  a 60-second evidence floor; removes the 150-second weekly hold; pools consecutive live
-  quota ticks; retains a better-conditioned bootstrap; differences only Codex's cumulative
-  `token_count` family instead of mixing in its per-request twin; keeps completed Codex
-  sessions attributable for the whole five-minute window; invalidates live Codex calibration
-  learned under the old activity accounting; normalizes bootstrap from cumulative counters;
-  preserves live event time separately from poll time; requires the current weekly anchor;
-  treats quota-anchor transitions as baselines; rejects malformed, post-cutoff, late,
-  scan-truncated, contradictory nested and unresolved long-context evidence; keeps overlapping
-  poll clocks monotonic; invalidates old live and bootstrap Codex evidence; applies Sol's strict `>272K` request tier;
-  rejects unsafe GPT prefix matches; uses a stable semantic price hash; and adaptively
-  recovers Wk row history hidden behind oversized image/tool transcript records. Numeric Wk
-  rates retain their plain numeric format, while the row tooltip explains the five-minute
-  activity window. The remaining architecture is tracked in the v2 entry above.
-- **Where:** `RunwayPriceTable.swift`, `CodexRunwayModel.swift`,
-  `ClaudeRunwayTokenActivityParser.swift`, `WeeklyQuotaCalibration.swift`, and
-  `WeeklyQuotaBootstrap.swift`.
-- **Why still partial:** the corrected implementation is committed locally but not yet shipped.
-- **Risk if wrong:** the regression would return inflated or contradictory weekly rates.
-- **To close:** ship the correction and record the release version; v2 is tracked separately.
-
-### OpenAI long-context pricing was historically unreachable from the Codex CLI
-> **partial** · sev: low · urg: low · verified 2026-09-09
-
-The local Quota Meter correction now implements the tier ahead of observed CLI reachability.
-OpenAI publishes a second
-price column for long context — for `gpt-5.6-sol` $8.00/$0.80/$10.00/$30.00 against the
-short-context $4.00/$0.40/$5.00/$20.00 the table ships; input, cached input and cache
-write double, output goes 1.5x. The full `gpt-5.5` and `gpt-5.4` models use the same
-long-context multipliers; `gpt-5.4-mini` does not.
-
-**The threshold is 272,000 *input* tokens**, and it is stated only inside a column-header
-tooltip on <https://developers.openai.com/api/docs/pricing> — the rendered prose does not
-mention it, so a plain read of that page reports "no threshold stated". Fetched and
-extracted from the raw page 2026-08-30; re-derive rather than trusting this line if the
-page is redesigned.
-
-**Why it cannot fire:** every Codex session reports
-`payload.info.model_context_window` = **258,400** — uniformly across `gpt-5.6-sol`,
-`-terra`, `-luna`, `gpt-5.5` and `codex-auto-review`, in all 29,402 local observations.
-258,400 < 272,000. Max observed per-turn `input_tokens` is 245,726; turns over 272K:
-**zero**. Claude has no long-context tier at all (4.6+ ships the full 1M window at
-standard rates), so this is OpenAI-only and currently unreachable.
-
-**Implemented locally:** runway, live-calibration, and bootstrap pricing preserve request
-boundaries and classify the raw request input strictly above 272,000. The whole request
-then uses 2x input/cache-write and 1.5x output rates for Sol, Terra, Luna, the `gpt-5.6`
-alias, and the internal Sol-priced review label. The broader immutable-snapshot and
-manifest-v2 work remains in the entry above.
 
 ### Runway overflow "+X sessions" undercount (`withPendingRows`)
 > **done** 2026-07-09
@@ -1953,46 +2017,8 @@ observed a real fast session locally.
   this collapses to a tombstone.
 
 ### Claude runway rows intermittently show tokens/hour instead of weekly-share in Weekly mode
-> **open** · sev: med · urg: low · verified 2026-08-16
-
-- **Reported by owner (2026-08-16):** with the runway presentation set to Weekly, Claude
-  session rows sometimes render raw token throughput instead of the weekly-average-burn
-  share; Codex rows are correct in the same mode. **Update same day:** owner then observed
-  Weekly mode showing the correct burn-rate for Claude too, with no code change in
-  between — so this is **intermittent, not a permanent fallback.** That rules out "Claude's
-  weekly data is structurally unmeasurable on this account" as the sole cause and points
-  instead at something timing- or state-dependent: a stale/zero usage snapshot on first
-  render before the weekly fetch lands, a refresh race between the 5h and weekly polls, or
-  the `weeklyMeasurable` guard tripping only during a specific window (e.g. right after an
-  app relaunch or a weekly-window rollover). Needs reproduction with logging, not a fix,
-  before anything below is trusted as the actual cause.
-- **Where:** the presentation resolves to `.tokensPerHour` instead of
-  `.weeklyPercentPerHour` whenever `weeklyMeasurable` is false —
-  [`effectivePresentation`](../AgentSessions/Views/AgentCockpitHUDView.swift:3152) (the
-  `.weekly` case), fed by `weeklyRunout` computed via `RunwayBaselineMath.averageBurnRunout`
-  in both [`request`](../AgentSessions/Views/AgentCockpitHUDView.swift:3223) (Codex) and
-  [`claudeRequest`](../AgentSessions/Views/AgentCockpitHUDView.swift:3318). Same fallback
-  also lives one layer down in
-  [`CodexRunwayCalculator.weeklySnapshot`](../AgentSessions/CodexStatus/CodexRunwayModel.swift:947),
-  which returns `nil` (→ token snapshot) whenever `remainingPercent <= 0` or the computed
-  run-out yields `seconds <= 0`.
-- **Not yet root-caused:** the call sites for Claude
-  ([claudeRequest](../AgentSessions/Views/AgentCockpitHUDView.swift:3708)) and Codex
-  ([codexRunwayRequest](../AgentSessions/Views/AgentCockpitHUDView.swift:3685)) look
-  structurally identical, and `weekAllModelsRemainingPercent` /
-  `weekAllModelsResetText` populate the same way Codex's week fields do
-  (`ClaudeStatusService.swift:1261`, `ClaudeUsageModel.swift:530-535`). The divergence is
-  therefore either in the *values* Claude's weekly usage source actually returns (e.g.
-  `weekAllModelsRemainingPercent` reading 0% used / no run-out on this account) or in
-  something not yet traced — a live snapshot comparison (Claude vs. Codex, same account,
-  Weekly mode) is needed, not more static reading.
-- **To close:** since it's intermittent, a single breakpoint won't catch it — add
-  temporary logging of `claudeRunwayRequest`'s `resolved.rateUnit`,
-  `weekRemainingPercent`/`weekResetText`, and `weeklyRunout` on every HUD refresh cycle,
-  then correlate the tokens-mode ticks against app lifecycle (launch, wake, weekly-window
-  rollover) and against `ClaudeUsageModel`'s fetch/refresh timing to catch it live.
-- **Risk if wrong:** low blast radius — display-only, wrong unit label on a runway row,
-  no data loss. Confusing enough to mislead pacing decisions, hence med severity.
+> **done** 2026-08-31 (792161fed, v5.1.1)
+Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutRecentTick, testWeeklyPresentationStaysWeeklyWithoutWeeklyWindow.
 
 ---
 
@@ -2060,3 +2086,34 @@ observed a real fast session locally.
     `CodexTerminalLaunching` protocol requirement.
 - **Risk if wrong:** none to runtime behavior; the only cost of getting it wrong is
   deleting a hook someone intended to wire up later.
+
+## CLI / Automation
+
+### No command-line interface for agents to drive archive or export
+> **open** · sev: low · urg: low · verified 2026-10-01
+- **Review 2026-10-01:** AgentSessions/ still has no CLI argument parser, URL handler, or App Intent; the local issue note leaves the requested commands and use case unanswered. Recommendation: keep open but clarification-first; confirm the reporter’s current answer before choosing a CLI shape.
+- **Evidence:** AgentSessions/Services/SessionArchiveManager.swift:145; `rg -n 'ArgumentParser|CommandLine\.arguments|agentsessions://|onOpenURL|AppIntent' AgentSessions/` returns no matches; issue #80.
+
+- **What:** [issue #80](https://github.com/jazzyalex/agent-sessions/issues/80) asks for a
+  CLI with flags, so a coding agent can use Agent Sessions as an archiving tool from
+  inside its own session. Today the app is GUI-only. The Swift sources have no argument
+  parsing, no URL scheme and no App Intents (grepped `AgentSessions/` for
+  `ArgumentParser`, `CommandLine.arguments`, `agentsessions://`, `onOpenURL`,
+  `AppIntent` — no hits).
+- **Where:** archive logic is in
+  [SessionArchiveManager.swift](../AgentSessions/Services/SessionArchiveManager.swift).
+  `index.db` is a plain SQLite file under `Application Support/AgentSessions/`. The app
+  has no sandbox, so an external tool can reach both.
+- **Open question:** "archiving" is not defined. It could mean copying raw session files,
+  exporting one session as Markdown or JSON, or protecting a session from the agent's own
+  cleanup. The reporter was asked on 2026-10-01 to describe the use case, the commands the
+  agent would run, which agents they use, and whether the app must be running.
+- **Fix shape (hypothesis, pending the answer):** a small command-line target that reuses
+  `SessionArchiveManager`, or a headless subcommand of the app binary. A full CLI may be
+  more than the use case needs.
+- **Why deferred:** the request has no concrete use case yet. Building before that risks
+  the wrong surface. A PR from the reporter is welcome.
+- **Risk if wrong:** low. Agents can copy the JSONL session files with shell commands in
+  the meantime.
+- **To close:** get the use case, then either scope a first version or close the issue as
+  `won't-do` with the shell workaround documented.

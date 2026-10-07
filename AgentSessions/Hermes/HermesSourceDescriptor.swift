@@ -10,7 +10,22 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .hermes,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .supported,
+                tokens: .supported,
+                cost: .unavailable("Hermes native cost is provider-specific and is not shown as an API-equivalent estimate"),
+                weeklyQuota: .unavailable("Hermes does not expose a compatible account quota feed")
+            ),
+            scanTelemetry: { session in
+                HermesTelemetryReader.loadTelemetry(for: session)
+            },
+            telemetryRevision: { session in
+                HermesTelemetryReader.telemetryRevision(for: session)
+            },
+            telemetryBackendAvailable: { session in
+                session.source == .hermes
+                    && URL(fileURLWithPath: session.filePath).lastPathComponent == "state.db"
+            },
             shortLabel: "Hermes",
             badgeInitials: "HM",
             // Olive-gold accent, shifted away from Claude/OpenClaw warm oranges.

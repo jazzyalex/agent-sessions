@@ -1,4 +1,64 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
+
+/// A compact filesystem proof used by discovery and parser handoffs.
+///
+/// This value lives with the session model because lightweight logic-test targets compile
+/// `Session.swift` without the concrete discovery implementation. Discovery-specific
+/// helpers remain in `SessionDiscovery.swift`.
+struct SessionFileStat: Equatable, Sendable {
+    let mtime: Int64
+    let size: Int64
+
+    /// Optional source-specific identity/fingerprint data. Generic sources keep this nil;
+    /// composite sources can use it to distinguish same-second, same-size rewrites without
+    /// changing the display timestamp contract.
+    let fingerprint: String?
+    /// POSIX change time, when available. This is a cheap cache identity for content
+    /// fingerprints: unlike modification time, it still changes for an in-place rewrite
+    /// whose mtime and byte count were restored by the writer.
+    let changeTime: Int64?
+
+    init(mtime: Int64, size: Int64, fingerprint: String? = nil, changeTime: Int64? = nil) {
+        self.mtime = mtime
+        self.size = size
+        self.fingerprint = fingerprint
+        self.changeTime = changeTime
+    }
+
+    /// Capture the higher-resolution proof used by OpenClaw's concurrent JSONL handoff.
+    /// Keeping this beside the value type makes parser and indexer captures identical.
+    static func precise(from url: URL) -> SessionFileStat? {
+        let descriptor = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return open(path, O_RDONLY)
+        }
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        return precise(fromFileDescriptor: descriptor)
+    }
+
+    /// Capture proof from a descriptor captured while its FileHandle was known
+    /// to be open. `FileHandle.fileDescriptor` can raise an Objective-C
+    /// exception after a failed read or close; callers that need a post-read
+    /// sample should retain the descriptor and use this non-throwing path.
+    static func precise(fromFileDescriptor descriptor: Int32) -> SessionFileStat? {
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else { return nil }
+
+        let mtime = Int64(metadata.st_mtimespec.tv_sec) * 1_000_000_000
+            + Int64(metadata.st_mtimespec.tv_nsec)
+        let changeTime = Int64(metadata.st_ctimespec.tv_sec) * 1_000_000_000
+            + Int64(metadata.st_ctimespec.tv_nsec)
+        return SessionFileStat(
+            mtime: mtime,
+            size: Int64(metadata.st_size),
+            fingerprint: "dev:\(metadata.st_dev):inode:\(metadata.st_ino)",
+            changeTime: changeTime)
+    }
+}
 
 public enum SessionSurface: String, Codable, Sendable {
     case cli
@@ -197,6 +257,19 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
 
+    // Runtime-only identity captured by a provider while a full parse is in
+    // flight. Shared-storage providers use these values to reject a parsed
+    // result when a lexical alias is retargeted before publication.
+    internal var sourceStorageIdentity: String? = nil
+    internal var sourceStorageRevision: String? = nil
+    // Cheap database-level proof captured alongside a full SQLite publication.
+    // It lets shared-storage handoffs detect an intervening commit without
+    // re-hashing every loaded transcript.
+    internal var sourceStorageDatabaseVersion: String? = nil
+    // File proof captured by a full JSONL parser. It is deliberately runtime
+    // only: a caller must not manufacture a proof from a later stat sample.
+    internal var sourceFileStat: SessionFileStat? = nil
+
     // Task 9e stage 0: true for a disposable tail-only provisional session
     // (ReverseJSONLTailReader + SessionIndexer.parseFileTail) published to
     // paint something readable before the full parse completes. Never
@@ -355,6 +428,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         // hasToolCallEvent intentionally excluded (derived at parse/index time from events)
         // isDeleted is a computed property (deletedAt != nil)
         // isPartiallyHydrated intentionally excluded (runtime-only, never persisted)
+        // sourceStorageIdentity/sourceStorageRevision/sourceStorageDatabaseVersion
+        // intentionally excluded (runtime-only)
+        // sourceFileStat intentionally excluded (runtime-only parse proof)
     }
 
     public static func == (lhs: Session, rhs: Session) -> Bool {

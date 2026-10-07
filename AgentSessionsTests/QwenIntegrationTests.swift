@@ -415,6 +415,95 @@ final class QwenIntegrationTests: XCTestCase {
         XCTAssertEqual(cycle.eventCount, 2)
     }
 
+    func testParserIgnoresDeadBranchRepeatedUUIDSessionConflict() throws {
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000017"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        try writeJSONLines([
+            record(uuid: "identity-root", parentUUID: nil, sessionID: id, type: "user",
+                   timestamp: "2026-08-17T15:03:00.000Z", cwd: "/tmp/identity",
+                   messageText: "Active prompt."),
+            record(uuid: "identity-dead", parentUUID: "identity-root", sessionID: "other-session",
+                   type: "assistant", timestamp: "2026-08-17T15:03:01.000Z", cwd: "/tmp/dead",
+                   messageText: "Dead response."),
+            record(uuid: "identity-dead", parentUUID: "identity-root", sessionID: id,
+                   type: "assistant", timestamp: "2026-08-17T15:03:02.000Z", cwd: "/tmp/dead",
+                   messageText: "Dead response fragment."),
+            record(uuid: "identity-active", parentUUID: "identity-root", sessionID: id,
+                   type: "assistant", timestamp: "2026-08-17T15:03:03.000Z", cwd: "/tmp/identity",
+                   messageText: "Active response.")
+        ], to: url)
+
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(session.events.filter { $0.kind != .meta }.compactMap(\.text),
+                       ["Active prompt.", "Active response."])
+    }
+
+    func testParserRejectsActiveRepeatedUUIDSessionConflict() throws {
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000018"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        try writeJSONLines([
+            record(uuid: "active-identity-root", parentUUID: nil, sessionID: id, type: "user",
+                   timestamp: "2026-08-17T15:04:00.000Z", cwd: "/tmp/identity",
+                   messageText: "Active prompt."),
+            record(uuid: "active-identity-conflict", parentUUID: "active-identity-root",
+                   sessionID: id, type: "assistant", timestamp: "2026-08-17T15:04:01.000Z",
+                   cwd: "/tmp/identity", messageText: "First response."),
+            record(uuid: "active-identity-conflict", parentUUID: "active-identity-root",
+                   sessionID: "other-session", type: "assistant",
+                   timestamp: "2026-08-17T15:04:02.000Z", cwd: "/tmp/other",
+                   messageText: "Conflicting response.")
+        ], to: url)
+
+        XCTAssertNil(QwenSessionParser.parseFileFull(at: url))
+    }
+
+    func testParserIgnoresDeadBranchRepeatedUUIDArtifactSessionConflict() throws {
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000019"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        try writeJSONLines([
+            record(uuid: "artifact-dead-root", parentUUID: nil, sessionID: id, type: "user",
+                   timestamp: "2026-08-17T15:05:00.000Z", cwd: "/tmp/identity",
+                   messageText: "Active prompt."),
+            record(uuid: "artifact-dead-conflict", parentUUID: "artifact-dead-root",
+                   sessionID: id, type: "assistant", timestamp: "2026-08-17T15:05:01.000Z",
+                   cwd: "/tmp/dead", messageText: "Dead response."),
+            record(uuid: "artifact-dead-conflict", parentUUID: "artifact-dead-root",
+                   sessionID: "other-session", type: "system",
+                   timestamp: "2026-08-17T15:05:02.000Z", cwd: "/tmp/dead", messageText: nil,
+                   subtype: "session_artifact_event"),
+            record(uuid: "artifact-dead-active", parentUUID: "artifact-dead-root", sessionID: id,
+                   type: "assistant", timestamp: "2026-08-17T15:05:03.000Z", cwd: "/tmp/identity",
+                   messageText: "Active response.")
+        ], to: url)
+
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(session.events.filter { $0.kind != .meta }.compactMap(\.text),
+                       ["Active prompt.", "Active response."])
+    }
+
+    func testParserRejectsActiveRepeatedUUIDArtifactSessionConflict() throws {
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000020"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        try writeJSONLines([
+            record(uuid: "artifact-active-root", parentUUID: nil, sessionID: id, type: "user",
+                   timestamp: "2026-08-17T15:06:00.000Z", cwd: "/tmp/identity",
+                   messageText: "Active prompt."),
+            record(uuid: "artifact-active-conflict", parentUUID: "artifact-active-root",
+                   sessionID: id, type: "assistant", timestamp: "2026-08-17T15:06:01.000Z",
+                   cwd: "/tmp/identity", messageText: "Active response."),
+            record(uuid: "artifact-active-conflict", parentUUID: "artifact-active-root",
+                   sessionID: "other-session", type: "system",
+                   timestamp: "2026-08-17T15:06:02.000Z", cwd: "/tmp/other", messageText: nil,
+                   subtype: "session_artifact_snapshot")
+        ], to: url)
+
+        XCTAssertNil(QwenSessionParser.parseFileFull(at: url))
+    }
+
     func testInvalidIdentityAndTypeRecordsCannotBecomeLeaf() throws {
         let root = try makeTemporaryRoot()
         let id = "019f0000-0000-7000-8000-000000000008"
@@ -1497,7 +1586,8 @@ final class QwenIntegrationTests: XCTestCase {
                         type: String,
                         timestamp: String,
                         cwd: String,
-                        messageText: String?) -> [String: Any] {
+                        messageText: String?,
+                        subtype: String? = nil) -> [String: Any] {
         var object: [String: Any] = [
             "uuid": uuid,
             "parentUuid": parentUUID ?? NSNull(),
@@ -1507,6 +1597,9 @@ final class QwenIntegrationTests: XCTestCase {
             "cwd": cwd,
             "version": "0.21.13"
         ]
+        if let subtype {
+            object["subtype"] = subtype
+        }
         if let messageText {
             object["message"] = [
                 "role": type == "assistant" ? "model" : "user",

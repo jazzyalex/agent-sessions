@@ -920,7 +920,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 telemetryLoadState = .loaded
             } else {
                 let reason: SessionInfoUnavailableReason =
-                    SessionSourceRegistry.descriptor(for: session.source).makeTelemetryProvider == nil
+                    !SessionSourceRegistry.descriptor(for: session.source).hasTelemetryBackend(for: session)
                         ? .unsupported
                         : .parseFailed
                 telemetryLoadState = .unavailable(reason)
