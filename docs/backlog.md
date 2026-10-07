@@ -697,6 +697,12 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   the unified log recorded a normal `proc_exit` rather than `EXC_CRASH` or `SIGABRT`. Treat
   the termination cause as unconfirmed until the same interaction is reproduced from an
   app-launched build with a process-exit reason captured.
+- **Follow-up evidence:** an app-launched Debug build with all 17 providers enabled kept
+  PID 33839 alive while the list was indexing, but two consecutive accessibility reads each
+  timed out. The same run logged repeated AppKit `NSTableView` reentrant-delegate warnings
+  and five missing Cursor `store.db-wal` files. This confirms the large-library UI hang
+  independently of the earlier unexplained process exit; the missing WAL reads are a
+  concurrent-file condition, not evidence of a crash by themselves.
 - **Risk if wrong:** users with several enabled providers can mistake a long scan for a hung
   app and cannot reliably inspect or switch sessions during the scan.
 - **To close:** a mixed-provider stress test proves bounded concurrency, cancellation, and
@@ -786,10 +792,21 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   0 duplicate parses, and 2 transcript/telemetry overlaps. The snapshot sink is
   [SessionInfoMetrics.swift](../AgentSessions/Support/SessionInfoMetrics.swift); the values
   are process-local and opt-in.
+- **Follow-up evidence:** three killed-and-relaunched provider-isolated runs produced these
+  small-sample nearest-rank p50/p95 results (so p95 is the maximum of three observations):
+
+  | Source | Model-first-paint p50 / p95 | Telemetry p50 / p95 | Bytes scanned per run | Overlap |
+  | --- | ---: | ---: | ---: | ---: |
+  | Codex | 95.2 / 116.5 ms | 5,211.7 / 5,328.8 ms | 22,085,632–24,117,248 | 1 each |
+  | OpenCode | 12.0 / 12.0 ms | 26.3 / 28.5 ms | 1,633,068 | 0 |
+  | Claude | 13.0 / 22.4 ms | 1,099.0 / 1,106.1 ms | 17,732,831 | 1 each |
+
+  All nine runs recorded zero cache hits, in-flight joins, and duplicate parses. These are
+  diagnostic baselines, not a statistically stable release benchmark.
 - **Current status:** phase 5 makes the requested counters observable without adding normal
   user-facing log noise, and the manual smoke pass captured a reproducible starting point.
-  Provider-by-provider cold-start distributions, repeat-run cache/coalescing comparisons,
-  and a paging responsiveness measure remain open.
+  The first repeated source-isolated distribution is now captured; repeat-run cache/coalescing
+  behavior and a paging responsiveness measure remain open.
 - **Risk if wrong:** a single fast first paint can hide an expensive telemetry scan or
   transcript/telemetry overlap that still makes large libraries feel slow.
 - **To close:** collect repeated cold/warm samples for the most-used providers, publish
