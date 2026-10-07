@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Unified provider refreshes now use a cancellation-aware two-source budget and keep the
   Session list visibly indexing while additional enabled providers wait to run.
 - Crash diagnostics no longer re-prompt for the same report after `Later`, ignore XCTest-injected test-host reports, and keep telemetry freshness checks from accessing a failed `FileHandle` descriptor after reading.
+- Session Info now exposes opt-in process-local metrics for model-first-paint, telemetry duration, bytes scanned, cache/coalescing hits, duplicate parses, and transcript/telemetry overlap so controlled smoke tests can produce real-use baselines.
 - Session Info now reads fx's audited aggregate input/output totals and current model/effort from `session.json` through the source registry; per-turn/cache attribution, cost, and quota remain explicitly unavailable.
 
 - Session Info now paints provider-neutral source, current model, configuration, and title metadata immediately for all supported agents while detailed telemetry loads separately.

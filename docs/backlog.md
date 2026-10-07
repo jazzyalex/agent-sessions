@@ -692,6 +692,11 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   makes the wait cancellation-aware, and keeps the UI in an explicit indexing state while
   queued sources are waiting. The mixed-provider stress fixture, measured paging baseline,
   and final closure remain open.
+- **Additional QA observation:** a later all-provider selection attempt saw the app process
+  disappear while the index held roughly 4,548 sessions. No new `.ips` report was produced;
+  the unified log recorded a normal `proc_exit` rather than `EXC_CRASH` or `SIGABRT`. Treat
+  the termination cause as unconfirmed until the same interaction is reproduced from an
+  app-launched build with a process-exit reason captured.
 - **Risk if wrong:** users with several enabled providers can mistake a long scan for a hung
   app and cannot reliably inspect or switch sessions during the scan.
 - **To close:** a mixed-provider stress test proves bounded concurrency, cancellation, and
@@ -768,6 +773,28 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   failed.
 - **To close:** cold-start tests distinguish indexing, cancelled, unavailable, and completed
   empty states for every source.
+
+### Session Info performance counters have only a controlled one-run baseline
+> **partial** · sev: med · urg: med · verified 2026-10-07
+
+- **What:** the quick-info/detailed-telemetry split now needs real-use measurements across
+  provider-isolated and mixed-provider launches. Without them, the UI can be visibly fast
+  while the detailed scan still consumes substantial time and bytes.
+- **Evidence:** launching the manual build with `AS_SESSION_INFO_METRICS=1` emitted a final
+  all-provider snapshot with model-first-paint averaging 58.6 ms across 2 paints, one
+  5,396.9 ms telemetry scan, 5,570,560 bytes scanned, 0 cache hits, 0 in-flight joins,
+  0 duplicate parses, and 2 transcript/telemetry overlaps. The snapshot sink is
+  [SessionInfoMetrics.swift](../AgentSessions/Support/SessionInfoMetrics.swift); the values
+  are process-local and opt-in.
+- **Current status:** phase 5 makes the requested counters observable without adding normal
+  user-facing log noise, and the manual smoke pass captured a reproducible starting point.
+  Provider-by-provider cold-start distributions, repeat-run cache/coalescing comparisons,
+  and a paging responsiveness measure remain open.
+- **Risk if wrong:** a single fast first paint can hide an expensive telemetry scan or
+  transcript/telemetry overlap that still makes large libraries feel slow.
+- **To close:** collect repeated cold/warm samples for the most-used providers, publish
+  p50/p95 model-first-paint and telemetry duration, and show nonzero cache/coalescing
+  behavior on a repeat selection without stale data.
 
 ### Crash diagnostics surfaced XCTest test-host aborts as end-user crashes
 > **partial** · sev: high · urg: high · verified 2026-10-07

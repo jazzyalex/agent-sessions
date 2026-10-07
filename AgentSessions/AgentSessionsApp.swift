@@ -647,6 +647,10 @@ final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in ClaudeCloudLiveModel.shared.startIfNeeded() }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        SessionInfoMetrics.shared.emitSnapshot(label: "application_terminate")
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         let item = NSMenuItem(

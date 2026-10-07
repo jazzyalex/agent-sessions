@@ -63,8 +63,11 @@ public final class SessionInfoMetrics: @unchecked Sendable {
     }
     private var activeTranscriptCounts = [ActivityIdentity: Int]()
     private var activeTelemetryCounts = [ActivityIdentity: Int]()
+    private let loggingEnabled: Bool
 
-    public init() {}
+    public init() {
+        loggingEnabled = ProcessInfo.processInfo.environment["AS_SESSION_INFO_METRICS"] == "1"
+    }
 
     public var snapshot: SessionInfoMetricsSnapshot {
         lock.lock()
@@ -79,6 +82,7 @@ public final class SessionInfoMetrics: @unchecked Sendable {
         // parse is in flight; forgetting those references would make the next
         // opposite-side begin miss a real overlap and make its end unbalanced.
         lock.unlock()
+        emitSnapshot(label: "reset")
     }
 
     public func recordModelFirstPaint(duration: TimeInterval) {
@@ -94,6 +98,7 @@ public final class SessionInfoMetrics: @unchecked Sendable {
             duplicateParseCount: values.duplicateParseCount,
             transcriptTelemetryOverlapCount: values.transcriptTelemetryOverlapCount)
         lock.unlock()
+        emitSnapshot(label: "model_first_paint")
     }
 
     public func recordTelemetryFinished(duration: TimeInterval, bytesScanned: UInt64) {
@@ -109,6 +114,7 @@ public final class SessionInfoMetrics: @unchecked Sendable {
             duplicateParseCount: values.duplicateParseCount,
             transcriptTelemetryOverlapCount: values.transcriptTelemetryOverlapCount)
         lock.unlock()
+        emitSnapshot(label: "telemetry_finished")
     }
 
     /// Accounts for source-specific freshness work performed before the shared
@@ -127,6 +133,7 @@ public final class SessionInfoMetrics: @unchecked Sendable {
             duplicateParseCount: values.duplicateParseCount,
             transcriptTelemetryOverlapCount: values.transcriptTelemetryOverlapCount)
         lock.unlock()
+        emitSnapshot(label: "telemetry_preparation")
     }
 
     public func recordCacheHit() {
@@ -186,12 +193,15 @@ public final class SessionInfoMetrics: @unchecked Sendable {
 
     private func beginTranscript(identity: ActivityIdentity) {
         lock.lock()
+        var recordedOverlap = false
         if activeTranscriptCounts[identity, default: 0] == 0,
            activeTelemetryCounts[identity, default: 0] > 0 {
             values = Self.incrementOverlap(values)
+            recordedOverlap = true
         }
         activeTranscriptCounts[identity, default: 0] += 1
         lock.unlock()
+        if recordedOverlap { emitSnapshot(label: "transcript_telemetry_overlap") }
     }
 
     public func endTranscript(path: String) {
@@ -220,12 +230,15 @@ public final class SessionInfoMetrics: @unchecked Sendable {
 
     private func beginTelemetry(identity: ActivityIdentity) {
         lock.lock()
+        var recordedOverlap = false
         if activeTelemetryCounts[identity, default: 0] == 0,
            activeTranscriptCounts[identity, default: 0] > 0 {
             values = Self.incrementOverlap(values)
+            recordedOverlap = true
         }
         activeTelemetryCounts[identity, default: 0] += 1
         lock.unlock()
+        if recordedOverlap { emitSnapshot(label: "transcript_telemetry_overlap") }
     }
 
     public func endTelemetry(path: String) {
@@ -256,6 +269,35 @@ public final class SessionInfoMetrics: @unchecked Sendable {
         lock.lock()
         values = transform(values)
         lock.unlock()
+        emitSnapshot(label: "counter")
+    }
+
+    /// Emits a machine-readable process-local baseline when the app is launched
+    /// with `AS_SESSION_INFO_METRICS=1`. This stays opt-in so normal users never
+    /// receive a log stream, while manual smoke tests can collect live metrics
+    /// without an in-process debugger or private UI.
+    public func emitSnapshot(label: String = "snapshot") {
+        guard loggingEnabled else { return }
+        let snapshot = self.snapshot
+        let averageModelPaint = snapshot.modelFirstPaintCount > 0
+            ? snapshot.modelFirstPaintTotalMilliseconds / Double(snapshot.modelFirstPaintCount)
+            : 0
+        let averageTelemetry = snapshot.telemetryRequestCount > 0
+            ? snapshot.telemetryDurationTotalMilliseconds / Double(snapshot.telemetryRequestCount)
+            : 0
+        let line = String(
+            format: "[SessionInfoMetrics] event=%@ model_first_paint_count=%d model_first_paint_avg_ms=%.1f telemetry_count=%d telemetry_avg_ms=%.1f bytes_scanned=%llu cache_hits=%d inflight_joins=%d duplicate_parses=%d transcript_telemetry_overlap=%d",
+            label,
+            snapshot.modelFirstPaintCount,
+            averageModelPaint,
+            snapshot.telemetryRequestCount,
+            averageTelemetry,
+            snapshot.telemetryBytesScanned,
+            snapshot.cacheHitCount,
+            snapshot.inFlightJoinCount,
+            snapshot.duplicateParseCount,
+            snapshot.transcriptTelemetryOverlapCount)
+        FileHandle.standardError.write(Data((line + "\n").utf8))
     }
 
     private static func incrementOverlap(_ snapshot: SessionInfoMetricsSnapshot) -> SessionInfoMetricsSnapshot {
