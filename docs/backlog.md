@@ -761,6 +761,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   reserve the empty state for a completed scan with zero results.
 - **Why deferred:** the current indexer has source-level progress but the list's empty-state
   copy does not consistently consume it for every provider.
+- **Current status:** phase 4 now consumes unified launch/indexing state and distinguishes
+  indexing, transient refresh, failure, active filters, and a completed zero-session result.
+  Per-provider cold-start coverage and the all-provider paging baseline remain open.
 - **Risk if wrong:** users may conclude that a provider has no history or that enabling it
   failed.
 - **To close:** cold-start tests distinguish indexing, cancelled, unavailable, and completed

@@ -91,6 +91,47 @@ enum UnifiedRowsStabilityPolicy {
     }
 }
 
+enum UnifiedSessionListEmptyState: Equatable {
+    case indexing
+    case updating
+    case searching
+    case failed
+    case filtered
+    case noSessions
+}
+
+enum UnifiedSessionListEmptyStatePolicy {
+    static func state(
+        hasRows: Bool,
+        isIndexing: Bool,
+        launchPhase: LaunchPhase,
+        hasDisplayedSessions: Bool,
+        indexingError: String?,
+        isDatasetChurning: Bool,
+        isSearchRunning: Bool,
+        isFiltered: Bool
+    ) -> UnifiedSessionListEmptyState? {
+        guard !hasRows else { return nil }
+
+        if launchPhase == .error || !(indexingError?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            return .failed
+        }
+        if isIndexing || launchPhase < .ready || !hasDisplayedSessions {
+            return .indexing
+        }
+        if isDatasetChurning {
+            return .updating
+        }
+        if isSearchRunning {
+            return .searching
+        }
+        if isFiltered {
+            return .filtered
+        }
+        return .noSessions
+    }
+}
+
 enum UnifiedTableIdentityPolicy {
     static func tableIdentity(columnLayoutID: UUID, reorderGeneration: Int) -> String {
         "unified-table-\(columnLayoutID.uuidString)-\(reorderGeneration)"
@@ -1168,6 +1209,12 @@ struct UnifiedSessionsView: View {
 		        .simultaneousGesture(TapGesture().onEnded {
 		            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
 		        })
+		        if let emptyState = sessionListEmptyState {
+		            sessionListEmptyStateView(emptyState)
+		                .frame(maxWidth: .infinity, maxHeight: .infinity)
+		                .background(Self.listPaneBackground)
+		                .allowsHitTesting(false)
+		        }
 		        }
 		        .contextMenu(forSelectionType: String.self) { ids in
 			            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
@@ -1414,6 +1461,74 @@ struct UnifiedSessionsView: View {
 	        || unified.isProcessingTranscripts
 	        || searchCoordinator.isRunning
 	        || unified.launchState.overallPhase < .ready
+	    }
+
+	    private var sessionListEmptyState: UnifiedSessionListEmptyState? {
+	        UnifiedSessionListEmptyStatePolicy.state(
+	            hasRows: !cachedRows.isEmpty,
+	            isIndexing: unified.isIndexing,
+	            launchPhase: unified.launchState.overallPhase,
+	            hasDisplayedSessions: unified.launchState.hasDisplayedSessions,
+	            indexingError: unified.indexingError,
+	            isDatasetChurning: isDatasetChurning,
+	            isSearchRunning: searchCoordinator.isRunning,
+	            isFiltered: footerIsFiltered
+	        )
+	    }
+
+	    @ViewBuilder
+	    private func sessionListEmptyStateView(_ state: UnifiedSessionListEmptyState) -> some View {
+	        VStack(spacing: LayoutTokens.sm) {
+	            switch state {
+	            case .indexing:
+	                ProgressView()
+	                    .controlSize(.small)
+	                Text("Indexing sessions…")
+	                    .font(.headline)
+	                Text(String(localized: unified.launchState.overallPhase.statusDescription))
+	                    .font(.callout)
+	                    .foregroundStyle(.secondary)
+	            case .updating:
+	                ProgressView()
+	                    .controlSize(.small)
+	                Text("Updating sessions…")
+	                    .font(.headline)
+	            case .searching:
+	                ProgressView()
+	                    .controlSize(.small)
+	                Text("Searching…")
+	                    .font(.headline)
+	            case .failed:
+	                Image(systemName: "exclamationmark.triangle")
+	                    .font(.title2)
+	                    .foregroundStyle(.secondary)
+	                Text("Session index unavailable")
+	                    .font(.headline)
+	                Text("Refresh to try indexing again.")
+	                    .font(.callout)
+	                    .foregroundStyle(.secondary)
+	            case .filtered:
+	                Image(systemName: "line.3.horizontal.decrease.circle")
+	                    .font(.title2)
+	                    .foregroundStyle(.secondary)
+	                Text("No matching sessions")
+	                    .font(.headline)
+	                Text("Try clearing the current filters.")
+	                    .font(.callout)
+	                    .foregroundStyle(.secondary)
+	            case .noSessions:
+	                Image(systemName: "text.bubble")
+	                    .font(.title2)
+	                    .foregroundStyle(.secondary)
+	                Text("No sessions yet")
+	                    .font(.headline)
+	                Text("Sessions will appear here after an agent records one.")
+	                    .font(.callout)
+	                    .foregroundStyle(.secondary)
+	            }
+        }
+	        .multilineTextAlignment(.center)
+	        .padding(LayoutTokens.xl)
 	    }
 
 	    private var footerStatusText: String {

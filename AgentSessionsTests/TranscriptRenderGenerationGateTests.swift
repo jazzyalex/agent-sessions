@@ -308,6 +308,87 @@ final class UnifiedRowsStabilityPolicyTests: XCTestCase {
     }
 }
 
+final class UnifiedSessionListEmptyStatePolicyTests: XCTestCase {
+    func testShowsIndexingBeforeTheFirstPublishedResult() {
+        XCTAssertEqual(
+            UnifiedSessionListEmptyStatePolicy.state(
+                hasRows: false,
+                isIndexing: false,
+                launchPhase: .ready,
+                hasDisplayedSessions: false,
+                indexingError: nil,
+                isDatasetChurning: false,
+                isSearchRunning: false,
+                isFiltered: false
+            ),
+            .indexing
+        )
+    }
+
+    func testShowsFailureInsteadOfAFalseEmptyLibrary() {
+        XCTAssertEqual(
+            UnifiedSessionListEmptyStatePolicy.state(
+                hasRows: false,
+                isIndexing: false,
+                launchPhase: .error,
+                hasDisplayedSessions: true,
+                indexingError: "provider failed",
+                isDatasetChurning: false,
+                isSearchRunning: false,
+                isFiltered: false
+            ),
+            .failed
+        )
+    }
+
+    func testShowsUpdatingDuringTransientEmptyRefresh() {
+        XCTAssertEqual(
+            UnifiedSessionListEmptyStatePolicy.state(
+                hasRows: false,
+                isIndexing: false,
+                launchPhase: .ready,
+                hasDisplayedSessions: true,
+                indexingError: nil,
+                isDatasetChurning: true,
+                isSearchRunning: false,
+                isFiltered: false
+            ),
+            .updating
+        )
+    }
+
+    func testShowsNoMatchesOnlyAfterIndexingHasSettled() {
+        XCTAssertEqual(
+            UnifiedSessionListEmptyStatePolicy.state(
+                hasRows: false,
+                isIndexing: false,
+                launchPhase: .ready,
+                hasDisplayedSessions: true,
+                indexingError: nil,
+                isDatasetChurning: false,
+                isSearchRunning: false,
+                isFiltered: true
+            ),
+            .filtered
+        )
+    }
+
+    func testRowsSuppressTheEmptyState() {
+        XCTAssertNil(
+            UnifiedSessionListEmptyStatePolicy.state(
+                hasRows: true,
+                isIndexing: true,
+                launchPhase: .scanning,
+                hasDisplayedSessions: true,
+                indexingError: nil,
+                isDatasetChurning: true,
+                isSearchRunning: false,
+                isFiltered: false
+            )
+        )
+    }
+}
+
 final class TranscriptSessionRenderKeyTests: XCTestCase {
     func testRenderKeyChangesWhenEventCountChanges() {
         let base = makeSession(eventCount: 10, events: [makeEvent(id: "e1")], isFavorite: false)

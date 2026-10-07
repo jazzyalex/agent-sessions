@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Session list empty states now distinguish indexing, transient refresh, indexing failure,
+  active filters, and a genuinely empty library, so a provider cannot briefly look empty
+  while its first scan is still settling.
 - Detailed Session Info telemetry now stops after five seconds with a cancellable,
   retryable timeout while provider-neutral quick info remains available.
 - Session Info and session rows now reject prompt/XML metadata leakage and timestamp-only
