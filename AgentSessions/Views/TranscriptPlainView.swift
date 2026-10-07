@@ -3,6 +3,8 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+private let sessionInfoDetailedTelemetryTimeoutNanoseconds: UInt64 = 5_000_000_000
+
 private enum TranscriptToolbarStyle {
     static let baseFont = Font.system(size: 13, weight: .regular, design: .monospaced)
     static let compactFont = Font.system(size: 11, weight: .regular, design: .monospaced)
@@ -513,6 +515,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var telemetryUpdatedAt: Date?
     @State private var quickInfoPaintState = SessionInfoQuickPaintState()
 
+    private enum TelemetryLoadOutcome {
+        case completed(SessionTelemetry?)
+        case timedOut
+    }
+
     private var telemetrySelectionIdentity: TranscriptTelemetrySelectionIdentity? {
         guard let id = sessionID, let session = resolvedSessionForRender(id: id) else { return nil }
         return TranscriptTelemetrySelectionIdentity(session: session)
@@ -911,20 +918,48 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 return
             }
             telemetryLoading = true
-            let result = await SessionTelemetryEngine.shared.telemetry(for: session)
+            let outcome = await loadTelemetryWithTimeout(for: session)
             guard !Task.isCancelled, owner == telemetrySelectionIdentity else { return }
-            sessionTelemetry = result
             telemetryUpdatedAt = Date()
             telemetryLoading = false
-            if result != nil {
-                telemetryLoadState = .loaded
-            } else {
-                let reason: SessionInfoUnavailableReason =
-                    !SessionSourceRegistry.descriptor(for: session.source).hasTelemetryBackend(for: session)
-                        ? .unsupported
-                        : .parseFailed
-                telemetryLoadState = .unavailable(reason)
+            switch outcome {
+            case .completed(let result):
+                sessionTelemetry = result
+                if result != nil {
+                    telemetryLoadState = .loaded
+                } else {
+                    let reason: SessionInfoUnavailableReason =
+                        !SessionSourceRegistry.descriptor(for: session.source).hasTelemetryBackend(for: session)
+                            ? .unsupported
+                            : .parseFailed
+                    telemetryLoadState = .unavailable(reason)
+                }
+            case .timedOut:
+                sessionTelemetry = nil
+                telemetryLoadState = .unavailable(.timedOut)
             }
+        }
+    }
+
+    private func loadTelemetryWithTimeout(for session: Session) async -> TelemetryLoadOutcome {
+        await withTaskGroup(of: TelemetryLoadOutcome.self) { group in
+            group.addTask {
+                .completed(await SessionTelemetryEngine.shared.telemetry(for: session))
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(nanoseconds: sessionInfoDetailedTelemetryTimeoutNanoseconds)
+                    return .timedOut
+                } catch {
+                    return .completed(nil)
+                }
+            }
+
+            guard let outcome = await group.next() else {
+                return .completed(nil)
+            }
+            group.cancelAll()
+            return outcome
         }
     }
 

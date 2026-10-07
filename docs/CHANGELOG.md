@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Detailed Session Info telemetry now stops after five seconds with a cancellable,
+  retryable timeout while provider-neutral quick info remains available.
 - Unified provider refreshes now use a cancellation-aware two-source budget and keep the
   Session list visibly indexing while additional enabled providers wait to run.
 - Crash diagnostics no longer re-prompt for the same report after `Later`, ignore XCTest-injected test-host reports, and keep telemetry freshness checks from accessing a failed `FileHandle` descriptor after reading.

@@ -30,6 +30,7 @@ public enum SessionInfoUnavailableReason: String, Codable, Hashable, Sendable {
     case parseFailed
     case ambiguous
     case redacted
+    case timedOut
 
     public var displayName: String {
         switch self {
@@ -39,6 +40,7 @@ public enum SessionInfoUnavailableReason: String, Codable, Hashable, Sendable {
         case .parseFailed: return "Could not read"
         case .ambiguous: return "Ambiguous"
         case .redacted: return "Redacted"
+        case .timedOut: return "Timed out"
         }
     }
 }

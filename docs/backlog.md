@@ -711,9 +711,12 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Fix shape:** enforce a visible timeout/cancellation outcome, surface scan progress or a
   precise unavailable reason, and retain the quick facts without presenting an indefinite
   spinner. Add a cold-start Codex fixture that exercises the same path.
+- **Current status:** phase 2 now bounds detailed telemetry with a five-second,
+  cancellation-aware timeout. The panel keeps quick facts, reports a distinct timeout
+  reason, and offers Refresh; a cold-start fixture and real-use baseline remain open.
 - **Why deferred:** the first implementation established the immediate-vs-detailed split and
-  in-flight coalescing; the provider-specific latency budget and UI timeout policy remain to
-  be chosen.
+  in-flight coalescing; the remaining work is provider-specific latency measurement and
+  cold-start coverage.
 - **Risk if wrong:** users cannot distinguish a slow scan from unsupported telemetry or a
   broken provider reader.
 - **To close:** the detailed panel reaches success, unsupported, cancelled, or failed within

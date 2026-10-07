@@ -666,7 +666,7 @@ struct TranscriptTelemetryView: View {
                             .font(SessionInfoType.row)
                             .foregroundStyle(.secondary)
                     } else if quickFacts != nil {
-                        Text("Detailed telemetry is unavailable for this source or transcript.")
+                        Text(detailedTelemetryUnavailableMessage)
                             .font(SessionInfoType.row)
                             .foregroundStyle(.secondary)
                     } else {
@@ -681,6 +681,20 @@ struct TranscriptTelemetryView: View {
             }
         }
         .background(Surface.chrome)
+    }
+
+    private var detailedTelemetryUnavailableMessage: String {
+        guard case .unavailable(let reason) = telemetryLoadState else {
+            return "Detailed telemetry is unavailable for this source or transcript."
+        }
+        switch reason {
+        case .timedOut:
+            return "Detailed telemetry timed out; quick info is still available. Try Refresh to retry."
+        case .unsupported:
+            return "Detailed telemetry is not supported for this source; quick info remains available."
+        default:
+            return "Detailed telemetry is unavailable for this source or transcript."
+        }
     }
 
     private var header: some View {

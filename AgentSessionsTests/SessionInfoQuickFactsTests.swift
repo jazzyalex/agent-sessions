@@ -160,6 +160,13 @@ final class SessionInfoQuickFactsTests: XCTestCase {
             SessionInfoQuickFacts(session: first).identity,
             SessionInfoQuickFacts(session: second).identity)
     }
+
+    func testTelemetryTimeoutIsAnExplicitUnavailableReason() {
+        XCTAssertEqual(SessionInfoUnavailableReason.timedOut.displayName, "Timed out")
+        XCTAssertEqual(
+            SessionInfoTelemetryLoadState.unavailable(.timedOut),
+            .unavailable(.timedOut))
+    }
 }
 
 final class SessionInfoMetricsTests: XCTestCase {
