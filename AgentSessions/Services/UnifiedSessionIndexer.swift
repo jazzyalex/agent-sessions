@@ -216,6 +216,37 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
 
+    /// Limits the number of providers doing filesystem/parsing work at once. The individual
+    /// indexers still own their cancellation and per-file yielding, but a launch with every
+    /// provider enabled must not turn those small worker pools into one large process-wide
+    /// burst.
+    private actor ProviderRefreshLimiter {
+        private let maximumConcurrent: Int
+        private var active = 0
+
+        init(maximumConcurrent: Int) {
+            self.maximumConcurrent = max(1, maximumConcurrent)
+        }
+
+        func acquire() async -> Bool {
+            while active >= maximumConcurrent {
+                guard !Task.isCancelled else { return false }
+                do {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                } catch {
+                    return false
+                }
+            }
+            guard !Task.isCancelled else { return false }
+            active += 1
+            return true
+        }
+
+        func release() {
+            active = max(0, active - 1)
+        }
+    }
+
     private actor ProviderRefreshCoordinator {
         enum RequestResult {
             case startNow
@@ -643,6 +674,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
+    private let providerRefreshLimiter = ProviderRefreshLimiter(maximumConcurrent: 2)
+    /// Sources requested by the current unified refresh that are waiting for a bounded
+    /// provider slot or are already refreshing. This keeps the footer in an indexing state
+    /// during the queue gap between two providers, when no individual provider publisher has
+    /// started the next scan yet.
+    private var pendingProviderRefreshSources: Set<SessionSource> = []
     /// One `SearchIngestService` (and its `IndexDB` handle) for this indexer's lifetime,
     /// shared across every source's search-ingest run — mirrors `AnalyticsIndexer`'s
     /// DB-per-build pattern but held rather than reopened each time. Created eagerly in
@@ -768,9 +805,11 @@ final class UnifiedSessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
                 self?.publishAfterCurrentUpdate { [weak self] in
-                    self?.isIndexing = value
-                    if value == false {
-                        self?.coreIndexingDisplayMode = .idle
+                    guard let self else { return }
+                    let hasQueuedRefresh = !self.pendingProviderRefreshSources.isEmpty
+                    self.isIndexing = value || hasQueuedRefresh
+                    if value == false && !hasQueuedRefresh {
+                        self.coreIndexingDisplayMode = .idle
                     }
                 }
             }
@@ -1099,7 +1138,23 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     func refresh(trigger: IndexRefreshTrigger = .manual) {
         LaunchProfiler.log("Unified.refresh: request enqueued")
-        for source in orderedSources where isAgentEnabled(source) {
+        let enabledSources = orderedSources.filter { isAgentEnabled($0) }
+        guard !enabledSources.isEmpty else { return }
+
+        pendingProviderRefreshSources.formUnion(enabledSources)
+        switch trigger {
+        case .launch, .manual:
+            coreIndexingDisplayMode = .indexing
+        case .monitor, .providerEnabled, .cleanup:
+            if coreIndexingDisplayMode != .indexing {
+                coreIndexingDisplayMode = .syncing
+            }
+        }
+        if !isIndexing {
+            isIndexing = true
+        }
+
+        for source in enabledSources {
             requestProviderRefresh(source: source, reason: "unified-refresh", trigger: trigger)
         }
     }
@@ -1637,6 +1692,17 @@ final class UnifiedSessionIndexer: ObservableObject {
                                              reason: "\(reason)-coalesced",
                                              trigger: trigger,
                                              delay: followUpDelay)
+        } else {
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.pendingProviderRefreshSources.remove(source)
+                guard self.pendingProviderRefreshSources.isEmpty,
+                      !self.orderedSources.contains(where: { self.handle($0).currentIsIndexing() }) else {
+                    return
+                }
+                self.isIndexing = false
+                self.coreIndexingDisplayMode = .idle
+            }
         }
     }
 
@@ -1644,6 +1710,14 @@ final class UnifiedSessionIndexer: ObservableObject {
                                         reason: String,
                                         trigger: IndexRefreshTrigger) async {
         await AppReadyGate.waitUntilReady()
+        guard await providerRefreshLimiter.acquire() else {
+            LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: cancelled while waiting for bounded provider slot")
+            return
+        }
+        defer {
+            Task { await providerRefreshLimiter.release() }
+        }
+
         let didTrigger = await MainActor.run { [weak self] in
             guard let self else { return false }
             guard self.shouldRefreshSource(source) else { return false }
@@ -1725,7 +1799,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         await MainActor.run { [weak self] in
             guard let self else { return }
-            if !self.isIndexing {
+            if !self.isIndexing && self.pendingProviderRefreshSources.isEmpty {
                 self.coreIndexingDisplayMode = .idle
             } else if self.coreIndexingDisplayMode != .indexing {
                 self.coreIndexingDisplayMode = .syncing

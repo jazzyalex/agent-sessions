@@ -688,8 +688,10 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   work, keep the visible page responsive, and publish an explicit indexing state while the
   remaining sources are still loading. Add a regression fixture for a large mixed-provider
   library and measure first paint separately from full indexing completion.
-- **Why deferred:** the current work made Session Info telemetry lazy and coalesced, but did
-  not yet redesign the provider indexer's all-source scheduling or page backpressure.
+- **Current status:** phase 1 now bounds unified provider refreshes to two active sources,
+  makes the wait cancellation-aware, and keeps the UI in an explicit indexing state while
+  queued sources are waiting. The mixed-provider stress fixture, measured paging baseline,
+  and final closure remain open.
 - **Risk if wrong:** users with several enabled providers can mistake a long scan for a hung
   app and cannot reliably inspect or switch sessions during the scan.
 - **To close:** a mixed-provider stress test proves bounded concurrency, cancellation, and
