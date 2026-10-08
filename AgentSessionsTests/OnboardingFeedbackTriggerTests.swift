@@ -221,7 +221,7 @@ final class OnboardingFeedbackTriggerTests: XCTestCase {
 
 final class WhatsNewCatalogTests: XCTestCase {
     func testAssembleForCurrentReleaseHasHighlights() {
-        let items = WhatsNewCatalog.assemble(for: "5.5")
+        let items = WhatsNewCatalog.assemble(for: "5.6")
         XCTAssertFalse(items.isEmpty)
         XCTAssertTrue(items.contains { $0.kind == .highlight })
         // At most one promo, always.
@@ -242,11 +242,11 @@ final class WhatsNewCatalogTests: XCTestCase {
     }
 
     func testHasContentForCurrentRelease() {
-        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.5"))
+        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.6"))
     }
 
     func testTeaserPresentForCurrentRelease() {
-        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.5"))
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.6"))
         XCTAssertNil(WhatsNewCatalog.teaser(for: "99.9"))
     }
 
@@ -265,6 +265,23 @@ final class WhatsNewCatalogTests: XCTestCase {
 
         let items = WhatsNewCatalog.assemble(for: "5.5")
         XCTAssertEqual(items.map { String(localized: $0.title) }, ["New: DeepSeek"])
+    }
+
+    func testRelease56HasSessionInfoHighlightsAndTeaser() {
+        let teaser = WhatsNewCatalog.teaser(for: "5.6")
+        XCTAssertNotNil(teaser)
+        XCTAssertTrue(
+            teaser.map { String(localized: $0) }?.contains("Session Info") ?? false,
+            "teaser: \(teaser.map { String(localized: $0) } ?? "nil")"
+        )
+
+        let items = WhatsNewCatalog.assemble(for: "5.6")
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
+            "Session Info for every agent",
+            "Quick facts first",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.map(\.kind), [.highlight, .highlight, .support])
     }
 
     func testRelease53HasLocalizedAuthoredHighlightsAndSupport() {

@@ -114,10 +114,33 @@ enum WhatsNewCatalog {
         "5.2": "Simplified Chinese arrives, and Quota Meter weekly rates get a stricter evidence model.",
         "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach.",
         "5.4": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place.",
-        "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories."
+        "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories.",
+        "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.6": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "info.circle",
+                title: "Session Info for every agent",
+                body: "Open Session Info for any supported agent. Provider, model or configuration, and title metadata appear as soon as the local records provide them; detailed usage, pricing, and request history remain source-specific and clearly unavailable when they are not recorded."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "list.bullet.rectangle",
+                title: "Quick facts first",
+                body: "Session metadata appears immediately while deeper telemetry loads separately. Clear empty states and bounded refreshes keep the session list responsive without implying that an agent recorded information it did not."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.3": [
             WhatsNewItem(
                 kind: .highlight,

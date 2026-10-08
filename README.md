@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.3/AgentSessions-5.5.3.dmg"><b>Download Agent Sessions 5.5.3</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.6/AgentSessions-5.6.dmg"><b>Download Agent Sessions 5.6</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -31,8 +31,14 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
-- **See what a session used.** For Codex and Claude, Session Info shows a session's API-equivalent price, token mix, model and thinking effort, and turn counts beside its transcript.
+- **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 5.6
+
+- **Session Info for every agent.** Open the inspector beside any supported agent transcript. Provider, current model or configuration, and title metadata appear immediately when recorded, with detailed telemetry staying honest about each source's limits.
+- **Broader provider detail.** Antigravity, Kimi, Grok, fx, Cline, Droid, DeepSeek Harness, Cursor, Qwen Code, and Devin now contribute their audited Session Info fields where their local records support them.
+- **Clearer loading and empty states.** Indexing, transient refresh, failures, filters, and a genuinely empty library are now distinct, and slow detailed scans time out with a retry path.
 
 ## What's New in 5.5.3
 
@@ -58,7 +64,7 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 
 ## Supported sources
 
-The current source registry contains 16 active agent formats plus legacy Droid sessions. Agent Sessions 5.5 adds DeepSeek Harness browsing and search; capabilities differ by source and installed CLI version.
+The current source registry contains 16 active agent formats plus legacy Droid sessions. Agent Sessions 5.6 adds Session Info for every source; capabilities differ by source and installed CLI version.
 
 | Source | Browse and search | Resume |
 |---|---:|---:|
@@ -101,12 +107,11 @@ The dollar view is an API-equivalent estimate, not your subscription bill.
 
 ## Session Info
 
-Open Session Info beside any Codex or Claude transcript with ⇧⌘I or the gauge button in the toolbar. It reads the session's own records.
+Open Session Info beside any supported agent transcript with ⇧⌘I or the gauge button in the toolbar. It starts with provider-neutral metadata from the loaded session row, then reads the session's own records when detailed telemetry is supported.
 
-- Price at published API rates, total tokens, and request count.
-- A cached / fresh / output bar, so a heavily cached session reads at a glance.
-- Current model and thinking effort, with a history of changes that jumps to each point in the transcript.
-- Transcript span and how turns divided between you, the agent, and tools.
+- **Quick info for every source** — provider, current model or configuration, and title when recorded.
+- **Detailed telemetry where available** — price at published API rates, total tokens, request count, token mix, model history, and activity.
+- **Honest boundaries** — unsupported cost, quota, token, and history fields stay labeled unavailable instead of being inferred.
 
 The price is an API-equivalent estimate, not your subscription bill.
 
@@ -116,7 +121,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.5.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.3/AgentSessions-5.5.3.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-5.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.6/AgentSessions-5.6.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 

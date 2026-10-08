@@ -698,6 +698,91 @@
         }
       }
     },
+    "Session Info for every agent": {
+      "comment": "Title for the Agent Sessions 5.6 What's New highlight. Session Info is the product feature name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session Info for every agent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "面向所有代理的会话信息"
+          }
+        }
+      }
+    },
+    "Quick facts first": {
+      "comment": "Title for the Agent Sessions 5.6 What's New highlight about immediate Session Info metadata.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick facts first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先看快速信息"
+          }
+        }
+      }
+    },
+    "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.": {
+      "comment": "One-line teaser for the Agent Sessions 5.6 What's New card. Session Info is the product feature name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "现在所有代理都可以打开会话信息：先查看快速事实；如果来源有记录，再查看更深入的遥测数据。"
+          }
+        }
+      }
+    },
+    "Open Session Info for any supported agent. Provider, model or configuration, and title metadata appear as soon as the local records provide them; detailed usage, pricing, and request history remain source-specific and clearly unavailable when they are not recorded.": {
+      "comment": "Body for the Agent Sessions 5.6 What's New Session Info highlight. Preserve Session Info and the source-specific availability boundary.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Session Info for any supported agent. Provider, model or configuration, and title metadata appear as soon as the local records provide them; detailed usage, pricing, and request history remain source-specific and clearly unavailable when they are not recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开任意受支持代理的会话信息。只要本地记录提供了数据，就会显示提供商、模型或配置以及标题元数据；详细用量、定价和请求历史仍取决于来源，未记录时会明确标记为不可用。"
+          }
+        }
+      }
+    },
+    "Session metadata appears immediately while deeper telemetry loads separately. Clear empty states and bounded refreshes keep the session list responsive without implying that an agent recorded information it did not.": {
+      "comment": "Body for the Agent Sessions 5.6 What's New quick-facts highlight. Preserve the distinction between metadata and deeper telemetry.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session metadata appears immediately while deeper telemetry loads separately. Clear empty states and bounded refreshes keep the session list responsive without implying that an agent recorded information it did not."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话元数据会立即显示，更深入的遥测数据则单独加载。清晰的空状态和有界刷新让会话列表保持响应，同时不会暗示代理记录了它没有记录的信息。"
+          }
+        }
+      }
+    },
     "Use the auto-detected Cline CLI or supply a custom path": {
       "localizations": {
         "en": {
@@ -1221,6 +1306,57 @@
         }
       },
       "comment": "User-visible copy from UnifiedSessionsView. Preserve runtime placeholders and allow value reordering for grammar."
+    },
+    "%@": {
+      "comment": "Session info unavailable-value detail. Preserve the runtime placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@"
+          }
+        }
+      }
+    },
+    "%@ from already-loaded Session metadata.": {
+      "comment": "Tooltip explaining that immediate Session info came from already-loaded Session metadata. Preserve the runtime placeholder and Session.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ from already-loaded Session metadata."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 来自已加载的 Session 元数据。"
+          }
+        }
+      }
+    },
+    "%@.%@": {
+      "comment": "Session info unavailable-value detail with a reason and optional follow-up. Preserve both runtime placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@.%@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@。%2$@"
+          }
+        }
+      }
     },
     "%@ --  No active session": {
       "comment": "Menu bar quota row when there is no active session; the quota label remains verbatim.",
@@ -4307,19 +4443,19 @@
         }
       }
     },
-    "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several.": {
-      "comment": "Tooltip explaining the Session info turn composition.",
+    "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. %@": {
+      "comment": "Tooltip explaining the Session info turn composition. Preserve the runtime placeholders.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. The agent made %lld priced requests — a single turn can span several."
+            "value": "Blocks in this transcript: %lld from you, %lld from the agent, %lld tool calls. %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "此对话记录中的区块：来自你的 %1$lld 个，来自代理的 %2$lld 个，工具调用 %3$lld 次。代理发出了 %4$lld 次计费请求——一个回合可能包含多次请求。"
+            "value": "此对话记录中的区块：来自你的 %1$lld 个，来自代理的 %2$lld 个，工具调用 %3$lld 次。%4$@"
           }
         }
       }
@@ -7330,6 +7466,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "崩溃报告仅在本地收集。使用下方的电子邮件链接可打开已预填内容的报告邮件。"
+          }
+        }
+      }
+    },
+    "Current model": {
+      "comment": "Session info row label for the model currently recorded on the loaded Session.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前模型"
+          }
+        }
+      }
+    },
+    "Current value read from provider session metadata.": {
+      "comment": "Tooltip explaining the provenance of a current Session info value.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current value read from provider session metadata."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前值读取自提供商会话元数据。"
+          }
+        }
+      }
+    },
+    "First observed model": {
+      "comment": "Session info row label for the first model observed in detailed telemetry.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First observed model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次观察到的模型"
+          }
+        }
+      }
+    },
+    "First observed model inferred from the first transcript record.": {
+      "comment": "Tooltip explaining an inferred first model in Session info.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First observed model inferred from the first transcript record."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次观察到的模型由首条对话记录推断得出。"
+          }
+        }
+      }
+    },
+    "First observed model recorded by the provider.": {
+      "comment": "Tooltip explaining a provider-recorded first model in Session info.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First observed model recorded by the provider."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次观察到的模型由提供商记录。"
           }
         }
       }
@@ -12148,19 +12369,19 @@
         }
       }
     },
-    "Loading session information…": {
-      "comment": "Status shown while the Session info inspector loads telemetry from the selected transcript.",
+    "Loading detailed telemetry…": {
+      "comment": "Status shown while the Session info inspector loads detailed telemetry.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Loading session information…"
+            "value": "Loading detailed telemetry…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在载入会话信息…"
+            "value": "正在加载详细遥测数据…"
           }
         }
       }
@@ -12925,6 +13146,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "夜猫子：%lld%% 的活动发生在午夜之后"
+          }
+        }
+      }
+    },
+    "No matching sessions": {
+      "comment": "Empty state shown when the current Session list filters match no sessions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的会话"
+          }
+        }
+      }
+    },
+    "No title is available in already-loaded Session metadata.": {
+      "comment": "Session info tooltip when loaded Session metadata has no clean title. Preserve Session.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No title is available in already-loaded Session metadata."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载的 Session 元数据中没有可用标题。"
+          }
+        }
+      }
+    },
+    "Not recorded in detailed telemetry.": {
+      "comment": "Session info unavailable-value detail when detailed telemetry has no recorded value.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not recorded in detailed telemetry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "详细遥测数据中未记录。"
+          }
+        }
+      }
+    },
+    "Pricing unavailable: %@": {
+      "comment": "Session info tooltip explaining why pricing is unavailable. Preserve the runtime placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pricing unavailable: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "价格不可用：%1$@"
+          }
+        }
+      }
+    },
+    "Provider-neutral source from loaded Session metadata.": {
+      "comment": "Tooltip explaining that the Session info source value came from loaded Session metadata. Preserve Session.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provider-neutral source from loaded Session metadata."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商中立的来源值读取自已加载的 Session 元数据。"
           }
         }
       }
@@ -15378,6 +15684,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "查询检测到的 fx CLI 版本"
+          }
+        }
+      }
+    },
+    "Quick info": {
+      "comment": "Heading for the provider-neutral quick facts in Session info.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速信息"
+          }
+        }
+      }
+    },
+    "Refresh to try indexing again.": {
+      "comment": "Action guidance shown when the Session index is unavailable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh to try indexing again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新以重试索引。"
+          }
+        }
+      }
+    },
+    "Request timing unavailable: %@": {
+      "comment": "Session info tooltip explaining why request timing is unavailable. Preserve the runtime placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request timing unavailable: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求计时不可用：%1$@"
+          }
+        }
+      }
+    },
+    "Session index unavailable": {
+      "comment": "Empty-state heading shown when the Session index cannot be read.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session index unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话索引不可用"
+          }
+        }
+      }
+    },
+    "Sessions will appear here after an agent records one.": {
+      "comment": "Empty-state explanation shown before any agent session has been indexed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions will appear here after an agent records one."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "智能体记录会话后，会话将显示在这里。"
           }
         }
       }
@@ -21026,6 +21417,91 @@
         }
       }
     },
+    "The provider recorded a total token count, but the component breakdown is unavailable.": {
+      "comment": "Session info tooltip when total tokens are available without component attribution.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The provider recorded a total token count, but the component breakdown is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商记录了 token 总数，但无法提供组成部分明细。"
+          }
+        }
+      }
+    },
+    "Transcript current model": {
+      "comment": "Session info row label for the model read from transcript telemetry.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript current model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话记录中的当前模型"
+          }
+        }
+      }
+    },
+    "Transcript thinking": {
+      "comment": "Session info row label for thinking effort read from transcript telemetry.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript thinking"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话记录中的思考"
+          }
+        }
+      }
+    },
+    "Try clearing the current filters.": {
+      "comment": "Empty-state guidance when active Session filters hide every result.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try clearing the current filters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请尝试清除当前筛选条件。"
+          }
+        }
+      }
+    },
+    "Updating sessions…": {
+      "comment": "Empty-state status shown while the Session index refreshes.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating sessions…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在更新会话…"
+          }
+        }
+      }
+    },
     "The provider recorded an empty inference region.": {
       "comment": "User-visible Session info copy.",
       "localizations": {
@@ -22170,6 +22646,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "上游：%@"
+          }
+        }
+      }
+    },
+    "Usage unavailable: %@": {
+      "comment": "Session info tooltip explaining why recorded usage is unavailable. Preserve the runtime placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage unavailable: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用量不可用：%1$@"
           }
         }
       }
