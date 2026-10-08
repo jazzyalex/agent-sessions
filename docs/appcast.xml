@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.5.3</title>
-            <pubDate>Tue, 29 Sep 2026 23:04:18 -0700</pubDate>
+            <title>5.6</title>
+            <pubDate>Wed, 07 Oct 2026 20:41:53 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,23 +27,38 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.5.3</h2>
+<h2>What&#x27;s New in 5.6</h2>
+<h3 class="hl">Highlights</h3>
+<ul class="highlights">
+<li><strong>Session Info for every agent.</strong> Open Session Info for any of the 17 registered agent sources. Provider, current model or configuration, and title metadata appear immediately when recorded, while unsupported values stay explicitly unavailable.</li>
+<li><strong>Detailed Session Info reaches more providers.</strong> Audited model, configuration, and usage records now surface across the sources that record them, without pretending that every agent exposes pricing, quota, or model history.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>More provider-specific detail.</strong> Antigravity and Kimi expose audited token records; Grok records model and reasoning-effort changes while stating its token-data limit; fx exposes its audited aggregate input/output totals and current model/effort.</li>
+<li><strong>Cline Session Info.</strong> Assistant model history and per-message input, cache-read, cache-write, and output components are available, while provider-specific pricing and quota remain unavailable.</li>
+<li><strong>Droid and DeepSeek Harness Session Info.</strong> Droid exposes configuration and preserves Factory&#x27;s aggregate token evidence without assigning it to a model; DeepSeek Harness v4 exposes model history and disjoint assistant-message token components without double-counting stream records.</li>
+<li><strong>Cursor, Qwen Code, and Devin Session Info.</strong> Cursor exposes its loaded current model; Qwen reports active-branch usage and model history; Devin reports its current model. Each source states the limits of its underlying records.</li>
+</ul>
 <h3>Improvements</h3>
 <ul>
-<li>Added published GPT-6.1 Sol pricing to Session Runway so its activity can contribute to dollar estimates and shared weekly calibration alongside Astra.</li>
+<li><strong>Clearer Session list states.</strong> Indexing, transient refresh, indexing failure, active filters, and a genuinely empty library now have distinct explanations.</li>
+<li><strong>Bounded provider refresh.</strong> Unified refreshes use a cancellation-aware two-source budget and keep the Session list visibly indexing while queued providers wait.</li>
+<li><strong>Responsive detailed telemetry.</strong> Detailed Session Info stops after five seconds with a cancellable, retryable timeout while provider-neutral quick info remains available.</li>
+<li><strong>Safer metadata display.</strong> Session Info and session rows reject prompt/XML leakage and timestamp-only Cursor titles while retaining raw provider values for diagnostics.</li>
+<li><strong>Headless CLI presence.</strong> Codex and OpenCode CLI sessions remain discoverable without a controlling terminal, while app-bundle processes and Codex Desktop keep their separate discovery paths.</li>
 </ul>
-<h3>Reminder: What You Got in 5.5</h3>
+<h3>Bug Fixes</h3>
 <ul>
-<li>Browse and search supported DeepSeek Harness histories locally.</li>
-<li>Follow Codex weekly quota from the configured sessions root with clearer reset and session-runway status.</li>
+<li><strong>Crash diagnostics recover cleanly.</strong> Choosing <code>Later</code> no longer re-prompts for the same report, XCTest-injected test-host reports are ignored, and failed telemetry file reads no longer access a closed descriptor during freshness checks.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.5.3</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.6</a></p>
 </div>
             ]]></description>
-            <sparkle:version>79</sparkle:version>
-            <sparkle:shortVersionString>5.5.3</sparkle:shortVersionString>
+            <sparkle:version>80</sparkle:version>
+            <sparkle:shortVersionString>5.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.5.3/AgentSessions-5.5.3.dmg" length="27588496" type="application/octet-stream" sparkle:edSignature="caaCwMxDY9nQ73xzezrkFBp8ER+XbhdkYd8fz+MwPLv7o35JN/4rQJDPlS5Gu8/OQLxNHe73ZLH8tEebV227AQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.6/AgentSessions-5.6.dmg" length="29027708" type="application/octet-stream" sparkle:edSignature="hxosFGli71AKiEl0X3oniK/t8P3abgswfM3fyY0rn5jeqYFq8vg1YkgLw62mV3YFI/9YAlQmUFRhYQYxaYXPDQ=="/>
         </item>
     </channel>
 </rss>
