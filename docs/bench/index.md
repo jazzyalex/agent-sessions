@@ -26,6 +26,11 @@ last corrected {{ site.data.session_bench.dates.last_corrected }} ·
 surface: {{ site.data.session_bench.surface }} ·
 <a href="{{ site.data.session_bench.methodology_url }}">github.com/jazzyalex/session-bench — methodology, data, evaluator &amp; corrections</a></p>
 
+<p><strong>New: <a href="{{ '/bench/v1/' | relative_url }}">Session-Bench v1</a></strong> scores
+twelve harnesses out of 100 on how much of a session a reader can recover from
+its files, with every score replayable. This page is the earlier v0.4 gate
+report card.</p>
+
 <style>
 .bench-table { width:100%; border-collapse:collapse; margin:1.5rem 0; font-size:0.92rem; }
 .bench-table th, .bench-table td { padding:0.5rem 0.55rem; border-bottom:1px solid var(--rule, #e1e0d9); text-align:left; }
