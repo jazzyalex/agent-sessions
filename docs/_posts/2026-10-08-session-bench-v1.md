@@ -833,7 +833,7 @@ table.sb1-grid th:first-child, table.sb1-grid td:first-child { text-align:left; 
 
 We ran the same two-prompt bug fix through twelve coding-agent harnesses,
 three times each, and kept only the session files they wrote. The file being
-fixed is 223 bytes long. Pi recorded the whole session in 19 KB. OpenClaw
+fixed is 265 bytes long. Pi recorded the whole session in 19 KB. OpenClaw
 recorded it in 697 KB, and 3% of that is the session.
 
 Size is the cheap finding. The one that matters is what you can get back.
@@ -923,7 +923,7 @@ everything else.
 {% for id in page.bench.by_size %}{% assign a = page.bench.agents | where: "id", id | first %}<span class="sb1-lab">{{ a.name }}</span><span class="sb1-line"><span class="sb1-bar" style="width:{{ a.kb_pct | times: 0.62 }}%" title="{{ a.session_kb }} KB of {{ a.kb }} KB is the session"><i style="width:{{ a.content_pct }}%"></i></span><span class="sb1-val">{{ a.kb }} KB<small>{{ a.content_pct }}% session</small></span></span>
 {% endfor %}</div>
 </div>
-<figcaption>KB is 1,000 bytes. Where sessions live in a shared database, the total counts the rows of this session. OpenClaw ran on its Codex backend, whose files for the session are 72% of its total.</figcaption>
+<figcaption>KB is 1,000 bytes. Where sessions live in a shared database, the total counts the rows of this session. OpenClaw ran on its Codex backend, whose files for the session are about 71% of its total.</figcaption>
 </figure>
 
 The session itself is small everywhere: between 15 KB and 108 KB of prompts,
@@ -937,12 +937,12 @@ work to a different agent, or to ask what went wrong, you pay for every byte.
 At a rough four bytes per token, Pi's record is under 5,000 tokens. Claude
 Desktop's is about 117,000 and OpenClaw's about 174,000, for the same
 two-prompt fix. [Handover between sessions]({{ '/blog/the-handover-problem/' | relative_url }})
-is hard enough without paying 35 times over for the transcript.
+is hard enough without paying 37 times over for the transcript.
 
 One caveat on the longest bar. OpenClaw ran on its Codex backend in our setup,
-and 72% of its 697 KB is that backend's own files for the session, written in
+and about 71% of its 697 KB is that backend's own files for the session, written in
 a home the plugin owns. They land on your disk for the same work, so they
-count. OpenClaw's own store is about 190 KB.
+count. OpenClaw's own store is about 200 KB.
 
 ## How many times it says each thing
 
@@ -966,9 +966,9 @@ field marks the later copies as copies. Codex stores 3 of 44 events once across 
 The causes differ. OpenCode writes every message part again, one to five
 times, into an `event` table as the part updates. Kimi Code's wire log states
 each prompt three times and each reply, tool call and result twice: once as it
-happens and once more in a summary record when the turn ends. Codex logs each
-prompt, reply, command, result and edit twice, as a UI event and as the wire
-item. OpenClaw stores each tool call in two forms and repeats the events in a
+happens and once more in a summary record when the turn ends. Codex writes each
+prompt, reply, command, command output and edit call twice, as an item record
+and as an event record. OpenClaw stores each tool call in two forms and repeats the events in a
 trace table. Claude Code writes each prompt twice and repeats an edit's
 arguments in its result.
 
@@ -1020,7 +1020,7 @@ total, and timestamps on 12 of 13 events. It loses its points on repetition:
 each prompt and each tool call is written twice, so 63% of events appear once.
 It also keeps the most actual session of the twelve, 108 KB.
 
-**Pi, 96.4.** One plain `session.jsonl`. 19 KB, every event written once, 79%
+**Pi, 96.4.** One plain JSONL file per session. 19 KB, every event written once, 79%
 of the bytes are the session. It records usage and cost per message and states
 no total, which is the 3 points it drops. The smallest record in the set is
 also the cleanest, as it was in August.
@@ -1049,13 +1049,14 @@ limit are Zstandard-compressed inside the database, the first prompt among
 them. Usage is a run total.
 
 **Codex, 87.5.** One rollout JSONL per session with complete usage that adds
-up. Everything in it is written twice: 3 of 44 events appear once across the
-three runs, and 14% of the bytes are the session. No storage format version. Codex Desktop writes the
+up. Most of it is written twice: 3 of 44 events appear once across the three
+runs, and 14% of the bytes are the session. No storage format version. Codex Desktop writes the
 same format and shares the row.
 
 **Hermes, 86.4.** Rows in one SQLite database: 36 KB, each event once, 64%
 session, a schema version. It is the second-leanest record here, and it scores
-5.5 of 15 on usage because it keeps the numbers of one request only.
+5.5 of 15 on usage: only the last request has a usage record, that record has
+no cache fields, and nothing adds up to a stated total.
 
 **Claude Desktop, 85.6.** The Claude Code transcript format plus a metadata
 file, at four times the bytes: 469 KB, 4% session. The transcript embeds your
@@ -1104,7 +1105,7 @@ v1, and say so in the report.
 
 **Our published evidence leaked, more than once.** Session files carry more
 of your machine than you would guess. Reviewers found, in files we had already
-cleaned: a cache file named by a hash of an account id, an index keyed by a
+cleaned: a file named by a hash of an account id, an index keyed by a
 hash of a private temp path, a fingerprint of a home folder listing, and a
 local date that gave away the time zone. All of it is fixed, and the report
 lists what still stays readable. If you are about to attach a raw session file
@@ -1131,7 +1132,8 @@ session in stores shared with other sessions. We do not read other sessions'
 data, so their root could not be verified as complete, and that costs each of
 them 3 portability points.
 
-The checker compares the path and id of an edit, not its text. Packet reviews
+For eleven rows the checker compares the path and id of an edit, not its
+text; Kimi Code has its own check of the edit text. Packet reviews
 were done by separate AI agent sessions on the same machine, with the outside
 model reviews on top; no second person repeated the captures. Cursor Desktop
 is not scored yet.
