@@ -148,10 +148,13 @@ else
 fi
 
 # Launch codex in detached tmux
+# Disable the startup update check: its "Update available" menu blocks the prompt,
+# and its default selection is "Update now" (runs `npm install -g @openai/codex`).
+CODEX_ARGS="-c check_for_update_on_startup=false"
 if [[ -n "$MODEL" ]]; then
-  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' -m $MODEL"
+  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' $CODEX_ARGS -m $MODEL"
 else
-  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD'"
+  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' $CODEX_ARGS"
 fi
 set +e
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" "$CMD"
@@ -195,6 +198,12 @@ while [ $iterations -lt $max_iterations ]; do
   sleep 0.25
   iterations=$((iterations+1))
   pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
+  # A startup menu still blocks the prompt (config override not honored, or the
+  # background-server prompt). Stop here: typing /status + Enter into a menu would
+  # confirm its selected option, and the update menu's default is "Update now".
+  if echo "$pane" | grep -qiE "Update available|Background server has incompatible feature settings"; then
+    echo "$(error_json startup_prompt_blocked 'Codex showed a startup menu instead of the prompt')"; exit 16
+  fi
   if echo "$pane" | grep -qi "Press enter to continue"; then
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
     sleep 0.6
@@ -272,7 +281,7 @@ extract() {
       }
     }
   }')
-  local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[[:space:]]*/, ""); sub(/[[:space:]]*│.*/, ""); sub(/[[:space:]]*\)$/, ""); sub(/[[:space:]]*$/, ""); print; exit }')
+  local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[[:space:]]*/, ""); sub(/[[:space:]]*│.*/, ""); sub(/[[:space:]]*\)[[:space:]]*$/, ""); sub(/[[:space:]]*$/, ""); print; exit }')
   echo "$pct" "$resets"
 }
 
