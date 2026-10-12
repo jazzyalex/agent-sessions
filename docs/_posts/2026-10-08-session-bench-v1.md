@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Same bug fix, 12 coding agents: 19 KB to 697 KB on disk, and what you can get back"
+title: "Same bug fix, 12 coding agents: 19 KB to 469 KB on disk, and what you can get back"
 description: "Session-Bench v1: we ran one two-prompt bug fix in twelve coding-agent harnesses and rebuilt each session from its files alone. Scores, charts, and what each one keeps."
 date: 2026-10-08
 image: /assets/session-bench-v1-social-card.png
@@ -8,7 +8,7 @@ summary: >-
   We ran the same two-prompt bug fix through twelve coding-agent harnesses,
   three times each, and rebuilt every session from the files alone: 31 checks,
   100 points, every score replayable. All twelve keep the conversation. The
-  record of the same fix takes 19 KB in Pi and 697 KB in OpenClaw, four
+  record of the same fix takes 19 KB in Pi and 469 KB in Claude Desktop, four
   harnesses never write an event only once, and four of twelve record token
   usage that adds up to a stated total. DeepSeek Harness is first at 96.9 and
   Cursor CLI last at 78.1.
@@ -833,8 +833,18 @@ table.sb1-grid th:first-child, table.sb1-grid td:first-child { text-align:left; 
 
 We ran the same two-prompt bug fix through twelve coding-agent harnesses,
 three times each, and kept only the session files they wrote. The file being
-fixed is 265 bytes long. Pi recorded the whole session in 19 KB. OpenClaw
-recorded it in 697 KB, and 3% of that is the session.
+fixed is 265 bytes long. Pi recorded the whole session in 19 KB. Claude
+Desktop recorded it in 469 KB, and 4% of that is the session.
+
+**Correction, 11 October 2026.** The first version of this post gave OpenClaw
+697 KB as the largest record and a spread of 37 times. That total counts a
+250 KB shell snapshot written by OpenClaw's Codex backend. The snapshot is a
+dump of the shell environment, and we did not count the same file in the Codex
+row. Measured the same way, OpenClaw is 447 KB, the largest record is Claude
+Desktop at 469 KB, and the spread is about 25 times. The v1 scores are
+unchanged: the snapshot moves OpenClaw's total by less than 0.1 point and
+changes no rank. The chart below still shows the scored 697 KB. The next
+revision of the bench will apply one rule to both rows.
 
 Size is the cheap finding. The one that matters is what you can get back.
 For every run we rebuilt the session from its files alone and checked 31
@@ -913,7 +923,7 @@ and [how to get a lost session back]({{ '/blog/recovering-a-lost-session/' | rel
 are earlier posts. The 19 points between first place and last come from
 everything else.
 
-## The same fix, 19 KB to 697 KB
+## The same fix, 19 KB to 469 KB
 
 <figure class="post-figure sb1" id="bytes">
 <div class="sb1-card">
@@ -923,11 +933,11 @@ everything else.
 {% for id in page.bench.by_size %}{% assign a = page.bench.agents | where: "id", id | first %}<span class="sb1-lab">{{ a.name }}</span><span class="sb1-line"><span class="sb1-bar" style="width:{{ a.kb_pct | times: 0.62 }}%" title="{{ a.session_kb }} KB of {{ a.kb }} KB is the session"><i style="width:{{ a.content_pct }}%"></i></span><span class="sb1-val">{{ a.kb }} KB<small>{{ a.content_pct }}% session</small></span></span>
 {% endfor %}</div>
 </div>
-<figcaption>KB is 1,000 bytes. Where sessions live in a shared database, the total counts the rows of this session. OpenClaw ran on its Codex backend, whose files for the session are about 71% of its total.</figcaption>
+<figcaption>KB is 1,000 bytes. Where sessions live in a shared database, the total counts the rows of this session. OpenClaw ran on its Codex backend, whose files for the session are about 71% of its total. That includes a 250 KB shell snapshot that the Codex bar does not count; without it OpenClaw is 447 KB.</figcaption>
 </figure>
 
 The session itself is small everywhere: between 15 KB and 108 KB of prompts,
-replies, tool calls and results. What varies by a factor of 37 is the total.
+replies, tool calls and results. What varies by a factor of 25 is the total.
 The rest is what the harness writes around the session: its instructions and
 tool definitions, repeated copies, snapshots and bookkeeping.
 
@@ -935,14 +945,17 @@ This is not a disk-space problem. It is a context problem. The moment you
 paste a raw session file into another model, to summarize it, to hand the
 work to a different agent, or to ask what went wrong, you pay for every byte.
 At a rough four bytes per token, Pi's record is under 5,000 tokens. Claude
-Desktop's is about 117,000 and OpenClaw's about 174,000, for the same
+Desktop's is about 117,000 and OpenClaw's about 112,000, for the same
 two-prompt fix. [Handover between sessions]({{ '/blog/the-handover-problem/' | relative_url }})
-is hard enough without paying 37 times over for the transcript.
+is hard enough without paying 25 times over for the transcript.
 
 One caveat on the longest bar. OpenClaw ran on its Codex backend in our setup,
-and about 71% of its 697 KB is that backend's own files for the session, written in
-a home the plugin owns. They land on your disk for the same work, so they
-count. OpenClaw's own store is about 200 KB.
+and the bar counts that backend's own files for the session, written in a home
+the plugin owns: a 245 KB rollout file and a 250 KB shell snapshot. The rollout
+lands on your disk for the same work, so it counts. The shell snapshot is a
+dump of the shell environment, and the Codex bar leaves it out, so the
+like-for-like total for OpenClaw is 447 KB. OpenClaw's own store is about
+200 KB.
 
 ## How many times it says each thing
 
@@ -1044,7 +1057,8 @@ usage on every reply. It writes no format version of any kind, and 10 of 13
 events carry a usable timestamp.
 
 **OpenClaw, 88.1.** Its own SQLite stores plus the files of the backend it
-ran on: 697 KB, 3% session, 3.1 copies of each event. Events above a size
+ran on: 697 KB as scored (447 KB without the backend's shell snapshot), 3%
+session, 3.1 copies of each event. Events above a size
 limit are Zstandard-compressed inside the database, the first prompt among
 them. Usage is a run total.
 
