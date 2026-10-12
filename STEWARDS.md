@@ -81,13 +81,13 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 
 | Agent | Steward | Last verified | Tier |
 |---|---|---|---|
-| Codex | @jazzyalex (maintainer) | 2026-08-13 · 0.147.0 | Maintained |
-| Claude Code | @jazzyalex (maintainer) | 2026-08-13 · 2.1.220 | Maintained |
+| Codex | @jazzyalex (maintainer) | 2026-10-12 · 0.162.1 | Maintained |
+| Claude Code | @jazzyalex (maintainer) | 2026-10-12 · 2.1.296 | Maintained |
 | Cursor Agent | steward wanted | 2026-08-13 · 2026.8.11 | Best-effort |
-| GitHub Copilot CLI | steward wanted | 2026-08-13 · 1.0.79 | Best-effort |
+| GitHub Copilot CLI | steward wanted | 2026-10-11 · 1.0.91 | Best-effort |
 | OpenCode | steward wanted | 2026-08-17 · 1.18.18 | Best-effort |
 | Antigravity CLI | steward wanted | 2026-08-13 · 1.1.12 | Best-effort |
-| Pi | steward wanted | 2026-08-17 · 0.84.2 | Best-effort |
+| Pi | steward wanted | 2026-10-11 · 1.0.3 | Best-effort |
 | Kimi Code | steward wanted | 2026-08-17 · 0.36.1 | Best-effort |
 | Grok CLI | steward wanted | 2026-08-17 · 1.0.4 | Best-effort |
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |

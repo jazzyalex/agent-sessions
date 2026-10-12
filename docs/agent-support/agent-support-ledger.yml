@@ -9,6 +9,46 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.6-unreleased"
+    as_of_date_utc: "2026-10-12"
+    as_of_commit: "b7895965+working-tree"
+    note: "Follow-up to the 2026-10-11 format check after the owner's real-home prebump for Claude and Antigravity."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.162.1"
+          scope: "latest; installed and upstream both 0.162.1"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261012-164952-057694Z-p71235-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261012-164239-479465Z-p68751/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh sandboxed codex_exec session on 0.162.1 matches baseline; the first attempt timed out at 180 s and the retry passed. Status probe passes."
+      claude:
+        sessions:
+          max_verified_version: "2.1.296"
+          scope: "latest; installed and upstream both 2.1.296"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261012-164201-248143Z-p68407-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261012-164239-479465Z-p68751/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl"]
+          notes: "Fresh Bash-tool session written by 2.1.296 matches the refreshed baseline. Authenticated usage probe and status probe pass after re-login."
+  - agent_sessions_version: "5.6-unreleased"
+    as_of_date_utc: "2026-10-11"
+    as_of_commit: "b7895965+working-tree"
+    note: "Format check after Codex 0.160.1, Copilot 1.0.91, and Pi 1.0.3. All three have fresh matching prebump sessions and a schema-clean final weekly. Claude 2.1.289 is schema-clean with healthy usage probes but had no prebump run, so its ceiling stays 2.1.285."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.160.1"
+          scope: "installed; upstream 0.162.1"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261011-181036-123955Z-p60597-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261011-181703-371999Z-p65090/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh codex_exec session matches baseline. Turn attribution, root_turn_id, sender deliveries, and model_catalog are fixture-covered; world_state tools is opaque. Status probe passes after the update-menu fix."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.91"
+          scope: "installed; upstream 1.0.95"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261011-181036-123955Z-p60597-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261011-181703-371999Z-p65090/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
+          notes: "Fresh session matches baseline. The model.* event family (1 of 8 local sessions) is fixture-covered and renders as meta rows; usage and quota fields are watch items."
+      pi:
+        sessions:
+          max_verified_version: "1.0.3"
+          scope: "installed; upstream 1.1.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261011-181503-932620Z-p63913-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261011-181703-371999Z-p65090/report.json", "Resources/Fixtures/stage0/agents/pi/small.jsonl"]
+          notes: "First prebump on 1.0.3 exposed a system-role record with sections and toolsAdded, and assistant thinkingLevel. Both are fixture-covered; the rerun matches baseline."
   - agent_sessions_version: "5.5.1-unreleased"
     as_of_date_utc: "2026-09-29"
     as_of_commit: "7714ccaf+working-tree"

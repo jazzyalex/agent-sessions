@@ -1084,6 +1084,10 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     "codex": {
         "changes", "statuses", "arguments", "parameters", "inputSchema", "_meta",
         "structuredContent", "agents_states",
+        # `world_state.payload.state.tools` (0.160) is keyed by TOOL/MCP SERVER NAME —
+        # 18 buckets like `mcp__codex_apps__gmail` on 2026-10-11. Every connector a user
+        # enables would read as Codex drift.
+        "tools",
     },
     # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
     # but `.message` was opaque — hiding content-block types and the whole `usage`

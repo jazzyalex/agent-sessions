@@ -162,6 +162,33 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Marketing Surfaces
 
+### Session-Bench v1 counts a shell snapshot for OpenClaw and not for Codex
+> **open** · sev: med · urg: med · verified 2026-10-11
+
+- **What:** the OpenClaw row (697 KB) counts the 250 KB shell snapshot that its Codex
+  backend writes (`codex-home/shell_snapshots/<thread id>.*.sh`, 249,501 to 249,718 bytes
+  in the three runs). The Codex CLI row (185 KB) does not: its evidence boundary is
+  `CODEX_HOME/sessions` only. The snapshot is a dump of the shell environment, not session
+  content. Like for like, OpenClaw is 447 KB and 5.1% session.
+- **Where:** in the session-bench repository — `docs/survival-v1/adapters/openclaw.md`
+  (*Family*), `session_bench/openclaw_score_inputs.py`,
+  `docs/survival-v1/shared-format-assessment.md` ("the CLI captures did not inventory
+  shell snapshots"). Size feeds `broad.classified_content_density` (3 points).
+- **Done 2026-10-11:** a dated correction note in the v1 post and its source copy. The
+  title and the spread now use Claude Desktop, 469 KB, about 25 times. The v1 scores and
+  the chart bar are unchanged.
+- **Fix shape:** one rule for both rows in the next bench revision: leave the shell
+  snapshot out of the OpenClaw family, rebuild the OpenClaw packets, rescore, and
+  regenerate the post data. Expected effect: OpenClaw density 0.099 to 0.154 points, total
+  88.1 or 88.2, no rank change. Also check the other rows for machine-dependent files.
+- **Also open:** `docs/assets/session-bench-v1-social-card.png` still reads "697 KB in
+  OpenClaw". Re-render it from `social-card.html` in the session-bench repository.
+- **Why deferred:** the rule change needs a new packet set through the sanitizer, the
+  independent public review and the release manifest. That is a re-release for less than
+  0.1 point.
+- **Risk if wrong:** a reader repeats the 697 KB figure as a like-for-like size. The post
+  now says it is not.
+
 ### Social banners need a feed-size typography pass
 > **open** · sev: low · urg: low · verified 2026-09-03
 
@@ -197,6 +224,42 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Agent Source Coverage
+
+### Credit PR #74 for the Cursor ACP format research
+> **open** · sev: low · urg: high · verified 2026-10-11
+
+- **What:** [PR #74](https://github.com/jazzyalex/agent-sessions/pull/74) was closed in
+  favor of our own ACP implementation. Its author asked on 2026-09-27 that the project
+  history keep the research visible: the persisted-store location and format evidence, the
+  read-only and no-resume boundary, and the first fixtures. We agreed in the PR on
+  2026-10-11.
+- **Where:** the Cursor ACP line in [CHANGELOG.md](../CHANGELOG.md) ("Search supported
+  Cursor ACP conversations") and the Cursor ACP documentation.
+- **Fix shape:** one acknowledgement sentence with a link to #74 in each place, in the
+  style used for #51 and #52. No merged-code credit.
+- **Why deferred:** found during a mail triage, not during a docs pass.
+- **Risk if wrong:** a public promise to a contributor stays unkept.
+
+### Check the DeepSeek Harness reader against the v3→v4 notes from the DSH discussion
+> **open** · sev: med · urg: low · verified —
+
+- **What:** a DSH user posted measured v4 behavior in
+  [discussion #4425](https://github.com/deepseek-ai/deepseek-harness/discussions/4425)
+  (2026-09-24, on `@deepseek-ai/dsh` 0.1.7-rc.1 and rc.2). Three points matter to a reader:
+  v3 message sources of kind `plugin` become producer-owned kinds in v4; a v4 `tool/result`
+  row carries `toolCallId`; the official loader refuses the whole file when a closed step
+  has an unresolved tool call. We replied on 2026-10-11 that Agent Sessions stays more
+  lenient than the official loader on purpose and that the docs will say so.
+- **Where:** [DeepSeekHarnessHistoricalNormalizer.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessHistoricalNormalizer.swift),
+  [DeepSeekHarnessRelationshipValidator.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessRelationshipValidator.swift),
+  [DeepSeekHarnessSessionParser.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessSessionParser.swift).
+  Not checked against the three points yet.
+- **To close:** confirm each point in the reader, run it against the probe fixture linked
+  in the discussion (`fixtures/probes/run.mjs` in `xiaoshenming/dsh-session-surgeon`), and
+  state the leniency in the DSH documentation.
+- **Why deferred:** needs a focused session with the fixture.
+- **Risk if wrong:** pre-v4 rows show a bare `plugin` source, or a session that the
+  harness refuses opens in the app with no warning.
 
 ### Codex MCP attribution sources are preserved but never shown
 > **open** · sev: low · urg: low · verified 2026-09-26
@@ -553,6 +616,67 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   empty), `batching_reminder_sent`, `silent_turn_reminder`, `total_tokens_reminder` — all
   harness nudges; Codex `internal_chat_message_metadata_passthrough.create_time`; Kimi
   `runtime.set_binding`.
+- **To close:** each line is either promoted to its own entry on a second sighting, or
+  deleted as settled noise.
+
+### Claude reports thinking time and permission decisions and nothing shows them
+> **open** · sev: low · urg: low · verified 2026-10-11
+
+- **What:** Claude 2.1.289 writes `thinkingDurationMs` on assistant records (46 of 179
+  sessions from the last 7 days; sampled values 104 ms to 17.8 s) and `permissionDecision`
+  (`decision`, `source`, `reasonType`) on user records (25 of 179 sessions). The second
+  one says why a tool call ran: `config`/`mode`, `config`/`classifier`,
+  `user_permanent`/`rule`, or `user_temporary`.
+- **Where:** [ClaudeSessionParser.swift](../AgentSessions/Services/ClaudeSessionParser.swift)
+  — no Swift code reads either key; both survive only in `rawJSON`.
+- **Fix shape:** thinking time belongs with
+  [TranscriptTurnTiming.swift](../AgentSessions/Services/TranscriptTurnTiming.swift),
+  which derives timing from timestamps today. The permission decision is a label on the
+  tool row.
+- **Why deferred:** found by the 2026-10-11 format sweep; the sweep only refreshed the
+  fixture.
+- **Risk if wrong:** `thinkingDurationMs` is absent from about three quarters of recent
+  sessions, so any UI must show nothing rather than zero. Only `accept` decisions were
+  observed; the shape of a denial is unknown.
+- **To close:** both values are shown, or each is declared noise with a reason.
+
+### Watch list from the 2026-10-11 format sweep
+> **open** · sev: low · urg: low · verified 2026-10-11
+
+- **Copilot `model.*` events** (`model_call_started/success/failure`, `turn_*`,
+  `message`, `response`, `messages_snapshot`) — seen in 1 of 8 local sessions (1.0.89,
+  a `gpt-4o-mini` side call with 151 prompt tokens). They fall to the parser's
+  `default:` branch and render as `[model.*]` meta rows, 14 rows for two turns.
+  `model_call_success` carries `responseUsage`, `copilotUsage.total_nano_aiu` and
+  `quotaSnapshots.premium_interactions` (`remainingPercentage`, `resetDate`). Promote if
+  main-model calls start emitting them: that would be Copilot's first per-call token
+  source and a quota source with no probe. Also check then whether the meta rows are
+  noise in the transcript.
+- **Codex `turn_attribution`** (`task_started`, `compacted.resume_metadata`) — 2 of 60
+  recent sessions; `turn_trigger` values `composer` and
+  `send_user_message_async_question`, with `parent_turn_id` and `initiating_agent_path`.
+  `task_complete.root_turn_id` is in 54 of 60. Possible source for turn and subagent
+  hierarchy.
+- **Codex `sender_user_messages` / `sender_deliveries`** — 1 of 60 sessions. Cross-agent
+  message delivery records with `text`; check for duplicated or missing transcript text
+  on a second sighting.
+- **Pi 1.0 system-prompt record** — every 1.0.3 session starts with a `role: "system"`
+  message whose `content` is empty and whose `sections` (`preamble`, `tools`, `rules`,
+  `docs`, `cwd`) and `toolsAdded` hold the prompt and tool list. Assistant messages gain
+  `thinkingLevel`. Seen in the two prebump sessions only; no real 1.0 session is on disk
+  yet. Check how the empty system row renders once real sessions exist.
+- **Antigravity `GENERIC.error`** — one record in the 2026-10-11 prebump session;
+  promote if it carries a user-visible failure reason.
+- **Claude `requestedModel`** — 1 of 179 sessions. Requested versus served model; it
+  matters for `$` pricing only if the two differ.
+- **Noise, deliberately not filed:** Claude `serverClassifierRequest`,
+  `serverClassifierContext`, `deferred_tools_delta.surfacedDefinitions`,
+  `removedByBlock`, `deferred_tools_record.toolInputCopies`, `prompt_snapshot.inlineTools`,
+  `toolChangeHeader`, `renderedBesideToolResult`, `queue-operation` ids; Codex
+  `world_state.state.tools` (keyed by tool name, now opaque in the fingerprint) and
+  `model_catalog`; Copilot `session.resume.data.eventsFileSizeBytes`, `autoTier`.
+- **Handled, fixture only:** Antigravity `PLANNER_RESPONSE.{input_tokens,output_tokens,
+  cache_read_tokens}` — read by `AntigravityTelemetryAccumulator`.
 - **To close:** each line is either promoted to its own entry on a second sighting, or
   deleted as settled noise.
 
@@ -1241,6 +1365,29 @@ the latter is tracked separately above until its lifecycle semantics are known.
 ---
 
 ## Agent Source Plumbing
+
+### OpenClaw monitoring reads JSONL while OpenClaw 2026.9 writes SQLite
+> **open** · sev: med · urg: low · verified 2026-10-11
+
+- **What:** the 2026-10-11 prebump ran OpenClaw 2026.9.8 to a normal stop, and no file
+  appeared under `agents/*/sessions/*.jsonl`; the newest transcript there is dated
+  2026-08-16. The run wrote `agents/main/agent/openclaw-agent.sqlite` and a Codex rollout
+  under `agents/main/agent/codex-home/sessions/`. The driver returned that rollout and
+  failed its own contract (`discovery_violation`). The app already reads
+  `openclaw-agent.sqlite`; weekly monitoring and the prebump driver do not, so OpenClaw
+  sits at `blocked_stale_sample` and SQLite schema drift is unwatched.
+- **Where:** `docs/agent-support/agent-watch-config.json` (`agents.openclaw.weekly.local_schema`
+  and `prebump.discover_session`, both `jsonl_newest`);
+  [OpenClawSessionDiscovery.swift](../AgentSessions/Services/OpenClawSessionDiscovery.swift)
+  (the SQLite path the monitor should mirror).
+- **Fix shape:** a SQLite-first fingerprint and discovery contract for OpenClaw, with the
+  JSONL tree as the legacy fallback — the same split OpenCode and Hermes already use.
+- **Why deferred:** found at the end of the 2026-10-11 sweep; it needs a new fingerprint
+  function and a baseline, not a config edit.
+- **Risk if wrong:** not verified that the app lists the 2026-10-11 session; only that
+  the store it reads was written at that time.
+- **To close:** weekly fingerprints the SQLite store, the prebump driver passes on a
+  current build, and `max_verified_version` moves off 2026.7.1.
 
 ### OpenClaw monitoring unions roots that app discovery selects by precedence
 > **open** · sev: low · urg: low · verified 2026-10-01
@@ -2081,6 +2228,22 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 
 ## Resume / Terminal Launch
 
+### PR #76: take the duplicate-Resume guard, not the terminal adapters
+> **open** · sev: low · urg: low · verified 2026-10-11
+
+- **What:** [PR #76](https://github.com/jazzyalex/agent-sessions/pull/76) adds one shared
+  Resume terminal preference and adapters for Ghostty, Kitty and WezTerm, and blocks a
+  repeated Resume while a launch is pending.
+- **Decision 2026-10-11:** no per-terminal adapters. The copy-resume-command action already
+  serves every terminal with no launch code to maintain. The author was told in the PR. The
+  PR stays open for the duplicate-Resume guard only, with no date promised.
+- **Where:** 26 files, +748 −11. The author reports 49 focused terminal tests passing after
+  a rebase. The guard has not been read in the code yet.
+- **To close:** review the duplicate-Resume guard alone, from a smaller PR if the author
+  sends one, or lift it with credit. Then close #76.
+- **Why deferred:** low priority by owner decision.
+- **Risk if wrong:** a double-click on Resume can start two terminal launches.
+
 ### `runAppleScript` blocks the main thread for the Terminal / iTerm path
 > **open** · sev: low · urg: low · verified 2026-08-04
 
@@ -2147,7 +2310,8 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 ## CLI / Automation
 
 ### No command-line interface for agents to drive archive or export
-> **open** · sev: low · urg: low · verified 2026-10-01
+> **open** · sev: low · urg: low · verified 2026-10-11
+- **Review 2026-10-11:** the reporter answered on 2026-10-02. The use case is one command, callable by an agent with no app running, that saves a readable transcript of one session: `--archive <session id> --format md|json|txt --location <path>`. No list command is needed. We replied on 2026-10-11 and pointed to [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77), whose `as-core read` command is the base for a Markdown export. No date was promised. The open question below is answered.
 - **Review 2026-10-01:** AgentSessions/ still has no CLI argument parser, URL handler, or App Intent; the local issue note leaves the requested commands and use case unanswered. Recommendation: keep open but clarification-first; confirm the reporter’s current answer before choosing a CLI shape.
 - **Evidence:** AgentSessions/Services/SessionArchiveManager.swift:145; `rg -n 'ArgumentParser|CommandLine\.arguments|agentsessions://|onOpenURL|AppIntent' AgentSessions/` returns no matches; issue #80.
 
