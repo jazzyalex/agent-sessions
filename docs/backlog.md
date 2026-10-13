@@ -667,6 +667,11 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   yet. Check how the empty system row renders once real sessions exist.
 - **Antigravity `GENERIC.error`** — one record in the 2026-10-11 prebump session;
   promote if it carries a user-visible failure reason.
+- **Claude `thinkingDisplay`** (2026-10-13 scan) — 1 record in 32 sessions from three
+  days, on 2.1.296 with `claude-sonnet-5`: value `omitted`, with an empty `thinking`
+  block and `thinkingDurationMs` 15906. It marks a turn whose reasoning text was not
+  stored. Promote if it spreads: the transcript should then say the thinking was
+  omitted instead of showing an empty block.
 - **Claude `requestedModel`** — 1 of 179 sessions. Requested versus served model; it
   matters for `$` pricing only if the two differ.
 - **Noise, deliberately not filed:** Claude `serverClassifierRequest`,
