@@ -451,7 +451,10 @@ class AntigravityPrintDriver:
         run_started = time.time()
         try:
             proc = subprocess.run(
-                ["agy", "-p", probe_prompt],
+                # Print mode cannot answer a permission prompt, so without this flag
+                # the tool call is denied and the session holds three records with
+                # no tool turn (2026-10-12: permanent blocked_thin_sample).
+                ["agy", "-p", probe_prompt, "--dangerously-skip-permissions"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -697,6 +700,8 @@ class OpenCodeRunDriver:
                     "json",
                     "--dir",
                     str(sandbox),
+                    # Config `prebump.model` picks a provider whose sign-in works.
+                    *(["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []),
                     prompt,
                 ],
                 env=env,
@@ -986,6 +991,8 @@ class PiPromptDriver:
                     "--no-themes",
                     "--no-context-files",
                     "--tools", "ls",
+                    # Config `prebump.model` picks a provider whose sign-in works.
+                    *(["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []),
                     prompt,
                 ],
                 env=env,

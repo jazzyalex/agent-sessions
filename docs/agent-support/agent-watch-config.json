@@ -151,6 +151,7 @@
       },
       "prebump": {
         "driver": "opencode_run",
+        "model": "openai/gpt-6-luna",
         "sandbox": {"mode": "home_override", "subdir": "opencode_sandbox"},
         "prompt": "Say hello in one sentence.",
         "timeout_seconds": 180,
@@ -500,6 +501,7 @@
       },
       "prebump": {
         "driver": "pi_prompt",
+        "model": "openai-codex/gpt-5.5",
         "sandbox": {"mode": "home_override", "subdir": "pi_sandbox"},
         "prompt": "Call the ls tool now with path '.'. Do not answer before making that tool call. List filenames only; do not open, read, or modify files.",
         "timeout_seconds": 180,
