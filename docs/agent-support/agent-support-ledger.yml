@@ -19,25 +19,25 @@ entries:
           max_verified_version: "1.0.97"
           scope: "latest; installed and upstream both 1.0.97"
           evidence: ["scripts/probe_scan_output/agent_watch/20261013-205123-722614Z-p8223-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
-          notes: "Fresh 1.0.97 session matches the refreshed baseline. The usage accounting family is fixture-covered; modelMetrics is unchanged."      pi:
+          notes: "Fresh 1.0.97 session matches the refreshed baseline. The usage accounting family is fixture-covered; modelMetrics is unchanged."
       pi:
         sessions:
           max_verified_version: "1.1.0"
           scope: "installed; upstream 1.2.0"
           evidence: ["scripts/probe_scan_output/agent_watch/20261013-204618-309991Z-p4088-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
-          notes: "Fresh 1.1.0 tool-call session matches after durationMs was added to the fixture. Driver model set to openai-codex/gpt-5.5."      opencode:
+          notes: "Fresh 1.1.0 tool-call session matches after durationMs was added to the fixture. Driver model set to openai-codex/gpt-5.5."
       opencode:
         sessions:
           max_verified_version: "1.19.0"
           scope: "latest; installed and upstream both 1.19.0"
           evidence: ["scripts/probe_scan_output/agent_watch/20261013-204618-309991Z-p4088-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
-          notes: "Fresh 1.19.0 session matches baseline. Driver model set to openai/gpt-6-luna."      hermes:
+          notes: "Fresh 1.19.0 session matches baseline. Driver model set to openai/gpt-6-luna."
       hermes:
         sessions:
           max_verified_version: "0.21.5"
           scope: "installed; upstream 0.21.7"
           evidence: ["scripts/probe_scan_output/agent_watch/20261013-204837-330031Z-p5673-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
-          notes: "Fresh real-home one-shot session matches baseline after the owner switched the provider to openai-codex."      grok:
+          notes: "Fresh real-home one-shot session matches baseline after the owner switched the provider to openai-codex."
       grok:
         sessions:
           max_verified_version: "1.0.44"
