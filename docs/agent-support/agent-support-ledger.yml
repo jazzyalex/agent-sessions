@@ -10,6 +10,41 @@
 #
 entries:
   - agent_sessions_version: "5.6-unreleased"
+    as_of_date_utc: "2026-10-13"
+    as_of_commit: "6467bbe0+working-tree"
+    note: "Format check after driver fixes for Pi, OpenCode and Antigravity and the owner's Grok and Hermes sign-ins. Five agents have fresh matching sessions."
+    verified:
+      copilot:
+        sessions:
+          max_verified_version: "1.0.97"
+          scope: "latest; installed and upstream both 1.0.97"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261013-205123-722614Z-p8223-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
+          notes: "Fresh 1.0.97 session matches the refreshed baseline. The usage accounting family is fixture-covered; modelMetrics is unchanged."      pi:
+      pi:
+        sessions:
+          max_verified_version: "1.1.0"
+          scope: "installed; upstream 1.2.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261013-204618-309991Z-p4088-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
+          notes: "Fresh 1.1.0 tool-call session matches after durationMs was added to the fixture. Driver model set to openai-codex/gpt-5.5."      opencode:
+      opencode:
+        sessions:
+          max_verified_version: "1.19.0"
+          scope: "latest; installed and upstream both 1.19.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261013-204618-309991Z-p4088-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
+          notes: "Fresh 1.19.0 session matches baseline. Driver model set to openai/gpt-6-luna."      hermes:
+      hermes:
+        sessions:
+          max_verified_version: "0.21.5"
+          scope: "installed; upstream 0.21.7"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261013-204837-330031Z-p5673-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
+          notes: "Fresh real-home one-shot session matches baseline after the owner switched the provider to openai-codex."      grok:
+      grok:
+        sessions:
+          max_verified_version: "1.0.44"
+          scope: "installed; upstream 1.0.52"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261013-204544-007799Z-p3747-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json"]
+          notes: "Fresh 1.0.44 session matches baseline after the owner signed in again."
+  - agent_sessions_version: "5.6-unreleased"
     as_of_date_utc: "2026-10-12"
     as_of_commit: "b7895965+working-tree"
     note: "Follow-up to the 2026-10-11 format check after the owner's real-home prebump for Claude and Antigravity."

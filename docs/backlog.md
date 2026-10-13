@@ -439,6 +439,31 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Related:** [Grok session sidecars are neither watched nor read](#grok-session-sidecars-are-neither-watched-nor-read)
   explains Grok and blocks it.
 
+### Telemetry: Copilot now writes a usage record for every model call
+> **open** · sev: low · urg: low · verified 2026-10-13
+
+- **What:** Copilot 1.0.95 adds a `session.usage_record` event after each model call.
+  It carries `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`,
+  `reasoningTokens`, `cost`, `duration`, `timeToFirstTokenMs`, `maxPromptTokens`,
+  `model` and `copilotUsage.totalNanoAiu`. Both model calls in each 1.0.95 and 1.0.97
+  prebump session have one. `session.shutdown` and `session.usage_checkpoint` also gain
+  `accountingSnapshot` and `providerModelMetrics`. The existing `modelMetrics` map is
+  unchanged, so today's telemetry still reads.
+- **Where:** [CopilotTelemetryAccumulator.swift](../AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift)
+  reads `modelMetrics` from the shutdown summary only.
+  [CopilotSessionParser.swift](../AgentSessions/Services/CopilotSessionParser.swift)
+  sends `session.usage_record` to the `default:` branch, so each call adds a
+  `[session.usage_record]` meta row.
+- **Fix shape:** accumulate per-call records for live token and cost figures before
+  shutdown, and for sessions that never write a shutdown summary. This may also answer
+  the subagent-token entry below.
+- **Why deferred:** found by the 2026-10-13 format check; only three sessions carry it.
+- **Risk if wrong:** summing per-call records and the shutdown summary would double
+  count. `usageAccountingWatermarks` looks like the upstream guard against that; read
+  it before adding anything.
+- **To close:** Copilot telemetry uses the per-call records, or the event is declared
+  noise and hidden from the meta rows.
+
 ### Telemetry: Copilot subagent tokens may be invisible to the shutdown summary
 > **open** · sev: med · urg: low · verified 2026-10-01
 - **Review 2026-10-01:** CopilotTelemetryAccumulator still consumes session.shutdown and session.model_change only; it does not read agentMetrics or subagent.completed. No real Copilot subagent sample in this checkout proves whether shutdown totals already include those tokens. Recommendation: keep open as verify-first; compare a real subagent session before changing accounting.
@@ -665,6 +690,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   `docs`, `cwd`) and `toolsAdded` hold the prompt and tool list. Assistant messages gain
   `thinkingLevel`. Seen in the two prebump sessions only; no real 1.0 session is on disk
   yet. Check how the empty system row renders once real sessions exist.
+- **Pi 1.1.0 assistant `durationMs`** (2026-10-13) — source-reported time per assistant
+  message. It joins the Kimi duration entry if per-turn timing gets a UI.
 - **Antigravity `GENERIC.error`** — one record in the 2026-10-11 prebump session;
   promote if it carries a user-visible failure reason.
 - **Claude `thinkingDisplay`** (2026-10-13 scan) — 1 record in 32 sessions from three

@@ -56,6 +56,7 @@ notes:
   - "2026-09-08 full format check: fresh native evidence verified Codex 0.153.4, Claude 2.1.263, Copilot 1.0.83, Kimi 0.41.0, Antigravity 1.1.27, OpenCode 1.18.29, Hermes 0.21.1, Cursor 2026.9.8, Pi 0.85.1, and Grok 1.0.24 after additive fixture refreshes. No parser behavior change was required. Claude remains installed-only because its updater advertised 2.1.266 but declined to replace 2.1.263; the separate usage capture was repaired and live-verified. Held: OpenClaw 2026.7.1 (vendor workspace migration blocks a fresh run), Qwen 0.14.3 (no modern native session), Devin 3000.6.7 (steward cadence), and fx 0.0.7 pending the requested steward check of 0.0.8. Final weekly report: scripts/probe_scan_output/agent_watch/20260908-235525-879296Z-p58511/report.json."
   - "2026-10-11 format check: bumped Codex 0.159.0->0.160.1, Copilot 1.0.89->1.0.91, and Pi 0.85.1->1.0.3 from fresh real-session prebump (scripts/probe_scan_output/agent_watch/20261011-181036-123955Z-p60597-prebump/report.json; Pi rerun scripts/probe_scan_output/agent_watch/20261011-181503-932620Z-p63913-prebump/report.json) with zero unknowns in the final weekly (scripts/probe_scan_output/agent_watch/20261011-181703-371999Z-p65090/report.json). Fixtures gained additive coverage for Codex turn attribution/sender deliveries, Claude 2.1.289 classifier/permission/deferred-tool fields, the Copilot model.* event family, Antigravity planner token counts and GENERIC.error, and the Pi 1.0 system-prompt record (sections, toolsAdded) and thinkingLevel. Codex world_state tools is now an opaque fingerprint key. codex_status_capture.sh no longer stalls on the Codex 0.160 update menu. Not bumped: Claude 2.1.289 (schema-clean weekly, no prebump run), Antigravity (self-updated 1.2.17->1.3.3 during prebump, sample now stale), Cursor (account usage limit), OpenCode (xAI refresh token invalid), OpenClaw (driver contract expects JSONL; 2026.9.8 writes openclaw-agent.sqlite), Grok and Hermes (not run)."
   - "2026-10-12 follow-up: bumped Codex 0.160.1->0.162.1 from a fresh sandboxed prebump (scripts/probe_scan_output/agent_watch/20261012-164952-057694Z-p71235-prebump/report.json, matches baseline) and Claude 2.1.285->2.1.296 from a fresh real-home prebump (scripts/probe_scan_output/agent_watch/20261012-164201-248143Z-p68407-prebump/report.json; 32 records stamped 2.1.296, Bash tool turn, matches baseline) and a schema-clean weekly (scripts/probe_scan_output/agent_watch/20261012-164239-479465Z-p68751/report.json, supports_latest, usage and status probes ok). Antigravity 1.3.3 matched baseline but the fresh session is 3 records with no tool call (blocked_thin_sample), so it stays 1.1.27. CLIs moved overnight: Codex 0.162.1, Copilot 1.0.95, Pi 1.1.0. Pi stays 1.0.3: its 1.1.0 prebump failed on an OpenAI OAuth refresh (invalid_grant). Copilot stays 1.0.91: the weekly recommends a bump to 1.0.95, but the newest session on disk was written by 1.0.91."
+  - "2026-10-13 format check: bumped Copilot 1.0.91->1.0.97, Pi 1.0.3->1.1.0, OpenCode 1.18.29->1.19.0, Hermes 0.21.1->0.21.5, and Grok 1.0.24->1.0.44 from fresh prebump sessions (scripts/probe_scan_output/agent_watch/20261013-205123-722614Z-p8223-prebump/report.json, scripts/probe_scan_output/agent_watch/20261013-204618-309991Z-p4088-prebump/report.json, scripts/probe_scan_output/agent_watch/20261013-204837-330031Z-p5673-prebump/report.json, scripts/probe_scan_output/agent_watch/20261013-204544-007799Z-p3747-prebump/report.json) with a schema-clean weekly (scripts/probe_scan_output/agent_watch/20261013-205133-210959Z-p8684/report.json). Copilot 1.0.95 added a usage accounting family (session.usage_record per model call, accountingSnapshot, providerModelMetrics, usageAccountingWatermarks) and 1.0.97 added requestBodyEncoding/requestBodyWireBytes; modelMetrics is unchanged, so shutdown telemetry still reads. Four Copilot maps are now opaque fingerprint keys. Pi 1.1.0 adds assistant durationMs. Claude 2.1.296 adds thinkingDisplay. Driver changes: Pi and OpenCode take prebump.model (openai-codex/gpt-5.5, openai/gpt-6-luna) because their default providers had dead OAuth tokens; Antigravity runs with --dangerously-skip-permissions because print mode denied every tool call. Held: Antigravity 1.3.4 (tool turn now runs, but the store holds only 4-record prebump sessions: blocked_thin_sample), Cursor (account usage limit), OpenClaw (monitor reads JSONL, CLI writes SQLite), Qwen, Cline, fx (steward ask in issue #83)."
 agents:
   codex_cli:
     max_verified_version: "0.162.1"
@@ -81,7 +82,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.91"
+    max_verified_version: "1.0.97"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -89,7 +90,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.18.29"
+    max_verified_version: "1.19.0"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -110,7 +111,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/008.json"
       - "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"
   hermes:
-    max_verified_version: "0.21.1"
+    max_verified_version: "0.21.5"
     version_field: "not_logged"
     notes:
       - "Hermes updated to 0.21.5 on 2026-09-29 and restored its pre-existing local patch exactly, but the post-update one-shot stops before session creation because the migrated configuration selects provider `copilot` without `COPILOT_GITHUB_TOKEN`. Keep 0.21.1 until a noninteractive authenticated run writes a fresh matching session. Current-build clean report: scripts/probe_scan_output/agent_watch/20260929-191147-275916Z-p82817-prebump/report.json. Post-update failure: scripts/probe_scan_output/agent_watch/20260929-192532-724083Z-p88348-prebump/report.json."
@@ -157,7 +158,7 @@ agents:
       - "AgentSessionsTests/CursorSessionParserTests.swift"
       - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
-    max_verified_version: "1.0.3"
+    max_verified_version: "1.1.0"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -206,7 +207,7 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.24"
+    max_verified_version: "1.0.44"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and subagent hierarchy"
     unsupported_surfaces:

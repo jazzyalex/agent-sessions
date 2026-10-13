@@ -1064,7 +1064,13 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # above, and the third of its kind found in the 2026-08-31 sweep after claude's
     # `artifacts` and `modelUsage`. Listed BEFORE copilot's baseline was rebuilt, so the
     # ids never entered the fixture.
-    "copilot": {"modelMetrics", "arguments", "toolArgs", "properties", "metrics", "models"},
+    # Copilot 1.0.95 accounting: `toolCounts` is keyed by tool name, `agentMetrics` by
+    # agent name, `variables` by prompt-variable name, and `usageAccountingWatermarks`
+    # by SESSION UUID, which `_redact` would write into the fixture as a key.
+    "copilot": {
+        "modelMetrics", "arguments", "toolArgs", "properties", "metrics", "models",
+        "toolCounts", "agentMetrics", "variables", "usageAccountingWatermarks",
+    },
     # `changes` is keyed by ABSOLUTE FILE PATH — walking it both invents a new bucket
     # per edited file (permanent phantom drift) and writes the user's real paths into
     # report artifacts. `arguments`/`parameters`/`inputSchema`/`_meta` are free-form

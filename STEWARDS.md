@@ -84,14 +84,14 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 | Codex | @jazzyalex (maintainer) | 2026-10-12 · 0.162.1 | Maintained |
 | Claude Code | @jazzyalex (maintainer) | 2026-10-12 · 2.1.296 | Maintained |
 | Cursor Agent | steward wanted | 2026-08-13 · 2026.8.11 | Best-effort |
-| GitHub Copilot CLI | steward wanted | 2026-10-11 · 1.0.91 | Best-effort |
-| OpenCode | steward wanted | 2026-08-17 · 1.18.18 | Best-effort |
+| GitHub Copilot CLI | steward wanted | 2026-10-13 · 1.0.97 | Best-effort |
+| OpenCode | steward wanted | 2026-10-13 · 1.19.0 | Best-effort |
 | Antigravity CLI | steward wanted | 2026-08-13 · 1.1.12 | Best-effort |
-| Pi | steward wanted | 2026-10-11 · 1.0.3 | Best-effort |
+| Pi | steward wanted | 2026-10-13 · 1.1.0 | Best-effort |
 | Kimi Code | steward wanted | 2026-08-17 · 0.36.1 | Best-effort |
-| Grok CLI | steward wanted | 2026-08-17 · 1.0.4 | Best-effort |
+| Grok CLI | steward wanted | 2026-10-13 · 1.0.44 | Best-effort |
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
-| Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
+| Hermes | steward wanted | 2026-10-13 · 0.21.5 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
@@ -122,8 +122,9 @@ Honest footnotes:
   captured on this machine without a paid plan or an alternate provider. Newer Qwen builds
   are unverified. A steward with a working Qwen account would close this outright — it is
   the single most useful agent to adopt.
-- **Hermes.** Held at 0.17.0 since 2026-06-24. The automated driver stopped producing a
-  usable sample, so newer Hermes builds have no fresh evidence either way.
+- **Hermes.** Verified on 0.21.5 on 2026-10-13 from a fresh driver session. The driver
+  depends on the provider set in the maintainer's Hermes config; when that provider has
+  no working credential, newer builds have no fresh evidence either way.
 - **fx (vercel-labs).** Re-verified 2026-08-27 on CLI 0.0.5 (df7e624) with 5 dirs under `~/.fx/sessions` (`178719436754…` etc., 3 with history, 2 empty `history_len 0`): `checkpoint.json` + `session.json` + `display.json` layout holds, all four `kind`s still render (live data covers `assistant` + `interrupted`; `background_command`/`compacted_summary` via fixture), `durableString` for `base64` text, `tool_calls[].arguments_json` as JSON string, `tool_result` keyed by `tool_call_id`. 9-point checklist (`issuecomment-5433779336`): count 5 (3 visible after `hideZeroMessageSessions`), titles from `display.json`/first prompt, no 1970, search `Skills: 25` hits, `has-commands` 3/2, Analytics counts, Copy `fx --resume <id>` (`--continue` only with `cwd`). `fx --help` advertises `--resume [last|<id>]`/`-c`; `fx session --id <id> --json` succeeds 3/3 non-corrupt (the fourth `178719436754…` is CLI-reported `InvalidSessionFormat` but browsable via direct `checkpoint.json`); `expect` spawning `fx --resume <id>` reaches `UnableToReadTerminalSize` not unknown-flag, so the flag is valid and the session is found — full interactive reopen needs a TTY and was not driven to a prompt. `steward_check.py fx` now runs (fixed `MATRIX_KEY` + `verified_map` + baseline `checkpoint.json` note) and reports additive 0.0.5 `unknown_keys` (`checkpoint_seq` etc.) with `format_drift_detected` but no missing render path. Format is young (3/`event_log_v1`), so drift is expected.
 
   Source inspection of fx 0.0.7 on 2026-09-02 found the same four history kinds and
