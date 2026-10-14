@@ -228,6 +228,11 @@ struct TelemetryCapabilities: Equatable, Sendable {
     /// (or the source splits 5m/1h itself). When false, a model that prices the two
     /// writes differently cannot be priced from this source's cache-write tokens.
     var cacheWriteTTLVerified: Bool = true
+    /// False when the source's format has no cache-write count and upstream may
+    /// fold cache writes into the input count. Such usage cannot be priced at a
+    /// row whose cache-write rate differs from its input rate, because the hidden
+    /// writes would be billed at the input rate.
+    var recordsCacheWrites: Bool = true
 
     /// The common Plan A shape: one reason, all four dimensions unavailable.
     static func allUnavailable(_ reason: String) -> TelemetryCapabilities {

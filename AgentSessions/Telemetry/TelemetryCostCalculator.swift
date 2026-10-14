@@ -15,26 +15,32 @@ enum TelemetryCostCalculator {
 
     static func estimate(slices: [TelemetryUsageSlice],
                          priceTable: RunwayPriceTable,
-                         cacheWriteTTLVerified: Bool = true) -> TelemetryCostEstimate {
+                         cacheWriteTTLVerified: Bool = true,
+                         recordsCacheWrites: Bool = true) -> TelemetryCostEstimate {
         estimate(slices: slices, snapshot: priceTable.snapshot(),
-                 cacheWriteTTLVerified: cacheWriteTTLVerified)
+                 cacheWriteTTLVerified: cacheWriteTTLVerified,
+                 recordsCacheWrites: recordsCacheWrites)
     }
 
     static func price(events: [TelemetryUsageEvent],
                       fallbackSlices: [TelemetryUsageSlice],
                       priceTable: RunwayPriceTable,
-                      cacheWriteTTLVerified: Bool = true) -> Result {
+                      cacheWriteTTLVerified: Bool = true,
+                      recordsCacheWrites: Bool = true) -> Result {
         price(events: events, fallbackSlices: fallbackSlices, snapshot: priceTable.snapshot(),
-              cacheWriteTTLVerified: cacheWriteTTLVerified)
+              cacheWriteTTLVerified: cacheWriteTTLVerified,
+              recordsCacheWrites: recordsCacheWrites)
     }
 
     static func price(events: [TelemetryUsageEvent],
                       fallbackSlices: [TelemetryUsageSlice],
                       snapshot: RunwayPriceSnapshot,
-                      cacheWriteTTLVerified: Bool = true) -> Result {
+                      cacheWriteTTLVerified: Bool = true,
+                      recordsCacheWrites: Bool = true) -> Result {
         guard !events.isEmpty else {
             return Result(estimate: estimate(slices: fallbackSlices, snapshot: snapshot,
-                                             cacheWriteTTLVerified: cacheWriteTTLVerified),
+                                             cacheWriteTTLVerified: cacheWriteTTLVerified,
+                                             recordsCacheWrites: recordsCacheWrites),
                           events: [])
         }
 
@@ -50,6 +56,7 @@ enum TelemetryCostCalculator {
             var eventFreeRoute: [String] = []
             let usd = price(event: event, snapshot: snapshot,
                             cacheWriteTTLVerified: cacheWriteTTLVerified,
+                            recordsCacheWrites: recordsCacheWrites,
                             unpricedModels: &eventUnpriced,
                             missingComponents: &eventMissing,
                             freeRouteModels: &eventFreeRoute)
@@ -79,7 +86,8 @@ enum TelemetryCostCalculator {
 
     private static func estimate(slices: [TelemetryUsageSlice],
                                  snapshot: RunwayPriceSnapshot,
-                                 cacheWriteTTLVerified: Bool) -> TelemetryCostEstimate {
+                                 cacheWriteTTLVerified: Bool,
+                                 recordsCacheWrites: Bool) -> TelemetryCostEstimate {
         var total = 0.0
         var unpricedModels: [String] = []
         var missingComponents: [String] = []
@@ -108,6 +116,12 @@ enum TelemetryCostCalculator {
             guard let rates = price.rates(for: tier, inferenceGeo: slice.inferenceGeo) else {
                 // Billing a fast record at standard would halve it. Refuse instead.
                 appendOnce("\(slug):\(slice.inferenceGeo.map { "inferenceGeo:\($0)" } ?? tier.rawValue)", to: &missingComponents)
+                continue
+            }
+            // Writes the format may have folded into input would be billed at the
+            // input rate; only a row that bills writes at that rate is safe.
+            if hidesCacheWrites(rates, recordsCacheWrites: recordsCacheWrites) {
+                appendOnce("\(slug):cacheWrite", to: &missingComponents)
                 continue
             }
 
@@ -160,6 +174,7 @@ enum TelemetryCostCalculator {
     private static func price(event: TelemetryUsageEvent,
                               snapshot: RunwayPriceSnapshot,
                               cacheWriteTTLVerified: Bool,
+                              recordsCacheWrites: Bool,
                               unpricedModels: inout [String],
                               missingComponents: inout [String],
                               freeRouteModels: inout [String]) -> Double? {
@@ -184,6 +199,12 @@ enum TelemetryCostCalculator {
             appendOnce("\(slug):\(event.inferenceGeo.map { "inferenceGeo:\($0)" } ?? tier.rawValue)", to: &missingComponents)
             return nil
         }
+        // Writes the format may have folded into input would be billed at the
+        // input rate; only a row that bills writes at that rate is safe.
+        if hidesCacheWrites(rates, recordsCacheWrites: recordsCacheWrites) {
+            appendOnce("\(slug):cacheWrite", to: &missingComponents)
+            return nil
+        }
         let writes = event.cacheWrite5mTokens + event.cacheWrite1hTokens
         // TTL is required evidence when the row prices the two writes differently.
         if !cacheWriteTTLVerified, writes > 0,
@@ -206,6 +227,14 @@ enum TelemetryCostCalculator {
                              output: Double(event.outputTokens),
                              cacheWrite5m: Double(event.cacheWrite5mTokens),
                              cacheWrite1h: Double(event.cacheWrite1hTokens))
+    }
+
+    /// A source without a cache-write count may carry writes inside its input count.
+    /// That is safe only when the row has no separate write rate (the vendor bills
+    /// writes as input) or its write rate equals the input rate.
+    private static func hidesCacheWrites(_ rates: RunwayRateSet, recordsCacheWrites: Bool) -> Bool {
+        guard !recordsCacheWrites, let write = rates.cacheWritePerMTok else { return false }
+        return write != rates.inputPerMTok
     }
 
     /// One cause is reported once however many slices hit it — the list names what

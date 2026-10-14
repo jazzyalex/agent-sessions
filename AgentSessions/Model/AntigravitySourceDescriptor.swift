@@ -18,7 +18,10 @@ extension SessionSourceDescriptor {
                 configuration: .partial("current model comes from loaded Session metadata; planner records do not state a model"),
                 tokens: .supported,
                 cost: .partial("models without a published first-party price are not estimated; usage before the first recorded model selection is not priced"),
-                weeklyQuota: .unavailable("Antigravity does not expose a compatible account quota feed")
+                weeklyQuota: .unavailable("Antigravity does not expose a compatible account quota feed"),
+                // PLANNER_RESPONSE records no cache-write field, and nothing upstream shows
+                // that input_tokens excludes cache creation, so writes may hide in input.
+                recordsCacheWrites: false
             ),
             makeTelemetryProvider: { AntigravityTelemetryProvider() },
             shortLabel: "Antigravity",

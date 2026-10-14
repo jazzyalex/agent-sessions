@@ -137,6 +137,12 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
     private var allRowsHaveRecordedTotal = true
     private var sawAnyRecordedTotal = false
     private var unavailableReason: String?
+    /// OpenClaw's CLI backend (`api: "cli"`) persists one assistant message per CLI
+    /// run with `lastCallUsage`: the last model call only for Claude stream-json, and
+    /// possibly a run total for other CLIs. Neither is the run's billable usage.
+    private var sawCLIBackendUsage = false
+    static let cliBackendCostUnavailableReason =
+        "OpenClaw CLI-backend turns record one model call's usage, not the whole run."
 
     static func accumulate<S: Sequence>(lines: S) -> SessionTelemetry where S.Element == String {
         var provider = Self()
@@ -192,6 +198,8 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
                 return
             }
             sawUsageRecord = true
+            let isCLIBackend = Self.string(message, keys: ["api"])?.lowercased() == "cli"
+            if isCLIBackend { sawCLIBackendUsage = true }
             guard let identifier = Self.string(object, keys: ["id"]) else {
                 unavailableReason = "OpenClaw usage is unavailable because a usage record lacks its canonical top-level entry ID."
                 return
@@ -225,7 +233,8 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
                           effort: effort,
                           effectiveEffort: effectiveEffort,
                           observedAt: observedAt,
-                          anchorLine: index) {
+                          anchorLine: index,
+                          isCLIBackend: isCLIBackend) {
             case .accepted:
                 timeline.observe(model: model,
                                  effort: effort,
@@ -271,7 +280,8 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
                 usageFamilies: [Self.usageFamily],
                 usageFamilyConflict: false,
                 displayTotalTokens: topLineTokens,
-                unavailableReason: nil)
+                unavailableReason: nil,
+                costUnavailableReason: sawCLIBackendUsage ? Self.cliBackendCostUnavailableReason : nil)
         } else {
             summary = nil
         }
@@ -297,7 +307,8 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
                                  effort: String?,
                                  effectiveEffort: String?,
                                  observedAt: Date?,
-                                 anchorLine: Int) -> IngestOutcome {
+                                 anchorLine: Int,
+                                 isCLIBackend: Bool) -> IngestOutcome {
         guard let cacheTelemetryState = Self.cacheTelemetryState(in: usage) else {
             unavailableReason = "OpenClaw usage is unavailable because an explicit cache telemetry state is malformed."
             return .rejected
@@ -385,7 +396,8 @@ struct OpenClawTelemetryProvider: SessionTelemetryProvider {
             cacheWrite1hTokens: components.cacheWrite1h,
             outputTokens: components.output,
             reasoningOutputTokens: components.reasoning,
-            contextInputTokens: contextUsage.inputTokens))
+            // A CLI-backend turn's context may be one call's or a summed run's.
+            contextInputTokens: isCLIBackend ? nil : contextUsage.inputTokens))
         return .accepted
     }
 

@@ -317,6 +317,26 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
+    /// Qwen folds Anthropic cache creation into promptTokenCount and does not persist
+    /// the split, so a Claude record's writes would be billed as fresh input. A row
+    /// whose write rate differs from its input rate is refused.
+    func testQwenRefusesAModelWhoseCacheWritesWouldHideInInput() async throws {
+        let sessionID = "12345678-1234-1234-1234-1234567890ac"
+        let session = try makeQwenSession(id: sessionID, records: [
+            qwenRecord(id: "root-claude", parent: nil, sessionID: sessionID, type: "user",
+                       timestamp: "2026-10-07T20:00:00.000Z"),
+            qwenRecord(id: "assistant-claude", parent: "root-claude", sessionID: sessionID,
+                       type: "assistant", timestamp: "2026-10-07T20:00:01.000Z", model: "claude-sonnet-5",
+                       usage: qwenUsage(prompt: 1000, cached: 200, output: 100, thoughts: 0))
+        ], model: "claude-sonnet-5")
+        let telemetry = try await priceThroughEngine(session: session)
+
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 1100, "tokens are still shown")
+        XCTAssertNil(telemetry.costEstimate?.apiEquivalentUSD)
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, ["claude-sonnet-5:cacheWrite"])
+    }
+
     func testQwenFailsClosedWhenAssistantUsageIsMalformed() throws {
         let sessionID = "12345678-1234-1234-1234-123456789013"
         let session = try makeQwenSession(id: sessionID, records: [
@@ -1158,26 +1178,28 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
     /// Cline core writes the whole run's usage onto the last assistant message when
     /// no assistant message of that run carried per-request metrics. That total can
     /// span several requests, so it must not claim one request's context size.
-    func testClineRunUsageFallbackDoesNotClaimARequestContextSize() throws {
-        func assistant(_ id: String, metrics: [String: Any]?) -> [String: Any] {
-            var message: [String: Any] = [
-                "role": "assistant",
-                "id": id,
-                "ts": 1785615367000,
-                "modelInfo": ["id": "gpt-5.4", "provider": "openai"]
-            ]
-            if let metrics { message["metrics"] = metrics }
-            return message
-        }
+    private func clineAssistant(_ id: String, model: String = "gpt-5.4",
+                                metrics: [String: Any]?) -> [String: Any] {
+        var message: [String: Any] = [
+            "role": "assistant",
+            "id": id,
+            "ts": 1785615367000,
+            "modelInfo": ["id": model, "provider": "openai"]
+        ]
+        if let metrics { message["metrics"] = metrics }
+        return message
+    }
+
+    func testClineRunUsageFallbackDoesNotClaimARequestContextSize() async throws {
         let usage: [String: Any] = [
             "inputTokens": 300_000, "cacheReadTokens": 0, "cacheWriteTokens": 0, "outputTokens": 10
         ]
         let session = try makeClineSession(messages: [
-            assistant("per-request", metrics: usage),
+            clineAssistant("per-request", metrics: usage),
             ["role": "user", "id": "user-1", "ts": 1785615368000, "content": []],
-            assistant("run-step-1", metrics: nil),
+            clineAssistant("run-step-1", metrics: nil),
             ["role": "user", "id": "tool-1", "ts": 1785615369000, "content": []],
-            assistant("run-step-2", metrics: usage)
+            clineAssistant("run-step-2", metrics: usage)
         ])
 
         let telemetry = try XCTUnwrap(ClineTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
@@ -1187,6 +1209,33 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertNil(telemetry.usageEvents.last?.contextInputTokens,
                      "metrics that follow an assistant message without metrics may be a run total")
         XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 600_020, "tokens are still counted")
+
+        // Through the engine, gpt-5.4's long-context tier needs one request's context,
+        // so the run total is refused while the per-request message alone would price.
+        let priced = try await priceThroughEngine(session: session)
+        XCTAssertNil(priced.costEstimate?.apiEquivalentUSD)
+        XCTAssertEqual(priced.costEstimate?.missingPriceComponents, ["gpt-5.4:contextInputTokens"])
+    }
+
+    /// A run total whose run also called another model belongs to no single model.
+    func testClineRunUsageFallbackAcrossModelsHasNoModel() throws {
+        let usage: [String: Any] = [
+            "inputTokens": 1000, "cacheReadTokens": 0, "cacheWriteTokens": 0, "outputTokens": 10
+        ]
+        let session = try makeClineSession(messages: [
+            clineAssistant("same-1", model: "gpt-5.4-mini", metrics: nil),
+            clineAssistant("same-total", model: "gpt-5.4-mini", metrics: usage),
+            ["role": "user", "id": "user-1", "ts": 1785615368000, "content": []],
+            clineAssistant("other-1", model: "gpt-5.4", metrics: nil),
+            clineAssistant("mixed-total", model: "gpt-5.4-mini", metrics: usage)
+        ])
+
+        let telemetry = try XCTUnwrap(ClineTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.usageEvents.map(\.recordID), ["same-total", "mixed-total"])
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["gpt-5.4-mini", nil],
+                       "a run total keeps its model only when every pending request named it")
+        XCTAssertTrue(telemetry.usageSlices.contains { $0.model == nil },
+                      "the slice uses the same model as the event")
     }
 
     func testClineFailsClosedWhenAnAssistantMetricRowIsMalformed() throws {
@@ -1922,18 +1971,28 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
     }
 
     func testAntigravityPlannerUsageIsPricedThroughTheEngine() async throws {
-        // Antigravity records a display name. "Claude Sonnet 4.6 (Thinking)" drops its
-        // effort suffix and resolves through the "claude sonnet 4.6" alias. Google
-        // publishes no price for any Gemini display name Antigravity writes that has
-        // an alias, so the aliased Claude selection is the priced case.
+        // Antigravity records a display name. "Gemini 3.8 Flash (High)" drops its
+        // effort suffix and resolves through the "gemini 3.8 flash" alias. The Gemini
+        // row has no cache-write rate, so input that may hide writes is still exact.
         let telemetry = try await priceThroughEngine(source: .antigravity, lines: [
-            antigravityInput(1, from: "None", to: "Claude Sonnet 4.6 (Thinking)"),
+            antigravityInput(1, from: "None", to: "Gemini 3.8 Flash (High)"),
             antigravityPlanner(2, input: 1_000_000)
         ])
 
-        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["Claude Sonnet 4.6 (Thinking)"])
-        // claude-sonnet-4-6: 1M fresh input at $3/MTok + 10 output at $15/MTok.
-        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 3.00015, accuracy: 1e-9)
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["Gemini 3.8 Flash (High)"])
+        // gemini-3.8-flash: 1M fresh input at $0.75/MTok + 10 output at $3.75/MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.7500375, accuracy: 1e-9)
+
+        // A Claude selection is refused: Antigravity records no cache-write count, and
+        // Claude bills writes above the input rate, so hidden writes would be underpriced.
+        let claude = try await priceThroughEngine(source: .antigravity, lines: [
+            antigravityInput(1, from: "None", to: "Claude Sonnet 4.6 (Thinking)"),
+            antigravityPlanner(2, input: 1_000_000)
+        ])
+        XCTAssertNil(claude.costEstimate?.apiEquivalentUSD)
+        // Components name the raw slug, as unpricedModels does (spec §7).
+        XCTAssertEqual(claude.costEstimate?.missingPriceComponents, ["Claude Sonnet 4.6 (Thinking):cacheWrite"])
+
         XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
         XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
         XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])

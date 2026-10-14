@@ -368,6 +368,7 @@ final class PriceManifestV2Tests: XCTestCase {
         let s = RunwayPriceTable.makeForTesting().snapshot()
         for raw in ["anthropic/claude-sonnet-5", "openai/gpt-5.5", "claude-haiku-4.5",
                     "Claude Sonnet 4.6 (Thinking)",
+                    "Gemini 3.8 Flash (High)", "Gemini 3.6 Flash (Medium)",
                     "z-ai/glm-5.3-flash", "minimax-m2.5-free", "kimi-k2.7-code",
                     "grok-4.6",
                     "muse-spark-1.3-contributor-free"] {
@@ -375,6 +376,15 @@ final class PriceManifestV2Tests: XCTestCase {
         }
         XCTAssertEqual(s.resolvedPrice(forModel: "muse-spark-1.3-contributor-free")?.price.inputPerMTok, 1.25)
         XCTAssertEqual(s.resolvedPrice(forModel: "z-ai/glm-5.3-flash")?.price.inputPerMTok, 0.15)
+        // Antigravity display names resolve through the aliases to their own rows.
+        XCTAssertEqual(ModelPriceKeyResolver.resolve("Gemini 3.8 Flash (High)", aliases: s.aliases)?.key,
+                       "gemini-3.8-flash")
+        XCTAssertEqual(ModelPriceKeyResolver.resolve("Gemini 3.6 Flash (Medium)", aliases: s.aliases)?.key,
+                       "gemini-3.6-flash")
+        XCTAssertEqual(s.resolvedPrice(forModel: "Gemini 3.8 Flash (High)")?.price,
+                       s.price(forModel: "gemini-3.8-flash"))
+        XCTAssertEqual(s.resolvedPrice(forModel: "Gemini 3.6 Flash (Medium)")?.price,
+                       s.price(forModel: "gemini-3.6-flash"))
         for raw in ["big-pickle", "x-preview-f-free", "gateway-injected", "coder-model",
                     "qwen3.5-9b", "kimi-k2.7-code-v2",
                     "Gemini 3.5 Flash (Medium)", "cline-free/deepseek-v4.1-flash"] {

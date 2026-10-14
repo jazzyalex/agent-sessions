@@ -307,6 +307,44 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 2.5, accuracy: 0.0001)
     }
 
+    // MARK: - Sources that record no cache-write count
+
+    /// A source without a cache-write count may hide writes in its input count.
+    /// The event path refuses a row whose write rate differs from its input rate,
+    /// and still prices a row with no separate write rate or a write rate equal to input.
+    func testEventPathRefusesHiddenCacheWritesWhenTheRowBillsWritesDifferently() throws {
+        let refused = TelemetryCostCalculator.price(
+            events: [event("claude-sonnet-5", input: oneMillion, context: nil),
+                     event("gpt-5", input: oneMillion, context: nil)],
+            fallbackSlices: [], snapshot: v2Snapshot(), recordsCacheWrites: false)
+        XCTAssertNil(refused.estimate.apiEquivalentUSD)
+        XCTAssertEqual(refused.estimate.missingPriceComponents, ["claude-sonnet-5:cacheWrite"])
+
+        let priced = TelemetryCostCalculator.price(
+            events: [event("gpt-5", input: oneMillion, context: nil),
+                     event("minimax-m2.5", input: oneMillion, context: nil)],
+            fallbackSlices: [], snapshot: v2Snapshot(), recordsCacheWrites: false)
+        XCTAssertEqual(try XCTUnwrap(priced.estimate.apiEquivalentUSD), 2.25, accuracy: 0.0001)
+        XCTAssertEqual(priced.estimate.missingPriceComponents, [])
+    }
+
+    func testSlicePathRefusesHiddenCacheWritesWhenTheRowBillsWritesDifferently() throws {
+        let refused = TelemetryCostCalculator.price(
+            events: [],
+            fallbackSlices: [slice("claude-sonnet-5", fresh: oneMillion),
+                             slice("gpt-5", fresh: oneMillion)],
+            snapshot: v2Snapshot(), recordsCacheWrites: false)
+        XCTAssertNil(refused.estimate.apiEquivalentUSD)
+        XCTAssertEqual(refused.estimate.missingPriceComponents, ["claude-sonnet-5:cacheWrite"])
+
+        let priced = TelemetryCostCalculator.price(
+            events: [],
+            fallbackSlices: [slice("claude-sonnet-5", fresh: oneMillion)],
+            snapshot: v2Snapshot())
+        XCTAssertEqual(try XCTUnwrap(priced.estimate.apiEquivalentUSD), 2.0, accuracy: 0.0001,
+                       "a source that records its writes is unaffected")
+    }
+
     // MARK: - Stored results from the previous build
 
     func testCostEstimateWithoutFreeRouteFieldStillDecodes() throws {

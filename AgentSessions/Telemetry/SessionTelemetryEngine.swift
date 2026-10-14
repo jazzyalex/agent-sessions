@@ -605,7 +605,8 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         let priced = TelemetryCostCalculator.price(events: base.usageEvents,
                                                    fallbackSlices: base.usageSlices,
                                                    snapshot: priceSnapshot,
-                                                   cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified)
+                                                   cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified,
+                                                   recordsCacheWrites: capabilities.recordsCacheWrites)
         return TelemetryScanResult(
             computed: ComputedTelemetry(
                 telemetry: SessionTelemetry(source: base.source,

@@ -70,8 +70,10 @@ enum ClineTelemetryReader {
         // request. When no assistant message of a run carried metrics, it writes the
         // whole run's usage onto the run's last assistant message instead. That total
         // can span several requests, so metrics that follow an assistant message
-        // without metrics keep their tokens but claim no request context size.
+        // without metrics keep their tokens but claim no request context size. If
+        // those requests named another model, the total has no single model either.
         var assistantWithoutMetricsPending = false
+        var pendingModels: Set<String> = []
 
         for (index, message) in messages.enumerated() {
             guard !Task.isCancelled else {
@@ -89,11 +91,16 @@ enum ClineTelemetryReader {
                              provenance: .assistantRecord)
 
             guard message.keys.contains("metrics") else {
-                if !isDisplayOnly(message) { assistantWithoutMetricsPending = true }
+                if !isDisplayOnly(message) {
+                    assistantWithoutMetricsPending = true
+                    if let model { pendingModels.insert(model) }
+                }
                 continue
             }
             let mayBeRunTotal = assistantWithoutMetricsPending
+            let usageModel = mayBeRunTotal && pendingModels.contains(where: { $0 != model }) ? nil : model
             assistantWithoutMetricsPending = false
+            pendingModels.removeAll()
             sawMetrics = true
             guard modelInfo(in: message["modelInfo"]) != nil else {
                 invalidModelInfo = true
@@ -120,7 +127,7 @@ enum ClineTelemetryReader {
                                  write5m: components.cacheWrite,
                                  write1h: 0,
                                  output: components.output,
-                                 model: model,
+                                 model: usageModel,
                                  effort: nil,
                                  speed: Self.speed)
 
@@ -133,7 +140,7 @@ enum ClineTelemetryReader {
                 anchorLine: index,
                 usageFamily: Self.usageFamily,
                 ownership: .session,
-                model: model,
+                model: usageModel,
                 reasoningEffort: nil,
                 speed: Self.speed,
                 freshInputTokens: components.fresh,

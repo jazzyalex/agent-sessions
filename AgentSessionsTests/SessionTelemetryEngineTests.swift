@@ -411,6 +411,11 @@ final class SessionTelemetryEngineTests: XCTestCase {
         for source in [SessionSource.claude, .codex, .pi, .copilot] {
             XCTAssertTrue(SessionSourceRegistry.descriptor(for: source).telemetry.cacheWriteTTLVerified)
         }
+        // Qwen and Antigravity record no cache-write count; writes may hide in input.
+        for source in SessionSource.allCases {
+            XCTAssertEqual(SessionSourceRegistry.descriptor(for: source).telemetry.recordsCacheWrites,
+                           ![.qwen, .antigravity].contains(source), "\(source)")
+        }
     }
 
     func testOpenCodeTelemetryCacheInvalidatesWhenLogicalSessionRevisionChanges() async throws {

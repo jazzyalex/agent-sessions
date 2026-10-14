@@ -9767,6 +9767,38 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
+    /// OpenClaw's CLI backend persists one assistant message per CLI run with
+    /// `lastCallUsage` (`api: "cli"`). That is one call's usage, not the run's, so
+    /// tokens are shown but no figure; any other api stays priced.
+    func testOpenClawCLIBackendTurnShowsTokensButNoCost() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-CLI-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        func price(api: String) async throws -> SessionTelemetry {
+            let url = root.appendingPathComponent("openclaw-\(api).jsonl")
+            try [
+                #"{"type":"session","version":3,"id":"openclaw-priced","timestamp":"2026-08-16T16:00:00.000Z","cwd":"/tmp"}"#,
+                #"{"type":"message","id":"assistant-1","timestamp":"2026-08-16T16:00:01.000Z","message":{"role":"assistant","api":"\#(api)","model":"gpt-5.4-mini","usage":{"input":1000,"output":100,"cacheRead":200,"cacheWrite":0,"totalTokens":1300},"content":[]}}"#
+            ].joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            return try await priceThroughEngine(session: Session(
+                id: "openclaw-\(api)", source: .openclaw, startTime: nil, endTime: nil,
+                model: "gpt-5.4-mini", filePath: url.path, eventCount: 0, events: []))
+        }
+
+        let cli = try await price(api: "cli")
+        XCTAssertEqual(cli.usageSummary?.topLineTokens, 1300, "tokens are still shown")
+        XCTAssertEqual(cli.usageSummary?.costUnavailableReason,
+                       "OpenClaw CLI-backend turns record one model call's usage, not the whole run.")
+        XCTAssertNil(cli.usageEvents.first?.contextInputTokens)
+        XCTAssertNil(cli.costEstimate?.apiEquivalentUSD)
+
+        let api = try await price(api: "openai-responses")
+        XCTAssertNil(api.usageSummary?.costUnavailableReason)
+        XCTAssertEqual(try XCTUnwrap(api.costEstimate?.apiEquivalentUSD), 0.001215, accuracy: 1e-12)
+    }
+
     func testOpenClawTelemetryReadsConfigurationAndUsageWithoutPricing() {
         let lines = [
             #"{"type":"session","version":3,"id":"openclaw-test","timestamp":"2026-08-16T16:00:00.000Z","cwd":"/tmp"}"#,

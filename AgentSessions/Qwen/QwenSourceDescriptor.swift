@@ -32,10 +32,13 @@ extension SessionSourceDescriptor {
                 configuration: .partial(
                     "assistant model records provide observed model history; current model is also retained from loaded Session metadata"),
                 tokens: .supported,
-                // Qwen records no cache-write count (Gemini-style usageMetadata), so the
-                // TTL flag never applies and keeps its default.
                 cost: .partial("models without a published first-party price are not estimated; the coder-model alias is opaque"),
-                weeklyQuota: .unavailable("Qwen Code does not expose a compatible account quota feed")
+                weeklyQuota: .unavailable("Qwen Code does not expose a compatible account quota feed"),
+                // Qwen's usageMetadata has no cache-write count. Upstream (@qwen-code
+                // 0.25.1) folds Anthropic cache creation into promptTokenCount and keeps
+                // the split only in an unpersisted WeakMap; the OpenAI-compatible path
+                // folds writes into prompt_tokens. Hidden writes would land in fresh input.
+                recordsCacheWrites: false
             ),
             scanTelemetry: { session in
                 QwenTelemetryReader.loadTelemetry(for: session)
