@@ -262,12 +262,14 @@ final class SessionTelemetryEngineTests: XCTestCase {
     private func configuredCodexQuota(prices: RunwayPriceTable,
                                       now: Date,
                                       reset: Date,
-                                      accountID: String = "account-a") -> WeeklyQuotaCalibrationStore {
+                                      accountID: String = "account-a",
+                                      priceRevision: Int? = nil) -> WeeklyQuotaCalibrationStore {
+        let priceRevision = priceRevision ?? prices.rateRevision(forProvider: "codex")
         let quota = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: now)
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
             windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
-        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
+        bootstrap.priceRevision = priceRevision
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -279,7 +281,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
             accountHash: WeeklyQuotaCalibrationScope.hashAccount(accountID),
             sourceFamily: "oauth",
             limitShape: "weekly",
-            priceRevision: prices.rateRevision(forProvider: "codex"))
+            priceRevision: priceRevision)
         quota.observeQuota(provider: "codex", remainingPercent: 80,
                            hasExactPercent: false, resetAt: reset, observedAt: now,
                            scope: scope, now: now)
@@ -1547,6 +1549,33 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(estimate.calibrationProvenance?.scannedAt, now)
         XCTAssertEqual(estimate.quotaObservedAt, now,
                        "the latest raw observation remains separate from scan provenance")
+    }
+
+    /// The gate between a calibration and a session cost is the provider rate
+    /// revision. A calibration stamped under the legacy global revision (what an
+    /// older build persisted) must not produce a per-session Wk figure, even when
+    /// the account matches and the calibration itself is internally consistent.
+    func testCodexWeeklyQuotaFailsClosedForCalibrationOnAnotherRateRevision() async throws {
+        let url = try write(codexLines(accountID: "account-a").map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
+        })
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        XCTAssertNotEqual(prices.revision, prices.rateRevision(forProvider: "codex"))
+        let quota = configuredCodexQuota(prices: prices, now: now, reset: reset,
+                                         priceRevision: prices.revision)
+        XCTAssertNotNil(quota.attributionContext(provider: "codex", now: now),
+                        "the store serves the stale calibration; only the engine gate refuses it")
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .codex))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertEqual(estimate.unavailableReason, "no compatible account-window calibration")
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped)
     }
 
     func testCodexWeeklyQuotaFailsClosedForConflictingTranscriptAccountIdentities() async throws {
