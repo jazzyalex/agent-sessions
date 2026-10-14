@@ -133,4 +133,35 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         let content = "<USER_REQUEST>\nhi\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 3.5 Flash to Gemini 4.0 Pro.\n</USER_SETTINGS_CHANGE>"
         XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content), "Gemini 4.0 Pro")
     }
+
+    func testModelNameStopsAtTheEndOfTheSentence() {
+        let content = "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string\n</USER_SETTINGS_CHANGE>"
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content),
+                       "Gemini 3.5 Flash (Medium)")
+    }
+
+    func testModelNameKeepsVersionDotsAndHandlesClosingTag() {
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(
+            fromUserInput: "`Model Selection` from Gemini 3.5 Flash (Low) to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"),
+                       "Claude Sonnet 4.6 (Thinking)")
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(
+            fromUserInput: "`Model Selection` from None to Gemini 3.7 Flash (High)</USER_SETTINGS_CHANGE>"),
+                       "Gemini 3.7 Flash (High)")
+        XCTAssertNil(AntigravityTranscriptParser.modelName(fromUserInput: "<USER_REQUEST>hi</USER_REQUEST>"))
+    }
+
+    func testSessionModelIsTheLastSelectedModel() throws {
+        let url = writeTranscript([
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:21:00Z","content":"<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium).\n</USER_SETTINGS_CHANGE>"}"#,
+            #"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-04T20:21:10Z","content":"Done."}"#,
+            #"{"step_index":2,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:22:00Z","content":"<USER_REQUEST>\nAgain.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 3.5 Flash (Medium) to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"}"#,
+            #"{"step_index":3,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:23:00Z","content":"<USER_REQUEST>\nNo setting change here.\n</USER_REQUEST>"}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = AntigravityTranscriptParser.parse(at: url, forcedID: nil, includeEvents: false) else {
+            return XCTFail("parse returned nil")
+        }
+        XCTAssertEqual(session.model, "Claude Sonnet 4.6 (Thinking)")
+    }
 }

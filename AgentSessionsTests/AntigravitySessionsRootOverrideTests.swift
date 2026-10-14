@@ -58,6 +58,28 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         return root
     }
 
+    private func scratchRepairDefaults(generation: Int? = nil) -> UserDefaults {
+        let name = "AntigravityRootOverrideRepair-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        if let generation {
+            defaults.set(generation, forKey: AntigravitySessionIndexer.parserGenerationDefaultsKey)
+        }
+        return defaults
+    }
+
+    /// Every refresh in this class runs against a scratch parser-repair defaults
+    /// suite that is already at the current generation, and a no-op row writer. The
+    /// one-time Antigravity repair therefore never forces a reparse here, and it can
+    /// never reach the real index database or `UserDefaults.standard`.
+    private func makeIndexer() -> AntigravitySessionIndexer {
+        let indexer = AntigravitySessionIndexer()
+        indexer.parserRepairDefaultsOverride = scratchRepairDefaults(
+            generation: AntigravitySessionIndexer.parserGeneration)
+        indexer.persistSessionMetaOverride = { (_: SessionMetaRow) async throws in }
+        return indexer
+    }
+
     private func missingRootPath() -> String {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("AntigravityRootOverride.absent.\(UUID().uuidString)", isDirectory: true)
@@ -153,7 +175,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         let root = try makeBrainRoot(artifact: "alpha.md")
         UserDefaults.standard.set(root.path, forKey: overrideKey)
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
 
         XCTAssertTrue(indexer.canAccessRootDirectory,
                       "indexer ignored the override and scanned the default root instead of \(root.path)")
@@ -163,7 +185,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         let absent = missingRootPath()
         UserDefaults.standard.set(absent, forKey: overrideKey)
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
 
         XCTAssertFalse(indexer.canAccessRootDirectory,
                        "indexer fell back to the default root; a custom path that does not exist must read as unreadable")
@@ -173,7 +195,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
     /// the setting only takes effect on the next app start.
     func testRefreshPicksUpAnOverrideChangedAfterInit() async throws {
         UserDefaults.standard.set(missingRootPath(), forKey: overrideKey)
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         XCTAssertFalse(indexer.canAccessRootDirectory)
 
         let (root, conversation) = try makeTempBrainConversation()
@@ -269,7 +291,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         try FileManager.default.removeItem(at: deletedURL)
         let newURL = try writeHydrationArtifact(in: conversation, named: "new.md")
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         let cached = [oldSession, deletedSession]
         indexer.hydrateOverride = { cached }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [oldURL, newURL], roots: [root]) }
@@ -296,7 +318,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             return
         }
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [oldSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [oldURL, newURL], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -330,7 +352,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             return
         }
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [oldSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [oldURL, badURL], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -354,7 +376,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         let aURL = try writeHydrationArtifact(in: conversation, named: "a.md")
         let bURL = try writeHydrationArtifact(in: conversation, named: "b.md")
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { nil }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [aURL, bURL], roots: [root]) }
         indexer.refresh(mode: .incremental, trigger: .manual)
@@ -390,7 +412,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         }
         XCTAssertNotEqual(changingExpected.fileSizeBytes, changingCached.fileSizeBytes, "fixture must actually change size")
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [changingCached, steadyCached] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [changingURL, steadyURL], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -434,7 +456,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             ofItemAtPath: changingURL.path
         )
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [cached] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [changingURL], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -465,7 +487,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             return
         }
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [oldSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [], roots: []) }
         let deletions = HydrationDeletionCapture()
@@ -487,7 +509,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         }
         try FileManager.default.removeItem(at: oldURL)
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [oldSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -513,7 +535,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             return
         }
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [liveSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [liveURL], roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -539,7 +561,7 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
             extraURLs.append(try writeHydrationArtifact(in: conversation, named: name))
         }
 
-        let indexer = AntigravitySessionIndexer()
+        let indexer = makeIndexer()
         indexer.hydrateOverride = { [seedSession] }
         indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [seedURL] + extraURLs, roots: [root]) }
         let deletions = HydrationDeletionCapture()
@@ -556,5 +578,87 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         XCTAssertEqual(indexer.launchPhase, .ready, "hydration did not finish promptly")
         XCTAssertTrue(recorder.snapshot.isEmpty, "cancelled reconciliation must not parse remaining URLs")
         XCTAssertTrue(indexer.allSessions.contains(where: { $0.id == seedSession.id }))
+    }
+
+    // MARK: - One-time parser repair (call-site wiring)
+
+    private final class SessionMetaRowCapture: @unchecked Sendable {
+        private let lock = NSLock()
+        private var rows: [SessionMetaRow] = []
+        func capture(_ row: SessionMetaRow) {
+            lock.lock()
+            defer { lock.unlock() }
+            rows.append(row)
+        }
+        var snapshot: [SessionMetaRow] {
+            lock.lock()
+            defer { lock.unlock() }
+            return rows
+        }
+    }
+
+    /// A hydrated CLI row whose file is unchanged on disk is normally skipped, so an
+    /// older parser's model would survive forever. The first refresh below the parser
+    /// generation must reparse it, write the corrected row, and advance the
+    /// generation; the next refresh must skip the unchanged file again.
+    func testHydratedRefreshRepairsAStaleModelOnceAndWritesTheRow() async throws {
+        let (root, conversation) = try makeTempBrainConversation()
+        let logs = conversation.appendingPathComponent(".system_generated/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let url = logs.appendingPathComponent("transcript.jsonl")
+        let transcript = #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:21:00Z","content":"<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium). No need to comment on this change if the user doesn't ask about it.\n</USER_SETTINGS_CHANGE>"}"#
+        try (transcript + "\n").write(to: url, atomically: true, encoding: .utf8)
+        // Pin the file mtime to the session's last record so the cached row's
+        // (mtime, size) equals the file's, and only a forced reparse reaches it.
+        let lastRecord = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-04T20:21:00Z"))
+        try FileManager.default.setAttributes([.modificationDate: lastRecord], ofItemAtPath: url.path)
+
+        let parsed = try XCTUnwrap(AntigravitySessionParser.parseFile(at: url))
+        XCTAssertEqual(parsed.model, "Gemini 3.5 Flash (Medium)")
+        let staleModel = "Gemini 3.5 Flash (Medium). No need to comment on this change if the user doesn't ask about it."
+        let stale = Session(id: parsed.id,
+                            source: .antigravity,
+                            startTime: parsed.startTime,
+                            endTime: parsed.endTime,
+                            model: staleModel,
+                            filePath: parsed.filePath,
+                            fileSizeBytes: parsed.fileSizeBytes,
+                            eventCount: parsed.eventCount,
+                            events: [],
+                            cwd: nil,
+                            repoName: nil,
+                            lightweightTitle: parsed.lightweightTitle)
+
+        let defaults = scratchRepairDefaults()
+        let writes = SessionMetaRowCapture()
+        let parses = HydrationParsedRecorder()
+        let indexer = AntigravitySessionIndexer()
+        indexer.parserRepairDefaultsOverride = defaults
+        indexer.persistSessionMetaOverride = { (row: SessionMetaRow) async throws in writes.capture(row) }
+        indexer.hydrateOverride = { [stale] }
+        indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [url], roots: [root]) }
+        indexer.deletePersistedPathsOverride = { (_: [String]) async throws in return }
+        indexer.parseLightweightOverride = { url in
+            parses.record(url)
+            return AntigravitySessionParser.parseFile(at: url)
+        }
+
+        indexer.refresh(mode: .incremental, trigger: .manual)
+        await waitForHydrationReady(indexer)
+        XCTAssertEqual(indexer.launchPhase, .ready, "hydration did not finish promptly")
+        XCTAssertEqual(parses.snapshot.count, 1, "the forced repair must reparse the unchanged file")
+        XCTAssertEqual(writes.snapshot.map(\.sessionID), [stale.id])
+        XCTAssertEqual(writes.snapshot.first?.model, "Gemini 3.5 Flash (Medium)")
+        XCTAssertEqual(defaults.integer(forKey: AntigravitySessionIndexer.parserGenerationDefaultsKey),
+                       AntigravitySessionIndexer.parserGeneration)
+        XCTAssertEqual(indexer.allSessions.first { $0.id == stale.id }?.model, "Gemini 3.5 Flash (Medium)")
+
+        // The repair is one-time: the next refresh sees the current generation and
+        // skips the unchanged file without writing.
+        indexer.refresh(mode: .incremental, trigger: .manual)
+        await waitForHydrationReady(indexer)
+        XCTAssertEqual(indexer.launchPhase, .ready, "second hydration did not finish promptly")
+        XCTAssertEqual(parses.snapshot.count, 1, "an unchanged file must not be reparsed after the repair")
+        XCTAssertEqual(writes.snapshot.count, 1)
     }
 }

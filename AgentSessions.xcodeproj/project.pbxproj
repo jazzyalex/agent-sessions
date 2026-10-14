@@ -579,6 +579,7 @@
 		D2C9E880B98EA7EEB236C5D0 /* SessionSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D259A265018314766FEA4E /* SessionSourceDescriptor.swift */; };
 		D3B6C5202DA0E71A758D873D /* UsageResetText.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BC1E7E1250DBB8C91387AC /* UsageResetText.swift */; };
 		D41507F504729BF008C2D432 /* SessionTelemetryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78FCABD15F7364268268C07 /* SessionTelemetryProvider.swift */; };
+		D463B782AF19463380FF008E /* AntigravityIndexRepairTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2BC21B6AB6984114CA0C4F /* AntigravityIndexRepairTests.swift */; };
 		D52EF4E7A285C69F067127EB /* StewardAskEligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F11CFDEB2D0EF5D8C94CC3B /* StewardAskEligibility.swift */; };
 		D53C587549079F4844715EF7 /* CopilotSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDB65DB42A3B2DFB3D57204 /* CopilotSessionIndexer.swift */; };
 		D5541F1B264AF5605E439D82 /* MigrationCorpusPreservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A3745628762D9F93EDA7DA4 /* MigrationCorpusPreservationTests.swift */; };
@@ -1123,6 +1124,7 @@
 		A8A5DAE765B5A08C0AB0012C /* CodexAuthClassifierTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CodexAuthClassifierTests.swift; sourceTree = SOURCE_ROOT; };
 		A8ECBA8C7A2350AD59145A21 /* SessionListFingerprintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionListFingerprintTests.swift; sourceTree = SOURCE_ROOT; };
 		A9020421B579E7FC4587EB8C /* SessionProviderCatalogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionProviderCatalogTests.swift; sourceTree = SOURCE_ROOT; };
+		AA2BC21B6AB6984114CA0C4F /* AntigravityIndexRepairTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/AntigravityIndexRepairTests.swift; sourceTree = SOURCE_ROOT; };
 		AA773C3D24C11E61FB976127 /* FxSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/FxSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		AAD101D941FAACBDF502142F /* OpenCodeSourceDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCode/OpenCodeSourceDescriptor.swift; sourceTree = SOURCE_ROOT; };
 		AB2DACC143BA4A752183EE4F /* FxResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/FxResume/FxResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
@@ -2260,6 +2262,7 @@
 				C7C8E6AE3EC7AAA462577F76 /* FxTelemetryReaderTests.swift */,
 				DD24507A908ADCA7857BD237 /* ModelPriceKeyResolverTests.swift */,
 				94C819F8CEF5E562618CC35C /* PriceManifestV2Tests.swift */,
+				AA2BC21B6AB6984114CA0C4F /* AntigravityIndexRepairTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -3617,6 +3620,7 @@
 				FAB3C0EA605B74E7F2F27147 /* FxTelemetryReaderTests.swift in Sources */,
 				EB03F6AB8B8E0C3FACD6E7BC /* ModelPriceKeyResolverTests.swift in Sources */,
 				B97C0B0D4348758FE1DE9307 /* PriceManifestV2Tests.swift in Sources */,
+				D463B782AF19463380FF008E /* AntigravityIndexRepairTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

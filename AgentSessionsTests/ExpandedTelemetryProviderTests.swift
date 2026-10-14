@@ -1667,6 +1667,42 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(telemetry.usageEvents.first?.observedAt).timeIntervalSince1970,
                        1791145294,
                        accuracy: 0.001)
+        XCTAssertTrue(telemetry.usageEvents.allSatisfy { $0.model == nil })
+    }
+
+    private func antigravityInput(_ step: Int, from old: String, to new: String) -> String {
+        #"{"step_index":\#(step),"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:21:00Z","content":"<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from \#(old) to \#(new).\n</USER_SETTINGS_CHANGE>"}"#
+    }
+
+    private func antigravityPlanner(_ step: Int, input: Int) -> String {
+        #"{"step_index":\#(step),"source":"MODEL","type":"PLANNER_RESPONSE","status":"OK","created_at":"2026-10-04T20:21:34Z","input_tokens":\#(input),"cache_read_tokens":0,"output_tokens":10}"#
+    }
+
+    func testAntigravityStampsEachPlannerEventWithTheModelInForce() {
+        let telemetry = AntigravityTelemetryAccumulator.accumulate(lines: [
+            antigravityPlanner(0, input: 1),
+            antigravityInput(1, from: "None", to: "Gemini 3.5 Flash (Medium)"),
+            antigravityPlanner(2, input: 100),
+            antigravityInput(3, from: "Gemini 3.5 Flash (Medium)", to: "Claude Sonnet 4.6 (Thinking)"),
+            antigravityPlanner(4, input: 200)
+        ])
+        XCTAssertEqual(telemetry.usageEvents.map(\.model),
+                       [nil, "Gemini 3.5 Flash (Medium)", "Claude Sonnet 4.6 (Thinking)"])
+        XCTAssertEqual(Set(telemetry.usageSlices.map(\.model)),
+                       [nil, "Gemini 3.5 Flash (Medium)", "Claude Sonnet 4.6 (Thinking)"])
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 331)
+    }
+
+    func testAntigravityUserInputWithoutASettingsChangeKeepsTheModel() {
+        let plain = #"{"step_index":3,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:22:00Z","content":"<USER_REQUEST>\nMention PLANNER_RESPONSE and Model Selection in prose.\n</USER_REQUEST>"}"#
+        let telemetry = AntigravityTelemetryAccumulator.accumulate(lines: [
+            antigravityInput(1, from: "None", to: "Gemini 3.5 Flash (Medium)"),
+            plain,
+            antigravityPlanner(4, input: 5)
+        ])
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["Gemini 3.5 Flash (Medium)"])
+        XCTAssertNil(telemetry.usageSummary?.unavailableReason,
+                     "a user message that names PLANNER_RESPONSE is not a malformed planner row")
     }
 
     func testGrokExposesFirstObservedConfigurationAndHonestTokenGap() {

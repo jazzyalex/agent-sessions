@@ -41,6 +41,8 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     internal var parseLightweightOverride: ((URL) -> Session?)? = nil
     internal var discoverSnapshotOverride: (() -> AntigravitySessionDiscovery.DiscoverySnapshot)? = nil
     internal var deletePersistedPathsOverride: (([String]) async throws -> Void)? = nil
+    internal var persistSessionMetaOverride: ((SessionMetaRow) async throws -> Void)? = nil
+    internal var parserRepairDefaultsOverride: UserDefaults? = nil
     internal var archiveMergeOverride: (([Session]) -> [Session])? = nil
     internal var reconciliationShouldContinueOverride: (() -> Bool)? = nil
     private let progressThrottler = ProgressThrottler()
@@ -209,11 +211,15 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
                     if let override = self.reconciliationShouldContinueOverride, !override() { return false }
                     return true
                 }
+                let repairDefaults = self.parserRepairDefaultsOverride ?? UserDefaults.standard
+                let needsRepair = repairDefaults.integer(forKey: Self.parserGenerationDefaultsKey)
+                    < Self.parserGeneration
                 let reconciliation = Self.reconcileHydratedSessions(
                     hydrated: result.sessions,
                     snapshot: snapshot,
                     parseNew: config.parseLightweight,
                     currentStat: { Self.fileStat(for: $0) },
+                    forceReparse: needsRepair,
                     shouldContinue: shouldContinue
                 )
                 guard self.refreshToken == token else { return }
@@ -237,6 +243,26 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
                     } catch {
                         hydratedDeletionError = error
                     }
+                }
+                if needsRepair {
+                    // A failed or cancelled repair leaves the generation unchanged, so
+                    // the next refresh retries. The in-memory list is already correct
+                    // for this launch either way.
+                    var repairDB: IndexDB? = nil
+                    _ = await Self.persistParserRepair(
+                        reparsed: reconciliation.reparsed,
+                        completed: reconciliation.completed,
+                        defaults: repairDefaults,
+                        shouldContinue: shouldContinue,
+                        write: { row in
+                            if let override = self.persistSessionMetaOverride {
+                                try await override(row)
+                            } else {
+                                let db = try repairDB ?? IndexDB()
+                                repairDB = db
+                                try await db.upsertSessionMetaCore(row)
+                            }
+                        })
                 }
                 guard self.refreshToken == token else { return }
                 if Task.isCancelled { return }
@@ -350,9 +376,46 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
         URL(fileURLWithPath: url.path).standardized.path
     }
 
+    /// Bump when `AntigravityTranscriptParser` changes what it stores in a session
+    /// row. Hydrated rows are otherwise skipped while mtime and size are unchanged,
+    /// so a parser fix would never reach them.
+    static let parserGeneration = 2
+    static let parserGenerationDefaultsKey = "AntigravityIndexParserGeneration"
+
     internal struct HydratedReconciliation {
         var sessions: [Session]
         var confirmedMissingPaths: [String]
+        /// Sessions re-parsed in this pass (changed files, plus every hydrated file
+        /// when `forceReparse` is set).
+        var reparsed: [Session] = []
+        /// False when `shouldContinue` stopped the pass early, or when a forced
+        /// reparse could not reparse a hydrated row.
+        var completed: Bool = true
+    }
+
+    /// Writes every reparsed session row, then — only if the pass finished and every
+    /// write succeeded — records the parser generation. Returns true when the
+    /// generation was advanced. `upsertSessionMetaCore` updates the parser-owned
+    /// columns and leaves analytics-owned fields alone.
+    internal static func persistParserRepair(
+        reparsed: [Session],
+        completed: Bool,
+        defaults: UserDefaults,
+        shouldContinue: () -> Bool = { true },
+        write: (SessionMetaRow) async throws -> Void
+    ) async -> Bool {
+        guard completed else { return false }
+        for session in reparsed {
+            guard shouldContinue() else { return false }
+            do {
+                try await write(SessionIndexer.sessionMetaRow(from: session))
+            } catch {
+                return false
+            }
+        }
+        guard shouldContinue() else { return false }
+        defaults.set(parserGeneration, forKey: parserGenerationDefaultsKey)
+        return true
     }
 
     internal static func reconcileHydratedSessions(
@@ -360,6 +423,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
         snapshot: AntigravitySessionDiscovery.DiscoverySnapshot,
         parseNew: (URL) -> Session?,
         currentStat: (URL) -> SessionFileStat? = { fileStat(for: $0) },
+        forceReparse: Bool = false,
         shouldContinue: () -> Bool = { true }
     ) -> HydratedReconciliation {
         var hydratedByPath: [String: Session] = [:]
@@ -378,9 +442,15 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
         placeholders.reserveCapacity(hydrated.count)
         var placeholderIndexByPath: [String: Int] = [:]
         var confirmedMissing: [String] = []
+        var reparsed: [Session] = []
+        var completed = true
         for s in hydrated {
             let key = normalizedSessionPath(s.filePath)
             if !snapshot.isAuthoritative(path: s.filePath) {
+                // A forced reparse cannot repair a row whose root was not fully
+                // scanned (the file loop below may never reach it), so the pass is
+                // incomplete and must be retried rather than recorded as done.
+                if forceReparse { completed = false }
                 placeholderIndexByPath[key] = placeholders.count
                 placeholders.append(s)
                 continue
@@ -393,26 +463,37 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             placeholders.append(s)
         }
         for url in snapshot.files {
-            if !shouldContinue() { break }
+            if !shouldContinue() { completed = false; break }
             let key = normalizedSessionPath(for: url)
             if let cached = hydratedByPath[key] {
-                guard snapshot.isAuthoritative(path: cached.filePath) else { continue }
-                guard let stat = currentStat(url) else { continue }
+                // Under `forceReparse` every hydrated row the loop reaches must end up
+                // reparsed; otherwise its stale row would survive a pass recorded as done.
+                guard snapshot.isAuthoritative(path: cached.filePath) else {
+                    if forceReparse { completed = false }
+                    continue
+                }
+                guard let stat = currentStat(url) else {
+                    if forceReparse { completed = false }
+                    continue
+                }
                 let cachedSecond = Int64(cached.modifiedAt.timeIntervalSince1970)
                 let cachedSize = cached.fileSizeBytes.map { Int64($0) }
-                if cachedSecond == stat.mtime && cachedSize == stat.size { continue }
-                guard shouldContinue() else { break }
-                if let reparsed = parseNew(url) {
+                if !forceReparse, cachedSecond == stat.mtime && cachedSize == stat.size { continue }
+                guard shouldContinue() else { completed = false; break }
+                if let fresh = parseNew(url) {
+                    reparsed.append(fresh)
                     if let idx = placeholderIndexByPath[key] {
-                        placeholders[idx] = reparsed
+                        placeholders[idx] = fresh
                     } else {
                         placeholderIndexByPath[key] = placeholders.count
-                        placeholders.append(reparsed)
+                        placeholders.append(fresh)
                     }
+                } else if forceReparse {
+                    completed = false
                 }
                 continue
             }
-            guard shouldContinue() else { break }
+            guard shouldContinue() else { completed = false; break }
             if let session = parseNew(url) {
                 let parsedKey = normalizedSessionPath(session.filePath)
                 if placeholderIndexByPath[parsedKey] == nil {
@@ -425,7 +506,10 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             if $0.modifiedAt != $1.modifiedAt { return $0.modifiedAt > $1.modifiedAt }
             return $0.id < $1.id
         }
-        return HydratedReconciliation(sessions: ordered, confirmedMissingPaths: confirmedMissing.sorted())
+        return HydratedReconciliation(sessions: ordered,
+                                      confirmedMissingPaths: confirmedMissing.sorted(),
+                                      reparsed: reparsed,
+                                      completed: completed)
     }
 
     func applySearch() {

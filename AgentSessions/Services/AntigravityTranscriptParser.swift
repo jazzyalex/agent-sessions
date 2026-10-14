@@ -48,7 +48,9 @@ enum AntigravityTranscriptParser {
             case "USER_INPUT":
                 let unwrapped = unwrapUserRequest(content ?? "")
                 if firstUserText == nil { firstUserText = unwrapped }
-                if model == nil { model = modelName(fromUserInput: content ?? "") }
+                // `Session.model` is the current (last selected) model, matching the
+                // descriptor: "current model comes from loaded Session metadata".
+                if let selected = modelName(fromUserInput: content ?? "") { model = selected }
                 if includeEvents {
                     events.append(makeEvent(sid, eventID(idx), ts, .user, "user", unwrapped, nil, nil, nil, raw))
                 }
@@ -139,15 +141,19 @@ enum AntigravityTranscriptParser {
     }
 
     static func modelName(fromUserInput content: String) -> String? {
-        // USER_SETTINGS_CHANGE reports the active model as
-        // "...`Model Selection` from <old> to <new>." — capture <new>, whether the
-        // change is from None (initial selection) or from a prior model.
-        guard let rx = try? NSRegularExpression(pattern: "Model Selection`?\\s+from\\s+.+?\\s+to\\s+(.+)") else { return nil }
+        // The selection is embedded in a USER_INPUT record's content as
+        // "...`Model Selection` from <old> to <new>." followed by more prompt text.
+        // Capture <new>, whether the change is from None (initial selection) or from
+        // a prior model. Stop at the first period that ends a sentence (followed by
+        // whitespace, a tag, or the end), so version dots such as "3.5" survive and
+        // the trailing instructions are not stored as the model.
+        guard let rx = try? NSRegularExpression(
+            pattern: "Model Selection`?\\s+from\\s+.+?\\s+to\\s+(.+?)(?:\\.(?=\\s|<|$)|(?=<)|$)",
+            options: [.dotMatchesLineSeparators]) else { return nil }
         let ns = content as NSString
         guard let m = rx.firstMatch(in: content, range: NSRange(location: 0, length: ns.length)),
               m.numberOfRanges > 1 else { return nil }
-        var name = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
-        if name.hasSuffix(".") { name.removeLast() }
+        let name = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : name
     }
 

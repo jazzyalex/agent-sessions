@@ -4,8 +4,11 @@ import Foundation
 ///
 /// Antigravity's CLI transcript records per-step `input_tokens`,
 /// `cache_read_tokens`, and `output_tokens` on `PLANNER_RESPONSE`. The model
-/// identifier is not present on those rows, so configuration remains explicitly
-/// partial and the already-loaded Session row remains the current-model source.
+/// identifier is not present on those rows; it arrives as a `Model Selection`
+/// settings change embedded in a `USER_INPUT` record. Each planner event is
+/// stamped with the model in force at that point in the file. Configuration
+/// remains explicitly partial, and the already-loaded Session row remains the
+/// current-model source.
 struct AntigravityTelemetryAccumulator {
     private static let speed = "standard-normalized"
 
@@ -22,9 +25,25 @@ struct AntigravityTelemetryAccumulator {
     private var sawAnyRecord = false
     private var sawUsageRecord = false
     private var invalidUsageRecord = false
+    /// The model selected by the most recent `USER_INPUT` settings change, in file
+    /// order. Planner events before the first observed selection stay nil (unpriced).
+    private var activeModel: String?
 
     mutating func consume(line: String, index: Int) {
-        guard line.contains("PLANNER_RESPONSE") else { return }
+        // Model selections arrive embedded in USER_INPUT content. Only such a line
+        // that mentions the setting is decoded; any other non-planner line is skipped
+        // without JSON work.
+        if line.contains("\"USER_INPUT\""), line.contains("Model Selection"),
+           let object = ClaudeRunwayLog.jsonObject(line),
+           object["type"] as? String == "USER_INPUT",
+           let selected = AntigravityTranscriptParser.modelName(
+               fromUserInput: object["content"] as? String ?? "") {
+            activeModel = selected
+            return
+        }
+        // The quoted form keeps a user message that merely names the record type
+        // from being treated as a malformed planner row.
+        guard line.contains("\"PLANNER_RESPONSE\"") else { return }
         guard let object = ClaudeRunwayLog.jsonObject(line) else {
             // A candidate planner row that cannot be decoded is invalid
             // evidence, not an ignorable comment or metadata line.
@@ -48,7 +67,7 @@ struct AntigravityTelemetryAccumulator {
                              write5m: 0,
                              write1h: 0,
                              output: output,
-                             model: nil,
+                             model: activeModel,
                              effort: nil,
                              speed: Self.speed)
         guard (components.topLine ?? 0) > 0 else { return }
@@ -59,7 +78,7 @@ struct AntigravityTelemetryAccumulator {
             anchorLine: index,
             usageFamily: "PLANNER_RESPONSE",
             ownership: .session,
-            model: nil,
+            model: activeModel,
             reasoningEffort: nil,
             speed: Self.speed,
             freshInputTokens: fresh,
