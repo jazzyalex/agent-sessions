@@ -242,4 +242,82 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         ], priceTable: table())
         XCTAssertEqual(result.unpricedModels, ["mystery-model-9"])
     }
+
+    // MARK: - Resolved keys and free routes
+
+    private func v2Snapshot() -> RunwayPriceSnapshot {
+        let t = RunwayPriceTable.makeEmptyForTesting()
+        let json = #"""
+        {"version":2,"sequence":1,"updated":"2026-10-13","aliases":{},
+         "models":{
+          "minimax-m2.5":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":4},
+          "claude-sonnet-5":{"inputPerMTok":2,"cachedInputPerMTok":0.2,"outputPerMTok":10,"cacheWritePerMTok":2.5,"cacheWrite1hPerMTok":4},
+          "gpt-5":{"inputPerMTok":1.25,"cachedInputPerMTok":0.125,"outputPerMTok":10,"cacheWritePerMTok":null}}}
+        """#
+        XCTAssertTrue(t.loadForTesting(json: Data(json.utf8)))
+        return t.snapshot()
+    }
+
+    func testFreeRouteIsPricedAtTheBaseRateAndReported() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [event("minimax-m2.5-free", input: oneMillion, context: nil, output: oneMillion)],
+            fallbackSlices: [], snapshot: v2Snapshot())
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 5.0, accuracy: 0.0001)
+        XCTAssertEqual(result.estimate.freeRouteModels, ["minimax-m2.5-free"])
+    }
+
+    func testOneStealthModelMakesTheWholeSessionUnpriced() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("minimax-m2.5", input: oneMillion, context: nil),
+                     event("big-pickle", input: oneMillion, context: nil)],
+            fallbackSlices: [], snapshot: v2Snapshot())
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.unpricedModels, ["big-pickle"], "the raw slug is reported")
+    }
+
+    func testProviderPrefixedClaudeModelPrices() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [event("anthropic/claude-sonnet-5", input: oneMillion, context: nil)],
+            fallbackSlices: [], snapshot: v2Snapshot())
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 2.0, accuracy: 0.0001)
+        XCTAssertTrue(result.estimate.freeRouteModels.isEmpty)
+    }
+
+    // MARK: - Cache-write TTL evidence
+
+    func testUnverifiedTTLRefusesAModelThatPricesTheTwoWritesDifferently() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("claude-sonnet-5", input: 10, context: nil, cacheWrite5m: 1_000)],
+            fallbackSlices: [], snapshot: v2Snapshot(), cacheWriteTTLVerified: false)
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.missingPriceComponents, ["claude-sonnet-5:cacheWriteTTL"])
+    }
+
+    func testUnverifiedTTLDoesNotBlockEventsWithoutCacheWrites() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [event("claude-sonnet-5", input: oneMillion, context: nil)],
+            fallbackSlices: [], snapshot: v2Snapshot(), cacheWriteTTLVerified: false)
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 2.0, accuracy: 0.0001)
+    }
+
+    func testVerifiedTTLStillPricesCacheWrites() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [event("claude-sonnet-5", input: 0, context: nil, cacheWrite5m: oneMillion)],
+            fallbackSlices: [], snapshot: v2Snapshot(), cacheWriteTTLVerified: true)
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 2.5, accuracy: 0.0001)
+    }
+
+    // MARK: - Stored results from the previous build
+
+    func testCostEstimateWithoutFreeRouteFieldStillDecodes() throws {
+        let old = #"{"unpricedModels":[],"missingPriceComponents":[],"priceTableUpdated":"2026-10-11"}"#
+        let decoded = try JSONDecoder().decode(TelemetryCostEstimate.self, from: Data(old.utf8))
+        XCTAssertEqual(decoded.freeRouteModels, [])
+    }
+
+    func testUsageSummaryWithoutCostReasonStillDecodes() throws {
+        let old = #"{"topLineTokens":1,"hasComponentBreakdown":true,"usageFamilies":[],"usageFamilyConflict":false}"#
+        let decoded = try JSONDecoder().decode(TelemetryUsageSummary.self, from: Data(old.utf8))
+        XCTAssertNil(decoded.costUnavailableReason)
+    }
 }

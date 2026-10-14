@@ -224,6 +224,10 @@ struct TelemetryCapabilities: Equatable, Sendable {
     /// Per-session share of an account's weekly quota. Unavailable everywhere until
     /// account quota snapshots are persisted (Plan B).
     let weeklyQuota: TelemetryCapability
+    /// True when this source's cache-write tokens are known to be 5-minute writes
+    /// (or the source splits 5m/1h itself). When false, a model that prices the two
+    /// writes differently cannot be priced from this source's cache-write tokens.
+    var cacheWriteTTLVerified: Bool = true
 
     /// The common Plan A shape: one reason, all four dimensions unavailable.
     static func allUnavailable(_ reason: String) -> TelemetryCapabilities {

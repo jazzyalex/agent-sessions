@@ -592,6 +592,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         // transcript reports a token count but can never be priced.
         guard capabilities.cost.isAvailable,
               base.usageSummary?.unavailableReason == nil,
+              base.usageSummary?.costUnavailableReason == nil,
               base.usageSummary?.hasComponentBreakdown == true else {
             return TelemetryScanResult(
                 computed: ComputedTelemetry(
@@ -603,7 +604,8 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         }
         let priced = TelemetryCostCalculator.price(events: base.usageEvents,
                                                    fallbackSlices: base.usageSlices,
-                                                   snapshot: priceSnapshot)
+                                                   snapshot: priceSnapshot,
+                                                   cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified)
         return TelemetryScanResult(
             computed: ComputedTelemetry(
                 telemetry: SessionTelemetry(source: base.source,

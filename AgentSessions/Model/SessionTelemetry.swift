@@ -321,6 +321,10 @@ public struct TelemetryUsageSummary: Equatable, Codable, Sendable {
     /// could not prove that the remaining rows belonged to this session. A partial
     /// or fail-closed total must not be presented as a genuine zero or complete sum.
     public let unavailableReason: String?
+    /// Non-nil when the token totals are sound but the evidence cannot support a
+    /// dollar figure — for example a whole-session summary that cannot be
+    /// attributed to one model or one request. Tokens still display.
+    public let costUnavailableReason: String?
 
     public init(topLineTokens: Int,
                 hasComponentBreakdown: Bool,
@@ -328,7 +332,8 @@ public struct TelemetryUsageSummary: Equatable, Codable, Sendable {
                 usageFamilies: [String],
                 usageFamilyConflict: Bool,
                 displayTotalTokens: Int? = nil,
-                unavailableReason: String? = nil) {
+                unavailableReason: String? = nil,
+                costUnavailableReason: String? = nil) {
         self.topLineTokens = topLineTokens
         self.hasComponentBreakdown = hasComponentBreakdown
         self.recordedTotalTokens = recordedTotalTokens
@@ -336,6 +341,7 @@ public struct TelemetryUsageSummary: Equatable, Codable, Sendable {
         self.usageFamilies = usageFamilies
         self.usageFamilyConflict = usageFamilyConflict
         self.unavailableReason = unavailableReason
+        self.costUnavailableReason = costUnavailableReason
     }
 }
 
@@ -355,6 +361,9 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
     /// Priced models missing a rate a slice actually needs, e.g.
     /// `"claude-opus-5:fast"` or `"claude-opus-5:cacheWrite1h"`.
     public let missingPriceComponents: [String]
+    /// Raw model slugs that were priced at the base model's list rate because the
+    /// session ran on a free or promotional route.
+    public let freeRouteModels: [String]
     /// `updated` date of the price manifest used, so a stored result can be
     /// re-judged when rates move.
     public let priceTableUpdated: String
@@ -368,19 +377,21 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
     public init(apiEquivalentUSD: Double?,
                 unpricedModels: [String],
                 missingPriceComponents: [String],
+                freeRouteModels: [String] = [],
                 priceTableUpdated: String,
                 priceTableRevision: Int = 0,
                 priceManifestFingerprint: String? = nil) {
         self.apiEquivalentUSD = apiEquivalentUSD
         self.unpricedModels = unpricedModels
         self.missingPriceComponents = missingPriceComponents
+        self.freeRouteModels = freeRouteModels
         self.priceTableUpdated = priceTableUpdated
         self.priceTableRevision = priceTableRevision
         self.priceManifestFingerprint = priceManifestFingerprint
     }
 
     private enum CodingKeys: String, CodingKey {
-        case apiEquivalentUSD, unpricedModels, missingPriceComponents
+        case apiEquivalentUSD, unpricedModels, missingPriceComponents, freeRouteModels
         case priceTableUpdated, priceTableRevision, priceManifestFingerprint
     }
 
@@ -389,6 +400,7 @@ public struct TelemetryCostEstimate: Equatable, Codable, Sendable {
         apiEquivalentUSD = try values.decodeIfPresent(Double.self, forKey: .apiEquivalentUSD)
         unpricedModels = try values.decode([String].self, forKey: .unpricedModels)
         missingPriceComponents = try values.decode([String].self, forKey: .missingPriceComponents)
+        freeRouteModels = try values.decodeIfPresent([String].self, forKey: .freeRouteModels) ?? []
         priceTableUpdated = try values.decode(String.self, forKey: .priceTableUpdated)
         priceTableRevision = try values.decodeIfPresent(Int.self, forKey: .priceTableRevision) ?? 0
         priceManifestFingerprint = try values.decodeIfPresent(String.self, forKey: .priceManifestFingerprint)
@@ -458,7 +470,7 @@ public struct TelemetryWeeklyQuotaEstimate: Equatable, Codable, Sendable {
 /// an already-running child's history.
 public struct SessionTelemetry: Equatable, Codable, Sendable {
     /// Bump when accumulator semantics change; caches key on it.
-    public static let parserVersion = 14
+    public static let parserVersion = 15
 
     public let source: SessionSource
     public let initialConfiguration: SessionConfiguration?
