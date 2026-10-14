@@ -10611,6 +10611,37 @@ final class SessionParserTests: XCTestCase {
                        .unavailable("Hermes native cost is provider-specific and is not shown as an API-equivalent estimate"))
     }
 
+    /// `session_model_usage` sums several requests into one row. Two 150K requests
+    /// must never be billed as one 300K long-context request.
+    func testHermesRollupNeverSelectsALongContextTier() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-LongCtx-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+        let telemetry = try XCTUnwrap(HermesTelemetryReader.loadTelemetry(for: session)).result.telemetry
+
+        XCTAssertFalse(telemetry.usageEvents.isEmpty)
+        XCTAssertTrue(telemetry.usageEvents.allSatisfy { $0.contextInputTokens == nil },
+                      "a rollup is not one request and must not claim a context size")
+
+        // The same usage attributed to a long-context model must be refused.
+        let asGPT54 = telemetry.usageEvents.map {
+            TelemetryUsageEvent(recordID: $0.recordID, observedAt: $0.observedAt, anchorLine: $0.anchorLine,
+                                usageFamily: $0.usageFamily, ownership: $0.ownership, model: "gpt-5.4",
+                                reasoningEffort: nil, speed: $0.speed,
+                                freshInputTokens: 300_000, cacheReadTokens: 0,
+                                cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+                                outputTokens: 1_000, contextInputTokens: $0.contextInputTokens)
+        }
+        let result = TelemetryCostCalculator.price(events: asGPT54, fallbackSlices: [],
+                                                   snapshot: RunwayPriceTable.makeForTesting().snapshot())
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.missingPriceComponents, ["gpt-5.4:contextInputTokens"])
+    }
+
     func testHermesTelemetryKeepsAuxiliaryUsageSeparateFromSessionAggregate() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Auxiliary-\(UUID().uuidString)", isDirectory: true)
