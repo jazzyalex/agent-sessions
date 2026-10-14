@@ -1511,6 +1511,57 @@
         }
       }
     },
+    "%@ cannot be priced: the request size needed for its long-context rate is not recorded": {
+      "comment": "Session info cost tooltip. %@ is a model identifier and stays verbatim. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot be priced: the request size needed for its long-context rate is not recorded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 无法计价：未记录判断其长上下文费率所需的请求大小"
+          }
+        }
+      }
+    },
+    "%@ cannot be priced: this agent does not record cache writes separately": {
+      "comment": "Session info cost tooltip. %@ is a model identifier and stays verbatim. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot be priced: this agent does not record cache writes separately"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 无法计价：此代理未单独记录缓存写入"
+          }
+        }
+      }
+    },
+    "%@ cannot be priced: this agent does not record how long cache writes are kept": {
+      "comment": "Session info cost tooltip. %@ is a model identifier and stays verbatim. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot be priced: this agent does not record how long cache writes are kept"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 无法计价：此代理未记录缓存写入的保留时长"
+          }
+        }
+      }
+    },
     "%@ has longest sessions: %@ avg": {
       "localizations": {
         "en": {

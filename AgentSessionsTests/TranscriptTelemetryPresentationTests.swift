@@ -322,6 +322,45 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
                        "No published price for local model: qwen3.5-9b. No price entry for: acme-9. No price entry for: cache_write")
     }
 
+    /// Missing evidence is not a missing price row. `:cacheWrite`, `:cacheWriteTTL`
+    /// and `:contextInputTokens` each get their own sentence; every other component
+    /// (speed tier, inference region, cache-write rate) keeps "No price entry for".
+    func testMissingEvidenceComponentsReadAsEvidenceNotAsMissingRows() {
+        let estimate = TelemetryCostEstimate(
+            apiEquivalentUSD: nil,
+            unpricedModels: [],
+            missingPriceComponents: ["qwen3.6-plus:cacheWrite",
+                                     "anthropic/claude-sonnet-5:cacheWriteTTL",
+                                     "gpt-5.4:contextInputTokens",
+                                     "claude-opus-5:fast",
+                                     "claude-opus-5:inferenceGeo:moon",
+                                     "gpt-5.5:cacheWrite5m"],
+            priceTableUpdated: "2026-10-14")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—")
+        // Parts are joined with ". " like the other unpriced reasons, so each
+        // sentence carries no period of its own.
+        XCTAssertEqual(value.help, [
+            "qwen3.6-plus cannot be priced: this agent does not record cache writes separately",
+            "anthropic/claude-sonnet-5 cannot be priced: this agent does not record how long cache writes are kept",
+            "gpt-5.4 cannot be priced: the request size needed for its long-context rate is not recorded",
+            "No price entry for: claude-opus-5:fast, claude-opus-5:inferenceGeo:moon, gpt-5.5:cacheWrite5m"
+        ].joined(separator: ". "))
+    }
+
+    /// A slug that itself contains a colon keeps it; only the trailing component
+    /// suffix is read.
+    func testMissingEvidenceKeepsAColonInTheModelSlug() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: nil, unpricedModels: [],
+                                             missingPriceComponents: ["poolside/laguna-s-2.1:free:cacheWriteTTL"],
+                                             priceTableUpdated: "2026-10-14")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.help,
+                       "poolside/laguna-s-2.1:free cannot be priced: this agent does not record how long cache writes are kept")
+    }
+
     func testCostUnavailableReasonIsShown() {
         let summary = TelemetryUsageSummary(topLineTokens: 10, hasComponentBreakdown: true,
                                             recordedTotalTokens: nil, usageFamilies: ["usage.record.session"],

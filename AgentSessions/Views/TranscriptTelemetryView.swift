@@ -230,10 +230,46 @@ enum TranscriptTelemetryPresentation {
         if unpriced.isEmpty && missing.isEmpty {
             return .absent(localized("No priceable usage was recorded in this transcript.", locale: locale))
         }
-        let parts = unpriced + (missing.isEmpty ? [] : [
-            localized("No price entry for: \(missing.joined(separator: ", "))", locale: locale)
+        // Missing evidence is not a missing price row: those components get their
+        // own sentence. Everything else still reads as a missing entry.
+        var evidence: [String] = []
+        var noEntry: [String] = []
+        for component in missing {
+            if let reason = missingEvidenceReason(forComponent: component, locale: locale) {
+                evidence.append(reason)
+            } else {
+                noEntry.append(component)
+            }
+        }
+        let parts = unpriced + evidence + (noEntry.isEmpty ? [] : [
+            localized("No price entry for: \(noEntry.joined(separator: ", "))", locale: locale)
         ])
         return .absent(parts.joined(separator: ". "))
+    }
+
+    /// The sentence for a `<model>:<component>` the calculator reports because the
+    /// agent did not record required evidence (spec §6), or nil when the component
+    /// is a genuinely missing rate (speed tier, inference region, cache-write rate).
+    /// Only the trailing component is read, so a slug containing a colon survives.
+    static func missingEvidenceReason(forComponent component: String,
+                                      locale: Locale = .current) -> String? {
+        func model(dropping suffix: String) -> String? {
+            guard component.hasSuffix(suffix), component.count > suffix.count else { return nil }
+            return String(component.dropLast(suffix.count))
+        }
+        if let model = model(dropping: ":cacheWrite") {
+            return localized("\(model) cannot be priced: this agent does not record cache writes separately",
+                             locale: locale)
+        }
+        if let model = model(dropping: ":cacheWriteTTL") {
+            return localized("\(model) cannot be priced: this agent does not record how long cache writes are kept",
+                             locale: locale)
+        }
+        if let model = model(dropping: ":contextInputTokens") {
+            return localized("\(model) cannot be priced: the request size needed for its long-context rate is not recorded",
+                             locale: locale)
+        }
+        return nil
     }
 
     /// Local models carry a parameter-count tag (`qwen3.5-9b`); unreleased models
