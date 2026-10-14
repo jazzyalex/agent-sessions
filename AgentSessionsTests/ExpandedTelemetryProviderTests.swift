@@ -1568,6 +1568,29 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.count, 1)
     }
 
+    func testKimiSessionSummaryFallbackShowsTokensButRefusesCost() {
+        let lines = [
+            #"{"type":"llm.request","model":"kimi-k2.7-code","thinkingEffort":"on","time":1785615365000}"#,
+            #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"session","usage":{"inputOther":100,"inputCacheRead":200,"inputCacheCreation":0,"output":300},"time":1785615366000}"#
+        ]
+        let telemetry = KimiTelemetryAccumulator.accumulate(lines: lines)
+        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["usage.record.session"])
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 600)
+        XCTAssertNil(telemetry.usageSummary?.unavailableReason, "tokens are still valid")
+        XCTAssertEqual(telemetry.usageSummary?.costUnavailableReason,
+                       "Kimi recorded only a whole-session usage summary, which cannot be attributed to one model or request.")
+    }
+
+    func testKimiTurnRecordsCarryNoCostReason() {
+        let lines = [
+            #"{"type":"llm.request","model":"kimi-k2.7-code","thinkingEffort":"on","time":1785615365000}"#,
+            #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"turn","usage":{"inputOther":2,"inputCacheRead":3,"inputCacheCreation":0,"output":5},"time":1785615367000}"#
+        ]
+        let telemetry = KimiTelemetryAccumulator.accumulate(lines: lines)
+        XCTAssertNil(telemetry.usageSummary?.costUnavailableReason)
+        XCTAssertEqual(telemetry.usageEvents.first?.model, "kimi-k2.7-code")
+    }
+
     func testKimiDistinguishesExplicitConfigChangesFromRequestObservations() {
         let lines = [
             #"{"type":"config.update","modelAlias":"kimi/kimi-k2.7-code","thinkingEffort":"on","time":1785615365000}"#,
@@ -1683,6 +1706,36 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.source, .kimi)
         XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 31)
         XCTAssertEqual(telemetry.usageEvents.first?.recordID, "usage.record:0")
+    }
+
+    /// Engine-level cover for the `costUnavailableReason` pricing gate: a Kimi file
+    /// with only a whole-session usage summary must show tokens but never a dollar
+    /// figure. The engine reads capabilities from the registry descriptor and has no
+    /// override seam, so while the Kimi descriptor declares cost `.unavailable` the
+    /// descriptor gate refuses first. Once the descriptor allows cost, only the
+    /// `costUnavailableReason` gate stands between this summary and a price.
+    func testEngineRefusesCostForAKimiWholeSessionSummary() async throws {
+        let url = directory.appendingPathComponent("wire.jsonl")
+        let line = #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"session","usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
+        try line.write(to: url, atomically: true, encoding: .utf8)
+
+        let session = Session(id: "kimi-session-summary",
+                              source: .kimi,
+                              startTime: nil,
+                              endTime: nil,
+                              model: "kimi-k2.7-code",
+                              filePath: url.path,
+                              eventCount: 0,
+                              events: [])
+        let engine = SessionTelemetryEngine(metrics: SessionInfoMetrics())
+        let value = await engine.telemetry(for: session)
+        let telemetry = try XCTUnwrap(value)
+
+        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["usage.record.session"])
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 31)
+        XCTAssertEqual(telemetry.usageSummary?.costUnavailableReason,
+                       "Kimi recorded only a whole-session usage summary, which cannot be attributed to one model or request.")
+        XCTAssertNil(telemetry.costEstimate?.apiEquivalentUSD)
     }
 
     func testEngineUsesAntigravityRegistryProviderForARealFileRevision() async throws {

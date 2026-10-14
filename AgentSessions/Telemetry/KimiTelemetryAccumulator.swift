@@ -173,7 +173,10 @@ struct KimiTelemetryAccumulator {
                 usageFamilyConflict: false,
                 unavailableReason: invalidSelectedFamily
                     ? "Kimi usage.record components are incomplete or malformed."
-                    : (hasUsage ? nil : "Kimi did not record usable usage components."))
+                    : (hasUsage ? nil : "Kimi did not record usable usage components."),
+                costUnavailableReason: (!useTurns && hasUsage && !invalidSelectedFamily)
+                    ? "Kimi recorded only a whole-session usage summary, which cannot be attributed to one model or request."
+                    : nil)
             : nil
 
         return SessionTelemetry(source: .kimi,
