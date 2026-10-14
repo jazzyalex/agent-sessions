@@ -43,8 +43,9 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     internal var deletePersistedPathsOverride: (([String]) async throws -> Void)? = nil
     internal var persistSessionMetaOverride: ((SessionMetaRow) async throws -> Void)? = nil
     internal var parserRepairDefaultsOverride: UserDefaults? = nil
-    /// Set once a forced repair pass has run to the end in this launch, even if it
-    /// was incomplete. Later refreshes then do not force again, so an unrepairable
+    /// Set once a forced repair pass finishes its reconciliation in this launch, even
+    /// if it was incomplete, and before its rows are written. Later refreshes then
+    /// do not force again, so an unrepairable
     /// row costs one full reparse per launch, not one per refresh. An incomplete pass
     /// still records no generation, so the next launch retries.
     private var parserRepairAttemptedThisLaunch = false
@@ -227,7 +228,10 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
                     forceReparse: needsRepair,
                     shouldContinue: shouldContinue
                 )
-                // A superseded or cancelled pass does not consume this launch's attempt.
+                // A pass superseded or cancelled during reconciliation does not
+                // consume this launch's attempt. The attempt is consumed here, before
+                // the archive merge and the repair writes, so a pass superseded,
+                // cancelled or failed after this point retries on the next launch.
                 if needsRepair, shouldContinue() {
                     self.parserRepairAttemptedThisLaunch = true
                 }
@@ -254,9 +258,10 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                 }
                 if needsRepair {
-                    // A failed or cancelled repair leaves the generation unchanged, so
-                    // the next refresh retries. The in-memory list is already correct
-                    // for this launch either way.
+                    // A failed or cancelled repair leaves the generation unchanged.
+                    // This launch's attempt is already consumed, so the next launch
+                    // retries, not the next refresh. The in-memory list is already
+                    // correct for this launch either way.
                     var repairDB: IndexDB? = nil
                     _ = await Self.persistParserRepair(
                         reparsed: reconciliation.reparsed,
