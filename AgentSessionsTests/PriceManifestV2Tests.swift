@@ -362,6 +362,33 @@ final class PriceManifestV2Tests: XCTestCase {
         XCTAssertEqual(RunwayPriceTable.makeForTesting().rateRevision(forProvider: "gemini"), 0)
     }
 
+    /// Provider-scoped lookup uses the same prefix sets as the provider revision:
+    /// `claude-` for Claude, `gpt-` and `codex-` for Codex. Other vendors' rows and
+    /// unknown providers match nothing; own rows match exactly as the full lookup.
+    func testProviderScopedLookupSeesOnlyTheProvidersOwnRows() {
+        let t = RunwayPriceTable.makeForTesting()
+        let s = t.snapshot()
+        for slug in ["claude-sonnet-5", "claude-opus-4-8-20260101", "claude-sonnet-5-5"] {
+            XCTAssertNotNil(s.price(forModel: slug, provider: "claude"), slug)
+            XCTAssertEqual(s.price(forModel: slug, provider: "claude"), s.price(forModel: slug), slug)
+            XCTAssertNil(s.price(forModel: slug, provider: "codex"), slug)
+        }
+        for slug in ["gpt-5.6-sol", "gpt-5.5", "codex-auto-review"] {
+            XCTAssertNotNil(s.price(forModel: slug, provider: "codex"), slug)
+            XCTAssertEqual(s.price(forModel: slug, provider: "codex"), s.price(forModel: slug), slug)
+            XCTAssertNil(s.price(forModel: slug, provider: "claude"), slug)
+        }
+        for slug in ["glm-4.7", "kimi-k2.7-code", "gemini-3.8-flash", "muse-spark-1.3", "grok-4.6"] {
+            XCTAssertNotNil(s.price(forModel: slug), "precondition: \(slug) has a v2 row")
+            XCTAssertNil(s.price(forModel: slug, provider: "claude"), slug)
+            XCTAssertNil(s.price(forModel: slug, provider: "codex"), slug)
+            XCTAssertNil(t.price(forModel: slug, provider: "claude"), slug)
+            XCTAssertNil(t.price(forModel: slug, provider: "codex"), slug)
+        }
+        XCTAssertNil(s.price(forModel: "claude-sonnet-5", provider: "gemini"))
+        XCTAssertEqual(Set(RunwayPriceSnapshot.providerKeyPrefixes.keys), ["claude", "codex"])
+    }
+
     // MARK: - Evidence strings
 
     func testEvidenceStringsResolveAgainstTheBundledTable() {

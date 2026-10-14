@@ -139,6 +139,53 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertEqual(once, twice, accuracy: 0.0001)
     }
 
+    /// The live calibration ledgers measure provider quota spend. A Claude Code or
+    /// Codex record on a third-party model (`glm-4.7`, which the v2 table prices for
+    /// Session Info) is not that spend, so each provider's ledger sees only its own
+    /// rows and poisons the interval instead of banking dollars.
+    func testProviderLedgersLeaveThirdPartyModelsUnpriced() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        XCTAssertNotNil(prices.price(forModel: "glm-4.7"), "precondition: the v2 table has a glm-4.7 row")
+        for provider in ["claude", "codex"] {
+            let ledger = store.ledger(provider: provider)
+            let event = WeeklyQuotaTokenEvent(logPath: "/\(provider)", eventID: "glm",
+                                              capturedAt: t0, input: 0, cachedInput: 0,
+                                              output: 1_000_000, cacheCreation: 0,
+                                              modelSlug: "glm-4.7")
+            ledger.recordIncremental(events: [event], priceTable: prices, now: t0)
+            let activity = ledger.activity(from: t0.addingTimeInterval(-1), to: t0)
+            XCTAssertTrue(activity?.hadUnpriced ?? false, provider)
+            XCTAssertEqual(activity?.dollars ?? -1, 0, provider)
+        }
+    }
+
+    /// Each provider ledger still prices its own rows, and only its own.
+    func testProviderLedgersPriceOnlyTheirOwnRows() {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let prices = RunwayPriceTable.makeForTesting()
+        for (provider, own, foreign) in [("claude", "claude-sonnet-5", "gpt-5.6"),
+                                         ("codex", "gpt-5.6", "claude-sonnet-5")] {
+            let ledger = store.ledger(provider: provider)
+            ledger.recordIncremental(events: [
+                WeeklyQuotaTokenEvent(logPath: "/own", eventID: "own", capturedAt: t0,
+                                      input: 0, cachedInput: 0, output: 1_000_000,
+                                      cacheCreation: 0, modelSlug: own)
+            ], priceTable: prices, now: t0)
+            let ownActivity = ledger.activity(from: t0.addingTimeInterval(-1), to: t0)
+            XCTAssertFalse(ownActivity?.hadUnpriced ?? true, provider)
+            XCTAssertGreaterThan(ownActivity?.dollars ?? 0, 0, provider)
+            ledger.recordIncremental(events: [
+                WeeklyQuotaTokenEvent(logPath: "/foreign", eventID: "foreign",
+                                      capturedAt: t0.addingTimeInterval(60),
+                                      input: 0, cachedInput: 0, output: 1_000_000,
+                                      cacheCreation: 0, modelSlug: foreign)
+            ], priceTable: prices, now: t0.addingTimeInterval(60))
+            let both = ledger.activity(from: t0.addingTimeInterval(-1), to: t0.addingTimeInterval(60))
+            XCTAssertTrue(both?.hadUnpriced ?? false, "\(provider) must not price \(foreign)")
+        }
+    }
+
     func testLedgerDoesNotRebillEventsAfterNativeArchiveMove() {
         let ledger = WeeklyQuotaActivityLedger()
         let prices = RunwayPriceTable.makeForTesting()
@@ -1712,7 +1759,7 @@ extension ProvisionalRateClampTests {
         // with tk/h for the very row the clamp was meant to tame.
         if let freshActivity = clamped.first(where: { $0.identity.id == "fresh" }) {
             let priced = CodexRunwayCalculator.dollarsPerHour(
-                for: freshActivity, priceTable: RunwayPriceTable.makeForTesting())
+                for: freshActivity, priceTable: RunwayPriceTable.makeForTesting(), source: .claude)
             XCTAssertNotNil(priced)
             XCTAssertLessThan(priced ?? .infinity, 10_000)
         }

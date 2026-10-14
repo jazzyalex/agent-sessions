@@ -490,7 +490,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
         let volume = freshInput + cached + output + cacheWrite
         guard volume > 0 else { return true }
 
-        guard let price = priceSnapshot.price(forModel: currentModel),
+        // Codex rows only: a Codex log on a third-party model is not Codex quota.
+        guard let price = priceSnapshot.price(forModel: currentModel, provider: "codex"),
               (cacheWrite == 0 || price.cacheWritePerMTok != nil),
               !(price.longContext.map {
                   delta.contextInput == nil && Double(delta.topLine - delta.output) > $0.thresholdInputTokens
@@ -629,7 +630,9 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                     let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                     // A tier with no rates counts as unpriced for the same reason an
                     // unknown model does — better an honest gap than a halved cost.
-                    guard let price = priceSnapshot.price(forModel: model),
+                    // Claude rows only: a Claude Code log routed to a third-party
+                    // model (Z.ai, Kimi) is not Claude quota spend.
+                    guard let price = priceSnapshot.price(forModel: model, provider: "claude"),
                           let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
                                                   inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {
                         localEntries.append((id, 0, volume, false))

@@ -278,6 +278,21 @@ final class WeeklyQuotaActivityLedger {
     private var lastPollAt: Date?
     private var firstPollAt: Date?
     private let lock = NSLock()
+    /// Provider whose quota this ledger measures (`"claude"`, `"codex"`). Prices
+    /// come from that provider's own rows only
+    /// (`RunwayPriceSnapshot.price(forModel:provider:)`): a record on a third-party
+    /// model is not provider quota spend and poisons its interval. The store
+    /// always sets it; nil (unit tests of the integration math) uses every row.
+    let provider: String?
+
+    init(provider: String? = nil) {
+        self.provider = provider
+    }
+
+    private func price(forModel slug: String?, in snapshot: RunwayPriceSnapshot) -> RunwayModelPrice? {
+        guard let provider else { return snapshot.price(forModel: slug) }
+        return snapshot.price(forModel: slug, provider: provider)
+    }
 
     func reset() {
         lock.lock(); defer { lock.unlock() }
@@ -297,6 +312,7 @@ final class WeeklyQuotaActivityLedger {
                 now: Date) {
         lock.lock(); defer { lock.unlock() }
 
+        let snapshot = priceTable.snapshot()
         var dollars = 0.0
         var hadUnpriced = false
 
@@ -321,7 +337,7 @@ final class WeeklyQuotaActivityLedger {
             let volume = dIn + dCached + dOut + dWrite
             guard volume > 0 else { continue }
 
-            guard let price = priceTable.price(forModel: obs.modelSlug) else {
+            guard let price = self.price(forModel: obs.modelSlug, in: snapshot) else {
                 // Material activity we cannot weight. Recorded as a poison flag so
                 // any interval containing it is rejected outright: pricing only the
                 // known slices would understate the denominator and inflate every
@@ -391,7 +407,7 @@ final class WeeklyQuotaActivityLedger {
             let discoveredLate = previousPollAt.map { event.capturedAt <= $0 } ?? false
             // Same poison flag as an unknown model when the record's billing tier has
             // no rates: the calibration must not be built on a knowingly halved cost.
-            guard let price = snapshot.price(forModel: event.modelSlug),
+            guard let price = self.price(forModel: event.modelSlug, in: snapshot),
                   (event.cacheCreation + event.cacheCreation1h == 0
                       || (price.cacheWritePerMTok != nil
                           && (event.cacheCreation1h == 0 || price.cacheWrite1hPerMTok != nil))),
@@ -981,7 +997,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     func ledger(provider: String) -> WeeklyQuotaActivityLedger {
         lock.lock(); defer { lock.unlock() }
         if let existing = ledgers[provider] { return existing }
-        let created = WeeklyQuotaActivityLedger()
+        let created = WeeklyQuotaActivityLedger(provider: provider)
         ledgers[provider] = created
         return created
     }

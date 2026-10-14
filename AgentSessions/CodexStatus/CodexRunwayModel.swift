@@ -1324,7 +1324,8 @@ enum CodexRunwayCalculator {
         var estimated: [(activity: RunwaySessionActivity, percentPerHour: Double)] = []
         var unpriceableIDs: Set<String> = []
         for activity in activities {
-            guard let dollarsPerHour = dollarsPerHour(for: activity, priceTable: priceTable) else {
+            guard let dollarsPerHour = dollarsPerHour(for: activity, priceTable: priceTable,
+                                                      source: baseline.source) else {
                 // Cannot be weighted, so it cannot be estimated. Surfaced as "n/a"
                 // rather than silently omitted or shown as a waiting clock.
                 unpriceableIDs.insert(activity.identity.id)
@@ -1386,8 +1387,18 @@ enum CodexRunwayCalculator {
     /// with reasoning already inside output), and providers bill reasoning at the
     /// output rate. So output already carries it; adding reasoning would double-count
     /// it, and subtracting it would understate the bill.
+    ///
+    /// Only the provider's own rows price (`source` → `"claude"` or `"codex"`):
+    /// Runway burn is provider quota spend, and a session on a third-party model
+    /// (`glm-4.7` through Claude Code) is not, even though Session Info prices it.
     static func dollarsPerHour(for activity: RunwaySessionActivity,
-                               priceTable: RunwayPriceTable) -> Double? {
+                               priceTable: RunwayPriceTable,
+                               source: UsageTrackingSource) -> Double? {
+        let provider: String
+        switch source {
+        case .claude: provider = "claude"
+        case .codex: provider = "codex"
+        }
         var perSecond = 0.0
         var pricedAnything = false
         for component in activity.components {
@@ -1399,7 +1410,7 @@ enum CodexRunwayCalculator {
             // the session rather than drop it honestly. That covers an unknown model
             // AND a slice served at a billing tier the model has no rates for — a
             // fast-mode record priced at standard would understate it by half.
-            guard let p = priceTable.price(forModel: component.modelSlug),
+            guard let p = priceTable.price(forModel: component.modelSlug, provider: provider),
                   (component.cacheCreationPerSecond == 0 || p.cacheWritePerMTok != nil),
                   (component.cacheCreation1hPerSecond == 0 || p.cacheWrite1hPerMTok != nil),
                   let rates = p.rates(for: component.speed,
@@ -1436,7 +1447,7 @@ enum CodexRunwayCalculator {
         var priced: [(activity: RunwaySessionActivity, dollarsPerHour: Double)] = []
         var unpriceableIDs: Set<String> = []
         for a in activities {
-            if let rate = dollarsPerHour(for: a, priceTable: priceTable) {
+            if let rate = dollarsPerHour(for: a, priceTable: priceTable, source: baseline.source) {
                 priced.append((a, rate))
             } else {
                 unpriceableIDs.insert(a.identity.id)

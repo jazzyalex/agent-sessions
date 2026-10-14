@@ -1284,7 +1284,8 @@ final class ClaudeRunwayParserTests: XCTestCase {
             return nil
         }
         return CodexRunwayCalculator.dollarsPerHour(for: activity,
-                                                    priceTable: RunwayPriceTable.makeForTesting())
+                                                    priceTable: RunwayPriceTable.makeForTesting(),
+                                                    source: .claude)
     }
 
     /// An assistant usage line. `flatCacheCreation` and the 5m/1h pair are emitted

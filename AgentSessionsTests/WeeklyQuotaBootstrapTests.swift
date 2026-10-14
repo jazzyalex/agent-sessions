@@ -220,6 +220,36 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             + "\"ephemeral_1h_input_tokens\":\(oneHourCacheWrite)}}}}"
     }
 
+    /// A Claude Code session routed to Z.ai records `glm-4.7`. The v2 table has a
+    /// `glm-4.7` row for Session Info, but that spend is not Claude quota: the
+    /// Claude bootstrap sees only `claude-` rows, so the record stays unpriced.
+    func testClaudeScanLeavesThirdPartyModelUnpriced() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000),
+                   claudeUsageLine(id: "m2", at: at, oneHourCacheWrite: 1_000_000, model: "glm-4.7")],
+                  name: "c.jsonl")
+        XCTAssertNotNil(RunwayPriceTable.makeForTesting().price(forModel: "glm-4.7"),
+                        "precondition: the v2 table has a glm-4.7 row")
+        let result = try XCTUnwrap(ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600)))
+        XCTAssertEqual(result.dollars, 10.0, accuracy: 0.001, "only the claude-opus-5 record is priced")
+        XCTAssertEqual(result.unpricedVolumeShare, 0.5, accuracy: 0.0001)
+    }
+
+    /// The Codex counterpart: a Codex log on `glm-4.7` is not Codex quota spend.
+    func testCodexScanLeavesThirdPartyModelUnpriced() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([modelLine("gpt-5.6", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)],
+                  name: "a.jsonl")
+        try write([modelLine("glm-4.7", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)],
+                  name: "b.jsonl")
+        let result = try XCTUnwrap(scan())
+        XCTAssertEqual(result.dollars, 20.0, accuracy: 0.001, "only the gpt-5.6 turn is priced")
+        XCTAssertEqual(result.unpricedVolumeShare, 0.5, accuracy: 0.0001)
+    }
+
     func testPricesTurnsInsideTheWindow() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         try write([modelLine("gpt-5.6", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)],

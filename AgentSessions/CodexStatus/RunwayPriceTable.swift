@@ -172,16 +172,51 @@ struct RunwayPriceSnapshot: Sendable {
         Self.price(forModel: slug, in: models)
     }
 
+    /// Provider name → the `models` key prefixes that are that provider's OWN
+    /// rows. The single definition behind both `rateRevision(forProvider:)` and
+    /// `price(forModel:provider:)`.
+    static let providerKeyPrefixes: [String: [String]] = [
+        "claude": ["claude-"],
+        "codex": ["gpt-", "codex-"]
+    ]
+
+    /// Lookup restricted to one provider's own rows. Runway burn and weekly-quota
+    /// calibration measure the provider's quota spend; a Claude Code or Codex log
+    /// routed to a third-party model (`glm-4.7`, a Kimi model) is not that spend,
+    /// so it must stay unpriced there even though Session Info prices it. An
+    /// unknown provider matches nothing.
+    func price(forModel slug: String?, provider: String) -> RunwayModelPrice? {
+        Self.price(forModel: slug, in: models, provider: provider)
+    }
+
+    static func price(forModel slug: String?,
+                      in models: [String: RunwayModelPrice],
+                      provider: String) -> RunwayModelPrice? {
+        guard let prefixes = providerKeyPrefixes[provider] else { return nil }
+        return price(forModel: slug, in: models, keyPrefixes: prefixes)
+    }
+
     /// The single matcher. Claude keys keep their guarded prefix rule; every
     /// other key (GPT and all vendors) matches exactly or with a dated-snapshot
     /// suffix, never by bare prefix, so a variant such as `kimi-k2.7-code-v2`
     /// cannot inherit a base rate.
     static func price(forModel slug: String?,
                       in models: [String: RunwayModelPrice]) -> RunwayModelPrice? {
+        price(forModel: slug, in: models, keyPrefixes: nil)
+    }
+
+    /// `keyPrefixes` nil considers every key; otherwise only keys with one of the
+    /// prefixes may match.
+    private static func price(forModel slug: String?,
+                              in models: [String: RunwayModelPrice],
+                              keyPrefixes: [String]?) -> RunwayModelPrice? {
         guard let slug, !slug.isEmpty else { return nil }
-        if let exact = models[slug] { return exact }
+        func allowed(_ key: String) -> Bool {
+            keyPrefixes.map { prefixes in prefixes.contains { key.hasPrefix($0) } } ?? true
+        }
+        if let exact = models[slug], allowed(slug) { return exact }
         var best: (key: String, price: RunwayModelPrice)?
-        for (key, price) in models where slug.hasPrefix(key) {
+        for (key, price) in models where slug.hasPrefix(key) && allowed(key) {
             if key.hasPrefix("claude-") {
                 guard isRecognizedClaudeSlug(slug, extending: key) else { continue }
             } else {
@@ -366,6 +401,12 @@ final class RunwayPriceTable: @unchecked Sendable {
         return RunwayPriceSnapshot.price(forModel: slug, in: models)
     }
 
+    /// See `RunwayPriceSnapshot.price(forModel:provider:)`.
+    func price(forModel slug: String?, provider: String) -> RunwayModelPrice? {
+        lock.lock(); defer { lock.unlock() }
+        return RunwayPriceSnapshot.price(forModel: slug, in: models, provider: provider)
+    }
+
     /// Fire-and-forget: fetch the manifest at most once/day and cache it. Never
     /// blocks; failures are silent (the current table stays).
     func refreshInBackground(now: Date = Date()) {
@@ -509,8 +550,7 @@ final class RunwayPriceTable: @unchecked Sendable {
             }
             return stableHash(projection) ?? 0
         }
-        let providerRevisions = ["claude": revision(["claude-"]),
-                                 "codex": revision(["gpt-", "codex-"])]
+        let providerRevisions = RunwayPriceSnapshot.providerKeyPrefixes.mapValues(revision)
         return DecodedManifest(models: models, aliases: aliases, updated: manifest.updated ?? "",
                                sequence: sequence, semanticRevision: semantic,
                                providerRevisions: providerRevisions,
