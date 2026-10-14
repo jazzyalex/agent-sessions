@@ -130,7 +130,14 @@ final class PriceManifestV2Tests: XCTestCase {
         RunwayPriceTable.cacheDirectoryOverride = dir
 
         let legacyURL = dir.appendingPathComponent(RunwayPriceTable.legacyV1FileName)
-        let sentinel = Data(#"{"version":1,"updated":"2099-12-31","models":{"claude-opus":{"inputPerMTok":1,"cachedInputPerMTok":1,"outputPerMTok":1}}}"#.utf8)
+        // The sentinel at the legacy file name is a manifest the v2 decoder WOULD
+        // adopt (schema 2, a sequence far above the bundled one, a distinctive
+        // rate), so the "not read" assertion below can actually fail on a read.
+        let sentinel = manifest(sequence: 9_999_999_999, opusOutput: 1)
+        let control = RunwayPriceTable.makeForTesting()
+        XCTAssertTrue(control.loadForTesting(json: sentinel), "precondition: the sentinel is adoptable")
+        XCTAssertEqual(control.price(forModel: "claude-opus-4-8")?.outputPerMTok, 1,
+                       "precondition: adopting the sentinel changes the observed rate")
         try sentinel.write(to: legacyURL)
         let before = try FileManager.default.attributesOfItem(atPath: legacyURL.path)[.modificationDate] as? Date
 
