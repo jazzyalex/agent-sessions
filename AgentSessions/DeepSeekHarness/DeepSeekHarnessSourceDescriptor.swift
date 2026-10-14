@@ -13,9 +13,10 @@ extension SessionSourceDescriptor {
                     "request/header, request/context, and model-selection records provide model history; first and current provenance remain explicit"),
                 tokens: .partial(
                     "assistant/message uses top-level usage when present, otherwise one final stream usage sample; input, cache-read, cache-write, and output totals stay disjoint and repeated stream samples are not double-counted"),
-                cost: .unavailable(
-                    "DeepSeek Harness has no audited local price identity for API-equivalent cost"),
-                weeklyQuota: .unavailable("DeepSeek Harness does not expose a compatible account quota feed")
+                cost: .partial("models without a published first-party price are not estimated"),
+                weeklyQuota: .unavailable("DeepSeek Harness does not expose a compatible account quota feed"),
+                // One generic cache-write count (`cacheWriteTokens`) with no TTL; see spec §6.5.
+                cacheWriteTTLVerified: false
             ),
             scanTelemetry: { session in
                 DeepSeekHarnessTelemetryReader.loadTelemetry(for: session)

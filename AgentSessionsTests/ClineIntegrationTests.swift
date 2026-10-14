@@ -47,10 +47,8 @@ final class ClineIntegrationTests: XCTestCase {
         guard case .supported = t.tokens else {
             return XCTFail("Cline token telemetry should be supported by assistant metric records")
         }
-        guard case .unavailable(let costReason) = t.cost else {
-            return XCTFail("Cline cost must remain explicitly unavailable")
-        }
-        XCTAssertTrue(costReason.contains("provider-specific"))
+        XCTAssertEqual(t.cost, .partial("models without a published first-party price are not estimated"))
+        XCTAssertFalse(t.cacheWriteTTLVerified, "Cline records one generic cache-write count with no TTL")
         guard case .unavailable(let quotaReason) = t.weeklyQuota else {
             return XCTFail("Cline quota must remain explicitly unavailable")
         }

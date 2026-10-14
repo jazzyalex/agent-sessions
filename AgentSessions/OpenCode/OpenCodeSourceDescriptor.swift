@@ -13,8 +13,10 @@ extension SessionSourceDescriptor {
             telemetry: TelemetryCapabilities(
                 configuration: .partial("current model comes from session metadata; first observation comes from message records"),
                 tokens: .supported,
-                cost: .unavailable("OpenCode native pricing is not yet audited"),
-                weeklyQuota: .unavailable("OpenCode does not expose a compatible account quota feed")
+                cost: .partial("models without a published first-party price are not estimated; usage rows without their own model are not priced"),
+                weeklyQuota: .unavailable("OpenCode does not expose a compatible account quota feed"),
+                // One generic cache-write count with no TTL; see spec §6.5.
+                cacheWriteTTLVerified: false
             ),
             scanTelemetry: { session in
                 OpenCodeSqliteReader.loadTelemetry(for: session)

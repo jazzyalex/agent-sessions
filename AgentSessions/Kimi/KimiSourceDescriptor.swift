@@ -13,8 +13,10 @@ extension SessionSourceDescriptor {
             telemetry: TelemetryCapabilities(
                 configuration: .partial("current model comes from loaded Session metadata; history comes from Kimi config and request records"),
                 tokens: .supported,
-                cost: .unavailable("Kimi native cost is provider-specific and is not shown as an API-equivalent estimate"),
-                weeklyQuota: .unavailable("Kimi does not expose a compatible account quota feed")
+                cost: .partial("models without a published first-party price are not estimated; whole-session usage summaries are not priced"),
+                weeklyQuota: .unavailable("Kimi does not expose a compatible account quota feed"),
+                // One generic cache-write count (`inputCacheCreation`) with no TTL; see spec §6.5.
+                cacheWriteTTLVerified: false
             ),
             makeTelemetryProvider: { KimiTelemetryProvider() },
             shortLabel: "Kimi Code",

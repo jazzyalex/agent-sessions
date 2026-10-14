@@ -183,7 +183,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
                 filePath: url.path, eventCount: 0, events: [])
     }
 
-    private func createOpenCodeTelemetryFixture(at url: URL) throws {
+    private func createOpenCodeTelemetryFixture(at url: URL, model: String = "shared-model") throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
             sqlite3_close(db)
@@ -217,10 +217,10 @@ final class SessionTelemetryEngineTests: XCTestCase {
         INSERT INTO session (id, time_updated) VALUES ('session-b', 1000);
         INSERT INTO message (id, session_id, time_created, time_updated, data)
         VALUES ('message-a', 'session-a', 1000, 1000,
-                '{"role":"assistant","modelID":"shared-model","tokens":{"input":3,"output":2,"total":5}}');
+                '{"role":"assistant","modelID":"\(model)","tokens":{"input":3,"output":2,"total":5}}');
         INSERT INTO message (id, session_id, time_created, time_updated, data)
         VALUES ('message-b', 'session-b', 1000, 1000,
-                '{"role":"assistant","modelID":"shared-model","tokens":{"input":3,"output":2,"total":5}}');
+                '{"role":"assistant","modelID":"\(model)","tokens":{"input":3,"output":2,"total":5}}');
         """)
     }
 
@@ -379,6 +379,38 @@ final class SessionTelemetryEngineTests: XCTestCase {
         // Configuration display still falls back to metadata.
         XCTAssertEqual(telemetry.currentConfiguration?.model, "model-b")
         XCTAssertEqual(telemetry.currentConfiguration?.modelProvenance, .sessionMetadata)
+    }
+
+    func testOpenCodeUsageRowIsPricedThroughTheEngine() async throws {
+        let dbURL = directory.appendingPathComponent("opencode.db")
+        try createOpenCodeTelemetryFixture(at: dbURL, model: "gpt-5.4-mini")
+        let telemetry = try await priceThroughEngine(
+            session: session(dbURL, source: .opencode, id: "session-a"))
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["gpt-5.4-mini"])
+        // gpt-5.4-mini: 3 fresh input × $0.75 + 2 output × $4.50, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.00001125, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
+    func testEnabledAgentsDeclarePartialCostAndUnverifiedCacheWriteTTL() {
+        for source in [SessionSource.opencode, .openclaw, .hermes, .kimi, .cline, .qwen,
+                       .antigravity, .deepseekHarness] {
+            let caps = SessionSourceRegistry.descriptor(for: source).telemetry
+            XCTAssertTrue(caps.cost.isAvailable, "\(source)")
+            if case .supported = caps.cost { XCTFail("\(source) must be .partial") }
+        }
+        // OpenClaw records `cacheWrite1h` only "when reported", so a write without it
+        // has no TTL evidence and joins the five generic cache-write readers.
+        for source in [SessionSource.opencode, .openclaw, .hermes, .kimi, .cline, .deepseekHarness] {
+            XCTAssertFalse(SessionSourceRegistry.descriptor(for: source).telemetry.cacheWriteTTLVerified,
+                           "\(source)")
+        }
+        for source in [SessionSource.claude, .codex, .pi, .copilot] {
+            XCTAssertTrue(SessionSourceRegistry.descriptor(for: source).telemetry.cacheWriteTTLVerified)
+        }
     }
 
     func testOpenCodeTelemetryCacheInvalidatesWhenLogicalSessionRevisionChanges() async throws {

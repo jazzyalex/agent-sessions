@@ -291,7 +291,30 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.first?.outputTokens, 4)
         XCTAssertEqual(telemetry.usageSlices.reduce(0) { $0 + $1.reasoningOutputTokens }, 3)
         XCTAssertFalse(telemetry.usageSlices.contains { $0.model == "dead-branch" })
-        XCTAssertNil(telemetry.costEstimate)
+        // Cost is enabled for Qwen; these synthetic models have no price row.
+        XCTAssertNil(telemetry.costEstimate?.apiEquivalentUSD)
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, ["qwen-old", "qwen-new"])
+    }
+
+    func testQwenAssistantUsageIsPricedThroughTheEngine() async throws {
+        // Qwen Code also runs OpenAI-compatible providers such as Z.ai, so an
+        // assistant record can name glm-4.7, which has a bundled first-party row.
+        // The coder-model alias is opaque and is never priced.
+        let sessionID = "12345678-1234-1234-1234-1234567890ab"
+        let session = try makeQwenSession(id: sessionID, records: [
+            qwenRecord(id: "root-priced", parent: nil, sessionID: sessionID, type: "user",
+                       timestamp: "2026-10-07T20:00:00.000Z"),
+            qwenRecord(id: "assistant-priced", parent: "root-priced", sessionID: sessionID,
+                       type: "assistant", timestamp: "2026-10-07T20:00:01.000Z", model: "glm-4.7",
+                       usage: qwenUsage(prompt: 1000, cached: 200, output: 100, thoughts: 0))
+        ], model: "glm-4.7")
+        let telemetry = try await priceThroughEngine(session: session)
+
+        // glm-4.7: 800 fresh × $0.60 + 200 cached × $0.11 + 100 output × $2.20, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.000722, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
     func testQwenFailsClosedWhenAssistantUsageIsMalformed() throws {
@@ -775,7 +798,46 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.first?.cacheWrite5mTokens, 1)
         XCTAssertEqual(telemetry.usageEvents.first?.contextInputTokens, 13)
         XCTAssertEqual(telemetry.usageSlices.first?.outputTokens, 10)
-        XCTAssertNil(telemetry.costEstimate)
+        // Cost is enabled for DeepSeek Harness; the synthetic model has no price row.
+        XCTAssertNil(telemetry.costEstimate?.apiEquivalentUSD)
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, ["synthetic-model"])
+    }
+
+    func testDeepSeekAssistantUsageIsPricedThroughTheEngine() async throws {
+        // No DeepSeek row exists (Task 11 found no unambiguous first-party cached-input
+        // price). DeepSeek Harness also routes Anthropic models through its pi-ai
+        // provider, so the fixture records claude-sonnet-5, with zero cache-write
+        // tokens because DSH writes carry no TTL (cacheWriteTTLVerified false).
+        let session = try makeDeepSeekSession(mutateRecord: { object in
+            guard var data = object["data"] as? [String: Any] else { return }
+            if var header = data["header"] as? [String: Any],
+               var config = header["config"] as? [String: Any] {
+                config["model"] = "claude-sonnet-5"
+                header["config"] = config
+                data["header"] = header
+            }
+            if var message = data["message"] as? [String: Any],
+               var source = message["source"] as? [String: Any],
+               source["kind"] as? String == "model" {
+                source["model"] = "claude-sonnet-5"
+                message["source"] = source
+                data["message"] = message
+            }
+            if var usage = data["usage"] as? [String: Any] {
+                usage["cacheWriteTokens"] = 0
+                usage["totalTokens"] = 17
+                data["usage"] = usage
+            }
+            object["data"] = data
+        })
+        let telemetry = try await priceThroughEngine(session: session)
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["claude-sonnet-5", "claude-sonnet-5"])
+        // claude-sonnet-5, two requests of 10 fresh × $2 + 2 cache-read × $0.20 + 5 output × $10, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.0001408, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
     func testDeepSeekStreamUsageDuplicateIsVerifiedWithoutDoubleCounting() throws {
@@ -1067,6 +1129,64 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.currentConfiguration?.model, "cline-free/deepseek-v4.1-flash")
         XCTAssertEqual(telemetry.currentConfiguration?.provenance, .sessionMetadata)
         XCTAssertEqual(telemetry.configurationChanges.count, 1)
+    }
+
+    func testClineAssistantMetricsArePricedThroughTheEngine() async throws {
+        // Zero cache-write tokens: Cline records one generic cache-write count with
+        // no TTL, so Claude writes are refused by design (cacheWriteTTLVerified false).
+        let session = try makeClineSession(messages: [[
+            "role": "assistant",
+            "id": "assistant-priced",
+            "ts": 1785615367000,
+            "modelInfo": ["id": "anthropic/claude-sonnet-5", "provider": "anthropic"],
+            "metrics": [
+                "inputTokens": 1000,
+                "cacheReadTokens": 400,
+                "cacheWriteTokens": 0,
+                "outputTokens": 100
+            ]
+        ]], manifestModel: "anthropic/claude-sonnet-5")
+        let telemetry = try await priceThroughEngine(session: session)
+
+        // claude-sonnet-5: 600 fresh × $2 + 400 cache-read × $0.20 + 100 output × $10, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.00228, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
+    /// Cline core writes the whole run's usage onto the last assistant message when
+    /// no assistant message of that run carried per-request metrics. That total can
+    /// span several requests, so it must not claim one request's context size.
+    func testClineRunUsageFallbackDoesNotClaimARequestContextSize() throws {
+        func assistant(_ id: String, metrics: [String: Any]?) -> [String: Any] {
+            var message: [String: Any] = [
+                "role": "assistant",
+                "id": id,
+                "ts": 1785615367000,
+                "modelInfo": ["id": "gpt-5.4", "provider": "openai"]
+            ]
+            if let metrics { message["metrics"] = metrics }
+            return message
+        }
+        let usage: [String: Any] = [
+            "inputTokens": 300_000, "cacheReadTokens": 0, "cacheWriteTokens": 0, "outputTokens": 10
+        ]
+        let session = try makeClineSession(messages: [
+            assistant("per-request", metrics: usage),
+            ["role": "user", "id": "user-1", "ts": 1785615368000, "content": []],
+            assistant("run-step-1", metrics: nil),
+            ["role": "user", "id": "tool-1", "ts": 1785615369000, "content": []],
+            assistant("run-step-2", metrics: usage)
+        ])
+
+        let telemetry = try XCTUnwrap(ClineTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.usageEvents.map(\.recordID), ["per-request", "run-step-2"])
+        XCTAssertEqual(telemetry.usageEvents.first?.contextInputTokens, 300_000,
+                       "a message whose run recorded per-request metrics keeps its context size")
+        XCTAssertNil(telemetry.usageEvents.last?.contextInputTokens,
+                     "metrics that follow an assistant message without metrics may be a run total")
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 600_020, "tokens are still counted")
     }
 
     func testClineFailsClosedWhenAnAssistantMetricRowIsMalformed() throws {
@@ -1732,22 +1852,29 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertNil(TranscriptTelemetryPresentation.tokens(telemetry))
     }
 
-    func testEngineUsesKimiRegistryProviderForARealFileRevision() async throws {
-        let url = directory.appendingPathComponent("wire.jsonl")
-        let line = #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"turn","usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
-        try line.write(to: url, atomically: true, encoding: .utf8)
-
-        let session = Session(id: "kimi-session",
-                              source: .kimi,
+    /// Writes inline JSONL lines to a fresh file and runs them through the registry
+    /// descriptor, its line provider, `SessionTelemetryEngine`, and the calculator.
+    /// Kimi keeps its native `wire.jsonl` name; other line providers use
+    /// `transcript.jsonl`, as their real-file revision tests do.
+    private func priceThroughEngine(source: SessionSource, lines: [String]) async throws -> SessionTelemetry {
+        let folder = directory.appendingPathComponent("priced-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(source == .kimi ? "wire.jsonl" : "transcript.jsonl")
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        let session = Session(id: "\(source.rawValue)-priced-\(UUID().uuidString)",
+                              source: source,
                               startTime: nil,
                               endTime: nil,
-                              model: "kimi-k2.7-code",
+                              model: nil,
                               filePath: url.path,
                               eventCount: 0,
                               events: [])
-        let engine = SessionTelemetryEngine(metrics: SessionInfoMetrics())
-        let value = await engine.telemetry(for: session)
-        let telemetry = try XCTUnwrap(value)
+        return try await priceThroughEngine(session: session)
+    }
+
+    func testEngineUsesKimiRegistryProviderForARealFileRevision() async throws {
+        let line = #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"turn","usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
+        let telemetry = try await priceThroughEngine(source: .kimi, lines: [line])
 
         XCTAssertEqual(telemetry.source, .kimi)
         XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 31)
@@ -1756,32 +1883,60 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
 
     /// Engine-level cover for the `costUnavailableReason` pricing gate: a Kimi file
     /// with only a whole-session usage summary must show tokens but never a dollar
-    /// figure. The engine reads capabilities from the registry descriptor and has no
-    /// override seam, so while the Kimi descriptor declares cost `.unavailable` the
-    /// descriptor gate refuses first. Once the descriptor allows cost, only the
-    /// `costUnavailableReason` gate stands between this summary and a price.
+    /// figure. The control session records the same model and tokens as a turn
+    /// record and must be priced, so the refusal cannot pass vacuously (an unpriced
+    /// model or a descriptor that refuses cost would also yield no figure). Only the
+    /// `costUnavailableReason` gate separates the two sessions.
     func testEngineRefusesCostForAKimiWholeSessionSummary() async throws {
-        let url = directory.appendingPathComponent("wire.jsonl")
-        let line = #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"session","usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
-        try line.write(to: url, atomically: true, encoding: .utf8)
+        let usage = #""usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
+        let turn = try await priceThroughEngine(source: .kimi, lines: [
+            #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"turn","# + usage
+        ])
+        let summary = try await priceThroughEngine(source: .kimi, lines: [
+            #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"session","# + usage
+        ])
 
-        let session = Session(id: "kimi-session-summary",
-                              source: .kimi,
-                              startTime: nil,
-                              endTime: nil,
-                              model: "kimi-k2.7-code",
-                              filePath: url.path,
-                              eventCount: 0,
-                              events: [])
-        let engine = SessionTelemetryEngine(metrics: SessionInfoMetrics())
-        let value = await engine.telemetry(for: session)
-        let telemetry = try XCTUnwrap(value)
+        XCTAssertNil(turn.usageSummary?.costUnavailableReason)
+        XCTAssertNotNil(turn.costEstimate?.apiEquivalentUSD,
+                        "the same model and tokens as a turn record must be priced")
 
-        XCTAssertEqual(telemetry.usageSummary?.usageFamilies, ["usage.record.session"])
-        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 31)
-        XCTAssertEqual(telemetry.usageSummary?.costUnavailableReason,
+        XCTAssertEqual(summary.usageSummary?.usageFamilies, ["usage.record.session"])
+        XCTAssertEqual(summary.usageSummary?.topLineTokens, 31)
+        XCTAssertEqual(summary.usageSummary?.costUnavailableReason,
                        "Kimi recorded only a whole-session usage summary, which cannot be attributed to one model or request.")
-        XCTAssertNil(telemetry.costEstimate?.apiEquivalentUSD)
+        XCTAssertNil(summary.costEstimate?.apiEquivalentUSD)
+    }
+
+    func testKimiTurnUsageIsPricedThroughTheEngine() async throws {
+        let lines = [
+            #"{"type":"llm.request","model":"kimi-k2.7-code","thinkingEffort":"on","time":1785615365000}"#,
+            #"{"type":"usage.record","model":"kimi-k2.7-code","usageScope":"turn","usage":{"inputOther":1000000,"inputCacheRead":0,"inputCacheCreation":0,"output":0},"time":1785615367000}"#
+        ]
+        let telemetry = try await priceThroughEngine(source: .kimi, lines: lines)
+
+        // kimi-k2.7-code: 1M fresh input at $0.95/MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.95, accuracy: 1e-9)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
+    func testAntigravityPlannerUsageIsPricedThroughTheEngine() async throws {
+        // Antigravity records a display name. "Claude Sonnet 4.6 (Thinking)" drops its
+        // effort suffix and resolves through the "claude sonnet 4.6" alias. Google
+        // publishes no price for any Gemini display name Antigravity writes that has
+        // an alias, so the aliased Claude selection is the priced case.
+        let telemetry = try await priceThroughEngine(source: .antigravity, lines: [
+            antigravityInput(1, from: "None", to: "Claude Sonnet 4.6 (Thinking)"),
+            antigravityPlanner(2, input: 1_000_000)
+        ])
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["Claude Sonnet 4.6 (Thinking)"])
+        // claude-sonnet-4-6: 1M fresh input at $3/MTok + 10 output at $15/MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 3.00015, accuracy: 1e-9)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
     func testEngineUsesAntigravityRegistryProviderForARealFileRevision() async throws {
@@ -1827,5 +1982,19 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.currentConfiguration?.model, "grok-4.5")
         XCTAssertEqual(telemetry.usageSummary?.unavailableReason,
                        "Grok transcript records do not expose token counts.")
+    }
+}
+
+extension XCTestCase {
+    /// Runs an already-built session through the registry: the engine reaches the
+    /// reader through `SessionSourceRegistry.descriptor(for:)`, so the descriptor's
+    /// cost capability and cache-write TTL flag are on the tested path. Uses the
+    /// bundled price table only, never a cached manifest from the machine.
+    func priceThroughEngine(session: Session) async throws -> SessionTelemetry {
+        let engine = SessionTelemetryEngine(
+            priceTable: RunwayPriceTable(loadBundled: true, readCache: false),
+            metrics: SessionInfoMetrics())
+        let value = await engine.telemetry(for: session)
+        return try XCTUnwrap(value)
     }
 }

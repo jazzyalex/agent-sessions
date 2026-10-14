@@ -47,9 +47,9 @@ final class DeepSeekHarnessSourceDescriptorTests: XCTestCase {
             return XCTFail("DeepSeek assistant usage should expose the audited partial path")
         }
         XCTAssertTrue(tokenReason.contains("assistant/message"))
-        guard case .unavailable = telemetry.cost else {
-            return XCTFail("DeepSeek pricing is intentionally unavailable")
-        }
+        XCTAssertEqual(telemetry.cost, .partial("models without a published first-party price are not estimated"))
+        XCTAssertFalse(telemetry.cacheWriteTTLVerified,
+                       "DeepSeek Harness records one generic cache-write count with no TTL")
         guard case .unavailable = telemetry.weeklyQuota else {
             return XCTFail("DeepSeek account quota is intentionally unavailable")
         }

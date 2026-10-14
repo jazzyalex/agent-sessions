@@ -15,8 +15,12 @@ extension SessionSourceDescriptor {
             telemetry: TelemetryCapabilities(
                 configuration: .partial("current model comes from loaded Session metadata; detailed history comes from OpenClaw records"),
                 tokens: .supported,
-                cost: .unavailable("OpenClaw native cost is provider-specific and is not shown as an API-equivalent estimate"),
-                weeklyQuota: .unavailable("OpenClaw does not expose a compatible account quota feed")
+                cost: .partial("models without a published first-party price are not estimated"),
+                weeklyQuota: .unavailable("OpenClaw does not expose a compatible account quota feed"),
+                // OpenClaw's Usage type documents `cacheWrite1h` as the 1-hour subset of
+                // `cacheWrite` "when reported". A write without it has no TTL evidence,
+                // so OpenClaw is treated like the generic cache-write readers.
+                cacheWriteTTLVerified: false
             ),
             makeTelemetryProvider: { OpenClawTelemetryProvider() },
             scanTelemetry: { session in

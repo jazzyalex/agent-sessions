@@ -38,8 +38,10 @@ extension SessionSourceDescriptor {
             telemetry: TelemetryCapabilities(
                 configuration: .partial("current model comes from loaded Session metadata; detailed history comes from Cline assistant modelInfo records"),
                 tokens: .supported,
-                cost: .unavailable("Cline provider pricing is provider-specific and is not shown as an API-equivalent estimate"),
-                weeklyQuota: .unavailable("Cline does not expose a compatible account quota feed")
+                cost: .partial("models without a published first-party price are not estimated"),
+                weeklyQuota: .unavailable("Cline does not expose a compatible account quota feed"),
+                // One generic cache-write count (`cacheWriteTokens`) with no TTL; see spec §6.5.
+                cacheWriteTTLVerified: false
             ),
             scanTelemetry: { session in
                 ClineTelemetryReader.loadTelemetry(for: session)

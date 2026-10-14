@@ -66,6 +66,12 @@ enum ClineTelemetryReader {
         var invalidMetrics = false
         var invalidModelInfo = false
         var totalTopLine = 0
+        // Cline core gives each assistant message the usage delta of its own model
+        // request. When no assistant message of a run carried metrics, it writes the
+        // whole run's usage onto the run's last assistant message instead. That total
+        // can span several requests, so metrics that follow an assistant message
+        // without metrics keep their tokens but claim no request context size.
+        var assistantWithoutMetricsPending = false
 
         for (index, message) in messages.enumerated() {
             guard !Task.isCancelled else {
@@ -82,7 +88,12 @@ enum ClineTelemetryReader {
                              anchorLine: index,
                              provenance: .assistantRecord)
 
-            guard message.keys.contains("metrics") else { continue }
+            guard message.keys.contains("metrics") else {
+                if !isDisplayOnly(message) { assistantWithoutMetricsPending = true }
+                continue
+            }
+            let mayBeRunTotal = assistantWithoutMetricsPending
+            assistantWithoutMetricsPending = false
             sawMetrics = true
             guard modelInfo(in: message["modelInfo"]) != nil else {
                 invalidModelInfo = true
@@ -130,7 +141,7 @@ enum ClineTelemetryReader {
                 cacheWrite5mTokens: components.cacheWrite,
                 cacheWrite1hTokens: 0,
                 outputTokens: components.output,
-                contextInputTokens: components.contextInput))
+                contextInputTokens: mayBeRunTotal ? nil : components.contextInput))
         }
 
         let unavailableReason: String?
@@ -230,6 +241,11 @@ enum ClineTelemetryReader {
             throw NSError(domain: "ClineTelemetryReader", code: 1)
         }
         return object
+    }
+
+    /// Cline core skips display-only assistant messages when it assigns usage.
+    private static func isDisplayOnly(_ message: [String: Any]) -> Bool {
+        (message["metadata"] as? [String: Any])?["displayOnly"] as? Bool == true
     }
 
     private static func modelInfoID(in value: Any?) -> String? {

@@ -17,7 +17,7 @@ extension SessionSourceDescriptor {
             telemetry: TelemetryCapabilities(
                 configuration: .partial("current model comes from loaded Session metadata; planner records do not state a model"),
                 tokens: .supported,
-                cost: .unavailable("Antigravity native cost is provider-specific and is not shown as an API-equivalent estimate"),
+                cost: .partial("models without a published first-party price are not estimated; usage before the first recorded model selection is not priced"),
                 weeklyQuota: .unavailable("Antigravity does not expose a compatible account quota feed")
             ),
             makeTelemetryProvider: { AntigravityTelemetryProvider() },

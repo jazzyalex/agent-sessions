@@ -5,8 +5,8 @@ import Foundation
 /// OpenClaw records one complete usage object on assistant messages. Model and
 /// thinking changes may also be stated by dedicated change records. The native
 /// `cost` object is intentionally ignored here: its meaning depends on the
-/// upstream provider and subscription, so the descriptor reports API-equivalent
-/// cost as unavailable rather than presenting a misleading dollar estimate.
+/// upstream provider and subscription. API-equivalent cost comes only from the
+/// shared calculator, priced at each usage record's own model.
 struct OpenClawTelemetryProvider: SessionTelemetryProvider {
     private static let usageFamily = "openclaw.message.usage"
     private static let speed = "standard-normalized"

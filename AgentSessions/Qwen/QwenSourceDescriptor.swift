@@ -32,8 +32,9 @@ extension SessionSourceDescriptor {
                 configuration: .partial(
                     "assistant model records provide observed model history; current model is also retained from loaded Session metadata"),
                 tokens: .supported,
-                cost: .unavailable(
-                    "Qwen Code has no audited local pricing identity for an API-equivalent estimate"),
+                // Qwen records no cache-write count (Gemini-style usageMetadata), so the
+                // TTL flag never applies and keeps its default.
+                cost: .partial("models without a published first-party price are not estimated; the coder-model alias is opaque"),
                 weeklyQuota: .unavailable("Qwen Code does not expose a compatible account quota feed")
             ),
             scanTelemetry: { session in

@@ -211,7 +211,8 @@ final class SessionParserTests: XCTestCase {
         """)
     }
 
-    private func createOpenClawSQLiteFixture(at url: URL, compressed: Bool = false) throws {
+    private func createOpenClawSQLiteFixture(at url: URL, compressed: Bool = false,
+                                             recordModel: String = "record-model") throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
             sqlite3_close(db)
@@ -266,8 +267,8 @@ final class SessionParserTests: XCTestCase {
 
         let header = #"{"type":"session","version":3,"id":"sqlite-demo","timestamp":"2026-04-16T00:00:00.000Z","cwd":"/tmp/openclaw"}"#
         let user = #"{"type":"message","id":"user-1","timestamp":"2026-04-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"OpenClaw SQLite fixture"}]}}"#
-        let assistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"record-model","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"content":[{"type":"text","text":"fixture response"}]}}"#
-        let modelChange = #"{"type":"model_change","modelId":"record-model","timestamp":"2026-04-16T00:00:03.000Z"}"#
+        let assistant = #"{"type":"message","id":"assistant-1","timestamp":"2026-04-16T00:00:02.000Z","message":{"role":"assistant","model":"\#(recordModel)","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"content":[{"type":"text","text":"fixture response"}]}}"#
+        let modelChange = #"{"type":"model_change","modelId":"\#(recordModel)","timestamp":"2026-04-16T00:00:03.000Z"}"#
         let records = [header, user, assistant, modelChange]
         for (offset, record) in records.enumerated() {
             let sequence = offset + 1
@@ -352,7 +353,7 @@ final class SessionParserTests: XCTestCase {
         return try body()
     }
 
-    private func createHermesStateDBFixture(at url: URL) throws {
+    private func createHermesStateDBFixture(at url: URL, model: String = "qwen3.5-9b") throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
             sqlite3_close(db)
@@ -442,11 +443,11 @@ final class SessionParserTests: XCTestCase {
         let toolCalls = #"[{"id":"call_hermes_1","type":"function","function":{"name":"shell","arguments":"{\"cmd\":\"pwd\"}"}}]"#
         try exec("""
         INSERT INTO sessions (id, source, user_id, model, model_config, system_prompt, parent_session_id, started_at, ended_at, end_reason, message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost, title, last_activity_at)
-        VALUES ('hermes_sqlite_demo', 'cli', 'user_1', 'qwen3.5-9b', \(sqlString(modelConfig)), 'system', NULL, 1780000000.0, 1780000004.0, 'complete', 3, 1, 10, 20, 0, 0, 2, 30, 0.01, 'Hermes SQLite demo', 1780000003.5);
+        VALUES ('hermes_sqlite_demo', 'cli', 'user_1', \(sqlString(model)), \(sqlString(modelConfig)), 'system', NULL, 1780000000.0, 1780000004.0, 'complete', 3, 1, 10, 20, 0, 0, 2, 30, 0.01, 'Hermes SQLite demo', 1780000003.5);
         INSERT INTO session_model_usage (session_id, model, task, api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
-        VALUES ('hermes_sqlite_demo', 'qwen3.5-9b', '', 1, 10, 20, 0, 0, 2, 1780000000.1, 1780000003.5);
+        VALUES ('hermes_sqlite_demo', \(sqlString(model)), '', 1, 10, 20, 0, 0, 2, 1780000000.1, 1780000003.5);
         INSERT INTO session_model_usage (session_id, model, task, api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, first_seen, last_seen)
-        VALUES ('hermes_sqlite_demo', 'qwen3.5-9b', 'title_generation', 1, 999, 999, 0, 0, 0, 1780000000.0, 1780000000.0);
+        VALUES ('hermes_sqlite_demo', \(sqlString(model)), 'title_generation', 1, 999, 999, 0, 0, 0, 1780000000.0, 1780000000.0);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
         VALUES (1, 'hermes_sqlite_demo', 'user', 'Hello from Hermes SQLite', NULL, NULL, NULL, 1780000000.1, 4, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
@@ -9730,6 +9731,42 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNotEqual(firstRevision, secondRevision)
     }
 
+    /// One priced fixture covers both OpenClaw reader paths: the JSONL line provider
+    /// and the SQLite `scanTelemetry` reader. gpt-5.4-mini has no long-context tier.
+    func testOpenClawUsageIsPricedThroughTheEngineForJSONLAndSQLite() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Priced-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let jsonlURL = root.appendingPathComponent("openclaw-priced.jsonl")
+        try [
+            #"{"type":"session","version":3,"id":"openclaw-priced","timestamp":"2026-08-16T16:00:00.000Z","cwd":"/tmp"}"#,
+            #"{"type":"message","id":"assistant-1","timestamp":"2026-08-16T16:00:01.000Z","message":{"role":"assistant","model":"gpt-5.4-mini","usage":{"input":1000,"output":100,"cacheRead":200,"cacheWrite":0,"totalTokens":1300},"content":[]}}"#
+        ].joined(separator: "\n").write(to: jsonlURL, atomically: true, encoding: .utf8)
+        let jsonlSession = Session(id: "openclaw-priced", source: .openclaw, startTime: nil, endTime: nil,
+                                   model: "gpt-5.4-mini", filePath: jsonlURL.path, eventCount: 0, events: [])
+        let jsonl = try await priceThroughEngine(session: jsonlSession)
+
+        // gpt-5.4-mini: 1000 fresh × $0.75 + 200 cache-read × $0.075 + 100 output × $4.50, per MTok.
+        XCTAssertEqual(try XCTUnwrap(jsonl.costEstimate?.apiEquivalentUSD), 0.001215, accuracy: 1e-12)
+        XCTAssertEqual(jsonl.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(jsonl.costEstimate?.missingPriceComponents, [])
+
+        let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
+        try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenClawSQLiteFixture(at: dbURL, recordModel: "gpt-5.4-mini")
+        let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
+        let telemetry = try await priceThroughEngine(session: session)
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["gpt-5.4-mini"])
+        // gpt-5.4-mini: 1 fresh × $0.75 + 1 output × $4.50, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.00000525, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
     func testOpenClawTelemetryReadsConfigurationAndUsageWithoutPricing() {
         let lines = [
             #"{"type":"session","version":3,"id":"openclaw-test","timestamp":"2026-08-16T16:00:00.000Z","cwd":"/tmp"}"#,
@@ -10608,7 +10645,28 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.first?.reasoningOutputTokens, 2)
         XCTAssertEqual(telemetry.usageSlices.first?.model, "qwen3.5-9b")
         XCTAssertEqual(SessionSourceRegistry.descriptor(for: .hermes).telemetry.cost,
-                       .unavailable("Hermes native cost is provider-specific and is not shown as an API-equivalent estimate"))
+                       .partial("models without a published first-party price are not estimated; per-model usage rollups cannot price models with a long-context tier"))
+    }
+
+    /// gpt-5.4-mini, not gpt-5.4: Hermes rollups carry no request context size, so a
+    /// model with a long-context tier is refused by design.
+    func testHermesModelUsageIsPricedThroughTheEngine() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Priced-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL, model: "gpt-5.4-mini")
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+        let telemetry = try await priceThroughEngine(session: session)
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["gpt-5.4-mini"])
+        // gpt-5.4-mini: 10 fresh × $0.75 + 20 output × $4.50, per MTok. The
+        // title_generation row is not session usage and is not priced.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.0000975, accuracy: 1e-12)
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD, "priced end to end")
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
     }
 
     /// `session_model_usage` sums several requests into one row. Two 150K requests
