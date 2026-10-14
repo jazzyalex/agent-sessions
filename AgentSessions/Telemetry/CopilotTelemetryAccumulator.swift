@@ -35,6 +35,11 @@ struct CopilotTelemetryAccumulator {
     private var sawAnyRecord = false
     private var sawModelMetrics = false
     private var sawTokenDetails = false
+    /// A `tokenDetails` fallback carried tokens; see `consumeShutdown`.
+    private var pricedWholeProcessTotal = false
+
+    static let wholeProcessTotalCostUnavailableReason =
+        "Copilot recorded only a whole-process token total, which cannot be attributed to one model."
 
     mutating func consume(line: String, index: Int) {
         guard let obj = ClaudeRunwayLog.jsonObject(line),
@@ -77,10 +82,22 @@ struct CopilotTelemetryAccumulator {
                 guard let entry = raw as? [String: Any],
                       let usage = entry["usage"] as? [String: Any] else { continue }
                 func int(_ key: String) -> Int { Int(ClaudeRunwayLog.double(usage[key]) ?? 0) }
-                let fresh = int("inputTokens")
                 let cacheRead = int("cacheReadTokens")
                 let write = int("cacheWriteTokens")
                 let output = int("outputTokens")
+                // `usage.inputTokens` INCLUDES cache reads and writes: in real
+                // records `inputTokens == tokenDetails.input + cache_read +
+                // cache_write`. Billing it as fresh input counts the cache twice.
+                // The entry's own `tokenDetails.input` is the fresh count when
+                // present; otherwise take both cache counts out of the total.
+                let fresh: Int
+                if let nested = entry["tokenDetails"] as? [String: Any],
+                   let input = nested["input"] as? [String: Any],
+                   let count = ClaudeRunwayLog.double(input["tokenCount"]) {
+                    fresh = Int(count)
+                } else {
+                    fresh = max(0, int("inputTokens") - cacheRead - write)
+                }
                 // The gate is "did this entry actually produce tokens", NOT "did the
                 // `usage` key parse". A `usage` block that is empty — or present with
                 // every value zero — is not a breakdown, and treating it as one marks
@@ -137,6 +154,11 @@ struct CopilotTelemetryAccumulator {
                          effort: timeline.effort,
                          speed: RunwaySpeedTier.standard.rawValue)
         if fresh + cacheRead + cacheWrite + output > 0 {
+            // A whole-process total stamped with the process's current model: a
+            // process that switched models would be priced entirely at the last
+            // one (spec §6.3, the same refusal as Kimi's session summary). Tokens
+            // still display; the cost is refused.
+            pricedWholeProcessTotal = true
             events.append(TelemetryUsageEvent(
                 recordID: "session.shutdown.tokenDetails:\(anchorLine)",
                 observedAt: observedAt, anchorLine: anchorLine,
@@ -162,7 +184,10 @@ struct CopilotTelemetryAccumulator {
                                     // Not a conflict: the two shapes come from
                                     // different processes in a resumed session, and
                                     // within one record only one of them is read.
-                                    usageFamilyConflict: false)
+                                    usageFamilyConflict: false,
+                                    costUnavailableReason: pricedWholeProcessTotal
+                                        ? Self.wholeProcessTotalCostUnavailableReason
+                                        : nil)
             : nil
 
         return SessionTelemetry(source: .copilot,

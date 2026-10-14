@@ -88,18 +88,103 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
 
     // MARK: - Usage
 
+    /// `usage.inputTokens` INCLUDES cache reads and writes (in every local record,
+    /// `inputTokens == tokenDetails.input + cache_read + cache_write`), so the fresh
+    /// part is what remains after both are taken out.
     func testPerModelMetricsProduceSlices() {
         let t = CopilotTelemetryAccumulator.accumulate(lines: [
             modelChange(new: "gpt-5-mini"),
             shutdownWithModelMetrics(["gpt-4.1": ["input": 1000, "output": 50, "cacheRead": 800]])
         ])
-        XCTAssertEqual(slice(t, model: "gpt-4.1")?.freshInputTokens, 1000)
+        XCTAssertEqual(slice(t, model: "gpt-4.1")?.freshInputTokens, 200)
         XCTAssertEqual(slice(t, model: "gpt-4.1")?.outputTokens, 50)
         XCTAssertEqual(slice(t, model: "gpt-4.1")?.cacheReadTokens, 800)
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.modelMetrics"])
         XCTAssertEqual(t.usageEvents.first?.usageFamily, "session.shutdown.modelMetrics")
         XCTAssertNil(t.usageEvents.first?.contextInputTokens,
                      "a process-lifetime summary is not a request context")
+        XCTAssertEqual(t.usageEvents.first?.freshInputTokens, 200)
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 1050, "200 fresh + 800 cache read + 50 output")
+    }
+
+    /// A real Copilot 1.0.x record (claude-haiku-4.5). The per-model entry carries its
+    /// own `tokenDetails`, whose `input` is the fresh count; it wins over the
+    /// subtraction. Billing `inputTokens` as fresh would count 42,858 cache tokens twice.
+    func testPerModelCacheTokensAreNotCountedTwice() {
+        let record = json(["type": "session.shutdown", "timestamp": "2026-10-13T10:00:00.000Z",
+                           "data": ["currentModel": "claude-haiku-4.5",
+                                    "modelMetrics": ["claude-haiku-4.5": [
+                                        "usage": ["inputTokens": 42873, "outputTokens": 289,
+                                                  "cacheReadTokens": 20631, "cacheWriteTokens": 22227,
+                                                  "reasoningTokens": 120],
+                                        "tokenDetails": ["input": ["tokenCount": 15],
+                                                         "cache_read": ["tokenCount": 20631],
+                                                         "cache_write": ["tokenCount": 22227],
+                                                         "output": ["tokenCount": 289]]]]]])
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [modelChange(new: "claude-haiku-4.5"), record])
+        let s = slice(t, model: "claude-haiku-4.5")
+        XCTAssertEqual(s?.freshInputTokens, 15)
+        XCTAssertEqual(s?.cacheReadTokens, 20631)
+        XCTAssertEqual(s?.cacheWrite5mTokens, 22227)
+        XCTAssertEqual(t.usageEvents.first?.freshInputTokens, 15)
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 15 + 20631 + 22227 + 289)
+    }
+
+    /// Without the nested `tokenDetails`, fresh input is `inputTokens` minus both
+    /// cache counts — never below zero.
+    func testPerModelFreshInputFallsBackToSubtractingCacheTokens() {
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [
+            modelChange(new: "claude-haiku-4.5"),
+            shutdownWithModelMetrics(["claude-haiku-4.5": ["input": 42873, "output": 289,
+                                                           "cacheRead": 20631, "cacheWrite": 22227]]),
+            shutdownWithModelMetrics(["gpt-5-mini": ["input": 10, "output": 1, "cacheRead": 50]])
+        ])
+        XCTAssertEqual(slice(t, model: "claude-haiku-4.5")?.freshInputTokens, 15)
+        XCTAssertEqual(slice(t, model: "gpt-5-mini")?.freshInputTokens, 0,
+                       "a malformed record cannot produce negative input")
+    }
+
+    /// The per-model shape names its model on the record, so it may be priced.
+    func testPerModelMetricsLeaveCostAvailable() {
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [
+            modelChange(new: "gpt-5-mini"),
+            shutdownWithModelMetrics(["gpt-5-mini": ["input": 100, "output": 10]])
+        ])
+        XCTAssertNil(t.usageSummary?.costUnavailableReason)
+    }
+
+    /// `tokenDetails` is a whole-process total. Stamping it with `currentModel` is the
+    /// pattern spec §6.3 refuses for Kimi: a process that switched models would be
+    /// priced entirely at the last one. Tokens still display; the cost is refused.
+    func testTokenDetailsFallbackRefusesACost() {
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [
+            modelChange(new: "gpt-5-mini"),
+            shutdownWithTokenDetails(currentModel: "gpt-5-mini", input: 100, output: 15, cacheRead: 5)
+        ])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 120, "tokens still display")
+        XCTAssertNil(t.usageSummary?.unavailableReason)
+        XCTAssertNotNil(t.usageSummary?.costUnavailableReason)
+    }
+
+    /// A resumed session where one process wrote only the session total: the whole
+    /// figure is refused, never a partial sum.
+    func testOneTokenDetailsProcessRefusesTheWholeSessionCost() {
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [
+            modelChange(new: "gpt-5-mini"),
+            shutdownWithModelMetrics(["gpt-5-mini": ["input": 100, "output": 10]]),
+            shutdownWithTokenDetails(currentModel: "gpt-5-mini", input: 50, output: 5)
+        ])
+        XCTAssertNotNil(t.usageSummary?.costUnavailableReason)
+    }
+
+    /// An all-zero session total spent nothing, so there is nothing to refuse.
+    func testAllZeroTokenDetailsDoesNotRefuseACost() {
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [
+            modelChange(new: "gpt-5-mini"),
+            shutdownWithModelMetrics(["gpt-5-mini": ["input": 100, "output": 10]]),
+            shutdownWithTokenDetails(currentModel: "gpt-5-mini", input: 0, output: 0)
+        ])
+        XCTAssertNil(t.usageSummary?.costUnavailableReason)
     }
 
     /// `tokenDetails` and `modelMetrics.usage` describe the SAME tokens. Reading
@@ -232,7 +317,8 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
         let lines = try String(contentsOf: url, encoding: .utf8)
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let t = CopilotTelemetryAccumulator.accumulate(lines: lines)
-        XCTAssertEqual(slice(t, model: "gpt-4.1")?.freshInputTokens, 1000)
+        XCTAssertEqual(slice(t, model: "gpt-4.1")?.freshInputTokens, 200,
+                       "inputTokens 1000 includes the 800 cache-read tokens")
         XCTAssertEqual(slice(t, model: "gpt-4.1")?.cacheReadTokens, 800)
     }
 }
