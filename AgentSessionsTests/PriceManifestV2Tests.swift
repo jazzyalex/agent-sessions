@@ -361,4 +361,21 @@ final class PriceManifestV2Tests: XCTestCase {
     func testUnknownProviderHasNoRevision() {
         XCTAssertEqual(RunwayPriceTable.makeForTesting().rateRevision(forProvider: "gemini"), 0)
     }
+
+    // MARK: - Evidence strings
+
+    func testEvidenceStringsResolveAgainstTheBundledTable() {
+        let s = RunwayPriceTable.makeForTesting().snapshot()
+        for raw in ["anthropic/claude-sonnet-5", "openai/gpt-5.5", "claude-haiku-4.5",
+                    "Claude Sonnet 4.6 (Thinking)",
+                    "z-ai/glm-5.3-flash", "minimax-m2.5-free", "kimi-k2.7-code",
+                    "grok-4.6",
+                    "muse-spark-1.3-contributor-free"] {
+            XCTAssertNotNil(s.resolvedPrice(forModel: raw), raw)
+        }
+        for raw in ["big-pickle", "x-preview-f-free", "gateway-injected", "coder-model",
+                    "qwen3.5-9b", "kimi-k2.7-code-v2"] {
+            XCTAssertNil(s.resolvedPrice(forModel: raw), raw)
+        }
+    }
 }
