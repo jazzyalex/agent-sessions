@@ -173,6 +173,11 @@ tools/release/deploy release <VERSION> [--dry-run]
 tools/release/deploy verify <VERSION>
 ```
 
+## After the Release Is Published
+
+- Set `sequence` and `fingerprint` in `docs/prices-v2.released.json` to the values the released build bundles (`RunwayPriceTable.makeForTesting().sequence` and `.manifestFingerprint`), in a commit of its own. Ordinary price edits never touch that file. `testSequenceIsRaisedWheneverTheManifestDiffersFromTheLastRelease` then forces a higher `sequence` on the next edit of any byte of `docs/prices-v2.json`.
+- Make sure `docs/prices-v2.json` is live on the docs site before or with the app release.
+
 ## Failure Handling
 
 - First stop: `docs/deployment.md` → Troubleshooting, logs, and rollback guidance.

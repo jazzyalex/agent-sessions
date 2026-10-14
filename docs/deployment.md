@@ -83,6 +83,11 @@ tools/release/deploy release 2.8
 
 # 7. Verify deployment (runs automatically, but can re-run)
 tools/release/deploy verify 2.8
+
+# 8. After the release is published: record the released price manifest.
+#    Set sequence and fingerprint in docs/prices-v2.released.json to the values
+#    the released build bundles (RunwayPriceTable.makeForTesting().sequence and
+#    .manifestFingerprint), in a commit of its own.
 ```
 
 ### Quick Patch Release

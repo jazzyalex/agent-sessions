@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- **API-equivalent cost for eight more agents.** Session Info now shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions when the model has a published first-party price and the session records enough evidence to price it. Free routes are priced at the base model's list rate and labeled as such. A session without enough evidence shows a stated reason instead of a number.
+
 ## [5.6] - 2026-10-07
 
 ### Highlights
