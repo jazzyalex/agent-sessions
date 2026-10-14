@@ -373,9 +373,25 @@ final class PriceManifestV2Tests: XCTestCase {
                     "muse-spark-1.3-contributor-free"] {
             XCTAssertNotNil(s.resolvedPrice(forModel: raw), raw)
         }
+        XCTAssertEqual(s.resolvedPrice(forModel: "muse-spark-1.3-contributor-free")?.price.inputPerMTok, 1.25)
+        XCTAssertEqual(s.resolvedPrice(forModel: "z-ai/glm-5.3-flash")?.price.inputPerMTok, 0.15)
         for raw in ["big-pickle", "x-preview-f-free", "gateway-injected", "coder-model",
-                    "qwen3.5-9b", "kimi-k2.7-code-v2"] {
+                    "qwen3.5-9b", "kimi-k2.7-code-v2",
+                    "Gemini 3.5 Flash (Medium)", "cline-free/deepseek-v4.1-flash"] {
             XCTAssertNil(s.resolvedPrice(forModel: raw), raw)
         }
+    }
+
+    /// xAI bills the higher tier once the prompt reaches 200k tokens; the manifest
+    /// threshold is exclusive, so it is encoded as 199999.
+    func testGrokLongContextTierStartsAtTwoHundredThousandTokens() throws {
+        let grok = try XCTUnwrap(RunwayPriceTable.makeForTesting().snapshot().price(forModel: "grok-4.6"))
+        let below = try XCTUnwrap(grok.rates(for: .standard, contextInputTokens: 199_999))
+        XCTAssertEqual(below.inputPerMTok, 2.0)
+        XCTAssertEqual(below.cachedInputPerMTok, 0.5)
+        let at = try XCTUnwrap(grok.rates(for: .standard, contextInputTokens: 200_000))
+        XCTAssertEqual(at.inputPerMTok, 4.0)
+        XCTAssertEqual(at.cachedInputPerMTok, 1.0)
+        XCTAssertEqual(at.outputPerMTok, 12.0)
     }
 }

@@ -404,3 +404,19 @@ every alias target exists; `codex-auto-review` matching is pinned.
 - Hermes per-request usage, which would restore `gpt-5.4` and `gpt-5.5`.
 - Retiring `docs/prices.json` once v1 clients are gone.
 - Showing native recorded cost.
+- Skipped price rows (vendor pages read 2026-10-14):
+  - `gemini-3.5-flash`, `gemini-3.7-flash`: Google publishes no price for these
+    ids. Its deprecations page routes them to `gemini-3.6-flash` and
+    `gemini-3.8-flash`.
+  - `deepseek-flash` / `deepseek-v4.1-flash`: DeepSeek prices by time of day
+    (peak and off-peak), and the schema cannot express that.
+    `deepseek-v4.1-flash` is a model version name, not an API id.
+  - `grok-code`: not an xAI API id. Only `grok-code-fast-1` and its aliases
+    exist.
+- Gemini 3.6 Flash and 3.8 Flash rates are published as valid through
+  2026-12-31. From 2027-01-01 they double to $1.50 / $0.15 / $7.50. On
+  2027-01-01, update both manifests and raise `sequence`.
+- Muse Spark: `muse-spark-1.3-contributor-free` is priced at the Standard rate,
+  as in the resolver example. Meta publishes `muse-spark-1.3-contributor` at
+  $0.10 / $0.002 / $0.20, and `cline-free/muse-spark-1.3-contributor` stays
+  unpriced. The owner decides which rate a contributor route uses.
