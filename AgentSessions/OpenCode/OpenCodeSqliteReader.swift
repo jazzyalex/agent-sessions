@@ -458,7 +458,10 @@ struct OpenCodeSqliteReader {
                 continue
             }
 
-            let model = row.model ?? metadataModel
+            // Price-bearing evidence: only the row's own model. Session metadata holds
+            // the *current* model, so borrowing it would price an older request at a
+            // later model's rate. A nil model makes the calculator refuse the figure.
+            let model = row.model
             let speed = "standard-normalized"
             events.append(TelemetryUsageEvent(
                 recordID: row.id.isEmpty ? nil : row.id,

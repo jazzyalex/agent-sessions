@@ -344,6 +344,43 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(metrics.snapshot.cacheHitCount, 0)
     }
 
+    func testOpenCodeUsageRowWithoutModelIsNotStampedWithSessionMetadataModel() throws {
+        let dbURL = directory.appendingPathComponent("opencode.db")
+        try createOpenCodeTelemetryFixture(at: dbURL)
+        // Session metadata holds the CURRENT model (model-b). The first assistant row
+        // carries no model of its own; the second names model-b explicitly.
+        try executeSQLite("""
+        ALTER TABLE session ADD COLUMN model TEXT;
+        UPDATE session SET model = '{"id":"model-b"}' WHERE id = 'session-a';
+        UPDATE message
+        SET data = '{"role":"assistant","tokens":{"input":3,"output":2,"total":5}}'
+        WHERE id = 'message-a';
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('message-a2', 'session-a', 1001, 1001,
+                '{"role":"assistant","modelID":"model-b","tokens":{"input":4,"output":2,"total":6}}');
+        """, at: dbURL)
+
+        let scan = try XCTUnwrap(OpenCodeSqliteReader.loadTelemetry(
+            for: session(dbURL, source: .opencode, id: "session-a")))
+        let telemetry = scan.result.telemetry
+        let events = telemetry.usageEvents
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events.map(\.recordID), ["message-a", "message-a2"])
+        XCTAssertNil(events[0].model,
+                     "session metadata is the current model; it must not be stamped on an older row")
+        XCTAssertEqual(events[1].model, "model-b")
+
+        // The slice built from the same rows uses the same row-only model.
+        let sliceModels = telemetry.usageSlices.map(\.model)
+        XCTAssertEqual(sliceModels.count, 2)
+        XCTAssertTrue(sliceModels.contains { $0 == nil })
+        XCTAssertTrue(sliceModels.contains { $0 == "model-b" })
+
+        // Configuration display still falls back to metadata.
+        XCTAssertEqual(telemetry.currentConfiguration?.model, "model-b")
+        XCTAssertEqual(telemetry.currentConfiguration?.modelProvenance, .sessionMetadata)
+    }
+
     func testOpenCodeTelemetryCacheInvalidatesWhenLogicalSessionRevisionChanges() async throws {
         let dbURL = directory.appendingPathComponent("opencode.db")
         try createOpenCodeTelemetryFixture(at: dbURL)
