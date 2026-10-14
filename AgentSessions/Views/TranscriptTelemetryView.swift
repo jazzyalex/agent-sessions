@@ -223,26 +223,32 @@ enum TranscriptTelemetryPresentation {
         if case let .unavailable(reason) = capability {
             return .absent(localized("Pricing unavailable: \(reason)", locale: locale))
         }
-        let unpriced = (telemetry.costEstimate?.unpricedModels ?? []).map(unpricedReason(forModel:))
+        let unpriced = (telemetry.costEstimate?.unpricedModels ?? []).map {
+            unpricedReason(forModel: $0, locale: locale)
+        }
         let missing = telemetry.costEstimate?.missingPriceComponents ?? []
         if unpriced.isEmpty && missing.isEmpty {
             return .absent(localized("No priceable usage was recorded in this transcript.", locale: locale))
         }
-        let parts = unpriced + (missing.isEmpty ? [] : ["No price entry for: \(missing.joined(separator: ", "))"])
+        let parts = unpriced + (missing.isEmpty ? [] : [
+            localized("No price entry for: \(missing.joined(separator: ", "))", locale: locale)
+        ])
         return .absent(parts.joined(separator: ". "))
     }
 
     /// Local models carry a parameter-count tag (`qwen3.5-9b`); unreleased models
     /// are known code names. Everything else is simply a missing row.
-    static func unpricedReason(forModel slug: String) -> String {
+    static func unpricedReason(forModel slug: String, locale: Locale = .current) -> String {
         let lower = slug.lowercased()
         let unreleased: Set<String> = ["big-pickle", "x-preview-f", "x-preview-f-free",
                                        "gateway-injected", "coder-model"]
-        if unreleased.contains(lower) { return "No published price for unreleased model: \(slug)" }
-        if lower.range(of: #"-\d+(\.\d+)?b$"#, options: .regularExpression) != nil {
-            return "No published price for local model: \(slug)"
+        if unreleased.contains(lower) {
+            return localized("No published price for unreleased model: \(slug)", locale: locale)
         }
-        return "No price entry for: \(slug)"
+        if lower.range(of: #"-\d+(\.\d+)?b$"#, options: .regularExpression) != nil {
+            return localized("No published price for local model: \(slug)", locale: locale)
+        }
+        return localized("No price entry for: \(slug)", locale: locale)
     }
 
     static func inferenceGeoValue(_ inferenceGeo: String?, locale: Locale = .current) -> Value {

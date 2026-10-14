@@ -12256,6 +12256,23 @@
         }
       }
     },
+    "List price. This session ran on a free route.": {
+      "comment": "Session info tooltip note appended to the API price estimate when the session ran on a free or promotional route.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List price. This session ran on a free route."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按标价计算。此会话使用了免费线路。"
+          }
+        }
+      }
+    },
     "Live Session Context": {
       "localizations": {
         "en": {
@@ -13446,6 +13463,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "未显示任何提供商"
+          }
+        }
+      }
+    },
+    "No published price for local model: %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No published price for local model: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地模型没有公开价格：%@"
+          }
+        }
+      }
+    },
+    "No published price for unreleased model: %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No published price for unreleased model: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未发布模型没有公开价格：%@"
           }
         }
       }

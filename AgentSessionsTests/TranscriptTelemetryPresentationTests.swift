@@ -302,11 +302,11 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
     }
 
     func testUnpricedReasonsAreSpecific() {
-        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "qwen3.5-9b"),
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "qwen3.5-9b", locale: Locale(identifier: "en_US")),
                        "No published price for local model: qwen3.5-9b")
-        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "big-pickle"),
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "big-pickle", locale: Locale(identifier: "en_US")),
                        "No published price for unreleased model: big-pickle")
-        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "acme-9"),
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "acme-9", locale: Locale(identifier: "en_US")),
                        "No price entry for: acme-9")
     }
 
