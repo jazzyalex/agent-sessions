@@ -1260,24 +1260,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
 
     // MARK: - Price manifest
 
-    /// The served manifest overwrites the compiled-in table whenever its `updated` is
-    /// not older. If a new rate reaches only one of the two, a refresh silently
-    /// reverts it — and a session whose model then has no fast rates drops out of `$`.
-    func testServedManifestMatchesTheBundledTable() throws {
-        let servedURL = FixturePaths.repoRootURL()
-            .appendingPathComponent("docs", isDirectory: true)
-            .appendingPathComponent("prices.json")
-        let served = try JSONSerialization.jsonObject(with: Data(contentsOf: servedURL)) as? [String: Any]
-        let bundled = try JSONSerialization.jsonObject(
-            with: Data(RunwayPriceTable.bundledJSON.utf8)) as? [String: Any]
-
-        XCTAssertEqual(served?["version"] as? Int, bundled?["version"] as? Int)
-        XCTAssertEqual(served?["updated"] as? String, bundled?["updated"] as? String,
-                       "both copies must advance together")
-        XCTAssertEqual(NSDictionary(dictionary: (served?["models"] as? [String: Any]) ?? [:]),
-                       NSDictionary(dictionary: (bundled?["models"] as? [String: Any]) ?? [:]),
-                       "every rate must reach both the served manifest and the bundled table")
-    }
+    // Served-manifest vs bundled-table guards live in PriceManifestV2Tests.
 
     // MARK: - Helpers
 

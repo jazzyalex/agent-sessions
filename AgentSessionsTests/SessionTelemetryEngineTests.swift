@@ -1318,8 +1318,8 @@ final class SessionTelemetryEngineTests: XCTestCase {
             $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
         })
         let prices = RunwayPriceTable.makeForTesting()
-        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
-        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
+        let firstManifest = Data(#"{"version":2,"sequence":9999999998,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
         XCTAssertTrue(prices.loadForTesting(json: firstManifest))
         let refreshOnce = OneShotAction {
             _ = prices.loadForTesting(json: secondManifest)
@@ -1348,7 +1348,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         let first = try XCTUnwrap(firstValue)
         let firstRevision = try XCTUnwrap(first.costEstimate?.priceTableRevision)
 
-        let replacement = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":10}}}"#.utf8)
+        let replacement = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":10}}}"#.utf8)
         XCTAssertTrue(prices.loadForTesting(json: replacement))
         let secondValue = await engine.telemetry(for: session(url, source: .codex))
         let second = try XCTUnwrap(secondValue)
@@ -1363,8 +1363,8 @@ final class SessionTelemetryEngineTests: XCTestCase {
             $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
         })
         let prices = RunwayPriceTable.makeForTesting()
-        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
-        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let firstManifest = Data(#"{"version":2,"sequence":9999999998,"updated":"2098-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
         XCTAssertTrue(prices.loadForTesting(json: firstManifest))
         let semanticRevision = prices.revision
         let engine = SessionTelemetryEngine(priceTable: prices)
@@ -1388,8 +1388,8 @@ final class SessionTelemetryEngineTests: XCTestCase {
             $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.5")
         })
         let prices = RunwayPriceTable.makeForTesting()
-        let firstManifest = Data(#"{"version":1,"updated":"2099-01-01","_note":"first","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
-        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","_note":"second","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let firstManifest = Data(#"{"version":2,"sequence":9999999998,"updated":"2099-01-01","_note":"first","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","_note":"second","models":{"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
         XCTAssertTrue(prices.loadForTesting(json: firstManifest))
         let engine = SessionTelemetryEngine(priceTable: prices)
         let firstValue = await engine.telemetry(for: session(url, source: .codex))
@@ -1655,8 +1655,8 @@ final class SessionTelemetryEngineTests: XCTestCase {
         ]
         let url = try write(legacy)
         let prices = RunwayPriceTable.makeForTesting()
-        let firstManifest = Data(#"{"version":1,"updated":"2098-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
-        let secondManifest = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
+        let firstManifest = Data(#"{"version":2,"sequence":9999999998,"updated":"2098-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"cacheWritePerMTok":null}}}"#.utf8)
+        let secondManifest = Data(#"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":null}}}"#.utf8)
         XCTAssertTrue(prices.loadForTesting(json: firstManifest))
         let firstRevision = prices.revision
         let refreshOnce = OneShotAction {

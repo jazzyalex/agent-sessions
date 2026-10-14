@@ -201,6 +201,18 @@ struct RunwayPriceSnapshot: Sendable {
             }
     }
 
+    /// Generic Claude family key (`claude-<family>`) → the versions it may price.
+    /// Bounded to versions whose rates have been verified. Numeric-looking future
+    /// minors must not silently inherit an older family's price (for example
+    /// Fable 5.2 from Fable 5.0).
+    static let knownClaudeVersions: [String: Set<String>] = [
+        "opus": ["4-5", "4-6", "4-7", "4-8", "5"],
+        "sonnet": ["3", "3-5", "4", "4-5", "4-6", "5"],
+        "haiku": ["4-5"],
+        "fable": ["5"],
+        "mythos": ["5"]
+    ]
+
     fileprivate static func isRecognizedClaudeSlug(_ slug: String, extending key: String) -> Bool {
         let suffix = String(slug.dropFirst(key.count))
         guard !suffix.isEmpty, suffix.first == "-" else { return false }
@@ -211,27 +223,17 @@ struct RunwayPriceSnapshot: Sendable {
         let keyParts = key.split(separator: "-")
         let isGenericFamily = keyParts.count == 2
             && keyParts[0] == "claude"
-            && ["opus", "sonnet", "haiku", "fable", "mythos"].contains(keyParts[1])
+            && knownClaudeVersions[String(keyParts[1])] != nil
         if !isGenericFamily {
             return Self.isClaudeDateSuffix(suffix)
         }
 
-        // Generic family aliases are bounded to versions whose rates have been
-        // verified. Numeric-looking future minors must not silently inherit an
-        // older family's price (for example Fable 5.2 from Fable 5.0).
         var parts = suffix.dropFirst().split(separator: "-").map(String.init)
         if parts.last?.count == 8, parts.last?.allSatisfy(\.isNumber) == true {
             parts.removeLast()
         }
         let version = parts.joined(separator: "-")
-        let knownVersions: [String: Set<String>] = [
-            "opus": ["4-5", "4-6", "4-7", "4-8", "5"],
-            "sonnet": ["3", "3-5", "4", "4-5", "4-6", "5"],
-            "haiku": ["4-5"],
-            "fable": ["5"],
-            "mythos": ["5"]
-        ]
-        return knownVersions[String(keyParts[1])]?.contains(version) == true
+        return knownClaudeVersions[String(keyParts[1])]?.contains(version) == true
     }
 
     private static func isClaudeDateSuffix(_ suffix: String) -> Bool {
@@ -251,68 +253,83 @@ struct RunwayPriceSnapshot: Sendable {
 /// canonical manifest identity exposed for verification; telemetry caches pair
 /// `revision` with `updated` so metadata-only manifest changes also invalidate.
 ///
-/// A cached or fetched manifest is only accepted when its `updated` date is at
-/// least as new as the compiled-in table's. Without that check, a client that
-/// cached an older manifest would keep overriding a corrected bundled table
-/// forever (indefinitely, if it's offline or the host still serves the old file).
+/// A cached or fetched manifest is only accepted when its `sequence` is strictly
+/// greater than the loaded table's. Without that check, a client that cached an
+/// older manifest would keep overriding a corrected bundled table forever
+/// (indefinitely, if it's offline or the host still serves the old file).
 ///
 /// `@unchecked Sendable`: lock-guarded mutable state touched from a background
 /// URLSession callback (mirrors `RunwayAggregateBurnHold`).
 final class RunwayPriceTable: @unchecked Sendable {
     static let shared = RunwayPriceTable()
 
-    /// Only manifests declaring this schema version are accepted; an unrecognized
-    /// version is ignored (keeps the current table) so a future schema change
-    /// can't poison old clients.
-    static let supportedVersion = 1
-    private static let manifestURL = URL(string: "https://jazzyalex.github.io/agent-sessions/prices.json")!
+    /// Only schema 2 is accepted. A schema-1 document — the legacy manifest that
+    /// shipped clients still read — is rejected from every source, so it can never
+    /// become the resolver source for a client that matches strictly.
+    static let supportedVersion = 2
+    static let legacyV1FileName = "prices.json"
+    static let cacheFileName = "prices-v2.json"
+    private static let manifestURL = URL(string: "https://jazzyalex.github.io/agent-sessions/prices-v2.json")!
     private static let minRefreshInterval: TimeInterval = 24 * 60 * 60
 
     private let lock = NSLock()
     private var models: [String: RunwayModelPrice] = [:]
+    private var aliases: [String: String] = [:]
     private var _revision = 0
     private var _manifestFingerprint = ""
     private var lastFetchAt: Date?
-    /// `updated` of the table currently in `models`. UTC ISO dates sort
-    /// lexicographically, so a plain string compare is a correct date compare.
+    /// `updated` of the table currently in `models`. Metadata only: it no longer
+    /// orders manifests (`sequence` does), but telemetry stamps it onto results.
     private var loadedUpdated: String = ""
+    /// `sequence` of the table currently loaded. Strictly increases on every edit.
+    private var loadedSequence = 0
+    private var providerRevisions: [String: Int] = [:]
+
+    struct DecodedManifest {
+        let models: [String: RunwayModelPrice]
+        let aliases: [String: String]
+        let updated: String
+        let sequence: Int
+        let semanticRevision: Int
+        let providerRevisions: [String: Int]
+        let manifestFingerprint: String
+    }
 
     init(loadBundled: Bool = true, readCache: Bool = true) {
         if loadBundled, let decoded = Self.decode(Data(Self.bundledJSON.utf8)) {
-            models = decoded.models
-            loadedUpdated = decoded.updated
-            _revision = decoded.semanticRevision
-            _manifestFingerprint = decoded.manifestFingerprint
+            install(decoded)
         }
-        // Overlay a previously fetched manifest unless it predates what we ship.
+        // Overlay a previously fetched manifest only when its sequence is higher.
         if readCache, let data = try? Data(contentsOf: Self.cacheURL()), let decoded = Self.decode(data) {
             adopt(decoded)
         }
     }
 
-    /// The single acceptance rule for every source (cache overlay, network refresh,
-    /// tests): take a manifest unless it is OLDER than the table already loaded.
-    /// Returns false when it was too old and was ignored.
-    ///
-    /// Equal dates are accepted deliberately. The manifest is the correctable source
-    /// of truth, so a same-date re-publish is a correction we want — and requiring
-    /// the cache to be strictly newer would throw such a correction away on the next
-    /// launch, reverting to the very price it fixed. The mirror hazard (a same-date
-    /// cache shadowing a bundled table that a new build silently corrected) is
-    /// prevented by process instead: `docs/prices.json` documents that `updated` MUST
-    /// advance on every edit, and the bundled copy moves with it.
-    @discardableResult
-    private func adopt(_ decoded: (models: [String: RunwayModelPrice], updated: String,
-                                   semanticRevision: Int, manifestFingerprint: String)) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard decoded.updated >= loadedUpdated else { return false }
+    /// Called from `init` without the lock (no other thread can hold the instance
+    /// yet) and from `adopt` under it.
+    private func install(_ decoded: DecodedManifest) {
         models = decoded.models
+        aliases = decoded.aliases
         loadedUpdated = decoded.updated
+        loadedSequence = decoded.sequence
         _revision = decoded.semanticRevision
+        providerRevisions = decoded.providerRevisions
         _manifestFingerprint = decoded.manifestFingerprint
+    }
+
+    /// The single acceptance rule for every source: take a manifest only when its
+    /// `sequence` is strictly greater than the loaded one. Equal sequence keeps the
+    /// loaded table, so a corrected bundle is never shadowed by a cache written
+    /// earlier the same day.
+    @discardableResult
+    private func adopt(_ decoded: DecodedManifest) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard decoded.sequence > loadedSequence else { return false }
+        install(decoded)
         return true
     }
 
+    var sequence: Int { lock.lock(); defer { lock.unlock() }; return loadedSequence }
     var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return models.isEmpty }
     var revision: Int { lock.lock(); defer { lock.unlock() }; return _revision }
     var semanticRevision: Int { revision }
@@ -323,8 +340,8 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     func snapshot() -> RunwayPriceSnapshot {
         lock.lock(); defer { lock.unlock() }
-        return RunwayPriceSnapshot(models: models, updatedDate: loadedUpdated, revision: _revision,
-                                   manifestFingerprint: _manifestFingerprint)
+        return RunwayPriceSnapshot(models: models, aliases: aliases, updatedDate: loadedUpdated,
+                                   revision: _revision, manifestFingerprint: _manifestFingerprint)
     }
 
     /// nil slug or no safe matching key → nil (→ $ unpriceable).
@@ -349,18 +366,26 @@ final class RunwayPriceTable: @unchecked Sendable {
             guard let self,
                   let http = response as? HTTPURLResponse, http.statusCode == 200,
                   let data, let decoded = Self.decode(data) else { return }
-            // Ignore (and don't cache) a manifest older than what we already have —
-            // e.g. the host still serves a file predating this build's bundled table.
+            // Ignore (and don't cache) a manifest whose sequence is not higher than
+            // what we already have — e.g. the host still serves a file predating
+            // this build's bundled table.
             guard self.adopt(decoded) else { return }
-            try? data.write(to: Self.cacheURL(), options: .atomic)
+            Self.persist(data)
         }.resume()
+    }
+
+    /// Writes the v2 cache file only. Never touches `legacyV1FileName`.
+    private static func persist(_ data: Data) {
+        try? data.write(to: cacheURL(), options: .atomic)
     }
 
     // MARK: - Decoding
 
     private struct Manifest: Decodable {
         let version: Int
+        let sequence: Int?
         let updated: String?
+        let aliases: [String: String]?
         let models: [String: RawPrice]
     }
     /// The five rate fields, shared by a model's standard rates and its nested
@@ -393,8 +418,8 @@ final class RunwayPriceTable: @unchecked Sendable {
         }
     }
     /// `cacheWrite1hPerMTok` and `fast` are optional, so this still decodes a
-    /// manifest published before either existed — schema `version` stays 1, and an
-    /// older client simply ignores the new keys.
+    /// row published before either existed; an older client simply ignores the
+    /// new keys.
     private struct RawPrice: Decodable {
         let inputPerMTok: Double
         let cachedInputPerMTok: Double
@@ -414,15 +439,13 @@ final class RunwayPriceTable: @unchecked Sendable {
         }
     }
 
-    /// Returns the model map + its `updated` date, only for a recognized schema
-    /// version; nil otherwise (malformed or unrecognized `version` → caller keeps
-    /// its current table). A manifest with no `updated` sorts oldest, so it can
-    /// never shadow a dated bundled table.
-    private static func decode(_ data: Data)
-        -> (models: [String: RunwayModelPrice], updated: String,
-            semanticRevision: Int, manifestFingerprint: String)? {
+    /// Returns the decoded manifest only for schema 2 with a positive `sequence`;
+    /// nil otherwise (malformed, schema 1, unrecognized `version`, or no
+    /// `sequence` → caller keeps its current table).
+    private static func decode(_ data: Data) -> DecodedManifest? {
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
               manifest.version == supportedVersion,
+              let sequence = manifest.sequence, sequence > 0,
               !manifest.models.isEmpty else { return nil }
         let models = manifest.models.mapValues {
             RunwayModelPrice(standard: $0.standardRateSet,
@@ -430,34 +453,58 @@ final class RunwayPriceTable: @unchecked Sendable {
                              longContext: $0.longContext?.price,
                              inferenceGeoUSMultiplier: $0.inferenceGeoUSMultiplier)
         }
-        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        guard let exactCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
-            return nil
+        // An alias whose target row is missing is dropped rather than failing the
+        // whole manifest; keys are compared lowercased by the resolver.
+        let aliases = (manifest.aliases ?? [:]).reduce(into: [String: String]()) { out, pair in
+            if models[pair.value] != nil { out[pair.key.lowercased()] = pair.value }
         }
+        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exactCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        else { return nil }
         let fingerprint = SHA256.hash(data: exactCanonical).map { String(format: "%02x", $0) }.joined()
         object.removeValue(forKey: "_note")
         object.removeValue(forKey: "updated")
-        guard let semanticCanonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
-            return nil
-        }
-        let digest = SHA256.hash(data: semanticCanonical)
-        let stableRevision = digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-            & UInt64(Int.max)
-        return (models, manifest.updated ?? "", Int(stableRevision), fingerprint)
+        object.removeValue(forKey: "sequence")
+        guard let semantic = stableHash(object) else { return nil }
+        return DecodedManifest(models: models, aliases: aliases, updated: manifest.updated ?? "",
+                               sequence: sequence, semanticRevision: semantic,
+                               providerRevisions: [:],   // filled in Task 4
+                               manifestFingerprint: fingerprint)
+    }
+
+    private static func stableHash(_ object: Any) -> Int? {
+        guard let canonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        else { return nil }
+        let digest = SHA256.hash(data: canonical)
+        return Int(digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) } & UInt64(Int.max))
     }
 
     private static func cacheURL() -> URL {
+        #if DEBUG
+        if let override = cacheDirectoryOverride {
+            return override.appendingPathComponent(cacheFileName)
+        }
+        #endif
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("AgentSessions", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("prices.json")
+        return dir.appendingPathComponent(cacheFileName)
     }
 
     #if DEBUG
+    /// Test seam: when set, `cacheURL()` resolves inside this directory instead of
+    /// Application Support.
+    static var cacheDirectoryOverride: URL?
+
+    /// Test seam: the same write `refreshInBackground` performs after adopting.
+    func persistForTesting(_ data: Data) {
+        Self.persist(data)
+    }
+
     /// Test seam: load a manifest from raw JSON (bypassing the network/cache).
-    /// Returns true if accepted — applies the same version + `updated`-date rules
+    /// Returns true if accepted — applies the same version + `sequence` rules
     /// as the real cache/network paths, so tests exercise production acceptance.
     @discardableResult
     func loadForTesting(json: Data) -> Bool {
@@ -468,14 +515,16 @@ final class RunwayPriceTable: @unchecked Sendable {
     static func makeEmptyForTesting() -> RunwayPriceTable { RunwayPriceTable(loadBundled: false, readCache: false) }
     #endif
 
-    /// Compiled-in default snapshot. Also published at `docs/prices.json` for the
-    /// refresh — the two MUST stay identical, because whichever is newer wins outright
-    /// and a rate that reaches only one of them is silently reverted by the other.
+    /// Compiled-in default snapshot. Also published at `docs/prices-v2.json` for the
+    /// refresh — the two MUST stay identical, because whichever has the higher
+    /// `sequence` wins outright and a rate that reaches only one of them is silently
+    /// reverted by the other. Claude, GPT and codex-auto-review rows must also stay
+    /// identical in the legacy schema-1 `docs/prices.json`.
     /// Verified 2026-09-09 against the official pricing pages
     /// (platform.claude.com/docs/en/about-claude/pricing and
     /// developers.openai.com/api/docs/pricing). Keyed by tier so longest-prefix
     /// resolves every generation (`claude-sonnet` → claude-sonnet-5, `gpt-5.6-sol`
-    /// exact, `gpt-5` → any other gpt-5.x). Correct via docs/prices.json — no rebuild.
+    /// exact, `gpt-5` → any other gpt-5.x). Correct via docs/prices-v2.json — no rebuild.
     ///
     /// `cachedInputPerMTok` = cache-hit read (0.1× input). `cacheWritePerMTok` =
     /// 5-minute cache write (1.25× input); `cacheWrite1hPerMTok` = 1-hour cache write
@@ -491,9 +540,11 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// stays at $3/$15 for Sonnet 4.x.
     static let bundledJSON = """
     {
-      "version": 1,
-      "updated": "2026-10-11",
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 uses the published Sonnet 5 rates: $2/$10 input/output, $0.20 cache reads, and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
+      "version": 2,
+      "sequence": 2026101301,
+      "updated": "2026-10-13",
+      "aliases": {},
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 uses the published Sonnet 5 rates: $2/$10 input/output, $0.20 cache reads, and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json.",
       "models": {
         "claude-opus-5-5": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 8.0, "inferenceGeoUSMultiplier": 1.1,
                             "fast": { "inputPerMTok": 8.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 40.0, "cacheWritePerMTok": 10.0, "cacheWrite1hPerMTok": 16.0 } },

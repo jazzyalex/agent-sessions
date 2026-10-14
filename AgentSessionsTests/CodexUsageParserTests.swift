@@ -4647,7 +4647,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(weekly.snapshot.rows.first).displayRate, 11.52, accuracy: 0.000001)
 
         // A cached pre-Astra manifest must not remove the new model after restart.
-        let old = #"{"version":1,"updated":"2026-09-03","models":{"gpt-5.6-sol":{"inputPerMTok":4,"cachedInputPerMTok":0.4,"outputPerMTok":20}}}"#
+        let old = #"{"version":2,"sequence":1,"updated":"2026-09-03","models":{"gpt-5.6-sol":{"inputPerMTok":4,"cachedInputPerMTok":0.4,"outputPerMTok":20}}}"#
         XCTAssertFalse(table.loadForTesting(json: Data(old.utf8)))
         XCTAssertEqual(table.price(forModel: "gpt-6-astra"), price)
     }
@@ -4833,12 +4833,15 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertFalse(t.loadForTesting(json: Data("not json".utf8)))
         let futureVersion = #"{"version":999,"models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0,"outputPerMTok":1}}}"#
         XCTAssertFalse(t.loadForTesting(json: Data(futureVersion.utf8)))
+        let schemaOne = #"{"version":1,"updated":"2099-01-01","models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        XCTAssertFalse(t.loadForTesting(json: Data(schemaOne.utf8)),
+                       "schema 1 is the legacy manifest and must be rejected")
         XCTAssertEqual(t.revision, before, "rejected manifests must not change the table")
-        // Undated manifests sort oldest and are refused, so a live manifest must
-        // carry an `updated` at least as new as the bundled table's.
-        let undated = #"{"version":1,"models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        // An undated manifest whose sequence is not higher than the bundled table's
+        // is refused: only `sequence` orders manifests.
+        let undated = #"{"version":2,"sequence":1,"models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
         XCTAssertFalse(t.loadForTesting(json: Data(undated.utf8)))
-        let ok = #"{"version":1,"updated":"2099-01-01","models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        let ok = #"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
         XCTAssertTrue(t.loadForTesting(json: Data(ok.utf8)))
         XCTAssertEqual(t.price(forModel: "zzz-model")?.inputPerMTok, 9)
         XCTAssertNotEqual(t.revision, before)
@@ -4847,13 +4850,14 @@ final class CodexUsageParserTests: XCTestCase {
     func testPriceRevisionIsStableForEquivalentManifestContent() {
         let a = RunwayPriceTable.makeEmptyForTesting()
         let b = RunwayPriceTable.makeEmptyForTesting()
-        let compact = #"{"version":1,"updated":"2099-01-01","models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":5}}}"#
+        let compact = #"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":5}}}"#
         let formatted = """
         {
           "models": { "x": { "outputPerMTok": 5, "cachedInputPerMTok": 0.1, "inputPerMTok": 1 } },
           "_note": "comment-only differences do not invalidate calibration",
           "updated": "2099-02-01",
-          "version": 1
+          "version": 2,
+          "sequence": 9999999999
         }
         """
         XCTAssertTrue(a.loadForTesting(json: Data(compact.utf8)))
@@ -5244,13 +5248,13 @@ final class CodexUsageParserTests: XCTestCase {
 
     /// A stale cached manifest must never shadow a corrected bundled table.
     func testPriceTableIgnoresOlderCachedManifest() {
-        let t = RunwayPriceTable.makeForTesting()   // bundled, updated 2026-08-26
+        let t = RunwayPriceTable.makeForTesting()   // bundled sequence
         let opusBefore = t.price(forModel: "claude-opus-4-8")?.outputPerMTok
-        let stale = #"{"version":1,"updated":"2020-01-01","models":{"claude-opus":{"inputPerMTok":99,"cachedInputPerMTok":9,"outputPerMTok":999}}}"#
+        let stale = #"{"version":2,"sequence":1,"updated":"2020-01-01","models":{"claude-opus":{"inputPerMTok":99,"cachedInputPerMTok":9,"outputPerMTok":999}}}"#
         XCTAssertFalse(t.loadForTesting(json: Data(stale.utf8)),
                        "a manifest older than the bundled table must be rejected")
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, opusBefore)
-        let newer = #"{"version":1,"updated":"2099-01-01","models":{"claude-opus":{"inputPerMTok":7,"cachedInputPerMTok":1,"outputPerMTok":33}}}"#
+        let newer = #"{"version":2,"sequence":9999999999,"updated":"2099-01-01","models":{"claude-opus":{"inputPerMTok":7,"cachedInputPerMTok":1,"outputPerMTok":33}}}"#
         XCTAssertTrue(t.loadForTesting(json: Data(newer.utf8)))
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 33)
     }

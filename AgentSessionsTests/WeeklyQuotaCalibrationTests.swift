@@ -2192,8 +2192,15 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         try writeTranscript(outputTokens: 100_000, resetsAt: resetsAt, at: t0,
                             model: "gpt-6-astra", name: "astra.jsonl")
         let prices = RunwayPriceTable.makeForTesting()
-        let corrected = Data(RunwayPriceTable.bundledJSON.utf8)
-        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: corrected) as? [String: Any])
+        // Each successive accepted manifest needs a strictly higher sequence than
+        // the one loaded before it: bundle < old < corrected.
+        let bundledSequence = RunwayPriceTable.makeForTesting().sequence
+        var correctedObject = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(RunwayPriceTable.bundledJSON.utf8)) as? [String: Any])
+        correctedObject["sequence"] = bundledSequence + 2
+        let corrected = try JSONSerialization.data(withJSONObject: correctedObject)
+        var old = correctedObject
+        old["sequence"] = bundledSequence + 1
         var models = try XCTUnwrap(old["models"] as? [String: Any])
         models.removeValue(forKey: "gpt-6.1-sol")
         old["models"] = models
@@ -2272,7 +2279,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0))
 
         let replacement = Data("""
-        {"version":1,"updated":"9999-12-31","models":{"gpt-5.6":{"inputPerMTok":1,"cachedInputPerMTok":1,"outputPerMTok":1}}}
+        {"version":2,"sequence":9999999999,"updated":"9999-12-31","models":{"gpt-5.6":{"inputPerMTok":1,"cachedInputPerMTok":1,"outputPerMTok":1}}}
         """.utf8)
         XCTAssertTrue(prices.loadForTesting(json: replacement))
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
