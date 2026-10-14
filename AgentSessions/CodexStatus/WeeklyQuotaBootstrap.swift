@@ -318,7 +318,9 @@ enum CodexWeeklyQuotaBootstrapScanner {
             windowStart: windowStart,
             resetsAt: resetsAt,
             scannedAt: now,
-            priceRevision: priceSnapshot.revision,
+            // Stamped from the same snapshot that priced the scan, so a background
+            // manifest refresh cannot pair these dollars with another table's revision.
+            priceRevision: priceSnapshot.rateRevision(forProvider: "codex"),
             activityAccountingRevision: WeeklyQuotaBootstrapResult.codexActivityAccountingRevision,
             accountHash: expectedAccountHash,
             accountAttributionSafe: !usedAccountUnidentifiedActivity
@@ -567,6 +569,10 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
         }
         let windowStart = resetsAt.addingTimeInterval(-Double(windowMinutes) * 60)
         guard windowStart < now else { return nil }
+        // One captured snapshot prices every record AND stamps the result, so a
+        // background manifest refresh mid-scan cannot pair these dollars with
+        // another table's revision.
+        let priceSnapshot = priceTable.snapshot()
 
         let urls = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
             root: root, modifiedAfter: windowStart, fileManager: fileManager)
@@ -623,7 +629,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                     let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                     // A tier with no rates counts as unpriced for the same reason an
                     // unknown model does — better an honest gap than a halved cost.
-                    guard let price = priceTable.price(forModel: model),
+                    guard let price = priceSnapshot.price(forModel: model),
                           let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
                                                   inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {
                         localEntries.append((id, 0, volume, false))
@@ -665,7 +671,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
             windowStart: windowStart,
             resetsAt: resetsAt,
             scannedAt: now,
-            priceRevision: priceTable.revision
+            priceRevision: priceSnapshot.rateRevision(forProvider: "claude")
         )
     }
 }

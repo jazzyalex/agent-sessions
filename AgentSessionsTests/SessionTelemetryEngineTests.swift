@@ -267,7 +267,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
             windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -279,7 +279,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
             accountHash: WeeklyQuotaCalibrationScope.hashAccount(accountID),
             sourceFamily: "oauth",
             limitShape: "weekly",
-            priceRevision: prices.revision)
+            priceRevision: prices.rateRevision(forProvider: "codex"))
         quota.observeQuota(provider: "codex", remainingPercent: 80,
                            hasExactPercent: false, resetAt: reset, observedAt: now,
                            scope: scope, now: now)
@@ -1459,13 +1459,13 @@ final class SessionTelemetryEngineTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
             windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "claude")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         quota.setBootstrapForTesting(provider: "claude", result: bootstrap)
         let scope = WeeklyQuotaCalibrationScope(provider: "claude", accountHash: nil,
                                                 sourceFamily: "oauth", limitShape: "weekly",
-                                                priceRevision: prices.revision)
+                                                priceRevision: prices.rateRevision(forProvider: "claude"))
         quota.observeQuota(provider: "claude", remainingPercent: 80, hasExactPercent: false,
                            resetAt: reset, observedAt: now, scope: scope, now: now)
 
@@ -1610,7 +1610,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
             windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -1620,7 +1620,7 @@ final class SessionTelemetryEngineTests: XCTestCase {
         let scope = WeeklyQuotaCalibrationScope(provider: "codex",
                                                 accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),
                                                 sourceFamily: "oauth", limitShape: "weekly",
-                                                priceRevision: prices.revision)
+                                                priceRevision: prices.rateRevision(forProvider: "codex"))
         quota.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
                            resetAt: reset, observedAt: now, scope: scope, now: now)
 

@@ -147,14 +147,25 @@ struct RunwayPriceSnapshot: Sendable {
     /// Exact canonical JSON fingerprint, including manifest metadata. Cache and
     /// telemetry provenance can use this when byte/content identity matters.
     let manifestFingerprint: String
+    /// Provider name (`"claude"`, `"codex"`) → semantic hash of that provider's
+    /// own rate rows. See `rateRevision(forProvider:)`.
+    let providerRevisions: [String: Int]
 
     init(models: [String: RunwayModelPrice], aliases: [String: String] = [:],
-         updatedDate: String, revision: Int, manifestFingerprint: String) {
+         updatedDate: String, revision: Int, manifestFingerprint: String,
+         providerRevisions: [String: Int] = [:]) {
         self.models = models
         self.aliases = aliases
         self.updatedDate = updatedDate
         self.revision = revision
         self.manifestFingerprint = manifestFingerprint
+        self.providerRevisions = providerRevisions
+    }
+
+    /// Semantic hash of one provider's own rate rows. Weekly-quota calibration is
+    /// keyed by this, never by the global `revision`.
+    func rateRevision(forProvider provider: String) -> Int {
+        providerRevisions[provider] ?? 0
     }
 
     func price(forModel slug: String?) -> RunwayModelPrice? {
@@ -341,7 +352,12 @@ final class RunwayPriceTable: @unchecked Sendable {
     func snapshot() -> RunwayPriceSnapshot {
         lock.lock(); defer { lock.unlock() }
         return RunwayPriceSnapshot(models: models, aliases: aliases, updatedDate: loadedUpdated,
-                                   revision: _revision, manifestFingerprint: _manifestFingerprint)
+                                   revision: _revision, manifestFingerprint: _manifestFingerprint,
+                                   providerRevisions: providerRevisions)
+    }
+
+    func rateRevision(forProvider provider: String) -> Int {
+        snapshot().rateRevision(forProvider: provider)
     }
 
     /// nil slug or no safe matching key → nil (→ $ unpriceable).
@@ -466,9 +482,38 @@ final class RunwayPriceTable: @unchecked Sendable {
         object.removeValue(forKey: "updated")
         object.removeValue(forKey: "sequence")
         guard let semantic = stableHash(object) else { return nil }
+
+        // Only the provider's own rows hash in, and only their rate-bearing fields,
+        // projected from the DECODED price. Aliases, sequence, notes, other vendors'
+        // rows, and any future non-rate annotation on a row are excluded, so none of
+        // them can discard Claude or Codex weekly calibration.
+        func rates(_ set: RunwayRateSet?) -> Any {
+            guard let set else { return NSNull() }
+            return ["input": set.inputPerMTok, "cachedInput": set.cachedInputPerMTok,
+                    "output": set.outputPerMTok,
+                    "cacheWrite": set.cacheWritePerMTok as Any? ?? NSNull(),
+                    "cacheWrite1h": set.cacheWrite1hPerMTok as Any? ?? NSNull()] as [String: Any]
+        }
+        func revision(_ prefixes: [String]) -> Int {
+            var projection: [String: Any] = [:]
+            for (key, price) in models where prefixes.contains(where: { key.hasPrefix($0) }) {
+                projection[key] = [
+                    "standard": rates(price.standard),
+                    "fast": rates(price.fast),
+                    "longContext": price.longContext.map {
+                        ["threshold": $0.thresholdInputTokens, "input": $0.inputMultiplier,
+                         "output": $0.outputMultiplier] as [String: Any]
+                    } as Any? ?? NSNull(),
+                    "geoUS": price.inferenceGeoUSMultiplier as Any? ?? NSNull()
+                ] as [String: Any]
+            }
+            return stableHash(projection) ?? 0
+        }
+        let providerRevisions = ["claude": revision(["claude-"]),
+                                 "codex": revision(["gpt-", "codex-"])]
         return DecodedManifest(models: models, aliases: aliases, updated: manifest.updated ?? "",
                                sequence: sequence, semanticRevision: semantic,
-                               providerRevisions: [:],   // filled in Task 4
+                               providerRevisions: providerRevisions,
                                manifestFingerprint: fingerprint)
     }
 

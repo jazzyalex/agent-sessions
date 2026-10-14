@@ -609,13 +609,13 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-3600),
             resetsAt: reset, scannedAt: t0)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
         store.setBootstrapForTesting(provider: "codex", result: bootstrap)
 
-        let rpcScope = scope(priceRevision: prices.revision, source: "cli-rpc", shape: "weekly")
+        let rpcScope = scope(priceRevision: prices.rateRevision(forProvider: "codex"), source: "cli-rpc", shape: "weekly")
         store.observeQuota(provider: "codex", remainingPercent: 80,
                            hasExactPercent: false, resetAt: reset,
                            observedAt: t0, scope: rpcScope, now: t0)
@@ -635,16 +635,16 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-3600), resetsAt: reset, scannedAt: t0)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
-        bootstrap.accountHash = scope(priceRevision: prices.revision).accountHash
+        bootstrap.accountHash = scope(priceRevision: prices.rateRevision(forProvider: "codex")).accountHash
         bootstrap.accountAttributionSafe = false
         store.setBootstrapForTesting(provider: "codex", result: bootstrap)
         store.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
                            resetAt: reset, observedAt: t0,
-                           scope: scope(priceRevision: prices.revision, source: "oauth", shape: "weekly"),
+                           scope: scope(priceRevision: prices.rateRevision(forProvider: "codex"), source: "oauth", shape: "weekly"),
                            now: t0, defaults: defaults)
 
         XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0),
@@ -660,7 +660,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         let ledger = store.ledger(provider: "codex")
         ledger.record(observations: [WeeklyQuotaTokenObservation(
             logPath: "/live", capturedAt: t0, input: 0, cachedInput: 0,
@@ -679,7 +679,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 70, dollars: 0.1, unpricedVolumeShare: 0,
             windowStart: t0, resetsAt: reset, scannedAt: later)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = scoped.limitShape
         bootstrap.sourceFamily = scoped.sourceFamily
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -702,7 +702,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         let ledger = store.ledger(provider: "codex")
         ledger.record(observations: [WeeklyQuotaTokenObservation(
             logPath: "/live", capturedAt: t0, input: 0, cachedInput: 0,
@@ -735,7 +735,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         var tracker = WeeklyQuotaCalibrationTracker()
         let ledger = WeeklyQuotaActivityLedger()
         let prices = RunwayPriceTable.makeForTesting()
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         let reset = t0.addingTimeInterval(604_800)
         for span in 0..<3 {
             let start = t0.addingTimeInterval(Double(span) * 7 * 3600)
@@ -792,11 +792,11 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0, resetsAt: reset, scannedAt: t0)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = scoped.limitShape
         bootstrap.sourceFamily = scoped.sourceFamily
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -817,7 +817,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         let ledger = store.ledger(provider: "codex")
         var output = 0.0
         ledger.record(observations: [WeeklyQuotaTokenObservation(
@@ -842,7 +842,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             usedPercentPoints: 70, dollars: 35, unpricedVolumeShare: 0,
             windowStart: reset.addingTimeInterval(-604_800), resetsAt: reset,
             scannedAt: now)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = scoped.limitShape
         bootstrap.sourceFamily = scoped.sourceFamily
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -877,7 +877,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
     func testHistoricalBootstrapSizeDoesNotOverrideObservedInterval() {
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
 
         func state(bootstrapDollars: Double) -> WeeklyRunwayCalibrationState {
             let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
@@ -905,7 +905,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                 usedPercentPoints: 70, dollars: bootstrapDollars, unpricedVolumeShare: 0,
                 windowStart: reset.addingTimeInterval(-604_800), resetsAt: reset,
                 scannedAt: at)
-            bootstrap.priceRevision = prices.revision
+            bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
             bootstrap.limitShape = scoped.limitShape
             bootstrap.sourceFamily = scoped.sourceFamily
             bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -930,15 +930,15 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             usedPercentPoints: 30, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-604_800),
             resetsAt: oldReset, scannedAt: t0)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = "weekly"
         bootstrap.sourceFamily = "oauth"
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
-        bootstrap.accountHash = scope(priceRevision: prices.revision).accountHash
+        bootstrap.accountHash = scope(priceRevision: prices.rateRevision(forProvider: "codex")).accountHash
         bootstrap.accountAttributionSafe = true
         store.setBestBootstrapForTesting(provider: "codex", result: bootstrap)
 
-        let currentScope = scope(priceRevision: prices.revision, source: "oauth", shape: "weekly")
+        let currentScope = scope(priceRevision: prices.rateRevision(forProvider: "codex"), source: "oauth", shape: "weekly")
         store.observeQuota(provider: "codex", remainingPercent: 90,
                            hasExactPercent: false, resetAt: currentReset,
                            observedAt: observedAt, scope: currentScope, now: observedAt)
@@ -958,12 +958,12 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let prices = RunwayPriceTable.makeForTesting()
-        let scoped = scope(priceRevision: prices.revision, shape: "weekly")
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"), shape: "weekly")
         let reset = t0.addingTimeInterval(604_800)
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 20, dollars: 100, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-3600), resetsAt: reset, scannedAt: t0)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = scoped.limitShape
         bootstrap.sourceFamily = scoped.sourceFamily
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -1078,7 +1078,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let ledger = store.ledger(provider: "codex")
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(4 * 24 * 3600)
-        let liveScope = scope(priceRevision: prices.revision, account: nil)
+        let liveScope = scope(priceRevision: prices.rateRevision(forProvider: "codex"), account: nil)
         var cumulativeOutput = 0.0
 
         ledger.record(observations: [
@@ -1108,7 +1108,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         var bootstrap = WeeklyQuotaBootstrapResult(
             usedPercentPoints: 33, dollars: 156.648, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-604_800), resetsAt: reset, scannedAt: now)
-        bootstrap.priceRevision = prices.revision
+        bootstrap.priceRevision = prices.rateRevision(forProvider: "codex")
         bootstrap.limitShape = liveScope.limitShape
         bootstrap.sourceFamily = liveScope.sourceFamily
         bootstrap.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -1122,7 +1122,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
         let prices = RunwayPriceTable.makeForTesting()
         let reset = t0.addingTimeInterval(604_800)
-        let scoped = scope(priceRevision: prices.revision)
+        let scoped = scope(priceRevision: prices.rateRevision(forProvider: "codex"))
 
         store.observeQuota(provider: "codex", remainingPercent: 80,
                            hasExactPercent: false, resetAt: reset,
@@ -1138,7 +1138,7 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             usedPercentPoints: 5, dollars: 10, unpricedVolumeShare: 0,
             windowStart: reset.addingTimeInterval(-604_800),
             resetsAt: reset, scannedAt: end)
-        impossible.priceRevision = prices.revision
+        impossible.priceRevision = prices.rateRevision(forProvider: "codex")
         impossible.limitShape = scoped.limitShape
         impossible.sourceFamily = scoped.sourceFamily
         impossible.activityAccountingRevision = WeeklyQuotaBootstrapResult.codexActivityAccountingRevision
@@ -1434,6 +1434,37 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                            scope: scoped, now: exact, defaults: suite)
         XCTAssertEqual(store.snapshotsForTesting(provider: "codex").last?.remainingPercent, 90,
                        "an out-of-order poll must not replace the latest snapshot")
+    }
+
+    /// The revision formula changed with provider scoping. A calibration persisted
+    /// under the old global revision is intentionally not restored (one-time
+    /// reset); one persisted under the provider revision survives a relaunch.
+    func testProviderRevisionResetsLegacyCalibrationOnceThenSurvivesRelaunch() throws {
+        let prices = RunwayPriceTable.makeForTesting()
+        // Deliberately the legacy global formula: this is what an older build stamped.
+        let legacyRevision = prices.revision
+        let providerRevision = prices.rateRevision(forProvider: "codex")
+        XCTAssertNotEqual(legacyRevision, providerRevision)
+        let end = t0.addingTimeInterval(10 * 60)
+
+        // Launch N (old build): persisted under the global revision.
+        let legacy = try persistedCalibration(scope: scope(priceRevision: legacyRevision),
+                                              hasExactPercent: false, model: "gpt-5.6")
+        // Launch N+1 (new build): a fresh tracker restores under the provider revision.
+        var upgraded = WeeklyQuotaCalibrationTracker()
+        upgraded.restore(from: legacy.data, scope: scope(priceRevision: providerRevision), now: end)
+        XCTAssertNil(upgraded.percentPointsPerDollar(now: end), "one-time reset")
+
+        // The new build persists under the provider revision; launch N+2 keeps it.
+        let current = try persistedCalibration(scope: scope(priceRevision: providerRevision),
+                                               hasExactPercent: false, model: "gpt-5.6")
+        var relaunched = WeeklyQuotaCalibrationTracker()
+        relaunched.restore(from: current.data,
+                           scope: scope(priceRevision: RunwayPriceTable.makeForTesting()
+                                            .rateRevision(forProvider: "codex")),
+                           now: end)
+        XCTAssertEqual(try XCTUnwrap(relaunched.percentPointsPerDollar(now: end)),
+                       current.ratio, accuracy: 0.000_001)
     }
 }
 
@@ -2170,7 +2201,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     func testAnIncompatiblePriceRevisionIsNotMigrated() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
         var stale = result(used: 80, dollars: 1000, resetsAt: t0, scannedAt: t0)
-        stale.priceRevision = RunwayPriceTable.shared.revision + 99
+        stale.priceRevision = RunwayPriceTable.shared.rateRevision(forProvider: "codex") + 99
         try store(stale, at: key("codex", "acct-a", t0))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
@@ -2213,7 +2244,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                     usedPercentPoints: used, priceTable: prices, now: now,
                     expectedAccountHash: account, shouldCancel: cancelled)
             },
-            priceRevisionProvider: { prices.revision })
+            priceRevisionProvider: { prices.rateRevision(forProvider: $0) })
         func ensure() {
             store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                                   windowMinutes: 10080, usedPercentPoints: 6,
@@ -2234,7 +2265,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(store.bootstrap(provider: "codex")).dollars, 6, accuracy: 0.0001)
         let scope = WeeklyQuotaCalibrationScope(
             provider: "codex", accountHash: codexAccountHash, sourceFamily: "oauth",
-            limitShape: "weekly", priceRevision: prices.revision)
+            limitShape: "weekly", priceRevision: prices.rateRevision(forProvider: "codex"))
         store.observeQuota(provider: "codex", remainingPercent: 94, hasExactPercent: false,
                            resetAt: resetsAt, observedAt: now, scope: scope, now: now, defaults: suite)
         let calibration = store.runwayCalibration(provider: "codex", now: now)
@@ -2265,13 +2296,13 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let prices = RunwayPriceTable.makeForTesting()
         var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0)
         cached.accountHash = "acct-a"
-        cached.priceRevision = prices.revision
+        cached.priceRevision = prices.rateRevision(forProvider: "codex")
         cached.limitShape = "5h+weekly"
         try store(cached, at: key("codex", "acct-a", resetsAt))
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(
             launchedAt: t0,
-            priceRevisionProvider: { prices.revision })
+            priceRevisionProvider: { prices.rateRevision(forProvider: $0) })
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 40,
                               accountHash: "acct-a", limitShape: "5h+weekly",
@@ -2296,7 +2327,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         let resetsAt = t0.addingTimeInterval(604_800)
         var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0,
                             accountHash: codexAccountHash)
-        cached.priceRevision = RunwayPriceTable.shared.revision
+        cached.priceRevision = RunwayPriceTable.shared.rateRevision(forProvider: "codex")
         cached.limitShape = "weekly"
         try store(cached, at: key("codex", codexAccountHash, resetsAt))
 

@@ -298,4 +298,67 @@ final class PriceManifestV2Tests: XCTestCase {
                                  "the manifest changed since the last release, so sequence must be raised")
         }
     }
+
+    // MARK: - Provider rate revision
+
+    private func table(models: String, aliases: String = "{}", sequence: Int = 1,
+                       note: String = "n") -> RunwayPriceTable {
+        let t = RunwayPriceTable.makeEmptyForTesting()
+        let json = #"{"version":2,"sequence":\#(sequence),"updated":"2026-10-13","_note":"\#(note)","aliases":\#(aliases),"models":{\#(models)}}"#
+        XCTAssertTrue(t.loadForTesting(json: Data(json.utf8)))
+        return t
+    }
+
+    private let claudeRow = #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25}"#
+    private let gptRow = #""gpt-5":{"inputPerMTok":1.25,"cachedInputPerMTok":0.125,"outputPerMTok":10}"#
+    private let geminiRow = #""gemini-3.5-flash":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":4}"#
+
+    func testForeignRowsAliasesAndMetadataDoNotMoveProviderRevisions() {
+        let base = table(models: "\(claudeRow),\(gptRow)")
+        let withGemini = table(models: "\(claudeRow),\(gptRow),\(geminiRow)")
+        let withAlias = table(models: "\(claudeRow),\(gptRow)", aliases: #"{"opus":"claude-opus"}"#)
+        let metadataOnly = table(models: "\(claudeRow),\(gptRow)", sequence: 77, note: "other")
+        for other in [withGemini, withAlias, metadataOnly] {
+            XCTAssertEqual(other.rateRevision(forProvider: "claude"), base.rateRevision(forProvider: "claude"))
+            XCTAssertEqual(other.rateRevision(forProvider: "codex"), base.rateRevision(forProvider: "codex"))
+        }
+        XCTAssertNotEqual(withGemini.revision, base.revision, "the global revision still tracks every row")
+        XCTAssertNotEqual(withAlias.revision, base.revision, "aliases change which rate a session gets")
+    }
+
+    func testOwnRateChangeMovesOnlyThatProvider() {
+        let base = table(models: "\(claudeRow),\(gptRow)")
+        let claudeChanged = table(models: #""claude-opus":{"inputPerMTok":6,"cachedInputPerMTok":0.5,"outputPerMTok":25},\#(gptRow)"#)
+        XCTAssertNotEqual(claudeChanged.rateRevision(forProvider: "claude"), base.rateRevision(forProvider: "claude"))
+        XCTAssertEqual(claudeChanged.rateRevision(forProvider: "codex"), base.rateRevision(forProvider: "codex"))
+
+        let codexAdded = table(models: #"\#(claudeRow),\#(gptRow),"codex-auto-review":{"inputPerMTok":4,"cachedInputPerMTok":0.4,"outputPerMTok":20}"#)
+        XCTAssertEqual(codexAdded.rateRevision(forProvider: "claude"), base.rateRevision(forProvider: "claude"))
+        XCTAssertNotEqual(codexAdded.rateRevision(forProvider: "codex"), base.rateRevision(forProvider: "codex"))
+    }
+
+    /// A non-rate annotation on a provider's own row must not move its revision.
+    func testNonRateRowAnnotationDoesNotMoveTheProviderRevision() {
+        let base = table(models: "\(claudeRow),\(gptRow)")
+        let annotated = table(models: #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"displayName":"Opus","deprecated":false},\#(gptRow)"#)
+        XCTAssertEqual(annotated.rateRevision(forProvider: "claude"), base.rateRevision(forProvider: "claude"))
+    }
+
+    func testEveryRateBearingFieldMovesTheProviderRevision() {
+        let base = table(models: claudeRow).rateRevision(forProvider: "claude")
+        for row in [
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.6,"outputPerMTok":25}"#,
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"cacheWritePerMTok":6.25}"#,
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"cacheWrite1hPerMTok":10}"#,
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"inferenceGeoUSMultiplier":1.1}"#,
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"longContext":{"thresholdInputTokens":200000,"inputMultiplier":2,"outputMultiplier":1.5}}"#,
+            #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"fast":{"inputPerMTok":10,"cachedInputPerMTok":1,"outputPerMTok":50}}"#
+        ] {
+            XCTAssertNotEqual(table(models: row).rateRevision(forProvider: "claude"), base, row)
+        }
+    }
+
+    func testUnknownProviderHasNoRevision() {
+        XCTAssertEqual(RunwayPriceTable.makeForTesting().rateRevision(forProvider: "gemini"), 0)
+    }
 }

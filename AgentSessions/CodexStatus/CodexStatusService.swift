@@ -697,7 +697,7 @@ final class CodexUsageModel: ObservableObject {
                     accountHash: weeklyAccountHash,
                     sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
                     limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
-                    priceRevision: RunwayPriceTable.shared.revision
+                    priceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "codex")
                 ),
                 now: now
             )

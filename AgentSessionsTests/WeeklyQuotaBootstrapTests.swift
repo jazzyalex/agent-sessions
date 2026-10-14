@@ -173,6 +173,38 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertNil(result, "an all-unpriceable malformed regional record cannot bootstrap calibration")
     }
 
+    /// Calibration is keyed by each provider's own rate rows, so a bootstrap must
+    /// carry that revision, not the global manifest revision, or it would never
+    /// match the live scope it is meant to serve.
+    func testBootstrapResultsAreStampedWithTheProviderRevision() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        let codexRoot = root.appendingPathComponent("codex", isDirectory: true)
+        let claudeRoot = root.appendingPathComponent("claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try [modelLine("gpt-5.6", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)]
+            .joined(separator: "\n")
+            .write(to: codexRoot.appendingPathComponent("a.jsonl"), atomically: true, encoding: .utf8)
+        try claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000)
+            .write(to: claudeRoot.appendingPathComponent("c.jsonl"), atomically: true, encoding: .utf8)
+
+        let codexResult = try XCTUnwrap(CodexWeeklyQuotaBootstrapScanner.scan(
+            root: codexRoot, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: table, now: anchor.addingTimeInterval(-3600)))
+        let claudeResult = try XCTUnwrap(ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: claudeRoot, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: table, now: anchor.addingTimeInterval(-3600)))
+        // The scans really priced something, so the stamps describe real rates.
+        XCTAssertEqual(codexResult.dollars, 20.0, accuracy: 0.001)
+        XCTAssertEqual(claudeResult.dollars, 10.0, accuracy: 0.001)
+
+        XCTAssertEqual(codexResult.priceRevision, table.rateRevision(forProvider: "codex"))
+        XCTAssertEqual(claudeResult.priceRevision, table.rateRevision(forProvider: "claude"))
+        XCTAssertNotEqual(codexResult.priceRevision, table.revision)
+        XCTAssertNotEqual(claudeResult.priceRevision, table.revision)
+    }
+
     private func claudeUsageLine(id: String,
                                  at: Date,
                                  oneHourCacheWrite: Int,

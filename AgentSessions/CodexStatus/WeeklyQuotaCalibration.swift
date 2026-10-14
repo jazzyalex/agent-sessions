@@ -771,7 +771,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// store by construction rather than remembering to reset a shared one.
     init(launchedAt: Date = Date(),
          scanRunner: BootstrapScanRunner? = nil,
-         priceRevisionProvider: (@Sendable () -> Int)? = nil) {
+         priceRevisionProvider: (@Sendable (String) -> Int)? = nil) {
         self.launchedAt = launchedAt
         self.scanRunner = scanRunner ?? { provider, root, resetsAt, windowMinutes,
                                          usedPercentPoints, priceTable, now,
@@ -788,7 +788,8 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 shouldCancel: shouldCancel
             )
         }
-        self.priceRevisionProvider = priceRevisionProvider ?? { RunwayPriceTable.shared.revision }
+        self.priceRevisionProvider = priceRevisionProvider
+            ?? { RunwayPriceTable.shared.rateRevision(forProvider: $0) }
     }
 
 #if DEBUG
@@ -798,7 +799,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     static func makeForTesting(
         launchedAt: Date = Date(),
         scanRunner: BootstrapScanRunner? = nil,
-        priceRevisionProvider: (@Sendable () -> Int)? = nil
+        priceRevisionProvider: (@Sendable (String) -> Int)? = nil
     ) -> WeeklyQuotaCalibrationStore {
         WeeklyQuotaCalibrationStore(
             launchedAt: launchedAt,
@@ -809,7 +810,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private let scanRunner: BootstrapScanRunner
-    private let priceRevisionProvider: @Sendable () -> Int
+    /// Provider name → that provider's own rate revision
+    /// (`RunwayPriceTable.rateRevision(forProvider:)`), never the global revision.
+    private let priceRevisionProvider: @Sendable (String) -> Int
     private var ledgers: [String: WeeklyQuotaActivityLedger] = [:]
     private var trackers: [String: WeeklyQuotaCalibrationTracker] = [:]
     private var restored: Set<String> = []
@@ -1596,7 +1599,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         let canPersistBootstrap = provider != "claude" || accountHash != nil
         let storeKey = Self.bootstrapKey(provider: provider, accountHash: accountHash, resetsAt: resetsAt)
         let bestKey = Self.bestBootstrapKey(provider: provider, accountHash: accountHash)
-        let priceRevision = priceRevisionProvider()
+        let priceRevision = priceRevisionProvider(provider)
         let scopeKey = BootstrapScopeKey(
             accountHash: accountHash,
             priceRevision: priceRevision,

@@ -146,11 +146,20 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         let revision: Int
         let updated: String
         let manifestFingerprint: String
+        /// Per-provider rate revisions of the same snapshot. Weekly calibration is
+        /// keyed by these, not by `revision`. A pure function of the models that
+        /// `revision` already covers, so it adds no new cache-miss cases.
+        let providerRevisions: [String: Int]
 
         init(snapshot: RunwayPriceSnapshot) {
             revision = snapshot.revision
             updated = snapshot.updatedDate
             manifestFingerprint = snapshot.manifestFingerprint
+            providerRevisions = snapshot.providerRevisions
+        }
+
+        func rateRevision(forProvider provider: String) -> Int {
+            providerRevisions[provider] ?? 0
         }
     }
 
@@ -667,8 +676,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 calibrationProvenance: nil,
                 calculatedAt: now, priceTableRevision: cost.priceTableRevision)
         }
+        // The calibration scope carries the provider's own rate revision, so compare
+        // it with that revision of the snapshot that priced `cost` (same snapshot as
+        // `pricing`), never with the global `cost.priceTableRevision`.
         guard let context = quotaStore.attributionContext(provider: source.rawValue, now: now),
-              context.scope.priceRevision == cost.priceTableRevision else {
+              context.scope.priceRevision == pricing.rateRevision(forProvider: source.rawValue) else {
             return TelemetryWeeklyQuotaEstimate(
                 status: .unavailable, percentPoints: nil,
                 unavailableReason: "no compatible account-window calibration",

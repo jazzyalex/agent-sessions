@@ -665,7 +665,7 @@ final class ClaudeUsageModel: ObservableObject {
                     accountHash: nil,
                     sourceFamily: calibrationSourceFamily,
                     limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
-                    priceRevision: RunwayPriceTable.shared.revision
+                    priceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "claude")
                 ),
                 now: now
             )
