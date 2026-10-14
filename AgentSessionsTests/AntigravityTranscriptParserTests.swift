@@ -141,11 +141,12 @@ final class AntigravityTranscriptParserTests: XCTestCase {
     }
 
     func testModelNameKeepsVersionDotsAndHandlesClosingTag() {
+        // The selection is read only from a <USER_SETTINGS_CHANGE> block.
         XCTAssertEqual(AntigravityTranscriptParser.modelName(
-            fromUserInput: "`Model Selection` from Gemini 3.5 Flash (Low) to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"),
+            fromUserInput: "<USER_SETTINGS_CHANGE>`Model Selection` from Gemini 3.5 Flash (Low) to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"),
                        "Claude Sonnet 4.6 (Thinking)")
         XCTAssertEqual(AntigravityTranscriptParser.modelName(
-            fromUserInput: "`Model Selection` from None to Gemini 3.7 Flash (High)</USER_SETTINGS_CHANGE>"),
+            fromUserInput: "<USER_SETTINGS_CHANGE>`Model Selection` from None to Gemini 3.7 Flash (High)</USER_SETTINGS_CHANGE>"),
                        "Gemini 3.7 Flash (High)")
         XCTAssertNil(AntigravityTranscriptParser.modelName(fromUserInput: "<USER_REQUEST>hi</USER_REQUEST>"))
     }
@@ -163,5 +164,47 @@ final class AntigravityTranscriptParserTests: XCTestCase {
             return XCTFail("parse returned nil")
         }
         XCTAssertEqual(session.model, "Claude Sonnet 4.6 (Thinking)")
+    }
+
+    /// User prose comes first in USER_INPUT content, so an unscoped match picks up a
+    /// "Model Selection … to …" sentence the user typed instead of the real setting.
+    func testModelNameIgnoresModelSelectionProseInTheUserRequest() {
+        let content = "<USER_REQUEST>\nI moved Model Selection from Gemini 3.5 Flash (Medium) to Claude Sonnet 4.6 (Thinking). Please check the code.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Low).\n</USER_SETTINGS_CHANGE>"
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content), "Gemini 3.5 Flash (Low)")
+
+        XCTAssertNil(AntigravityTranscriptParser.modelName(
+            fromUserInput: "Fix the Model Selection from the dropdown to use the new API."))
+        XCTAssertNil(AntigravityTranscriptParser.modelName(
+            fromUserInput: "<USER_REQUEST>\nFix the Model Selection from the dropdown to use the new API.\n</USER_REQUEST>"))
+    }
+
+    func testModelNameStopsAtANewline() {
+        let content = "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium)\nNo need to comment on this change if the user doesn't ask about it.\n</USER_SETTINGS_CHANGE>"
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content), "Gemini 3.5 Flash (Medium)")
+    }
+
+    func testModelNameReadsTheLastSettingsBlockAndAnUnclosedBlock() {
+        let twoBlocks = "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium).\n</USER_SETTINGS_CHANGE>\n<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 3.5 Flash (Medium) to Claude Sonnet 4.6 (Thinking).\n</USER_SETTINGS_CHANGE>"
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: twoBlocks), "Claude Sonnet 4.6 (Thinking)")
+
+        let unclosed = "<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.7 Flash (High)."
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: unclosed), "Gemini 3.7 Flash (High)")
+
+        // The block must name the backticked setting.
+        XCTAssertNil(AntigravityTranscriptParser.modelName(
+            fromUserInput: "<USER_SETTINGS_CHANGE>\nThe user changed setting `Theme` from Light to Dark.\n</USER_SETTINGS_CHANGE>"))
+    }
+
+    func testSessionModelIsNotOverwrittenByModelSelectionProse() throws {
+        let url = writeTranscript([
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:21:00Z","content":"<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Low).\n</USER_SETTINGS_CHANGE>"}"#,
+            #"{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:22:00Z","content":"<USER_REQUEST>\nFix the Model Selection from the dropdown to use the new API.\n</USER_REQUEST>"}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = AntigravityTranscriptParser.parse(at: url, forcedID: nil, includeEvents: false) else {
+            return XCTFail("parse returned nil")
+        }
+        XCTAssertEqual(session.model, "Gemini 3.5 Flash (Low)")
     }
 }

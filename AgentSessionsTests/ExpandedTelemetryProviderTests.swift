@@ -1705,6 +1705,16 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
                      "a user message that names PLANNER_RESPONSE is not a malformed planner row")
     }
 
+    func testAntigravityModelSelectionProseDoesNotChangeTheStampedModel() {
+        let prose = #"{"step_index":2,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:22:00Z","content":"<USER_REQUEST>\nI moved Model Selection from Gemini 3.5 Flash (Low) to Claude Sonnet 4.6 (Thinking). Fix the Model Selection from the dropdown to use the new API.\n</USER_REQUEST>"}"#
+        let telemetry = AntigravityTelemetryAccumulator.accumulate(lines: [
+            antigravityInput(1, from: "None", to: "Gemini 3.5 Flash (Low)"),
+            prose,
+            antigravityPlanner(3, input: 5)
+        ])
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["Gemini 3.5 Flash (Low)"])
+    }
+
     func testGrokExposesFirstObservedConfigurationAndHonestTokenGap() {
         let lines = [
             #"{"type":"assistant","content":"one","model_id":"grok-4.5","reasoning_effort":"high"}"#,

@@ -140,18 +140,30 @@ enum AntigravityTranscriptParser {
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static let settingsChangeOpenTag = "<USER_SETTINGS_CHANGE>"
+    private static let settingsChangeCloseTag = "</USER_SETTINGS_CHANGE>"
+
+    /// Matches "`Model Selection` from <old> to <new>" inside a settings block and
+    /// captures <new>. `.` does not cross lines, so the capture stops at a newline;
+    /// it also stops at the first period that ends a sentence (followed by
+    /// whitespace, a tag, or the end) or at a tag. Version dots such as "3.5"
+    /// survive, and the trailing instructions are not stored as the model.
+    private static let modelSelectionRegex = try? NSRegularExpression(
+        pattern: "`Model Selection`\\s+from\\s+.+?\\s+to\\s+(.+?)(?:\\.(?=\\s|<|$)|(?=<)|(?=\\n)|$)")
+
     static func modelName(fromUserInput content: String) -> String? {
-        // The selection is embedded in a USER_INPUT record's content as
-        // "...`Model Selection` from <old> to <new>." followed by more prompt text.
-        // Capture <new>, whether the change is from None (initial selection) or from
-        // a prior model. Stop at the first period that ends a sentence (followed by
-        // whitespace, a tag, or the end), so version dots such as "3.5" survive and
-        // the trailing instructions are not stored as the model.
-        guard let rx = try? NSRegularExpression(
-            pattern: "Model Selection`?\\s+from\\s+.+?\\s+to\\s+(.+?)(?:\\.(?=\\s|<|$)|(?=<)|$)",
-            options: [.dotMatchesLineSeparators]) else { return nil }
-        let ns = content as NSString
-        guard let m = rx.firstMatch(in: content, range: NSRange(location: 0, length: ns.length)),
+        // The selection is embedded in a USER_INPUT record's content as a
+        // <USER_SETTINGS_CHANGE> block: "...`Model Selection` from <old> to <new>."
+        // followed by more prompt text. The user's own request comes first in the
+        // same content and may mention "Model Selection" in prose, so read only the
+        // last settings block (to the end of content when it is not closed).
+        guard let open = content.range(of: settingsChangeOpenTag, options: .backwards) else { return nil }
+        let afterOpen = content[open.upperBound...]
+        let block = afterOpen.range(of: settingsChangeCloseTag)
+            .map { String(afterOpen[..<$0.lowerBound]) } ?? String(afterOpen)
+        guard let rx = modelSelectionRegex else { return nil }
+        let ns = block as NSString
+        guard let m = rx.firstMatch(in: block, range: NSRange(location: 0, length: ns.length)),
               m.numberOfRanges > 1 else { return nil }
         let name = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : name

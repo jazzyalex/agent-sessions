@@ -661,4 +661,71 @@ final class AntigravitySessionsRootOverrideTests: XCTestCase {
         XCTAssertEqual(parses.snapshot.count, 1, "an unchanged file must not be reparsed after the repair")
         XCTAssertEqual(writes.snapshot.count, 1)
     }
+
+    /// A CLI transcript that never parses makes every forced pass incomplete. The
+    /// forced reparse must then run once per launch, not on every refresh (the
+    /// monitor refreshes per agent turn); the generation stays unrecorded so the
+    /// next launch retries.
+    func testForcedRepairRunsOncePerLaunchWhenATranscriptStaysUnparseable() async throws {
+        let (root, goodConversation) = try makeTempBrainConversation()
+        let badConversation = root.appendingPathComponent("conversation-bad-\(UUID().uuidString)", isDirectory: true)
+        let lastRecord = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-04T20:21:00Z"))
+
+        func writeTranscript(in conversation: URL, _ text: String) throws -> URL {
+            let logs = conversation.appendingPathComponent(".system_generated/logs", isDirectory: true)
+            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            let url = logs.appendingPathComponent("transcript.jsonl")
+            try (text + "\n").write(to: url, atomically: true, encoding: .utf8)
+            // Pin mtime to the cached row's last-record time so only a forced pass
+            // reparses these files.
+            try FileManager.default.setAttributes([.modificationDate: lastRecord], ofItemAtPath: url.path)
+            return url
+        }
+        let goodURL = try writeTranscript(in: goodConversation, #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-04T20:21:00Z","content":"<USER_REQUEST>\nGo.\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.5 Flash (Medium).\n</USER_SETTINGS_CHANGE>"}"#)
+        // No `step_index`: the transcript parser rejects it on every attempt.
+        let badURL = try writeTranscript(in: badConversation, #"{"type":"USER_INPUT","content":"x"}"#)
+        XCTAssertNil(AntigravitySessionParser.parseFile(at: badURL))
+
+        func cachedRow(id: String, url: URL) throws -> Session {
+            let size = try XCTUnwrap(
+                (FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue)
+            return Session(id: id, source: .antigravity, startTime: lastRecord, endTime: lastRecord,
+                           model: "Gemini 3.5 Flash (Medium). No need to comment on this change.",
+                           filePath: url.path, fileSizeBytes: size, eventCount: 1, events: [],
+                           cwd: nil, repoName: nil, lightweightTitle: "Go")
+        }
+        let good = try cachedRow(id: goodConversation.lastPathComponent, url: goodURL)
+        let bad = try cachedRow(id: badConversation.lastPathComponent, url: badURL)
+
+        let defaults = scratchRepairDefaults()
+        let writes = SessionMetaRowCapture()
+        let parses = HydrationParsedRecorder()
+        let indexer = AntigravitySessionIndexer()
+        indexer.parserRepairDefaultsOverride = defaults
+        indexer.persistSessionMetaOverride = { (row: SessionMetaRow) async throws in writes.capture(row) }
+        indexer.hydrateOverride = { [good, bad] }
+        indexer.discoverSnapshotOverride = { self.makeHydrationSnapshot(files: [goodURL, badURL], roots: [root]) }
+        indexer.deletePersistedPathsOverride = { (_: [String]) async throws in return }
+        indexer.parseLightweightOverride = { url in
+            parses.record(url)
+            return AntigravitySessionParser.parseFile(at: url)
+        }
+
+        indexer.refresh(mode: .incremental, trigger: .manual)
+        await waitForHydrationReady(indexer)
+        XCTAssertEqual(indexer.launchPhase, .ready, "hydration did not finish promptly")
+        XCTAssertEqual(Set(parses.snapshot),
+                       Set([goodURL, badURL].map { AntigravitySessionDiscovery.normalizedPath($0.path) }),
+                       "the first refresh must force a reparse of every CLI row")
+        XCTAssertTrue(writes.snapshot.isEmpty, "an incomplete pass writes nothing")
+        XCTAssertEqual(defaults.integer(forKey: AntigravitySessionIndexer.parserGenerationDefaultsKey), 0)
+
+        indexer.refresh(mode: .incremental, trigger: .manual)
+        await waitForHydrationReady(indexer)
+        XCTAssertEqual(indexer.launchPhase, .ready, "second hydration did not finish promptly")
+        XCTAssertEqual(parses.snapshot.count, 2, "a later refresh in the same launch must not force again")
+        XCTAssertTrue(writes.snapshot.isEmpty)
+        XCTAssertEqual(defaults.integer(forKey: AntigravitySessionIndexer.parserGenerationDefaultsKey), 0,
+                       "the next launch must retry")
+    }
 }

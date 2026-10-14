@@ -143,6 +143,36 @@ final class AntigravityIndexRepairTests: XCTestCase {
         XCTAssertFalse(stopped.completed)
     }
 
+    /// The repair targets CLI transcripts only. Markdown rows always store a nil
+    /// model, so they are never force-reparsed and can never block the repair, even
+    /// when their brain directory is gone and they stay non-authoritative forever.
+    func testForcedReconcileTargetsOnlyCLITranscripts() throws {
+        let f = reconcileFixture()
+        let orphanMarkdown = antigravitySession(
+            id: "md-orphan", path: "/nonexistent-antigravity-brain/conv-old/task.md", model: nil)
+        let rootMarkdownURL = f.root.appendingPathComponent("conv-md/task.md")
+        let rootMarkdown = antigravitySession(id: "md-root", path: rootMarkdownURL.path, model: nil)
+        let snapshot = AntigravitySessionDiscovery.DiscoverySnapshot(
+            files: [f.url, rootMarkdownURL], authoritativeRoots: [f.root])
+        XCTAssertFalse(snapshot.isAuthoritative(path: orphanMarkdown.filePath))
+
+        var parsedPaths: [String] = []
+        let result = AntigravitySessionIndexer.reconcileHydratedSessions(
+            hydrated: [f.hydrated, orphanMarkdown, rootMarkdown],
+            snapshot: snapshot,
+            parseNew: { url in
+                parsedPaths.append(url.path)
+                return url.pathExtension == "jsonl" ? f.fixed : rootMarkdown
+            },
+            currentStat: { _ in f.unchangedStat },
+            forceReparse: true)
+
+        XCTAssertTrue(result.completed, "rows the repair does not target must not block it")
+        XCTAssertEqual(result.reparsed.map(\.id), [f.hydrated.id])
+        XCTAssertEqual(parsedPaths, [f.url.path], "an unchanged markdown row must not be reparsed")
+        XCTAssertTrue(result.sessions.contains { $0.id == orphanMarkdown.id }, "orphan rows are kept as before")
+    }
+
     func testForcedReconcileIsIncompleteWhenAHydratedRowCannotBeRepaired() async throws {
         let f = reconcileFixture()
         let unstattable = AntigravitySessionIndexer.reconcileHydratedSessions(
