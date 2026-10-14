@@ -338,19 +338,21 @@ authority.
 | Speed tier | The row has a `fast` rate set | An observed tier, or the explicit `standard-normalized` declaration that this source is priced at the standard list rate by definition | Unpriced: `<model>:<tier>`. `unknown` never maps to standard |
 
 Two flags on `TelemetryCapabilities` (in `SessionSourceDescriptor.swift`) control the
-cache-write rules. Both default to `true`. Set one to `false` only with upstream format
-evidence, and cite that evidence in a comment at the flag.
+cache-write rules. The code default is `true` for both, because Claude and Codex keep it.
+Absence of evidence means unpriced (spec §6), so a new source states both flags and cites
+its upstream evidence in a comment at each flag.
 
-- **`cacheWriteTTLVerified`.** True when the source's cache-write tokens are known to be
-  5-minute writes, or the source splits 5-minute and 1-hour writes itself. Set it to
-  `false` when the source keeps one generic cache-write count with no TTL. OpenCode,
-  OpenClaw, Hermes, Kimi, Cline and DeepSeek Harness do this. When it is `false`, the
+- **`cacheWriteTTLVerified`.** May be `true` only with upstream evidence that the
+  source's cache writes are 5-minute writes only, or that the source splits 5-minute
+  and 1-hour writes itself. Set it to `false` when the source keeps one generic
+  cache-write count with no TTL. OpenCode, OpenClaw, Hermes, Kimi, Cline, DeepSeek
+  Harness, Copilot and Pi do this. When it is `false`, the
   event has cache-write tokens, and the row has a distinct 1-hour write rate, the
   calculator reports `<model>:cacheWriteTTL` and gives no figure. Events without
   cache-write tokens, and rows with one write rate, are still priced.
-- **`recordsCacheWrites`.** True when the source's format has a cache-write count. Set it
-  to `false` when the format has no such count and upstream may fold cache writes into
-  the input count. Qwen and Antigravity do this. When it is `false` and the row bills
+- **`recordsCacheWrites`.** True when the source's format has its own cache-write count.
+  Set it to `false` when the format folds cache writes into input or has no cache-write
+  count. Qwen and Antigravity do this. When it is `false` and the row bills
   writes at a rate other than the input rate, the calculator reports `<model>:cacheWrite`
   and gives no figure, because the hidden writes would be billed at the input rate. Rows
   with no separate write rate, or a write rate equal to the input rate, are still priced.

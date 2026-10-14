@@ -1956,6 +1956,45 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertNil(summary.costEstimate?.apiEquivalentUSD)
     }
 
+    /// Copilot and Pi each record one generic cache-write count with no TTL, and the
+    /// resolver now opens Claude rows to both (`claude-haiku-4.5`,
+    /// `anthropic/claude-sonnet-5`). Claude prices 5-minute and 1-hour writes
+    /// differently, so a Claude session with cache writes gets no figure and names
+    /// `cacheWriteTTL` (spec §6.5). The same session without writes is priced, so
+    /// the refusal cannot pass vacuously.
+    func testCopilotRefusesClaudeCacheWritesWithoutTTL() async throws {
+        func copilot(write: Int) -> [String] {
+            [#"{"type":"session.model_change","timestamp":"2026-10-13T10:00:00.000Z","data":{"newModel":"claude-haiku-4.5"}}"#,
+             #"{"type":"session.shutdown","timestamp":"2026-10-13T10:05:00.000Z","data":{"modelMetrics":{"claude-haiku-4.5":{"usage":{"inputTokens":\#(1000 + write),"outputTokens":100,"cacheReadTokens":0,"cacheWriteTokens":\#(write)}}}}}"#]
+        }
+        try await assertRefusesClaudeCacheWritesWithoutTTL(
+            source: .copilot, model: "claude-haiku-4.5",
+            withWrites: copilot(write: 500), withoutWrites: copilot(write: 0))
+    }
+
+    func testPiRefusesClaudeCacheWritesWithoutTTL() async throws {
+        func pi(write: Int) -> [String] {
+            [#"{"type":"message","timestamp":"2026-10-13T10:00:00.000Z","message":{"role":"assistant","model":"anthropic/claude-sonnet-5","usage":{"input":1000,"cacheRead":0,"cacheWrite":\#(write),"output":100}}}"#]
+        }
+        try await assertRefusesClaudeCacheWritesWithoutTTL(
+            source: .pi, model: "anthropic/claude-sonnet-5",
+            withWrites: pi(write: 500), withoutWrites: pi(write: 0))
+    }
+
+    private func assertRefusesClaudeCacheWritesWithoutTTL(
+        source: SessionSource, model: String, withWrites: [String], withoutWrites: [String],
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        let refused = try await priceThroughEngine(source: source, lines: withWrites)
+        XCTAssertNil(refused.costEstimate?.apiEquivalentUSD, file: file, line: line)
+        XCTAssertEqual(refused.costEstimate?.missingPriceComponents, ["\(model):cacheWriteTTL"],
+                       file: file, line: line)
+
+        let priced = try await priceThroughEngine(source: source, lines: withoutWrites)
+        XCTAssertNotNil(priced.costEstimate?.apiEquivalentUSD,
+                        "the same model without cache writes is priced", file: file, line: line)
+    }
+
     func testKimiTurnUsageIsPricedThroughTheEngine() async throws {
         let lines = [
             #"{"type":"llm.request","model":"kimi-k2.7-code","thinkingEffort":"on","time":1785615365000}"#,

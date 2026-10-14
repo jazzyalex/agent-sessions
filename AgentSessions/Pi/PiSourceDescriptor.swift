@@ -17,7 +17,12 @@ extension SessionSourceDescriptor {
                 configuration: .supported,
                 tokens: .supported,
                 cost: .supported,
-                weeklyQuota: .unavailable("no account-level quota feed")
+                weeklyQuota: .unavailable("no account-level quota feed"),
+                // One generic `usage.cacheWrite` count with no TTL, and Claude models
+                // (`anthropic/...`) resolve to rows that price 5-minute and 1-hour
+                // writes differently; see spec §6.5. No upstream evidence says the
+                // writes are 5-minute only.
+                cacheWriteTTLVerified: false
             ),
             makeTelemetryProvider: { PiTelemetryProvider() },
             shortLabel: "Pi",

@@ -19,7 +19,12 @@ extension SessionSourceDescriptor {
                 configuration: .supported,
                 tokens: .partial("only an end-of-process summary; no per-turn attribution"),
                 cost: .partial("priced from the session summary, not per turn"),
-                weeklyQuota: .unavailable("no account-level quota feed")
+                weeklyQuota: .unavailable("no account-level quota feed"),
+                // One generic `cacheWriteTokens` count with no TTL, and Claude models
+                // (`claude-haiku-4.5`) resolve to rows that price 5-minute and 1-hour
+                // writes differently; see spec §6.5. No upstream evidence says the
+                // writes are 5-minute only.
+                cacheWriteTTLVerified: false
             ),
             makeTelemetryProvider: { CopilotTelemetryProvider() },
             shortLabel: "Copilot",

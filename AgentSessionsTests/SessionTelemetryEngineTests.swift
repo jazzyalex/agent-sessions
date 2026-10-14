@@ -404,11 +404,15 @@ final class SessionTelemetryEngineTests: XCTestCase {
         }
         // OpenClaw records `cacheWrite1h` only "when reported", so a write without it
         // has no TTL evidence and joins the five generic cache-write readers.
-        for source in [SessionSource.opencode, .openclaw, .hermes, .kimi, .cline, .deepseekHarness] {
+        // Copilot and Pi also keep one generic cache-write count, and the resolver
+        // opens Claude rows to both, so absence of TTL evidence means unpriced.
+        for source in [SessionSource.opencode, .openclaw, .hermes, .kimi, .cline, .deepseekHarness,
+                       .copilot, .pi] {
             XCTAssertFalse(SessionSourceRegistry.descriptor(for: source).telemetry.cacheWriteTTLVerified,
                            "\(source)")
         }
-        for source in [SessionSource.claude, .codex, .pi, .copilot] {
+        // Claude records the 5-minute/1-hour split itself; Codex keeps the default.
+        for source in [SessionSource.claude, .codex] {
             XCTAssertTrue(SessionSourceRegistry.descriptor(for: source).telemetry.cacheWriteTTLVerified)
         }
         // Qwen and Antigravity record no cache-write count; writes may hide in input.
