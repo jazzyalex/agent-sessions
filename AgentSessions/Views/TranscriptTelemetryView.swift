@@ -202,6 +202,9 @@ enum TranscriptTelemetryPresentation {
         if let reason = telemetry.usageSummary?.unavailableReason {
             return .absent(localized("Usage unavailable: \(reason)", locale: locale))
         }
+        if let reason = telemetry.usageSummary?.costUnavailableReason {
+            return .absent(localized("Pricing unavailable: \(reason)", locale: locale))
+        }
         if let dollars = telemetry.costEstimate?.apiEquivalentUSD {
             let text: String
             if dollars > 0 && dollars < 0.01 {
@@ -209,20 +212,37 @@ enum TranscriptTelemetryPresentation {
             } else {
                 text = dollars.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(locale))
             }
-            return Value(
-                text: text,
-                help: localized(
-                    "Estimated API price at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Reference value, not a subscription charge.",
-                    locale: locale))
+            var help = localized(
+                "Estimated API price at published rates: \(dollars.formatted(.number.precision(.fractionLength(4)).locale(locale))) USD. Reference value, not a subscription charge.",
+                locale: locale)
+            if telemetry.costEstimate?.freeRouteModels.isEmpty == false {
+                help += " " + localized("List price. This session ran on a free route.", locale: locale)
+            }
+            return Value(text: text, help: help)
         }
         if case let .unavailable(reason) = capability {
             return .absent(localized("Pricing unavailable: \(reason)", locale: locale))
         }
-        let reasons = (telemetry.costEstimate?.unpricedModels ?? [])
-            + (telemetry.costEstimate?.missingPriceComponents ?? [])
-        return .absent(reasons.isEmpty
-                       ? localized("No priceable usage was recorded in this transcript.", locale: locale)
-                       : localized("No price entry for: \(reasons.joined(separator: ", "))", locale: locale))
+        let unpriced = (telemetry.costEstimate?.unpricedModels ?? []).map(unpricedReason(forModel:))
+        let missing = telemetry.costEstimate?.missingPriceComponents ?? []
+        if unpriced.isEmpty && missing.isEmpty {
+            return .absent(localized("No priceable usage was recorded in this transcript.", locale: locale))
+        }
+        let parts = unpriced + (missing.isEmpty ? [] : ["No price entry for: \(missing.joined(separator: ", "))"])
+        return .absent(parts.joined(separator: ". "))
+    }
+
+    /// Local models carry a parameter-count tag (`qwen3.5-9b`); unreleased models
+    /// are known code names. Everything else is simply a missing row.
+    static func unpricedReason(forModel slug: String) -> String {
+        let lower = slug.lowercased()
+        let unreleased: Set<String> = ["big-pickle", "x-preview-f", "x-preview-f-free",
+                                       "gateway-injected", "coder-model"]
+        if unreleased.contains(lower) { return "No published price for unreleased model: \(slug)" }
+        if lower.range(of: #"-\d+(\.\d+)?b$"#, options: .regularExpression) != nil {
+            return "No published price for local model: \(slug)"
+        }
+        return "No price entry for: \(slug)"
     }
 
     static func inferenceGeoValue(_ inferenceGeo: String?, locale: Locale = .current) -> Value {

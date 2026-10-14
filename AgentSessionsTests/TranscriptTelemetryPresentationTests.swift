@@ -269,6 +269,70 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
                          usageSummary: nil, costEstimate: estimate)
     }
 
+    private func telemetry(cost: TelemetryCostEstimate) -> SessionTelemetry {
+        costOnlyTelemetry(cost)
+    }
+
+    private func telemetry(summary: TelemetryUsageSummary) -> SessionTelemetry {
+        SessionTelemetry(source: .codex, initialConfiguration: nil, currentConfiguration: nil,
+                         configurationChanges: [], usageSlices: [], usageEvents: [],
+                         usageSummary: summary, costEstimate: nil)
+    }
+
+    // MARK: - Session Info prices: free routes and unpriced reasons
+
+    func testFreeRouteAddsTheListPriceNote() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: 1.5, unpricedModels: [],
+                                             missingPriceComponents: [],
+                                             freeRouteModels: ["minimax-m2.5-free"],
+                                             priceTableUpdated: "2026-10-13")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "$1.50")
+        XCTAssertTrue(value.help.contains("List price. This session ran on a free route."))
+    }
+
+    func testPaidRouteHasNoListPriceNote() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: 1.5, unpricedModels: [],
+                                             missingPriceComponents: [],
+                                             priceTableUpdated: "2026-10-13")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertFalse(value.help.contains("free route"))
+    }
+
+    func testUnpricedReasonsAreSpecific() {
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "qwen3.5-9b"),
+                       "No published price for local model: qwen3.5-9b")
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "big-pickle"),
+                       "No published price for unreleased model: big-pickle")
+        XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "acme-9"),
+                       "No price entry for: acme-9")
+    }
+
+    func testUnpricedModelsShowSpecificReasonsInHelp() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: nil,
+                                             unpricedModels: ["qwen3.5-9b", "acme-9"],
+                                             missingPriceComponents: ["cache_write"],
+                                             priceTableUpdated: "2026-10-13")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—")
+        XCTAssertEqual(value.help,
+                       "No published price for local model: qwen3.5-9b. No price entry for: acme-9. No price entry for: cache_write")
+    }
+
+    func testCostUnavailableReasonIsShown() {
+        let summary = TelemetryUsageSummary(topLineTokens: 10, hasComponentBreakdown: true,
+                                            recordedTotalTokens: nil, usageFamilies: ["usage.record.session"],
+                                            usageFamilyConflict: false,
+                                            costUnavailableReason: "Kimi recorded only a whole-session summary.")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(summary: summary),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—")
+        XCTAssertTrue(value.help.contains("Kimi recorded only a whole-session summary."))
+    }
+
     // MARK: - Task 1: deduplicated pricing basis
 
     func testPricingBasisCollapsesRequestsThatDifferOnlyByContextSize() {
