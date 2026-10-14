@@ -137,6 +137,8 @@ private extension RunwayRateSet {
 /// single session or between its event rows and total.
 struct RunwayPriceSnapshot: Sendable {
     let models: [String: RunwayModelPrice]
+    /// Normalized model string → `models` key. See `ModelPriceKeyResolver`.
+    let aliases: [String: String]
     let updatedDate: String
     /// Changes only when the model/rate semantics change. Calibration scopes use
     /// this value so a date or note-only manifest edit does not discard learning.
@@ -146,19 +148,49 @@ struct RunwayPriceSnapshot: Sendable {
     /// telemetry provenance can use this when byte/content identity matters.
     let manifestFingerprint: String
 
+    init(models: [String: RunwayModelPrice], aliases: [String: String] = [:],
+         updatedDate: String, revision: Int, manifestFingerprint: String) {
+        self.models = models
+        self.aliases = aliases
+        self.updatedDate = updatedDate
+        self.revision = revision
+        self.manifestFingerprint = manifestFingerprint
+    }
+
     func price(forModel slug: String?) -> RunwayModelPrice? {
+        Self.price(forModel: slug, in: models)
+    }
+
+    /// The single matcher. Claude keys keep their guarded prefix rule; every
+    /// other key (GPT and all vendors) matches exactly or with a dated-snapshot
+    /// suffix, never by bare prefix, so a variant such as `kimi-k2.7-code-v2`
+    /// cannot inherit a base rate.
+    static func price(forModel slug: String?,
+                      in models: [String: RunwayModelPrice]) -> RunwayModelPrice? {
         guard let slug, !slug.isEmpty else { return nil }
         if let exact = models[slug] { return exact }
         var best: (key: String, price: RunwayModelPrice)?
         for (key, price) in models where slug.hasPrefix(key) {
-            if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) { continue }
-            if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) { continue }
+            if key.hasPrefix("claude-") {
+                guard isRecognizedClaudeSlug(slug, extending: key) else { continue }
+            } else {
+                guard isDatedSnapshot(slug, extending: key) else { continue }
+            }
             if best == nil || key.count > best!.key.count { best = (key, price) }
         }
         return best?.price
     }
 
-    private static func isRecognizedGPTSnapshot(_ slug: String, extending key: String) -> Bool {
+    /// Raw slug first, so every session that prices today keeps its result; then
+    /// the resolved key.
+    func resolvedPrice(forModel raw: String?) -> (price: RunwayModelPrice, viaFreeRoute: Bool)? {
+        if let direct = price(forModel: raw) { return (direct, false) }
+        guard let resolved = ModelPriceKeyResolver.resolve(raw, aliases: aliases),
+              let price = price(forModel: resolved.key) else { return nil }
+        return (price, resolved.viaFreeRoute)
+    }
+
+    private static func isDatedSnapshot(_ slug: String, extending key: String) -> Bool {
         let suffix = String(slug.dropFirst(key.count))
         if suffix.count == 9, suffix.first == "-", suffix.dropFirst().allSatisfy(\.isNumber) { return true }
         guard suffix.count == 11, suffix.first == "-" else { return false }
@@ -213,7 +245,7 @@ struct RunwayPriceSnapshot: Sendable {
 /// corrected without an app release. The fetch is a plain GET of a static file —
 /// no user or session data is sent (same trust model as the Sparkle appcast).
 ///
-/// Lookup is **longest-prefix** for Claude and exact-or-dated-snapshot for GPT.
+/// Lookup is **longest-prefix** for Claude and exact-or-dated-snapshot for every other key.
 /// `revision` is a stable semantic hash of the model/rate content, so persisted
 /// calibrations survive metadata-only edits. `manifestFingerprint` is the exact
 /// canonical manifest identity exposed for verification; telemetry caches pair
@@ -297,37 +329,8 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     /// nil slug or no safe matching key → nil (→ $ unpriceable).
     func price(forModel slug: String?) -> RunwayModelPrice? {
-        guard let slug, !slug.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
-        if let exact = models[slug] { return exact }
-        var best: (key: String, price: RunwayModelPrice)?
-        for (key, price) in models where slug.hasPrefix(key) {
-            if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) {
-                continue
-            }
-            if key.hasPrefix("claude-"), !Self.isRecognizedClaudeSlug(slug, extending: key) {
-                continue
-            }
-            if best == nil || key.count > best!.key.count { best = (key, price) }
-        }
-        return best?.price
-    }
-
-    private static func isRecognizedGPTSnapshot(_ slug: String, extending key: String) -> Bool {
-        let suffix = String(slug.dropFirst(key.count))
-        if suffix.count == 9, suffix.first == "-", suffix.dropFirst().allSatisfy(\.isNumber) {
-            return true
-        }
-        guard suffix.count == 11, suffix.first == "-" else { return false }
-        let date = Array(suffix.dropFirst())
-        return date[4] == "-" && date[7] == "-"
-            && date.enumerated().allSatisfy { index, character in
-                index == 4 || index == 7 ? character == "-" : character.isNumber
-            }
-    }
-
-    private static func isRecognizedClaudeSlug(_ slug: String, extending key: String) -> Bool {
-        RunwayPriceSnapshot.isRecognizedClaudeSlug(slug, extending: key)
+        return RunwayPriceSnapshot.price(forModel: slug, in: models)
     }
 
     /// Fire-and-forget: fetch the manifest at most once/day and cache it. Never
