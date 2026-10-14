@@ -831,20 +831,14 @@ table.sb1-grid th:first-child, table.sb1-grid td:first-child { text-align:left; 
 .sb1-tl li { margin:5px 0; }
 </style>
 
-We ran the same two-prompt bug fix through twelve coding-agent harnesses,
-three times each, and kept only the session files they wrote. The file being
-fixed is 265 bytes long. Pi recorded the whole session in 19 KB. Claude
-Desktop recorded it in 469 KB, and 4% of that is the session.
+Every coding agent writes your session to disk, and a lot rests on those
+files: resuming after a crash, handing the work to another agent, finding out
+what a feature cost. Almost nobody checks what they actually keep. So we ran
+the same two-prompt bug fix through twelve coding-agent harnesses, three times
+each, and kept only the session files they wrote.
 
-**Correction, 11 October 2026.** The first version of this post gave OpenClaw
-697 KB as the largest record and a spread of 37 times. That total counts a
-250 KB shell snapshot written by OpenClaw's Codex backend. The snapshot is a
-dump of the shell environment, and we did not count the same file in the Codex
-row. Measured the same way, OpenClaw is 447 KB, the largest record is Claude
-Desktop at 469 KB, and the spread is about 25 times. The v1 scores are
-unchanged: the snapshot moves OpenClaw's total by less than 0.1 point and
-changes no rank. The chart below still shows the scored 697 KB. The next
-revision of the bench will apply one rule to both rows.
+The file being fixed is 265 bytes long. Pi recorded the whole session in
+19 KB. Claude Desktop recorded it in 469 KB, and 4% of that is the session.
 
 Size is the cheap finding. The one that matters is what you can get back.
 For every run we rebuilt the session from its files alone and checked 31
@@ -855,12 +849,6 @@ files open at all without the vendor's own code. That is
 **[Session-Bench v1]({{ '/bench/v1/' | relative_url }})**: 100 points, twelve
 harnesses, 36 runs, and every score recomputes from the published session
 files with one command per run.
-
-[The August bench]({{ '/blog/session-bench-launch/' | relative_url }}) asked
-twenty pass/fail questions of each format, answered mostly from our own corpus
-and weekly drift checks. v1 is a different instrument. It runs the harness,
-keeps an outside witness, and replays the result. The two do not share a
-scale, and the order changed.
 
 <figure class="post-figure sb1" id="scorecard">
 <div class="sb1-card">
@@ -1127,6 +1115,26 @@ to a public issue, that list is for you.
 
 Four rounds of outside review went into this release. The first three said
 do not ship.
+
+## Correction, 11 October 2026
+
+The first version of this post gave OpenClaw 697 KB as the largest record and
+a spread of 37 times. That total counts a 250 KB shell snapshot written by
+OpenClaw's Codex backend. The snapshot is a dump of the shell environment, and
+we did not count the same file in the Codex row. Measured the same way,
+OpenClaw is 447 KB, the largest record is Claude Desktop at 469 KB, and the
+spread is about 25 times. The v1 scores are unchanged: the snapshot moves
+OpenClaw's total by less than 0.1 point and changes no rank. The size chart
+still shows the scored 697 KB. The next revision of the bench will apply one
+rule to both rows.
+
+## How v1 differs from the August bench
+
+[The August bench]({{ '/blog/session-bench-launch/' | relative_url }}) asked
+twenty pass/fail questions of each format, answered mostly from our own corpus
+and weekly drift checks. v1 is a different instrument. It runs the harness,
+keeps an outside witness, and replays the result. The two do not share a
+scale, and the order changed.
 
 ## What this does not show
 
