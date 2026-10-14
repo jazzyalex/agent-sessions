@@ -12,7 +12,11 @@ struct RunwayFileSignature: Hashable, Sendable {
     /// directly, so a stat failure never serves stale data.
     static func read(path: String) -> RunwayFileSignature? {
         let url = URL(fileURLWithPath: path)
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
+        // A Codex rollout compressed to `.jsonl.zst` keeps its `.jsonl` path; sign the
+        // compressed file when the plain one is gone.
+        guard let values = (try? url.resourceValues(forKeys: keys))
+                ?? CodexRolloutStorage.storageURL(for: url).flatMap({ try? $0.resourceValues(forKeys: keys) }),
               let mtime = values.contentModificationDate else {
             return nil
         }

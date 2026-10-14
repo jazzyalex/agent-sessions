@@ -67,7 +67,8 @@ enum CodexProbeCleanup {
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue {
                 if let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) {
-                    for u in items where u.pathExtension.lowercased() == "jsonl" {
+                    // Includes cold `.jsonl.zst` rollouts, deleted as the compressed file.
+                    for u in items where u.pathExtension.lowercased() == "jsonl" || CodexRolloutStorage.isCompressedRollout(u) {
                         urls.append(u)
                     }
                 }
@@ -78,10 +79,8 @@ enum CodexProbeCleanup {
     }
 
     private static func isProbeFile(url: URL) -> Bool {
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return false }
-        defer { try? fh.close() }
         // Read just the head; we only need the first user line and optional cwd
-        let data = try? fh.read(upToCount: 256 * 1024) ?? Data()
+        let data = try? CodexRolloutStorage.readHead(for: url, maxBytes: 256 * 1024)
         guard let data, !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return false }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map { String($0) }
         let probeWD = CodexProbeConfig.probeWorkingDirectory()

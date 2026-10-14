@@ -470,7 +470,8 @@ extension ImageBrowserViewModel {
             return out
 
         default:
-            let url = URL(fileURLWithPath: session.filePath)
+            // Same decoded copy the index was built from, so span offsets line up.
+            let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
             let signature = index.signature
             // The same rule the transcript uses, from the same implementation — see
             // `ImageUserTurnResolver`, which exists because this used to be a second copy
@@ -552,7 +553,10 @@ extension ImageBrowserViewModel {
 private extension ImageBrowserViewModel {
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {
         do {
-            let attrs = try FileManager.default.attributesOfItem(atPath: path)
+            // A compressed Codex rollout is signed by its `.jsonl.zst` file, matching
+            // `ImageBrowserIndexCache.fileSignature(forPath:)`.
+            let statPath = CodexRolloutStorage.storageURL(for: URL(fileURLWithPath: path))?.path ?? path
+            let attrs = try FileManager.default.attributesOfItem(atPath: statPath)
             let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
             let modDate = (attrs[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
             return ImageBrowserFileSignature(

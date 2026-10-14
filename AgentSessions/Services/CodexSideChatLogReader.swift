@@ -370,8 +370,11 @@ enum CodexSideChatLogReader {
             guard let walker = fm.enumerator(at: root,
                                              includingPropertiesForKeys: nil,
                                              options: [.skipsHiddenFiles]) else { continue }
-            for case let url as URL in walker where url.pathExtension == "jsonl" {
-                // rollout-<timestamp>-<uuid>.jsonl
+            for case let rawURL as URL in walker
+            where rawURL.pathExtension == "jsonl" || CodexRolloutStorage.isCompressedRollout(rawURL) {
+                // rollout-<timestamp>-<uuid>.jsonl, or a cold `.jsonl.zst` known by
+                // its canonical `.jsonl` path.
+                let url = CodexRolloutStorage.canonicalURL(for: rawURL)
                 let stem = url.deletingPathExtension().lastPathComponent
                 guard stem.count >= 36 else { continue }
                 let threadID = String(stem.suffix(36))
@@ -405,9 +408,8 @@ enum CodexSideChatLogReader {
     /// First line only — a rollout's header is its first record, and these files
     /// run to megabytes.
     private static func firstLine(of url: URL) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let chunk = try? handle.read(upToCount: 64 * 1024), let text = String(data: chunk, encoding: .utf8) else {
+        guard let chunk = try? CodexRolloutStorage.readHead(for: url, maxBytes: 64 * 1024),
+              let text = String(data: chunk, encoding: .utf8) else {
             return nil
         }
         return text.split(whereSeparator: \.isNewline).first.map(String.init)

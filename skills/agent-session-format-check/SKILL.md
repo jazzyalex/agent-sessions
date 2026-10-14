@@ -569,6 +569,31 @@ Monthly is enough — provider prices move rarely, but when they move they move 
 
 ---
 
+## 2b  Codex Rollout Compression (`.jsonl.zst`)
+
+Codex's `local_thread_store_compression` (upstream `codex-rs/rollout/src/compression.rs`)
+replaces any rollout under `sessions/` or `archived_sessions/` that has not been modified
+for **7 days** with `rollout-….jsonl.zst` (one zstd stream, level 3, mtime preserved)
+and **deletes the plain file**. Resume restores plain `.jsonl` first. Readers prefer the
+plain file when both exist. The flag is off by default in the CLI; the desktop app turns
+it on (announced 2026-10-14 as "60% less disk").
+
+The records inside are unchanged, so this is a container change, not schema drift, and
+the schema fingerprint will not flag it. What to check instead:
+
+- `results.codex.weekly.local_schema.compressed_files`: the number of compressed rollouts
+  under the scanned roots. Zero means compression has not run on this machine yet.
+- The discovery contract accepts both forms; a sampled `.jsonl.zst` is decoded with
+  Python's `compression.zstd` (3.14+) in `_open_session_text`.
+- App side, `CodexRolloutStorage` keeps every Codex session on its canonical `.jsonl`
+  path (session ids hash that path), resolves the file that exists, streams `.zst` through
+  `ZstdStreamDecoder`, and gives seek-based readers (image spans) a decoded cache copy.
+  `CodexRolloutStorageTests` pins the behavior.
+
+To reproduce compression without touching real history, copy a few old rollouts (keep
+their mtimes) plus `auth.json` into a throwaway `CODEX_HOME` and run
+`codex exec -c features.local_thread_store_compression=true "Reply with ok."` there.
+
 ## 3  OpenCode Storage Changes
 
 OpenCode's current local backend is SQLite at `~/.local/share/opencode/opencode.db`.
@@ -655,7 +680,7 @@ Key contracts (simplified from regexes in
 `docs/agent-support/agent-watch-config.json`):
 | Agent    | Expected pattern |
 |----------|-----------------|
-| Codex    | `*/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Codex    | `*/sessions/YYYY/MM/DD/rollout-*.jsonl` or cold `rollout-*.jsonl.zst` (§2b) |
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/opencode.db` or legacy `*/opencode/storage/session/*/ses_*.json` |
 | Hermes   | `~/.hermes/state.db` or legacy `~/.hermes/sessions/session_*.json` |

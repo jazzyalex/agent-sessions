@@ -53,7 +53,7 @@ final class CodexResumeCoordinator {
         guard let sessionID = Self.appSessionID(for: session) else {
             return .failure(CodexDesktopAppLauncher.LaunchError.invalidSessionID.localizedDescription)
         }
-        guard FileManager.default.fileExists(atPath: session.filePath) else {
+        guard CodexRolloutStorage.exists(atPath: session.filePath) else {
             return .failure(String(localized: "The session log could not be found on disk.",
                                    comment: "Error when opening a session whose local log was removed."))
         }
@@ -67,7 +67,7 @@ final class CodexResumeCoordinator {
     }
 
     func quickLaunchInTerminal(session: Session) async -> QuickLaunchResult {
-        guard FileManager.default.fileExists(atPath: session.filePath) else {
+        guard CodexRolloutStorage.exists(atPath: session.filePath) else {
             return .failure("The session log could not be found on disk.")
         }
 
@@ -85,7 +85,7 @@ final class CodexResumeCoordinator {
 
             do {
                 let fallbackURL: URL?
-                if FileManager.default.fileExists(atPath: session.filePath) {
+                if CodexRolloutStorage.exists(atPath: session.filePath) {
                     fallbackURL = URL(fileURLWithPath: session.filePath)
                 } else {
                     fallbackURL = nil

@@ -411,7 +411,7 @@ struct CodexResumeSheet: View {
         guard !fileMissing else { return nil }
         do {
             let fallbackURL: URL?
-            if FileManager.default.fileExists(atPath: session.filePath) {
+            if CodexRolloutStorage.exists(atPath: session.filePath) {
                 fallbackURL = URL(fileURLWithPath: session.filePath)
             } else {
                 fallbackURL = nil
@@ -488,7 +488,7 @@ struct CodexResumeSheet: View {
         }
         workingDirectoryField = settings.workingDirectory(for: session.id) ?? session.cwd ?? settings.defaultWorkingDirectory
         updateFileSizeWarning(for: session)
-        fileMissing = !FileManager.default.fileExists(atPath: session.filePath)
+        fileMissing = !CodexRolloutStorage.exists(atPath: session.filePath)
     }
 
     private func menuTitle(for session: Session) -> String {

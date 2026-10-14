@@ -131,7 +131,8 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                     for session in sessionsSnapshot {
                         if Task.isCancelled { break }
 
-                        let url = URL(fileURLWithPath: session.filePath)
+                        // A compressed Codex rollout is scanned in its decoded copy.
+                        let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
                         if !FileManager.default.fileExists(atPath: url.path) {
                             scanned += 1
                             let scannedSnapshot = scanned

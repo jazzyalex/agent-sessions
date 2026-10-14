@@ -211,7 +211,9 @@ enum SessionInlineImageMapper {
     static func imagesByUserBlockIndex(for session: Session,
                                        maxMatches: Int = 400,
                                        shouldCancel: () -> Bool = { false }) -> [Int: [InlineSessionImage]] {
-        let sessionFileURL = URL(fileURLWithPath: session.filePath)
+        // Image spans are byte offsets, so a compressed Codex rollout is read from its
+        // decoded copy.
+        let sessionFileURL = CodexRolloutStorage.seekableURL(forPath: session.filePath)
         guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return [:] }
 
         struct InlineScanResult: Hashable, Sendable {

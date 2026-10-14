@@ -84,6 +84,19 @@ def _expand_path(p: str) -> Path:
     return Path(expanded).expanduser()
 
 
+def _open_session_text(path: Path):
+    """Open a session file as text, decoding a `.jsonl.zst` (one zstd stream) transparently.
+
+    Codex compresses rollouts that have not changed for 7 days into
+    `rollout-*.jsonl.zst` and deletes the plain file (`local_thread_store_compression`).
+    """
+    if path.name.endswith(".jsonl.zst"):
+        from compression import zstd as _zstd  # Python 3.14+
+
+        return _zstd.open(path, "rt", encoding="utf-8", errors="replace")
+    return path.open("r", encoding="utf-8", errors="replace")
+
+
 # Credentials that must never reach a monitored agent CLI. This tool shells out
 # to every agent binary on the machine; a GitHub token in their environment is
 # ambient authority none of them need.
@@ -773,7 +786,7 @@ def _newest_files(
 def _jsonl_contains_any_type(path: Path, required_types: set[str], max_lines: int) -> bool:
     try:
         lines_seen = 0
-        with path.open("r", encoding="utf-8", errors="replace") as f:
+        with _open_session_text(path) as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -972,7 +985,7 @@ def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[st
 def _tail_lines(path: Path, max_lines: int) -> list[str]:
     # Read tail-ish by keeping only last max_lines lines (simple but OK for monitoring).
     lines: list[str] = []
-    with path.open("r", encoding="utf-8", errors="replace") as f:
+    with _open_session_text(path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -3308,7 +3321,7 @@ def _kimi_wire_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     part_runs: dict[tuple[Any, Any, Any, str], int] = {}
 
     lines: list[str] = []
-    with path.open("r", encoding="utf-8", errors="replace") as f:
+    with _open_session_text(path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -3462,7 +3475,7 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
     total_lines: int = 0
 
     lines: list[str] = []
-    with path.open("r", encoding="utf-8", errors="replace") as f:
+    with _open_session_text(path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -3567,7 +3580,7 @@ def _antigravity_markdown_schema_fingerprint(path: Path, max_lines: int) -> dict
     in_fence = False
 
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
+        with _open_session_text(path) as handle:
             for idx, line in enumerate(handle):
                 if idx >= max(0, int(max_lines)):
                     break
@@ -6598,6 +6611,18 @@ def main(argv: list[str]) -> int:
                         newest = Path(local_fp["file"])
 
                 if local_fp is not None:
+                    compressed_glob = local_schema_cfg.get("compressed_glob")
+                    if isinstance(compressed_glob, str) and compressed_glob:
+                        # Codex rollout compression replaces cold `.jsonl` files with
+                        # `.jsonl.zst`; a non-zero count is the signal that it has
+                        # reached this machine.
+                        local_fp["compressed_files"] = sum(
+                            1
+                            for r in roots
+                            if _expand_path(r).exists()
+                            for p in _expand_path(r).rglob(compressed_glob)
+                            if p.is_file()
+                        )
                     weekly_details["local_schema"] = local_fp
                     if baseline_type_keys:
                         if kind == "deepseek_harness_sessions":

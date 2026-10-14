@@ -744,9 +744,15 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         var bytesRead: UInt64 = 0
         var didInvokeAfterFirstLine = false
         do {
-            let completed = try JSONLReader(url: url,
-                                            maximumBytes: maximumBytes,
-                                            propagatesReadErrors: true).forEachLineWhile({ line in
+            // A compressed Codex rollout streams through its decoder; the signature
+            // bound only applies to a plain file that can still grow.
+            let reader = CodexRolloutStorage.lineReader(for: url,
+                                                        maximumBytes: maximumBytes,
+                                                        propagatesReadErrors: true)
+                ?? JSONLReader(url: url,
+                               maximumBytes: maximumBytes,
+                               propagatesReadErrors: true)
+            let completed = try reader.forEachLineWhile({ line in
                 guard !Task.isCancelled else { return false }
                 consume(line, index)
                 index += 1

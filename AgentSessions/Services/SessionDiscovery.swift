@@ -28,7 +28,11 @@ struct SessionDiscoveryDelta {
 extension SessionFileStat {
     /// Stat a single session file, returning nil for non-regular files.
     static func from(_ url: URL) -> SessionFileStat? {
-        guard let precise = SessionFileStat.precise(from: url) else { return nil }
+        // A Codex rollout keeps its canonical `.jsonl` path after Codex compresses it
+        // to `.jsonl.zst`; when the plain file is gone, stat the compressed one.
+        guard let precise = SessionFileStat.precise(from: url)
+            ?? CodexRolloutStorage.storageURL(for: url).flatMap({ SessionFileStat.precise(from: $0) })
+        else { return nil }
         return SessionFileStat(
             mtime: precise.mtime / 1_000_000_000,
             size: precise.size)
@@ -104,8 +108,9 @@ final class CodexSessionDiscovery: SessionDiscovery {
             }
             if let enumerator = fm.enumerator(at: scanRoot, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
                 for case let url as URL in enumerator {
-                    // Codex format: rollout-YYYY-MM-DDThh-mm-ss-UUID.jsonl
-                    if url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl" {
+                    // Codex format: rollout-YYYY-MM-DDThh-mm-ss-UUID.jsonl, or a cold
+                    // `.jsonl.zst` that is kept on its canonical `.jsonl` path.
+                    if CodexRolloutStorage.isRolloutFile(url) {
                         found.append(url)
                     }
                 }
@@ -113,7 +118,8 @@ final class CodexSessionDiscovery: SessionDiscovery {
         }
 
         // Sort by filename descending (newest first)
-        return found.sorted { $0.lastPathComponent > $1.lastPathComponent }
+        return CodexRolloutStorage.canonicalRolloutURLs(found)
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
     private func scanRoots(for root: URL) -> [URL] {
@@ -163,7 +169,7 @@ final class CodexSessionDiscovery: SessionDiscovery {
                 let rootPath = sessionsRoot().path
                 if Self.path(oldPath, isWithin: rootPath),
                    currentArchivedFilenames.contains(filename),
-                   !FileManager.default.fileExists(atPath: oldPath) {
+                   !CodexRolloutStorage.exists(atPath: oldPath) {
                     return true
                 }
                 return false
@@ -190,9 +196,8 @@ final class CodexSessionDiscovery: SessionDiscovery {
                 continue
             }
             for file in items {
-                guard file.lastPathComponent.hasPrefix("rollout-"),
-                      file.pathExtension.lowercased() == "jsonl" else { continue }
-                found.append(file)
+                guard CodexRolloutStorage.isRolloutFile(file) else { continue }
+                found.append(CodexRolloutStorage.canonicalURL(for: file))
             }
         }
         found.append(contentsOf: discoverRecentArchivedSessionFiles(dayWindow: dayWindow, previousByPath: previousByPath))
@@ -223,11 +228,11 @@ final class CodexSessionDiscovery: SessionDiscovery {
                                                  options: [.skipsHiddenFiles]) else {
                 continue
             }
-            for case let url as URL in enumerator {
-                guard url.lastPathComponent.hasPrefix("rollout-"),
-                      url.pathExtension.lowercased() == "jsonl" else {
+            for case let rawURL as URL in enumerator {
+                guard CodexRolloutStorage.isRolloutFile(rawURL) else {
                     continue
                 }
+                let url = CodexRolloutStorage.canonicalURL(for: rawURL)
                 let filenameIsRecent = prefixes.contains { url.lastPathComponent.hasPrefix($0) }
                 if filenameIsRecent || previousByPath[url.path] != nil {
                     found.append(url)
@@ -252,9 +257,8 @@ final class CodexSessionDiscovery: SessionDiscovery {
         for (path, previousStat) in previousByPath {
             guard rootPaths.contains(where: { Self.path(path, isWithin: $0) }) else { continue }
 
-            let url = URL(fileURLWithPath: path)
-            guard url.lastPathComponent.hasPrefix("rollout-"),
-                  url.pathExtension.lowercased() == "jsonl" else { continue }
+            let url = CodexRolloutStorage.canonicalURL(for: URL(fileURLWithPath: path))
+            guard CodexRolloutStorage.isRolloutFile(url) else { continue }
             guard let currentStat = SessionFileStat.from(url),
                   currentStat != previousStat else { continue }
 

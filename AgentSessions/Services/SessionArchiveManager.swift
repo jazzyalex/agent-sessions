@@ -1314,6 +1314,16 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             upstreamURL = URL(fileURLWithPath: info.upstreamPath)
             upstreamExists = fm.fileExists(atPath: upstreamURL.path)
         }
+        if !upstreamExists, info.source == .codex, CodexRolloutStorage.isStoredCompressed(upstreamURL) {
+            // Codex compressed the idle rollout to `.jsonl.zst` without changing its
+            // bytes. The upstream is present, and the committed archive stays as-is.
+            info.lastUpstreamSeenAt = Date()
+            info.upstreamMissing = false
+            try writeInfo(info)
+            reloadCache()
+            log("sync upstream compressed source=\(info.source.rawValue) id=\(info.sessionID)")
+            return
+        }
         info.lastUpstreamSeenAt = upstreamExists ? Date() : info.lastUpstreamSeenAt
         info.upstreamMissing = !upstreamExists
 

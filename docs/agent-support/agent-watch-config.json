@@ -16,14 +16,16 @@
         "local_schema": {
           "kind": "jsonl_newest",
           "roots": ["$CODEX_HOME/sessions", "~/.codex/sessions"],
-          "glob": "**/rollout-*.jsonl",
+          "glob": "**/rollout-*.jsonl*",
+          "exclude_globs": ["*.tmp"],
+          "compressed_glob": "rollout-*.jsonl.zst",
           "required_types": ["session_meta"],
           "max_lines": 2500
         },
         "freshness_window_days": 14,
         "discovery_path_contract": {
-          "description": "Codex sessions should be discovered from day folders under a sessions root.",
-          "patterns": ["/sessions/[0-9]{4}/[0-9]{2}/[0-9]{2}/rollout-[^/]+\\.jsonl$"]
+          "description": "Codex sessions should be discovered from day folders under a sessions root, as plain .jsonl or as a cold .jsonl.zst (local_thread_store_compression).",
+          "patterns": ["/sessions/[0-9]{4}/[0-9]{2}/[0-9]{2}/rollout-[^/]+\\.jsonl(\\.zst)?$"]
         },
         "probes": [
           {

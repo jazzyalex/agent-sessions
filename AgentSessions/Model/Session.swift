@@ -2064,7 +2064,8 @@ private struct RolloutRegex {
     private let regex: NSRegularExpression?
 
     init() {
-        let pattern = "^rollout-([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2})-([0-9a-fA-F-]+)\\.jsonl$"
+        // `.jsonl.zst` is a rollout Codex compressed after 7 idle days.
+        let pattern = "^rollout-([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2})-([0-9a-fA-F-]+)\\.jsonl(\\.zst)?$"
         regex = try? NSRegularExpression(pattern: pattern)
     }
 

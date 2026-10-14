@@ -1946,7 +1946,7 @@ struct UnifiedSessionsView: View {
             if shouldShowLaunchOverlay {
                 launchBlockingTranscriptOverlay()
             } else if let s = settledSelectedSession {
-                if !s.isSideChat && !FileManager.default.fileExists(atPath: s.filePath) {
+                if !s.isSideChat && !CodexRolloutStorage.exists(atPath: s.filePath) {
                     let providerName: String = s.source.descriptor.shortLabel
                     let accent: Color = sourceAccent(s)
                     VStack(spacing: 12) {
@@ -3494,8 +3494,8 @@ struct UnifiedSessionsView: View {
     }
 
     private func revealSessionFile(_ s: Session) {
-        let url = URL(fileURLWithPath: s.filePath)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        // Reveal the file that exists: a compressed Codex rollout is `.jsonl.zst`.
+        guard let url = CodexRolloutStorage.storageURL(for: URL(fileURLWithPath: s.filePath)) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 

@@ -583,6 +583,8 @@ final class SessionIndexer: ObservableObject {
                !hasLoadedEvents,
                let existingSize = existing.fileSizeBytes,
                existingSize >= FeatureFlags.transcriptTailFirstPaintMinBytes,
+               // The tail reader seeks; a compressed rollout has no tail to seek to.
+               !CodexRolloutStorage.isStoredCompressed(url),
                let tailSession = self.parseFileTail(at: url, forcedID: id) {
                 DispatchQueue.main.async {
                     guard let idx = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
@@ -1178,7 +1180,8 @@ final class SessionIndexer: ObservableObject {
                 }
             }
             let fmExists: (Session) -> Bool = { s in
-                FileManager.default.fileExists(atPath: s.filePath)
+                // A rollout Codex compressed to `.jsonl.zst` keeps its `.jsonl` path.
+                CodexRolloutStorage.exists(atPath: s.filePath)
             }
             var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
 
@@ -1438,6 +1441,7 @@ final class SessionIndexer: ObservableObject {
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {
+        let url = CodexRolloutStorage.storageURL(for: url) ?? url
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
         guard values?.isRegularFile == true else { return nil }
         let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
@@ -2303,7 +2307,8 @@ final class SessionIndexer: ObservableObject {
     }
 
     func parseFile(at url: URL) -> Session? {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let storageURL = CodexRolloutStorage.storageURL(for: url) ?? url
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: storageURL.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
 
@@ -2335,17 +2340,26 @@ final class SessionIndexer: ObservableObject {
         let _span = Perf.begin("transcriptParseFull", thresholdMs: 100, "path=\(url.lastPathComponent)")
         defer { Perf.end(_span) }
         DBG("    📖 parseFileFull: Getting file attrs...")
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        // `url` is the canonical `.jsonl` path. Codex may hold the bytes in a cold
+        // `.jsonl.zst` instead; that file is decoded as a stream and gets no append
+        // snapshot, because Codex restores it to plain `.jsonl` before writing.
+        let storageURL = CodexRolloutStorage.storageURL(for: url) ?? url
+        let isCompressedStorage = CodexRolloutStorage.isCompressedRollout(storageURL)
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: storageURL.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
-        let snapshotSize = (attrs[.size] as? NSNumber)?.uint64Value
-        let snapshotSystemNumber = (attrs[.systemNumber] as? NSNumber)?.uint64Value
-        let snapshotFileNumber = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value
+        let snapshotSize = isCompressedStorage ? nil : (attrs[.size] as? NSNumber)?.uint64Value
+        let snapshotSystemNumber = isCompressedStorage ? nil : (attrs[.systemNumber] as? NSNumber)?.uint64Value
+        let snapshotFileNumber = isCompressedStorage ? nil : (attrs[.systemFileNumber] as? NSNumber)?.uint64Value
         DBG("    📖 parseFileFull: File size = \(size) bytes")
 
         DBG("    📖 parseFileFull: Creating JSONLReader...")
-        let reader = JSONLReader(url: url,
-                                 maximumBytes: snapshotSize,
-                                 propagatesReadErrors: true)
+        let reader = CodexRolloutStorage.lineReader(for: url,
+                                                    maximumBytes: snapshotSize,
+                                                    propagatesReadErrors: true)
+            ?? JSONLReader(url: url,
+                           maximumBytes: snapshotSize,
+                           propagatesReadErrors: true)
+        var decodedByteCount: UInt64 = 0
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
         var parentSessionID: String? = nil
@@ -2359,6 +2373,7 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
+                if isCompressedStorage { decodedByteCount += UInt64(rawLine.utf8.count + 1) }
                 // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: Self.eventID(base: eventIDBase, index: idx))
@@ -2427,7 +2442,7 @@ final class SessionIndexer: ObservableObject {
         var start = times.min()
         var end = times.max()
         if start == nil || end == nil {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: storageURL.path) {
                 if start == nil { start = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date) }
                 if end == nil { end = (attrs[.modificationDate] as? Date) ?? start }
             }
@@ -2443,7 +2458,9 @@ final class SessionIndexer: ObservableObject {
                               endTime: end,
                               model: modelSeen,
                               filePath: url.path,
-                              fileSizeBytes: snapshotSize.flatMap(Int.init(exactly:)),
+                              fileSizeBytes: isCompressedStorage
+                                  ? Int(exactly: decodedByteCount)
+                                  : snapshotSize.flatMap(Int.init(exactly:)),
                               eventCount: nonMetaCount,
                               events: events,
                               isHousekeeping: isHousekeeping,
@@ -2724,8 +2741,26 @@ final class SessionIndexer: ObservableObject {
         let headBytesInitial = 256 * 1024
         let headBytesMax = 2 * 1024 * 1024
         let tailBytes = 256 * 1024
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        // A rollout Codex compressed to `.jsonl.zst` is decoded once here for its
+        // head and tail; `url` stays the canonical `.jsonl` path for the session id.
+        let storageURL = CodexRolloutStorage.storageURL(for: url) ?? url
+        var compressedHeadTail: (head: Data, tail: Data, decodedSize: UInt64)?
+        if CodexRolloutStorage.isCompressedRollout(storageURL) {
+            guard let decoded = try? CodexRolloutStorage.readCompressedHeadAndTail(
+                storageURL, headBytes: headBytesMax, tailBytes: tailBytes) else { return nil }
+            compressedHeadTail = decoded
+        }
+        var compressedHeadCursor = 0
+        guard let fh = try? FileHandle(forReadingFrom: storageURL) else { return nil }
         defer { try? fh.close() }
+        func readHeadChunk(_ count: Int) -> Data {
+            guard let head = compressedHeadTail?.head else {
+                return (try? fh.read(upToCount: count)) ?? Data()
+            }
+            let end = min(head.count, compressedHeadCursor + count)
+            defer { compressedHeadCursor = end }
+            return head.subdata(in: compressedHeadCursor..<end)
+        }
 
         // Read head lines (newline-bounded) rather than a fixed slice.
         // Newer Codex sessions can have an extremely large first line (session_meta with embedded instructions),
@@ -2741,7 +2776,7 @@ final class SessionIndexer: ObservableObject {
             while bytesRead < maxBytes, out.count < maxLines {
                 let remaining = maxBytes - bytesRead
                 let chunkSize = min(64 * 1024, remaining)
-                let chunk = (try? fh.read(upToCount: chunkSize)) ?? Data()
+                let chunk = readHeadChunk(chunkSize)
                 if chunk.isEmpty { break }
                 bytesRead += chunk.count
                 newlineCount += chunk.filter { $0 == 0x0a }.count
@@ -2771,9 +2806,13 @@ final class SessionIndexer: ObservableObject {
         let headRead = readHeadLines(initialBytes: headBytesInitial, maxBytes: headBytesMax, maxLines: 300)
 
         // Read tail slice
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
+        let fileSize = compressedHeadTail.map { Int(clamping: $0.decodedSize) }
+            ?? (try? FileManager.default.attributesOfItem(atPath: storageURL.path)[.size] as? NSNumber)?.intValue
+            ?? size
         var tailData: Data = Data()
-        if fileSize > tailBytes {
+        if let compressedHeadTail {
+            if fileSize > tailBytes { tailData = compressedHeadTail.tail }
+        } else if fileSize > tailBytes {
             let offset = UInt64(fileSize - tailBytes)
             try? fh.seek(toOffset: offset)
             tailData = (try? fh.readToEnd()) ?? Data()
@@ -2929,7 +2968,7 @@ final class SessionIndexer: ObservableObject {
         // Now create final lightweight session with empty events but preserve metadata
         let session = Session(id: id,
                               source: .codex,
-                              startTime: tmin ?? (attrsDate(url, key: .creationDate) ?? mtime),
+                              startTime: tmin ?? (attrsDate(storageURL, key: .creationDate) ?? mtime),
                               endTime: tmax ?? mtime,
                               model: model,
                               filePath: url.path,

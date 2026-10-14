@@ -96,7 +96,8 @@ actor ImageBrowserIndexCache {
         if shouldCancel() { return emptyIndex(for: session) }
 
         let signature = fileSignature(forPath: session.filePath) ?? ImageBrowserFileSignature(filePath: session.filePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
-        let url = URL(fileURLWithPath: session.filePath)
+        // Spans are byte offsets; a compressed Codex rollout is scanned in its decoded copy.
+        let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
 
         let createdAt = Int64(Date().timeIntervalSince1970)
 
@@ -323,7 +324,9 @@ private extension ImageBrowserIndexCache {
 
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {
         do {
-            let attrs = try fileManager.attributesOfItem(atPath: path)
+            // A compressed Codex rollout is signed by its `.jsonl.zst` file.
+            let statPath = CodexRolloutStorage.storageURL(for: URL(fileURLWithPath: path))?.path ?? path
+            let attrs = try fileManager.attributesOfItem(atPath: statPath)
             let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
             let modDate = (attrs[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
             return ImageBrowserFileSignature(
