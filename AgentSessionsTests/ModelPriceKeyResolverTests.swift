@@ -26,8 +26,12 @@ final class ModelPriceKeyResolverTests: XCTestCase {
     }
 
     func testFreeRoutesKeepTheFlagThroughAliasLookup() {
+        // Only the free marker is stripped. The contributor route's base model is
+        // `muse-spark-1.3-contributor`, which Meta prices separately.
         XCTAssertEqual(resolve("muse-spark-1.3-contributor-free"),
-                       ResolvedPriceKey(key: "muse-spark-1.3", viaFreeRoute: true))
+                       ResolvedPriceKey(key: "muse-spark-1.3-contributor", viaFreeRoute: true))
+        XCTAssertEqual(resolve("cline-free/muse-spark-1.3-contributor"),
+                       ResolvedPriceKey(key: "muse-spark-1.3-contributor", viaFreeRoute: true))
         XCTAssertEqual(resolve("cline-free/deepseek-v4.1-flash"),
                        ResolvedPriceKey(key: "deepseek-v4.1-flash", viaFreeRoute: true))
         XCTAssertEqual(resolve("minimax-m2.5-free"),

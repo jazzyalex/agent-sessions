@@ -15,7 +15,10 @@ struct ResolvedPriceKey: Equatable, Sendable {
 enum ModelPriceKeyResolver {
     private static let reasoningSuffixes: Set<String> =
         ["minimal", "low", "medium", "high", "xhigh", "thinking"]
-    private static let freeSuffixes = [":free", "-contributor-free", "-free"]
+    /// Only the free marker is stripped. `muse-spark-1.3-contributor-free` keeps its
+    /// `-contributor` part, because the contributor route's base model is
+    /// `muse-spark-1.3-contributor`, which Meta prices separately.
+    private static let freeSuffixes = [":free", "-free"]
     private static let freePrefix = "cline-free/"
     private static let providerPrefixes: Set<String> =
         ["anthropic", "openai", "google", "z-ai", "moonshotai", "deepseek", "minimax",

@@ -73,6 +73,9 @@ unverified by review.
   `z-ai/glm-5.3-flash`, `poolside/laguna-s-2.1:free`.
 - Free markers: `muse-spark-1.3-contributor-free` (59),
   `cline-free/deepseek-v4.1-flash` (5), `minimax-m2.5-free`, `:free` suffix.
+  The free marker is `cline-free/`, `:free` or `-free` only. In
+  `muse-spark-1.3-contributor-free` the base model is
+  `muse-spark-1.3-contributor`, a separate Meta Contributor-mode model.
 - Spelling variant: `claude-haiku-4.5`.
 - Display name: `Gemini 3.5 Flash (Medium)`, `Claude Sonnet 4.6 (Thinking)`.
 - Stealth or unpublished: `big-pickle` (49), `x-preview-f-free`,
@@ -107,7 +110,10 @@ from key resolution, so no later step can erase it.
    is in a fixed list: `minimal`, `low`, `medium`, `high`, `xhigh`,
    `thinking`. Any other parenthetical stays.
 3. **Free route.** Set `viaFreeRoute` and strip when the string has the prefix
-   `cline-free/`, or one trailing `:free`, `-contributor-free`, or `-free`.
+   `cline-free/`, or one trailing `:free` or `-free`. Only the free marker is
+   stripped: `muse-spark-1.3-contributor-free` and
+   `cline-free/muse-spark-1.3-contributor` both resolve to
+   `muse-spark-1.3-contributor`.
 4. **Provider prefix.** If exactly one `/` remains, drop the part before it only
    when it is in a fixed allowlist (`anthropic`, `openai`, `google`, `z-ai`,
    `moonshotai`, `deepseek`, `minimax`, `x-ai`, `qwen`, `meta`, `opencode`,
@@ -416,7 +422,10 @@ every alias target exists; `codex-auto-review` matching is pinned.
 - Gemini 3.6 Flash and 3.8 Flash rates are published as valid through
   2026-12-31. From 2027-01-01 they double to $1.50 / $0.15 / $7.50. On
   2027-01-01, update both manifests and raise `sequence`.
-- Muse Spark: `muse-spark-1.3-contributor-free` is priced at the Standard rate,
-  as in the resolver example. Meta publishes `muse-spark-1.3-contributor` at
-  $0.10 / $0.002 / $0.20, and `cline-free/muse-spark-1.3-contributor` stays
-  unpriced. The owner decides which rate a contributor route uses.
+- Muse Spark contributor route, decided by the owner (2026-10-14): a free
+  route is priced at its base model's list price. The base model of
+  `muse-spark-1.3-contributor-free` and `cline-free/muse-spark-1.3-contributor`
+  is `muse-spark-1.3-contributor`, which Meta publishes at $0.10 input /
+  $0.002 cached input / $0.20 output (read 2026-10-14 at
+  dev.meta.ai/docs/pricing-rate-limits). Both strings price at that v2 row
+  (sequence 2026101403), never at the Standard `muse-spark-1.3` rate.

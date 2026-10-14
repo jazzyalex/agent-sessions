@@ -398,10 +398,23 @@ final class PriceManifestV2Tests: XCTestCase {
                     "Gemini 3.8 Flash (High)", "Gemini 3.6 Flash (Medium)",
                     "z-ai/glm-5.3-flash", "minimax-m2.5-free", "kimi-k2.7-code",
                     "grok-4.6",
-                    "muse-spark-1.3-contributor-free"] {
+                    "muse-spark-1.3-contributor-free", "cline-free/muse-spark-1.3-contributor"] {
             XCTAssertNotNil(s.resolvedPrice(forModel: raw), raw)
         }
-        XCTAssertEqual(s.resolvedPrice(forModel: "muse-spark-1.3-contributor-free")?.price.inputPerMTok, 1.25)
+        // A free route is priced at its base model's list price. The contributor
+        // route's base model is `muse-spark-1.3-contributor` (Meta Contributor mode,
+        // $0.10 / $0.002 / $0.20), never the Standard rate.
+        for raw in ["muse-spark-1.3-contributor-free", "cline-free/muse-spark-1.3-contributor"] {
+            let resolved = s.resolvedPrice(forModel: raw)
+            XCTAssertEqual(resolved?.price.inputPerMTok, 0.10, raw)
+            XCTAssertEqual(resolved?.price.cachedInputPerMTok, 0.002, raw)
+            XCTAssertEqual(resolved?.price.outputPerMTok, 0.20, raw)
+            XCTAssertNil(resolved?.price.cacheWritePerMTok, raw)
+            XCTAssertNil(resolved?.price.longContext, raw)
+            XCTAssertEqual(resolved?.viaFreeRoute, true, raw)
+        }
+        XCTAssertEqual(s.resolvedPrice(forModel: "muse-spark-1.3")?.price.inputPerMTok, 1.25,
+                       "Standard mode keeps its own row")
         XCTAssertEqual(s.resolvedPrice(forModel: "z-ai/glm-5.3-flash")?.price.inputPerMTok, 0.15)
         // Antigravity display names resolve through the aliases to their own rows.
         XCTAssertEqual(ModelPriceKeyResolver.resolve("Gemini 3.8 Flash (High)", aliases: s.aliases)?.key,
