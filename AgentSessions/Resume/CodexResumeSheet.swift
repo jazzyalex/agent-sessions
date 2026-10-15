@@ -316,9 +316,16 @@ struct CodexResumeSheet: View {
                 .toggleStyle(.switch)
                 .help("Launch Codex with -c experimental_resume=<path> instead of resume <id>.")
             } else if requiresFallback {
-                Label("Falling back to experimental resume flag", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let session = selectedSession, !hasPlainFallbackFile(session) {
+                    Label("Codex compressed this session. Update Codex to resume it by ID.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Falling back to experimental resume flag", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -411,7 +418,9 @@ struct CodexResumeSheet: View {
         guard !fileMissing else { return nil }
         do {
             let fallbackURL: URL?
-            if CodexRolloutStorage.exists(atPath: session.filePath) {
+            // Only a plain `.jsonl` can be an explicit resume path. A rollout Codex
+            // compressed resumes by id; Codex restores the plain file itself.
+            if FileManager.default.fileExists(atPath: session.filePath) {
                 fallbackURL = URL(fileURLWithPath: session.filePath)
             } else {
                 fallbackURL = nil
@@ -432,10 +441,25 @@ struct CodexResumeSheet: View {
 
     @MainActor
     private func canLaunch(session: Session) -> Bool {
-        if fileMissing { return false }
-        if codexBinary == nil { return false }
-        if shouldUseFallback { return true }
-        return probeVersion?.supportsResumeByID ?? false
+        Self.canLaunch(fileMissing: fileMissing,
+                       hasBinary: codexBinary != nil,
+                       requiresFallback: requiresFallback,
+                       usesFallback: shouldUseFallback,
+                       supportsResumeByID: probeVersion?.supportsResumeByID ?? false,
+                       hasPlainFallbackFile: hasPlainFallbackFile(session))
+    }
+
+    /// A CLI that cannot resume by ID needs a plain file to pass as the explicit
+    /// path; a session Codex compressed has none, so it cannot be launched there.
+    static func canLaunch(fileMissing: Bool,
+                          hasBinary: Bool,
+                          requiresFallback: Bool,
+                          usesFallback: Bool,
+                          supportsResumeByID: Bool,
+                          hasPlainFallbackFile: Bool) -> Bool {
+        if fileMissing || !hasBinary { return false }
+        if requiresFallback || usesFallback { return hasPlainFallbackFile }
+        return supportsResumeByID
     }
 
     @MainActor
@@ -446,7 +470,15 @@ struct CodexResumeSheet: View {
     @MainActor
     private var canOfferFallback: Bool {
         guard let version = probeVersion else { return false }
+        // The explicit-path flag needs a plain file; a compressed session has none.
+        guard let session = selectedSession, hasPlainFallbackFile(session) else { return false }
         return version.supportsResumeByID
+    }
+
+    /// Only a plain `.jsonl` can be an explicit resume path. A rollout Codex compressed
+    /// resumes by ID; Codex restores the plain file itself.
+    private func hasPlainFallbackFile(_ session: Session) -> Bool {
+        FileManager.default.fileExists(atPath: session.filePath)
     }
 
     @MainActor
@@ -500,9 +532,22 @@ struct CodexResumeSheet: View {
     @MainActor
     private func updateFileSizeWarning(for session: Session) {
         do {
-            let attrs = try FileManager.default.attributesOfItem(atPath: session.filePath)
+            let storagePath = CodexRolloutStorage.storageURL(for: URL(fileURLWithPath: session.filePath))?.path
+                ?? session.filePath
+            let attrs = try FileManager.default.attributesOfItem(atPath: storagePath)
             if let size = attrs[.size] as? NSNumber {
-                let bytes = size.int64Value
+                // A compressed rollout's size is its decoded size: from the zstd frame
+                // header, else from the indexed session, else the stored size as a floor.
+                let bytes: Int64
+                if CodexRolloutStorage.isCompressedRollout(URL(fileURLWithPath: storagePath)) {
+                    if let decoded = CodexRolloutStorage.frameContentSize(of: URL(fileURLWithPath: storagePath)) {
+                        bytes = Int64(clamping: decoded)
+                    } else {
+                        bytes = max(size.int64Value, Int64(session.fileSizeBytes ?? 0))
+                    }
+                } else {
+                    bytes = size.int64Value
+                }
                 if bytes > 100 * 1024 * 1024 {
                     let formatter = ByteCountFormatter()
                     formatter.allowedUnits = [.useMB, .useGB]
@@ -573,7 +618,13 @@ struct CodexResumeSheet: View {
     private func runHealthCheck() async {
         guard let session = selectedSession else { return }
         let bin = codexBinary
-        let (_, output) = await ResumeHealthCheck.run(sessionPath: session.filePath,
+        // The script reads the JSONL with jq and grep, so a rollout Codex compressed
+        // is checked through a decoded temporary copy.
+        let decodedCopy = CodexRolloutStorage.isStoredCompressed(URL(fileURLWithPath: session.filePath))
+            ? try? CodexRolloutStorage.decodedTemporaryCopy(for: URL(fileURLWithPath: session.filePath))
+            : nil
+        defer { if let decodedCopy { try? FileManager.default.removeItem(at: decodedCopy) } }
+        let (_, output) = await ResumeHealthCheck.run(sessionPath: decodedCopy?.path ?? session.filePath,
                                                          workingDirectory: workingDirectoryField.isEmpty ? nil : workingDirectoryField,
                                                          codexBinary: bin,
                                                          timeoutSeconds: 6)

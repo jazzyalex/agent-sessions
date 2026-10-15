@@ -91,10 +91,55 @@ def _open_session_text(path: Path):
     `rollout-*.jsonl.zst` and deletes the plain file (`local_thread_store_compression`).
     """
     if path.name.endswith(".jsonl.zst"):
-        from compression import zstd as _zstd  # Python 3.14+
+        try:
+            from compression import zstd as _zstd  # Python 3.14+
+        except ImportError as exc:
+            # An OSError, so callers that skip unreadable files skip this one too.
+            raise OSError(f"{path.name}: decoding .jsonl.zst needs Python 3.14+ (compression.zstd)") from exc
 
         return _zstd.open(path, "rt", encoding="utf-8", errors="replace")
     return path.open("r", encoding="utf-8", errors="replace")
+
+
+try:
+    from compression.zstd import ZstdError as _ZstdError  # Python 3.14+
+except ImportError:  # pragma: no cover - older Python cannot open .zst at all
+
+    class _ZstdError(Exception):
+        pass
+
+
+# What reading a session file can raise: I/O errors, and for a `.jsonl.zst` a
+# truncated stream (EOFError) or corrupt data (ZstdError).
+_SESSION_READ_ERRORS: tuple[type[BaseException], ...] = (OSError, EOFError, _ZstdError)
+
+
+def _readable_fingerprints(candidates: list[Path], fingerprint: Any) -> list[dict[str, Any]]:
+    """`fingerprint(p)` for each candidate in order, skipping files that fail to read."""
+    out: list[dict[str, Any]] = []
+    for cand in candidates:
+        try:
+            out.append(fingerprint(cand))
+        except _SESSION_READ_ERRORS:
+            continue
+    return out
+
+
+def _is_session_candidate(path: Path) -> bool:
+    """False for a file that is not a separate session.
+
+    A `rollout-*.jsonl*` glob also matches `X.jsonl.zst` next to its own `X.jsonl`
+    while Codex restores a compressed rollout; that is one session and the plain file
+    wins, as in Codex and the app. Other `rollout-*.jsonl.<suffix>` files (Codex's
+    `.tmp` files) are not sessions. Other agents' names (DeepSeek's `.jsonl.zstd`)
+    are left alone.
+    """
+    name = path.name
+    if not name.startswith("rollout-"):
+        return True
+    if name.endswith(".jsonl.zst"):
+        return not path.with_name(name[: -len(".zst")]).exists()
+    return name.endswith(".jsonl")
 
 
 # Credentials that must never reach a monitored agent CLI. This tool shells out
@@ -776,7 +821,7 @@ def _newest_files(
             continue
         if not p.is_file():
             continue
-        if _path_matches_any_exclude(p, exclude_globs):
+        if _path_matches_any_exclude(p, exclude_globs) or not _is_session_candidate(p):
             continue
         scored.append((st.st_mtime, p))
     scored.sort(key=lambda t: t[0], reverse=True)
@@ -802,7 +847,7 @@ def _jsonl_contains_any_type(path: Path, required_types: set[str], max_lines: in
                 t = obj.get("type")
                 if isinstance(t, str) and t in required_types:
                     return True
-    except OSError:
+    except _SESSION_READ_ERRORS:
         return False
     return False
 
@@ -820,7 +865,11 @@ def _newest_file_with_types(
         if not root.exists():
             continue
         candidates.extend(root.glob(glob) if "*" in glob and "/" not in glob else root.rglob(glob))
-    candidates = [c for c in candidates if c.is_file() and not _path_matches_any_exclude(c, exclude_globs)]
+    candidates = [
+        c
+        for c in candidates
+        if c.is_file() and not _path_matches_any_exclude(c, exclude_globs) and _is_session_candidate(c)
+    ]
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     wanted = {t for t in required_types if isinstance(t, str) and t}
     for p in candidates:
@@ -6481,7 +6530,6 @@ def main(argv: list[str]) -> int:
                                 return _kimi_wire_schema_fingerprint(p, max_lines=max_lines)
                             return _schema_fingerprint_for_agent(agent_name, p, max_lines=max_lines)
 
-                        local_fp = _fp(newest)
                         # Union the next few recent sessions into the same fingerprint so
                         # one thin session cannot decide the verdict on its own.
                         if required_types:
@@ -6493,13 +6541,13 @@ def main(argv: list[str]) -> int:
                             recent = _newest_files(
                                 roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
                             )
-                        siblings = [p for p in recent if p != newest]
-                        sampled_fps = [local_fp]
-                        for sib in siblings:
-                            try:
-                                sampled_fps.append(_fp(sib))
-                            except OSError:
-                                continue
+                        # A sample that fails to read (a truncated or corrupt `.jsonl.zst`
+                        # can pass the head-only type check above) is skipped; the next
+                        # readable one leads the fingerprint.
+                        sampled_fps = _readable_fingerprints(
+                            [newest] + [p for p in recent if p != newest], _fp
+                        )
+                        local_fp = sampled_fps[0] if sampled_fps else None
                         if len(sampled_fps) > 1:
                             local_fp["type_keys"] = _merge_type_keys(sampled_fps)
                             merged_counts: dict[str, int] = {}
@@ -6507,7 +6555,8 @@ def main(argv: list[str]) -> int:
                                 for t, n in (fp.get("type_counts") or {}).items():
                                     merged_counts[t] = merged_counts.get(t, 0) + int(n)
                             local_fp["type_counts"] = dict(sorted(merged_counts.items()))
-                        local_fp["sampled_files"] = [str(fp.get("file")) for fp in sampled_fps]
+                        if local_fp is not None:
+                            local_fp["sampled_files"] = [str(fp.get("file")) for fp in sampled_fps]
                 elif kind == "antigravity_markdown_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)

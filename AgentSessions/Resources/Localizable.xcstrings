@@ -6631,6 +6631,23 @@
         }
       }
     },
+    "Codex compressed this session. Update Codex to resume it by ID.": {
+      "comment": "Resume sheet note: the installed Codex CLI can only resume from a plain session file, and Codex stored this session compressed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex compressed this session. Update Codex to resume it by ID."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 已压缩此会话。请更新 Codex 以按 ID 继续。"
+          }
+        }
+      }
+    },
     "Codex is not found": {
       "localizations": {
         "en": {

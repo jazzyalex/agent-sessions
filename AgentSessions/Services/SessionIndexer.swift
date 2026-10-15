@@ -642,7 +642,8 @@ final class SessionIndexer: ObservableObject {
                 // Force full parse by calling parseFile directly (skip lightweight check).
                 // JSONLReader is bounded to the size captured inside this call, so growth
                 // after the snapshot is left for the next append pass.
-                if let fullResult = self.parseFileFullResult(at: url, forcedID: id) {
+                if let fullResult = self.parseFileFullResult(at: url, forcedID: id),
+                   fullResult.readSucceeded || !hasLoadedEvents {
                     parsedSession = fullResult.session
                     if fullResult.readSucceeded,
                        let snapshotByteCount = fullResult.snapshotByteCount,
@@ -731,9 +732,16 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
             } else {
-                DBG("❌ parseFileFull returned nil for \(filename)")
+                // Nil parse, or a read that failed partway (for example a truncated
+                // `.jsonl.zst`) over a transcript that is already loaded: keep the
+                // loaded transcript. The stat is recorded so a monitor retries only
+                // after the file changes.
+                DBG("❌ parseFileFull returned no usable session for \(filename)")
                 self.reloadLock.lock()
                 self.appendCursorsBySessionID.removeValue(forKey: id)
+                if hasLoadedEvents, let preParseStat {
+                    self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                }
                 self.reloadLock.unlock()
                 // Clear loading state on failure
                 DispatchQueue.main.async {
@@ -2353,13 +2361,16 @@ final class SessionIndexer: ObservableObject {
         DBG("    📖 parseFileFull: File size = \(size) bytes")
 
         DBG("    📖 parseFileFull: Creating JSONLReader...")
+        // Counted at the decoder, before line splitting, so the size is the exact
+        // decoded byte count (empty and oversized lines included).
+        var decodedByteCount: UInt64 = 0
         let reader = CodexRolloutStorage.lineReader(for: url,
                                                     maximumBytes: snapshotSize,
-                                                    propagatesReadErrors: true)
+                                                    propagatesReadErrors: true,
+                                                    onDecodedBytes: { decodedByteCount += UInt64($0) })
             ?? JSONLReader(url: url,
                            maximumBytes: snapshotSize,
                            propagatesReadErrors: true)
-        var decodedByteCount: UInt64 = 0
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
         var parentSessionID: String? = nil
@@ -2373,7 +2384,6 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
-                if isCompressedStorage { decodedByteCount += UInt64(rawLine.utf8.count + 1) }
                 // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: Self.eventID(base: eventIDBase, index: idx))
@@ -2741,25 +2751,35 @@ final class SessionIndexer: ObservableObject {
         let headBytesInitial = 256 * 1024
         let headBytesMax = 2 * 1024 * 1024
         let tailBytes = 256 * 1024
-        // A rollout Codex compressed to `.jsonl.zst` is decoded once here for its
-        // head and tail; `url` stays the canonical `.jsonl` path for the session id.
+        // A rollout Codex compressed to `.jsonl.zst` has no tail to seek to. Its head is
+        // decoded only as far as the head lines need; the tail is decoded only when the
+        // whole rollout is at most `compressedTailDecodeLimit` bytes decoded. `url`
+        // stays the canonical `.jsonl` path for the session id.
+        let compressedTailDecodeLimit = 16 * 1024 * 1024
         let storageURL = CodexRolloutStorage.storageURL(for: url) ?? url
-        var compressedHeadTail: (head: Data, tail: Data, decodedSize: UInt64)?
-        if CodexRolloutStorage.isCompressedRollout(storageURL) {
-            guard let decoded = try? CodexRolloutStorage.readCompressedHeadAndTail(
-                storageURL, headBytes: headBytesMax, tailBytes: tailBytes) else { return nil }
-            compressedHeadTail = decoded
+        let isCompressedStorage = CodexRolloutStorage.isCompressedRollout(storageURL)
+        let headDecoder: ZstdStreamDecoder? = isCompressedStorage ? ZstdStreamDecoder() : nil
+        var headDecodeFailed = false
+        // The last decoded bytes of a compressed rollout, kept between 1x and 2x `tailBytes`.
+        var decodedTail = Data()
+        func keepDecodedTail(_ chunk: Data) {
+            decodedTail.append(chunk)
+            if decodedTail.count > tailBytes * 2 { decodedTail = Data(decodedTail.suffix(tailBytes)) }
         }
-        var compressedHeadCursor = 0
         guard let fh = try? FileHandle(forReadingFrom: storageURL) else { return nil }
         defer { try? fh.close() }
         func readHeadChunk(_ count: Int) -> Data {
-            guard let head = compressedHeadTail?.head else {
+            guard let headDecoder else {
                 return (try? fh.read(upToCount: count)) ?? Data()
             }
-            let end = min(head.count, compressedHeadCursor + count)
-            defer { compressedHeadCursor = end }
-            return head.subdata(in: compressedHeadCursor..<end)
+            do {
+                let chunk = try headDecoder.read(from: fh, upTo: count)
+                keepDecodedTail(chunk)
+                return chunk
+            } catch {
+                headDecodeFailed = true
+                return Data()
+            }
         }
 
         // Read head lines (newline-bounded) rather than a fixed slice.
@@ -2805,13 +2825,63 @@ final class SessionIndexer: ObservableObject {
 
         let headRead = readHeadLines(initialBytes: headBytesInitial, maxBytes: headBytesMax, maxLines: 300)
 
+        // A damaged compressed stream gets no lightweight row; the full parse reports it.
+        if headDecodeFailed { return nil }
+
         // Read tail slice
-        let fileSize = compressedHeadTail.map { Int(clamping: $0.decodedSize) }
-            ?? (try? FileManager.default.attributesOfItem(atPath: storageURL.path)[.size] as? NSNumber)?.intValue
-            ?? size
+        var fileSize: Int
+        // Whether a compressed rollout is small enough to decode to its end, and
+        // whether that decode reached the end.
+        var decodesToEnd = false
+        var decodedToEnd = false
+        if isCompressedStorage {
+            // Decoded size: the frame header records it for Codex's files. Without it,
+            // a rollout of at most 2 MiB stored is decoded toward its end: the size is
+            // exact when the end arrives within the 16 MiB decode limit, else it is at
+            // least the bytes decoded. A larger one is estimated from the ratio seen in
+            // the decoded head.
+            if let known = CodexRolloutStorage.frameContentSize(of: storageURL) {
+                fileSize = Int(clamping: known)
+                decodesToEnd = known <= UInt64(compressedTailDecodeLimit)
+            } else {
+                let consumed = max(1, Int(clamping: headDecoder?.compressedBytesConsumed ?? 1))
+                let ratio = Double(headRead.bytesRead) / Double(consumed)
+                fileSize = max(headRead.bytesRead, Int(Double(max(size, 0)) * ratio))
+                decodesToEnd = size >= 0 && size <= compressedTailDecodeLimit / 8
+            }
+        } else {
+            fileSize = (try? FileManager.default.attributesOfItem(atPath: storageURL.path)[.size] as? NSNumber)?.intValue
+                ?? size
+        }
         var tailData: Data = Data()
-        if let compressedHeadTail {
-            if fileSize > tailBytes { tailData = compressedHeadTail.tail }
+        if let headDecoder {
+            // A bounded rollout is decoded to its end for the tail (latest model, last
+            // timestamps). A larger one keeps only its head; Codex keeps the rollout's
+            // mtime when it compresses it, so the mtime stands in for the last event
+            // time below. A tail that fails to decode is dropped; the head stands.
+            if decodesToEnd {
+                var decodedTotal = headRead.bytesRead
+                do {
+                    while true {
+                        let chunk = try headDecoder.read(from: fh, upTo: 256 * 1024)
+                        if chunk.isEmpty { break }
+                        decodedTotal += chunk.count
+                        keepDecodedTail(chunk)
+                        if decodedTotal > compressedTailDecodeLimit { throw ZstdStreamDecoder.DecodeError.limitExceeded }
+                    }
+                    fileSize = decodedTotal
+                    decodedToEnd = true
+                    // A tail is read whenever the head sample may have stopped short:
+                    // more bytes than one tail, or the head's 300-line cap was reached.
+                    if decodedTotal > tailBytes || headRead.lines.count >= 300 {
+                        tailData = Data(decodedTail.suffix(tailBytes))
+                    }
+                } catch {
+                    // Past the decode limit, the bytes decoded so far are a floor.
+                    fileSize = max(fileSize, decodedTotal)
+                    tailData = Data()
+                }
+            }
         } else if fileSize > tailBytes {
             let offset = UInt64(fileSize - tailBytes)
             try? fh.seek(toOffset: offset)
@@ -2930,6 +3000,11 @@ final class SessionIndexer: ObservableObject {
 
         headLines.forEach(ingest)
         tailLines.forEach(ingest)
+        if isCompressedStorage && !decodedToEnd {
+            // Only the head was read: the mtime, which Codex keeps when it compresses,
+            // stands in for the last event time.
+            tmax = max(tmax ?? mtime, mtime)
+        }
 
         // Estimate event count: count newlines in head slice for more accurate estimate
         let headBytesRead = max(headRead.bytesRead, 1)

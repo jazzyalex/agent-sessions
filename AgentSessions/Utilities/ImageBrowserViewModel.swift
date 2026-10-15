@@ -470,8 +470,11 @@ extension ImageBrowserViewModel {
             return out
 
         default:
-            // Same decoded copy the index was built from, so span offsets line up.
-            let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
+            // The canonical path, not a decoded cache copy: for a compressed Codex
+            // rollout the span offsets point into the decoded bytes, and
+            // `decodeImageData` resolves that copy when it reads, so an evicted copy
+            // is rebuilt instead of failing.
+            let url = URL(fileURLWithPath: session.filePath)
             let signature = index.signature
             // The same rule the transcript uses, from the same implementation — see
             // `ImageUserTurnResolver`, which exists because this used to be a second copy

@@ -131,9 +131,13 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                     for session in sessionsSnapshot {
                         if Task.isCancelled { break }
 
-                        // A compressed Codex rollout is scanned in its decoded copy.
-                        let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
-                        if !FileManager.default.fileExists(atPath: url.path) {
+                        // A compressed Codex rollout is scanned in its decoded copy; one
+                        // without images is skipped without decoding it to disk. Items keep
+                        // the canonical path, which `decodeImageData` resolves at read time.
+                        let scanURL = CodexRolloutStorage.seekableURLForImageScan(forPath: session.filePath)
+                        let url = scanURL ?? URL(fileURLWithPath: session.filePath)
+                        let canonicalURL = URL(fileURLWithPath: session.filePath)
+                        if scanURL == nil || !FileManager.default.fileExists(atPath: url.path) {
                             scanned += 1
                             let scannedSnapshot = scanned
                             await MainActor.run {
@@ -220,12 +224,12 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                                         sessionID: sessionID,
                                         sessionTitle: title,
                                         sessionModifiedAt: modifiedAt,
-                                        sessionFileURL: url,
+                                        sessionFileURL: canonicalURL,
                                         sessionSource: session.source,
                                         sessionProject: session.repoName,
                                         sessionImageIndex: idx + 1,
                                         lineIndex: lineIndex,
-                                        eventID: SessionIndexer.eventID(forPath: url.path, index: lineIndex),
+                                        eventID: SessionIndexer.eventID(forPath: canonicalURL.path, index: lineIndex),
                                         userPromptIndex: Self.userPromptIndex(for: session, lineIndex: lineIndex),
                                         span: item.span
                                     )

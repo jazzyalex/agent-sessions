@@ -1285,8 +1285,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                               authorityToken: CursorACPAuthorityToken? = nil,
                               persistCanonicalStagingMetadata: Bool = true) throws {
         let fm = FileManager.default
-        let upstreamURL: URL
-        let upstreamExists: Bool
+        var upstreamURL: URL
+        var upstreamExists: Bool
+        // A decoded copy of a compressed Codex rollout, removed when this sync ends.
+        var decodedUpstreamCopy: URL?
+        defer {
+            if let decodedUpstreamCopy { try? fm.removeItem(at: decodedUpstreamCopy) }
+        }
         if let authorityToken,
            info.source == .cursor,
            SessionArchiveInfo.isCursorACPIdentity(info.sessionID) {
@@ -1315,14 +1320,39 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             upstreamExists = fm.fileExists(atPath: upstreamURL.path)
         }
         if !upstreamExists, info.source == .codex, CodexRolloutStorage.isStoredCompressed(upstreamURL) {
-            // Codex compressed the idle rollout to `.jsonl.zst` without changing its
-            // bytes. The upstream is present, and the committed archive stays as-is.
-            info.lastUpstreamSeenAt = Date()
-            info.upstreamMissing = false
-            try writeInfo(info)
-            reloadCache()
-            log("sync upstream compressed source=\(info.source.rawValue) id=\(info.sessionID)")
-            return
+            if hasCompleteArchivedSnapshot(info: info),
+               archiveMatchesCompressedUpstream(info: info, upstreamURL: upstreamURL) {
+                // Codex compressed the idle rollout to `.jsonl.zst` without changing
+                // its bytes. The upstream is present, and the committed archive
+                // already holds them.
+                // The status follows the ordinary no-op below, so a matching sync also
+                // clears an earlier `.error` status and its message.
+                try requireCurrentAuthority(authorityToken, sessionID: info.sessionID)
+                let now = Date()
+                info.lastUpstreamSeenAt = now
+                info.upstreamMissing = false
+                info.lastError = nil
+                if info.lastUpstreamChangeAt == nil { info.lastUpstreamChangeAt = info.lastSyncAt ?? now }
+                if shouldMarkFinal(lastChangeAt: info.lastUpstreamChangeAt) {
+                    info.status = .final
+                } else {
+                    info.status = .syncing
+                }
+                try writeInfo(info)
+                reloadCache()
+                log("sync upstream compressed source=\(info.source.rawValue) id=\(info.sessionID)")
+                return
+            }
+            // No committed archive yet (a new pin of an already compressed session),
+            // or one that may hold older bytes (Codex resumed the session and later
+            // compressed it again while the app was not running): archive the decoded
+            // bytes under the rollout's `.jsonl` name through the normal snapshot path,
+            // which compares them with the committed manifest.
+            let decoded = try CodexRolloutStorage.decodedTemporaryCopy(for: upstreamURL)
+            decodedUpstreamCopy = decoded
+            upstreamURL = decoded
+            upstreamExists = true
+            log("sync upstream compressed, archiving decoded copy source=\(info.source.rawValue) id=\(info.sessionID)")
         }
         info.lastUpstreamSeenAt = upstreamExists ? Date() : info.lastUpstreamSeenAt
         info.upstreamMissing = !upstreamExists
@@ -1455,8 +1485,10 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         }
 
         if isNoop {
-            // No changes; maybe transition to final if quiet long enough.
+            // No changes; maybe transition to final if quiet long enough. A verified
+            // no-op also recovers from an earlier failed sync, so its message goes.
             try requireCurrentAuthority(authorityToken, sessionID: info.sessionID)
+            info.lastError = nil
             let now = Date()
             if info.lastUpstreamChangeAt == nil { info.lastUpstreamChangeAt = info.lastSyncAt ?? now }
             if shouldMarkFinal(lastChangeAt: info.lastUpstreamChangeAt) {
@@ -2122,6 +2154,24 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             throw ArchiveSnapshotCopyFailure.invalid
         }
         keepDestination = true
+    }
+
+    /// True when the committed manifest's primary entry has the compressed rollout's
+    /// decoded size (from its zstd frame header) and its mtime. Codex keeps a
+    /// rollout's mtime when it compresses it, so a match means the archive was taken
+    /// from these bytes. Without a recorded decoded size there is no match, and the
+    /// caller decodes and compares instead.
+    private func archiveMatchesCompressedUpstream(info: SessionArchiveInfo, upstreamURL: URL) -> Bool {
+        let compressed = CodexRolloutStorage.compressedSibling(of: upstreamURL)
+        // Reads the header through an O_NOFOLLOW descriptor of a regular file, the same
+        // source rule as the copy itself; a symlinked or special `.zst` never matches.
+        guard let data = readArchiveFile(source: info.source, id: info.sessionID, name: "manifest.json"),
+              let manifest = try? JSONDecoder().decode(SessionArchiveManifest.self, from: data),
+              let entry = manifest.entries.first(where: { $0.relativePath == info.primaryRelativePath }),
+              let source = CodexRolloutStorage.regularCompressedFileInfo(at: compressed),
+              let decodedSize = source.decodedSize else { return false }
+        return entry.sizeBytes == Int64(clamping: decodedSize)
+            && abs(entry.mtimeSeconds - source.modified.timeIntervalSince1970) < 0.001
     }
 
     private func hasCompleteArchivedSnapshot(info: SessionArchiveInfo,

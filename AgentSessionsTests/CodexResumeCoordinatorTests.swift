@@ -159,6 +159,38 @@ final class CodexResumeCoordinatorTests: XCTestCase {
         XCTAssertNil(workspace.openedURL)
     }
 
+    func testQuickLaunchOnAnOldCLIAsksToUpdateCodexForACompressedSession() async throws {
+        // Codex 0.38 cannot resume by ID; a compressed session has no plain file to
+        // pass as the explicit path, so the fallback-path advice would be a dead end.
+        let env = MockEnvironment(result: .success(.init(version: .semantic(major: 0, minor: 38, patch: 0),
+                                                          binaryURL: URL(fileURLWithPath: "/usr/local/bin/codex"))))
+        let launcher = MockLauncher()
+        let defaults = UserDefaults(suiteName: "CodexResumeCoordinatorTests.compressed")!
+        defaults.removePersistentDomain(forName: "CodexResumeCoordinatorTests.compressed")
+        let settings = CodexResumeSettings.makeForTesting(defaults: defaults)
+        let coordinator = CodexResumeCoordinator(settings: settings,
+                                                 environment: env,
+                                                 commandBuilder: CodexResumeCommandBuilder(),
+                                                 terminalLauncher: launcher)
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexResumeCompressed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let canonical = dir.appendingPathComponent("rollout-2026-09-03T13-40-47-01a06900-af0b-7d53-a27e-64ee9619ca31.jsonl")
+        try Data("not decoded here".utf8).write(to: CodexRolloutStorage.compressedSibling(of: canonical))
+        let session = Session(id: "abc", startTime: nil, endTime: nil, model: nil,
+                              filePath: canonical.path, eventCount: 0, events: [])
+
+        let result = await coordinator.quickLaunchInTerminal(session: session)
+        guard case .needsConfiguration(let message) = result else {
+            return XCTFail("Expected a configuration notice, got \(result)")
+        }
+        XCTAssertTrue(message.contains("Update Codex"), message)
+        XCTAssertFalse(message.contains("fallback path"), message)
+        XCTAssertFalse(launcher.didLaunch)
+    }
+
     // MARK: - Helpers
 
     private func desktopSession(filePath: String, internalID: String? = nil,

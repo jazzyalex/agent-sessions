@@ -96,14 +96,18 @@ actor ImageBrowserIndexCache {
         if shouldCancel() { return emptyIndex(for: session) }
 
         let signature = fileSignature(forPath: session.filePath) ?? ImageBrowserFileSignature(filePath: session.filePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
-        // Spans are byte offsets; a compressed Codex rollout is scanned in its decoded copy.
-        let url = CodexRolloutStorage.seekableURL(forPath: session.filePath)
+        // Spans are byte offsets; a compressed Codex rollout is scanned in its decoded
+        // copy. Nil means a compressed rollout with no `data:image/` payload, which is
+        // indexed as empty without decoding it to disk.
+        let scanURL = CodexRolloutStorage.seekableURLForImageScan(forPath: session.filePath)
+        let url = scanURL ?? URL(fileURLWithPath: session.filePath)
 
         let createdAt = Int64(Date().timeIntervalSince1970)
 
         switch session.source {
         case .codex, .claude, .openclaw, .grok, .kimi, .pi, .hermes, .cursor:
             let located: [Base64ImageDataURLScanner.LocatedSpan] = {
+                guard scanURL != nil else { return [] }
                 do {
                     switch session.source {
                     case .codex, .grok, .kimi, .pi, .hermes, .cursor:

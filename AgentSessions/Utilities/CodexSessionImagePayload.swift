@@ -211,10 +211,12 @@ enum SessionInlineImageMapper {
     static func imagesByUserBlockIndex(for session: Session,
                                        maxMatches: Int = 400,
                                        shouldCancel: () -> Bool = { false }) -> [Int: [InlineSessionImage]] {
-        // Image spans are byte offsets, so a compressed Codex rollout is read from its
-        // decoded copy.
-        let sessionFileURL = CodexRolloutStorage.seekableURL(forPath: session.filePath)
-        guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return [:] }
+        // Image spans are byte offsets, so a compressed Codex rollout is scanned in its
+        // decoded copy. Payloads keep the canonical path: the copy can be evicted, and
+        // `decodeImageData` resolves the path again when it reads.
+        guard let sessionFileURL = CodexRolloutStorage.seekableURLForImageScan(forPath: session.filePath),
+              FileManager.default.fileExists(atPath: sessionFileURL.path) else { return [:] }
+        let sessionPathURL = URL(fileURLWithPath: session.filePath)
 
         struct InlineScanResult: Hashable, Sendable {
             let payload: SessionImagePayload
@@ -271,7 +273,7 @@ enum SessionInlineImageMapper {
                 case .codex, .grok, .kimi, .pi, .hermes, .cursor:
                     return try Base64ImageDataURLScanner
                         .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                        .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
+                        .map { InlineScanResult(payload: .base64(sourceURL: sessionPathURL, span: $0.span), lineIndex: $0.lineIndex) }
                 case .claude:
                     return try ClaudeBase64ImageScanner
                         .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
@@ -542,7 +544,17 @@ enum CodexSessionImagePayload {
                                       offset: UInt64,
                                       length: Int,
                                       shouldCancel: () -> Bool = { false }) throws -> Data {
-        let fh = try FileHandle(forReadingFrom: url)
+        // A payload names a Codex rollout by its canonical `.jsonl` path. When Codex
+        // holds it as `.jsonl.zst`, the offsets point into the decoded copy, which is
+        // resolved (and rebuilt if it was evicted) here, at read time.
+        let fh: FileHandle
+        do {
+            fh = try FileHandle(forReadingFrom: CodexRolloutStorage.seekableURL(forPath: url.path))
+        } catch {
+            // Eviction can remove a copy between resolution and open; resolve once more.
+            guard CodexRolloutStorage.isStoredCompressed(url) else { throw error }
+            fh = try FileHandle(forReadingFrom: CodexRolloutStorage.seekableURL(forPath: url.path))
+        }
         defer { try? fh.close() }
         try fh.seek(toOffset: offset)
 

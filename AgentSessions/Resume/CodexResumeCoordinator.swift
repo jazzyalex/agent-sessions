@@ -80,12 +80,18 @@ final class CodexResumeCoordinator {
             return .needsConfiguration(error.errorDescription ?? "Codex CLI not found. Configure the path and try again.")
         case .success(let data):
             guard data.version.supportsResumeByID else {
+                // A fallback path needs a plain file; a session Codex compressed has none.
+                guard FileManager.default.fileExists(atPath: session.filePath) else {
+                    return .needsConfiguration(String(localized: "Codex compressed this session. Update Codex to resume it by ID."))
+                }
                 return .needsConfiguration("Codex \(data.version.description) does not support resuming by session ID. Use the resume sheet to configure a fallback path.")
             }
 
             do {
                 let fallbackURL: URL?
-                if CodexRolloutStorage.exists(atPath: session.filePath) {
+                // Only a plain `.jsonl` can be an explicit resume path. A rollout
+                // Codex compressed resumes by id; Codex restores the plain file itself.
+                if FileManager.default.fileExists(atPath: session.filePath) {
                     fallbackURL = URL(fileURLWithPath: session.filePath)
                 } else {
                     fallbackURL = nil
