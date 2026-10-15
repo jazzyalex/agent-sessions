@@ -462,11 +462,23 @@ final class RunwayPriceTable: @unchecked Sendable {
                           cacheWritePerMTok: cacheWritePerMTok,
                           cacheWrite1hPerMTok: cacheWrite1hPerMTok)
         }
+
+        var isValid: Bool {
+            RawPrice.isRate(inputPerMTok) && RawPrice.isRate(cachedInputPerMTok)
+                && RawPrice.isRate(outputPerMTok)
+                && (cacheWritePerMTok.map(RawPrice.isRate) ?? true)
+                && (cacheWrite1hPerMTok.map(RawPrice.isRate) ?? true)
+        }
     }
     private struct RawLongContext: Decodable {
         let thresholdInputTokens: Double
         let inputMultiplier: Double
         let outputMultiplier: Double
+
+        var isValid: Bool {
+            thresholdInputTokens.isFinite && thresholdInputTokens >= 0
+                && RawPrice.isMultiplier(inputMultiplier) && RawPrice.isMultiplier(outputMultiplier)
+        }
 
         var price: RunwayLongContextPrice {
             RunwayLongContextPrice(thresholdInputTokens: thresholdInputTokens,
@@ -494,16 +506,32 @@ final class RunwayPriceTable: @unchecked Sendable {
                           cacheWritePerMTok: cacheWritePerMTok,
                           cacheWrite1hPerMTok: cacheWrite1hPerMTok)
         }
+
+        /// A fetched manifest is adopted automatically, so a row must hold prices
+        /// that can exist: finite, non-negative rates; finite positive multipliers.
+        var isValid: Bool {
+            Self.isRate(inputPerMTok) && Self.isRate(cachedInputPerMTok) && Self.isRate(outputPerMTok)
+                && (cacheWritePerMTok.map(Self.isRate) ?? true)
+                && (cacheWrite1hPerMTok.map(Self.isRate) ?? true)
+                && (fast?.isValid ?? true)
+                && (longContext?.isValid ?? true)
+                && (inferenceGeoUSMultiplier.map(Self.isMultiplier) ?? true)
+        }
+
+        static func isRate(_ value: Double) -> Bool { value.isFinite && value >= 0 }
+        static func isMultiplier(_ value: Double) -> Bool { value.isFinite && value > 0 }
     }
 
-    /// Returns the decoded manifest only for schema 2 with a positive `sequence`;
-    /// nil otherwise (malformed, schema 1, unrecognized `version`, or no
-    /// `sequence` → caller keeps its current table).
+    /// Returns the decoded manifest only for schema 2 with a positive `sequence`
+    /// and valid numbers in every row; nil otherwise (malformed, schema 1,
+    /// unrecognized `version`, no `sequence`, or a negative or non-finite rate or
+    /// multiplier → caller keeps its current table).
     private static func decode(_ data: Data) -> DecodedManifest? {
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
               manifest.version == supportedVersion,
               let sequence = manifest.sequence, sequence > 0,
-              !manifest.models.isEmpty else { return nil }
+              !manifest.models.isEmpty,
+              manifest.models.values.allSatisfy(\.isValid) else { return nil }
         let models = manifest.models.mapValues {
             RunwayModelPrice(standard: $0.standardRateSet,
                              fast: $0.fast?.rateSet,
@@ -626,10 +654,10 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 2,
-      "sequence": 2026101403,
+      "sequence": 2026101501,
       "updated": "2026-10-14",
       "aliases": { "claude sonnet 4.6": "claude-sonnet-4-6", "gemini 3.6 flash": "gemini-3.6-flash", "gemini 3.8 flash": "gemini-3.8-flash" },
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 uses the published Sonnet 5 rates: $2/$10 input/output, $0.20 cache reads, and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026 (Google publishes $1.50/$0.15/$7.50 from January 1, 2027); context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 is $2/$10 input/output, $0.10 cache reads (0.05x input), and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026 (Google publishes $1.50/$0.15/$7.50 from January 1, 2027); context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
       "models": {
         "claude-opus-5-5": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 8.0, "inferenceGeoUSMultiplier": 1.1,
                             "fast": { "inputPerMTok": 8.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 40.0, "cacheWritePerMTok": 10.0, "cacheWrite1hPerMTok": 16.0 } },

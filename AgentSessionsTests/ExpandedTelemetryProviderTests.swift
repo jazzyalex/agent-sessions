@@ -1930,6 +1930,17 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.first?.recordID, "usage.record:0")
     }
 
+    /// Real Kimi Code usage rows name the model `moonshot-ai/kimi-k2.7-code` (every
+    /// usage.record in the stage0 Kimi fixtures has that shape). The provider segment
+    /// must not stop the row from resolving to its price.
+    func testEnginePricesAKimiTurnRecordWithTheProviderPrefixedModel() async throws {
+        let line = #"{"type":"usage.record","model":"moonshot-ai/kimi-k2.7-code","usageScope":"turn","usage":{"inputOther":7,"inputCacheRead":11,"inputCacheCreation":0,"output":13},"time":1785615367000}"#
+        let telemetry = try await priceThroughEngine(source: .kimi, lines: [line])
+        XCTAssertEqual(telemetry.usageEvents.first?.model, "kimi-k2.7-code")
+        XCTAssertNotNil(telemetry.costEstimate?.apiEquivalentUSD,
+                        "a Kimi Code turn record on a priced model shows a cost")
+    }
+
     /// Engine-level cover for the `costUnavailableReason` pricing gate: a Kimi file
     /// with only a whole-session usage summary must show tokens but never a dollar
     /// figure. The control session records the same model and tokens as a turn

@@ -17,6 +17,9 @@ final class ModelPriceKeyResolverTests: XCTestCase {
                        ResolvedPriceKey(key: "gpt-5.5", viaFreeRoute: false))
         XCTAssertEqual(resolve("z-ai/glm-5.3-flash"),
                        ResolvedPriceKey(key: "glm-5.3-flash", viaFreeRoute: false))
+        // Kimi Code's own usage rows spell the provider with a hyphen.
+        XCTAssertEqual(resolve("moonshot-ai/kimi-k2.7-code"),
+                       ResolvedPriceKey(key: "kimi-k2.7-code", viaFreeRoute: false))
         XCTAssertEqual(resolve("claude-haiku-4.5"),
                        ResolvedPriceKey(key: "claude-haiku-4-5", viaFreeRoute: false))
         XCTAssertEqual(resolve("Gemini 3.5 Flash (Medium)"),

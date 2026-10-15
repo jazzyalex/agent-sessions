@@ -180,12 +180,26 @@ PANE_PID=$("$TMUX_CMD" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_
 
 sleep 0.8
 
+# A startup menu blocks the prompt (config override not honored, or the
+# background-server prompt). Stop: typing /status + Enter into a menu would confirm
+# its selected option, and the update menu's default is "Update now". Checked
+# before the header, while waiting for the prompt, and right before each keystroke
+# that could confirm a menu, because the menu can draw after the header.
+exit_if_startup_menu() {
+  local p=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -200 2>/dev/null || echo "")
+  if echo "$p" | grep -qiE "Update available|Background server has incompatible feature settings"; then
+    echo "$(error_json startup_prompt_blocked 'Codex showed a startup menu instead of the prompt')"; exit 16
+  fi
+}
+
 wait_for_prompt() {
   local tries=0
   while [ $tries -lt 40 ]; do
     sleep 0.2
+    exit_if_startup_menu
     local p=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -200 2>/dev/null || echo "")
-    if echo "$p" | grep -q "^› "; then return 0; fi
+    # The composer prompt, not a numbered menu row such as "› 1. Update now".
+    if echo "$p" | grep -qE '^› ($|[^0-9])'; then return 0; fi
     tries=$((tries+1))
   done
   return 1
@@ -198,12 +212,7 @@ while [ $iterations -lt $max_iterations ]; do
   sleep 0.25
   iterations=$((iterations+1))
   pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
-  # A startup menu still blocks the prompt (config override not honored, or the
-  # background-server prompt). Stop here: typing /status + Enter into a menu would
-  # confirm its selected option, and the update menu's default is "Update now".
-  if echo "$pane" | grep -qiE "Update available|Background server has incompatible feature settings"; then
-    echo "$(error_json startup_prompt_blocked 'Codex showed a startup menu instead of the prompt')"; exit 16
-  fi
+  exit_if_startup_menu
   if echo "$pane" | grep -qi "Press enter to continue"; then
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
     sleep 0.6
@@ -222,11 +231,13 @@ sleep "$THINK_WAIT"
 
 ensure_status() {
   # Single /status attempt typed char-by-char to guarantee column-1 command
+  exit_if_startup_menu
   for c in / s t a t u s; do
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "$c" 2>/dev/null || true
     sleep 0.15
   done
   sleep "$THINK_WAIT"
+  exit_if_startup_menu
   "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null || true
 
   # Wait for the page to fully render; check multiple times

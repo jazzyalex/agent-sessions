@@ -101,6 +101,32 @@ final class PriceManifestV2Tests: XCTestCase {
         XCTAssertEqual(table.price(forModel: "claude-opus-4-8")?.outputPerMTok, 333)
     }
 
+    /// A fetched manifest is adopted automatically, so a higher sequence must not
+    /// install a price that cannot exist (it would show a negative or zero cost).
+    func testHigherSequenceWithAnImpossibleNumberIsRejected() {
+        let table = RunwayPriceTable.makeForTesting()
+        let before = table.manifestFingerprint
+        let next = table.sequence + 1
+        func row(_ fields: String) -> Data {
+            Data(#"{"version":2,"sequence":\#(next),"updated":"2026-10-15","models":{"claude-opus":{\#(fields)}}}"#.utf8)
+        }
+        let base = #""inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25"#
+        let invalid = [
+            #""inputPerMTok":-2,"cachedInputPerMTok":0.5,"outputPerMTok":25"#,
+            base + #","cacheWritePerMTok":-1"#,
+            base + #","fast":{"inputPerMTok":10,"cachedInputPerMTok":1,"outputPerMTok":-50}"#,
+            base + #","longContext":{"thresholdInputTokens":200000,"inputMultiplier":0,"outputMultiplier":1.5}"#,
+            base + #","longContext":{"thresholdInputTokens":-1,"inputMultiplier":2,"outputMultiplier":1.5}"#,
+            base + #","inferenceGeoUSMultiplier":-1.1"#,
+        ]
+        for fields in invalid {
+            XCTAssertFalse(table.loadForTesting(json: row(fields)), fields)
+            XCTAssertEqual(table.manifestFingerprint, before, "the accepted table stays: \(fields)")
+        }
+        // Control: the same shape with valid numbers is adopted.
+        XCTAssertTrue(table.loadForTesting(json: row(base + #","inferenceGeoUSMultiplier":1.1"#)))
+    }
+
     func testManifestWithoutSequenceIsRejected() {
         let table = RunwayPriceTable.makeForTesting()
         let json = #"{"version":2,"updated":"2099-01-01","models":{"claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":1}}}"#

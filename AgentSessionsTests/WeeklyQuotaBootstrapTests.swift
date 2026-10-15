@@ -205,6 +205,31 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertNotEqual(claudeResult.priceRevision, table.revision)
     }
 
+    /// Haiku 5.5 bills a request whose prompt exceeds 100k tokens at 5x. The scan
+    /// must apply that per request, as Session Info does, or a long-context request
+    /// is booked at a fifth of its cost and inflates percent-points-per-dollar.
+    func testClaudeScanAppliesTheHaiku55LongContextTierPerRequest() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        // 1M one-hour write tokens: one request above the threshold. $0.20/MTok base.
+        try write([claudeUsageLine(id: "long", at: at, oneHourCacheWrite: 1_000_000,
+                                   model: "claude-haiku-5-5")], name: "long.jsonl")
+        let long = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertEqual(long?.dollars ?? 0, 1.0, accuracy: 0.0001, "5x the $0.20 base above 100k")
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("long.jsonl"))
+        // 50k tokens in one request stays at the base rate: 0.05 MTok x $0.20.
+        try write([claudeUsageLine(id: "short", at: at, oneHourCacheWrite: 50_000,
+                                   model: "claude-haiku-5-5")], name: "short.jsonl")
+        let short = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+        XCTAssertEqual(short?.dollars ?? 0, 0.01, accuracy: 0.00001)
+    }
+
     private func claudeUsageLine(id: String,
                                  at: Date,
                                  oneHourCacheWrite: Int,

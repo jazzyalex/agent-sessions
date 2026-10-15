@@ -68,6 +68,19 @@ final class CodexStatusProbeSuppressionTests: XCTestCase {
                        "the fake menu received a submitted line")
     }
 
+    /// The menu can draw after the header. The header ends the first wait loop, so
+    /// the guard must also run while waiting for the prompt, and a numbered menu
+    /// row ("› 1. Update now") must not count as the prompt.
+    func testCaptureScriptStopsAtAMenuDrawnAfterTheHeader() throws {
+        let fake = try makeFakeCodex(mode: "late-menu")
+        let result = try runCodexStatusCapture(fakeCodexDirectory: fake)
+
+        XCTAssertEqual(result.status, 16, result.stdout + result.stderr)
+        XCTAssertTrue(result.stdout.contains("startup_prompt_blocked"), result.stdout)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fake.appendingPathComponent("input.txt").path),
+                       "the late menu received a submitted line")
+    }
+
     private func makeFakeCodex(mode: String) throws -> URL {
         try XCTSkipUnless(["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
             .contains { FileManager.default.isExecutableFile(atPath: $0) }, "tmux is not installed")
@@ -81,6 +94,14 @@ final class CodexStatusProbeSuppressionTests: XCTestCase {
         dir="$(cd "$(dirname "$0")" && pwd)"
         printf '%s\\n' "$@" > "$dir/args.txt"
         if [[ "$(cat "$dir/mode")" == "menu" ]]; then
+          echo "  Update available · 0.1.0 → 0.2.0"
+          echo "› 1. Update now (runs \\`npm install -g @openai/codex\\`)"
+          echo "  2. Skip"
+          IFS= read -r line; echo "got:$line" > "$dir/input.txt"; sleep 30; exit 0
+        fi
+        if [[ "$(cat "$dir/mode")" == "late-menu" ]]; then
+          echo ">_ OpenAI Codex (v0.0.0)"
+          sleep 1.5
           echo "  Update available · 0.1.0 → 0.2.0"
           echo "› 1. Update now (runs \\`npm install -g @openai/codex\\`)"
           echo "  2. Skip"

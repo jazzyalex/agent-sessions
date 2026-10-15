@@ -9129,6 +9129,27 @@ final class SessionParserTests: XCTestCase {
         { agents: { entries: { worker: { agentDir: '\(externalDirectory.path)' } } } }
         """, to: stateRoot.appendingPathComponent("openclaw.json"))
 
+        // Discovery trusts the config only after `openclaw config validate`. A stub
+        // validator keeps the test independent of an installed OpenClaw CLI (the CI
+        // runner has none, so the real lookup fails closed there).
+        let validator = home.appendingPathComponent("validator.sh")
+        try writeText("""
+        #!/bin/sh
+        printf '%s\\n' '{"valid":true}'
+        """, to: validator)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: validator.path)
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.openClawBinaryOverride
+        let previousOverride = defaults.string(forKey: overrideKey)
+        defaults.set(validator.path, forKey: overrideKey)
+        defer {
+            if let previousOverride {
+                defaults.set(previousOverride, forKey: overrideKey)
+            } else {
+                defaults.removeObject(forKey: overrideKey)
+            }
+        }
+
         try withProcessEnvironment([
             "OPENCLAW_HOME": home.path,
             "OPENCLAW_PROFILE": nil,

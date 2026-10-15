@@ -21,7 +21,8 @@ enum ModelPriceKeyResolver {
     private static let freeSuffixes = [":free", "-free"]
     private static let freePrefix = "cline-free/"
     private static let providerPrefixes: Set<String> =
-        ["anthropic", "openai", "google", "z-ai", "moonshotai", "deepseek", "minimax",
+        // Kimi Code writes `moonshot-ai/…`; OpenRouter-style ids use `moonshotai/…`.
+        ["anthropic", "openai", "google", "z-ai", "moonshotai", "moonshot-ai", "deepseek", "minimax",
          "x-ai", "qwen", "meta", "opencode", "openrouter", "poolside"]
 
     static func resolve(_ raw: String?, aliases: [String: String]) -> ResolvedPriceKey? {

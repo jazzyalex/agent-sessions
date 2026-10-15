@@ -194,9 +194,12 @@ struct KimiTelemetryAccumulator {
            !alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return alias.split(separator: "/").last.map(String.init) ?? alias
         }
+        // Kimi Code usage rows carry `"model":"moonshot-ai/kimi-k2.7-code"`; the
+        // provider segment is dropped as for `modelAlias`, matching
+        // KimiSessionParser.modelIdentifier, so the row resolves to its price.
         if let model = object["model"] as? String,
            !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return model
+            return model.split(separator: "/").last.map(String.init) ?? model
         }
         return nil
     }
