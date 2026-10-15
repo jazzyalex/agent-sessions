@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - **Codex usage refresh no longer stalls on the update prompt.** When a newer Codex CLI was available, the `/status` probe waited on Codex's update menu and the usage meter stopped refreshing. The probe now skips the update check and reports a blocked startup prompt instead of waiting.
-- **Correct Claude 5.5 prices.** Sonnet 5.5 cache reads use the published $0.10 per million tokens, and Haiku 5.5 now has a price, so its sessions show a cost.
+- **Correct Claude 5.5 prices.** Sonnet 5.5 cache reads use the published $0.10 per million tokens, and Haiku 5.5 now has a price, so its sessions show a cost. The Claude weekly estimate counts Haiku 5.5 requests above 100k tokens at their long-context rate.
 - **Copilot costs count cache tokens once.** Session Info no longer bills Copilot cache tokens twice and no longer prices whole-process totals as one session.
 - **Runway prices each provider by its own rates.** Burn rate and weekly calibration use only the provider's own price rows.
 

@@ -828,6 +828,32 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Session Info, startup and crash diagnostics
 
+### Price rows have no effective date, so a vendor price change re-prices old sessions
+> **open** · sev: med · urg: high · verified 2026-10-15
+
+- **What:** a price row holds one rate set with no effective date, and any manifest change
+  re-prices every cached session. The pricing spec
+  ([2026-10-13 design](superpowers/specs/2026-10-13-session-info-prices-all-agents-design.md))
+  says to edit the `gemini-3.6-flash` and `gemini-3.8-flash` rows to $1.50/$0.15/$7.50 on
+  2027-01-01. That edit shows every 2026 Gemini session at 2x its cost; leaving it shows
+  2027 sessions at half.
+- **Fix options:** optional dated rate periods per schema-2 row, chosen by the usage
+  event's `observedAt`; or separate dated keys; or Session Info help text saying rates are
+  current list prices, not the price at session time.
+- **Why deferred:** a schema change, found by the 2026-10-14 review of changes since 5.6.
+  Must land before 2027-01-01.
+
+### Runway burn does not apply long-context tiers to Claude rows
+> **open** · sev: low · urg: low · verified 2026-10-15
+
+- **What:** `ClaudeRunwayTokenActivityParser` builds burst and weekly components without
+  `contextInputTokens`, so `CodexRunwayModel` prices Claude components at base rates. Only
+  `claude-haiku-5-5` has a long-context tier (5x above 100k prompt tokens), so the Runway
+  `$/h` for long-context Haiku 5.5 requests is understated. Session Info and the weekly
+  bootstrap scan apply the tier per request.
+- **Why deferred:** components sum many requests, so a per-request threshold needs the
+  slices split by context band before pricing. Found by the 2026-10-14 review.
+
 ### Enabling every provider can fan out into a multi-thousand-session scan and block paging
 > **open** · sev: high · urg: high · verified 2026-10-07
 
