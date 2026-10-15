@@ -732,6 +732,91 @@
         }
       }
     },
+    "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.": {
+      "comment": "One-line teaser for the Agent Sessions 5.7 What's New card. Session Info is the product feature name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 压缩会话后，这些 Codex 会话仍会留在列表中；会话信息还为另外八个代理显示费用。"
+          }
+        }
+      }
+    },
+    "Compressed Codex sessions": {
+      "comment": "Title for the Agent Sessions 5.7 What's New highlight about Codex sessions stored as compressed files.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compressed Codex sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "压缩的 Codex 会话"
+          }
+        }
+      }
+    },
+    "The Codex desktop app now packs sessions idle for 7 days into compressed files. Agent Sessions reads them as before: transcripts, search, Session Info, images, stars and pins keep working.": {
+      "comment": "Body for the Agent Sessions 5.7 What's New highlight about compressed Codex sessions. Session Info is the product feature name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Codex desktop app now packs sessions idle for 7 days into compressed files. Agent Sessions reads them as before: transcripts, search, Session Info, images, stars and pins keep working."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 桌面应用现在会把闲置 7 天的会话打包为压缩文件。Agent Sessions 照常读取这些会话：对话记录、搜索、会话信息、图片、星标和固定都能继续使用。"
+          }
+        }
+      }
+    },
+    "Cost for eight more agents": {
+      "comment": "Title for the Agent Sessions 5.7 What's New highlight about API-equivalent cost in Session Info for more agents.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cost for eight more agents"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另外八个代理也显示费用"
+          }
+        }
+      }
+    },
+    "Session Info shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness from first-party list prices, and says why when a session lacks the evidence.": {
+      "comment": "Body for the Agent Sessions 5.7 What's New highlight about API-equivalent cost. Keep the agent names and Session Info unchanged.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Session Info shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness from first-party list prices, and says why when a session lacks the evidence."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话信息现在按官方标价，为 OpenCode、OpenClaw、Hermes、Kimi、Cline、Qwen、Antigravity 和 DeepSeek Harness 显示 API 等价费用；会话缺少足够依据时，会说明原因。"
+          }
+        }
+      }
+    },
     "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.": {
       "comment": "One-line teaser for the Agent Sessions 5.6 What's New card. Session Info is the product feature name.",
       "localizations": {

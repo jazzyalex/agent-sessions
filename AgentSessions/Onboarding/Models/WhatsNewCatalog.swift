@@ -115,10 +115,33 @@ enum WhatsNewCatalog {
         "5.3": "Session info shows what one session used, and a calmer toolbar keeps the essentials in reach.",
         "5.4": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place.",
         "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories.",
-        "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it."
+        "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.",
+        "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.7": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "archivebox",
+                title: "Compressed Codex sessions",
+                body: "The Codex desktop app now packs sessions idle for 7 days into compressed files. Agent Sessions reads them as before: transcripts, search, Session Info, images, stars and pins keep working."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "dollarsign.circle",
+                title: "Cost for eight more agents",
+                body: "Session Info shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness from first-party list prices, and says why when a session lacks the evidence."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.6": [
             WhatsNewItem(
                 kind: .highlight,

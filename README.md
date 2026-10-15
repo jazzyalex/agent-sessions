@@ -34,6 +34,12 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
 
+## What's New in 5.7
+
+- **Compressed Codex sessions stay in the list.** The Codex desktop app now packs sessions idle for 7 days into `.jsonl.zst` files and deletes the originals. Agent Sessions reads them as before: transcripts, search, Session Info, images, stars and pins keep working, and the files are never changed.
+- **API-equivalent cost for eight more agents.** Session Info prices OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions from first-party list prices, and says why when a session lacks the evidence.
+- **Fixes.** The Codex usage meter no longer stalls on Codex's update prompt, Claude 5.5 prices are corrected, and Copilot cache tokens are counted once.
+
 ## What's New in 5.6
 
 - **Session Info for every agent.** Open the inspector beside any supported agent transcript. Provider, current model or configuration, and title metadata appear immediately when recorded, with detailed telemetry staying honest about each source's limits.

@@ -4,17 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Features
+### Highlights
 
-- **Compressed Codex sessions stay in the list.** Codex now compresses session files that have been idle for 7 days into `rollout-….jsonl.zst` and deletes the plain file. Agent Sessions reads both forms, keeps each session's identity, star and pin when Codex compresses or restores its file, and shows transcripts, search, Session Info and images for compressed sessions. Agent Sessions reads compressed files without changing them; decoded copies for image previews live in the app's cache, capped at 1 GB.
-- **API-equivalent cost for eight more agents.** Session Info now shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions when the model has a published first-party price and the session records enough evidence to price it. Free routes are priced at the base model's list rate and labeled as such. A session without enough evidence shows a stated reason instead of a number.
+- **Compressed Codex sessions stay in the list.** The Codex desktop app now packs sessions idle for 7 days into `.jsonl.zst` files and deletes the originals. Agent Sessions reads them as before: same transcript, search, Session Info, images, stars and pins, and it never changes the files.
+- **API-equivalent cost for eight more agents.** Session Info prices OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions from first-party list prices. A session without enough evidence says why instead of guessing.
 
 ### Bug Fixes
 
-- **Codex usage refresh no longer stalls on the update prompt.** When a newer Codex CLI was available, the `/status` probe waited on Codex's update menu and the usage meter stopped refreshing. The probe now skips the update check and reports a blocked startup prompt instead of waiting.
-- **Correct Claude 5.5 prices.** Sonnet 5.5 cache reads use the published $0.10 per million tokens, and Haiku 5.5 now has a price, so its sessions show a cost. The Claude weekly estimate counts Haiku 5.5 requests above 100k tokens at their long-context rate.
-- **Copilot costs count cache tokens once.** Session Info no longer bills Copilot cache tokens twice and no longer prices whole-process totals as one session.
-- **Runway prices each provider by its own rates.** Burn rate and weekly calibration use only the provider's own price rows.
+- **Codex usage refresh no longer stalls on the update prompt.** A newer Codex CLI opened an update menu, and the usage probe waited on it until the meter stopped refreshing.
+- **Correct Claude 5.5 prices.** Sonnet 5.5 cache reads are $0.10 per million tokens, and Haiku 5.5 now has a price.
+- **Copilot costs count cache tokens once.** Session Info billed Copilot cache tokens twice.
 
 ## [5.6] - 2026-10-07
 
