@@ -9,6 +9,13 @@ All notable changes to this project will be documented in this file.
 - **Compressed Codex sessions stay in the list.** Codex now compresses session files that have been idle for 7 days into `rollout-….jsonl.zst` and deletes the plain file. Agent Sessions reads both forms, keeps each session's identity, star and pin when Codex compresses or restores its file, and shows transcripts, search, Session Info and images for compressed sessions. Agent Sessions reads compressed files without changing them; decoded copies for image previews live in the app's cache, capped at 1 GB.
 - **API-equivalent cost for eight more agents.** Session Info now shows an API-equivalent cost for OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions when the model has a published first-party price and the session records enough evidence to price it. Free routes are priced at the base model's list rate and labeled as such. A session without enough evidence shows a stated reason instead of a number.
 
+### Bug Fixes
+
+- **Codex usage refresh no longer stalls on the update prompt.** When a newer Codex CLI was available, the `/status` probe waited on Codex's update menu and the usage meter stopped refreshing. The probe now skips the update check and reports a blocked startup prompt instead of waiting.
+- **Correct Claude 5.5 prices.** Sonnet 5.5 cache reads use the published $0.10 per million tokens, and Haiku 5.5 now has a price, so its sessions show a cost.
+- **Copilot costs count cache tokens once.** Session Info no longer bills Copilot cache tokens twice and no longer prices whole-process totals as one session.
+- **Runway prices each provider by its own rates.** Burn rate and weekly calibration use only the provider's own price rows.
+
 ## [5.6] - 2026-10-07
 
 ### Highlights

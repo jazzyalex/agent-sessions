@@ -1,3 +1,39 @@
+## 2026-10-14 · format-checks-10-09-to-10-14 + codex-zst · Compressed Codex rollouts supported and reviewed to SHIP; 5.6.1 QA next
+status: in-progress
+
+**State:** Format checks 10-09…10-14 and Codex `.jsonl.zst` support (`3a3bd27b`) plus its review fixes are committed and pushed. Six Repo MCP review rounds: Sol Pro (round 1), then Sol Extra High rounds 2–6; round 6 returned SHIP. 5.6.1 changelog drafted; `deploy qa --version 5.6.1` is next; deploy waits for the user.
+
+**Verified:**
+- Commits on `main`: 424e4c25 (prices), e4376c7a (Codex probe fix), 5c02bbb9, 6467bbe0, 8d093ae2 (prebump drivers), 7a21734c (10-13 bumps), 093acb15 (ledger YAML fix), 3a3bd27b (compression support).
+- Matrix ceilings: Codex 0.162.1, Claude 2.1.296, Copilot 1.0.97, Pi 1.1.0, OpenCode 1.19.0, Hermes 0.21.5, Grok 1.0.44. Held: Antigravity 1.1.27, Cursor 2026.9.8, OpenClaw 2026.7.1.
+- Codex `local_thread_store_compression`: a throwaway `CODEX_HOME` with `codex exec -c features.local_thread_store_compression=true` compressed 4 rollouts (~75% smaller, byte-identical decode). CLI default is off; the desktop app turns it on.
+
+**Decided / don't redo:**
+- Compressed sessions keep the canonical `.jsonl` path (session id = SHA-256 of path). All access goes through `AgentSessions/Utilities/CodexRolloutStorage.swift`.
+- Repo MCP review uses generic `chatgpt-run prepare --kind review --profile review-critical --surface chat`, not `coord review prepare-or-join`. Reason: the shared path fails "Target fingerprint is unavailable" because `unsafeInventorySkipped` (repo-mcp `src/review-target.ts`) counts the tracked symlink `tools/claude_usage_capture.sh`.
+- Model evidence: `--control-label "5.6 Pro" --model-label "GPT-5.6 Sol Pro"`. "GPT-5.6 Sol" alone gives MODEL_MISMATCH. Selections expire 2 min after prepare; observed-at needs ms precision.
+
+**Review rounds (task `agent-sessions-zst-review-20261014`, base = HEAD `3a3bd27b`, worktree diff):**
+- R2 `cc31d380` NO-SHIP (P1 stale-archive fast path, P2 no-follow, monitor abort, old-CLI resume). R3 `deaa4650` NO-SHIP (image prefilter, late model/tail, size guarantee, resume UX). R4 `701eba28` NO-SHIP (matcher followed a symlink; stale `.error`). R5 `59d2bf47` NO-SHIP (stale `lastError` text). R6 `4858122e` **SHIP**, output sha `01e95dfd…0d09`.
+- Kept on purpose: the full parse keeps the first model it sees (pre-existing, same for plain `.jsonl`); no global decode budget for the lightweight parse (16 MiB decoded per new or changed file).
+- Run R4's recorded submission is ~30 s before the real send (the first click only expanded the composer).
+
+**Round 1 result (completed 21:26Z):** NOT TESTABLE. Repo MCP `git_diff` cannot diff base→HEAD (no base_ref; full diff > 64 MiB with vendored libzstd), so it was a current-HEAD audit. Findings: P1 pinning a compressed-only Codex session creates no archive (SessionArchiveManager early return); P2 image items keep evictable cache URLs; P2 cache materialization race/tmp leak/cap; P2 fallback resume + health check get the absent `.jsonl`; P2 truncated `.zst` parse replaces a good transcript; P2 lightweight parse decodes whole stream; P2 zero-byte `.zst` accepted; P3 `fileSizeBytes` line-count vs decoded; P3 agent_watch samples both forms. Output `scratchpad/rmcp_output_raw.txt`, sha `2988099f…e783`, outcome `completed`. Fixes await the user's go; 5.6.1 changelog drafted (uncommitted), QA/bump after fixes.
+
+**Live review IDs:**
+- Task `agent-sessions-zst-review-20261014`, run `00b82bf5-125d-401a-89e0-4911b822b222` (submitted), prompt_sha256 `5befba09…3ba3`, base `19a7a706`, session-id `CB04D14E-9AD6-4D4D-AED0-AF87B73D5EE8`, submission_event_sha256 `ffec7579…7c66`.
+- Conversation https://chatgpt.com/c/6acfeb38-d6b4-83e8-b07c-68c4e995f20e. Earlier runs af260e61 (SELECTION_EXPIRED) and f71f83e4 (MODEL_LABEL_RETRY) failed before submit.
+
+**Done on the user's answers:**
+- `scripts/agent_captures` (31 GB) moved to `~/.Trash/agent_captures-codex-history-20261014`; the user empties the Trash.
+- Live check: `~/.codex/sessions/2026/09/22/rollout-2026-09-22T19-44-17-01a0cc26-….jsonl` compressed in place (backup in the session scratchpad `zst-live-check/`). Reverse with `zstd -d` + `touch -r`, or let Codex restore it on resume.
+- Python 3.15 got pytest 9.1.1 (`--user`), so `deploy qa`'s `python3 -m pytest` runs.
+
+**Next:**
+1. `tools/release/deploy qa --version 5.6.1` (the untracked quota-meter spec belongs to another session; move it aside only for QA and put it back). Deploy only on the user's go.
+2. Recheck Codex desktop once ChatGPT.app updates past 26.1007 (bundled codex 0.162.0-alpha.17.2 has not compressed anything yet).
+3. Plan doc `docs/superpowers/plans/2026-10-11-agent-format-update-plan.md` status stops at 10-11; the 10-12…14 bumps live in matrix/ledger/tracker.
+
 ## 2026-09-29 13:59 · format-check-5.5.2-release · Current formats verified and 5.5.2 released
 status: done
 
