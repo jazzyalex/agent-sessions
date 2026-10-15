@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.7] - 2026-10-14
+
 ### Highlights
 
 - **Compressed Codex sessions stay in the list.** The Codex desktop app now packs sessions idle for 7 days into `.jsonl.zst` files and deletes the originals. Agent Sessions reads them as before: same transcript, search, Session Info, images, stars and pins, and it never changes the files.
