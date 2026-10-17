@@ -1,6 +1,7 @@
 # Quota Meter notch presentation — design
 
-Date: 2026-10-12 (revised 2026-10-13 after architecture review)
+Date: 2026-10-12. Revised 2026-10-13 (architecture review) and 2026-10-17
+(XHigh spec review, verdict NO-SHIP; all 13 findings applied).
 Status: draft, awaiting owner review
 
 ## Problem
@@ -21,56 +22,91 @@ Out of scope for v1:
 - A wing that changes width by state.
 - Automatic detection of menu bar collisions (see "Crowded menu bar").
 - Any change to the menu bar status item (`UsageMenuBarLabel`).
-- Any change to the floating window's layout or behaviour.
+- Any change to the floating window's layout or behaviour, except one addition:
+  the "Move to notch" toolbar button (see "Discoverability").
 - Any feature that needs Accessibility or Screen Recording permission.
+
+## Plans and gate
+
+This spec produces two plans, in order:
+
+1. **Spike plan.** A throwaway hardware prototype (see "Hardware spike"). Its
+   findings are written back into this spec.
+2. **Production plan.** Written only after the spike findings are in this spec
+   and the owner has approved the revision. The implementation order at the
+   end of this spec is the outline for that plan, not the plan itself.
 
 ## Placement setting
 
-One new preference, `QuotaMeterPlacement`, in Settings → Quota Meter:
+One new preference, `QuotaMeterPlacement`:
 
 | Value | Behaviour |
 |---|---|
-| `automatic` | Notch when the Quota Meter's target screen has a notch; floating window otherwise. |
-| `notch` | Notch on an available notched screen; floating window when none is connected. |
 | `floating` | Floating window always. Today's behaviour. |
+| `notch` | Notch on the notched screen; floating window when no notched screen is connected. |
+| `automatic` | Notch when the target screen is the notched screen; floating window otherwise. |
 
-**Target screen.** The target screen is the screen that holds the floating
-window's frame: its current screen while it is open, or the screen containing
-its autosaved frame while it is not. "A notched screen exists somewhere" is not
-the test. With an external monitor attached and the floating window on that
-monitor, `automatic` stays floating. With the built-in display alone, the
-target screen is the built-in display and `automatic` resolves to the notch.
+**Default (owner decision, 2026-10-13).** An absent key resolves to
+`floating`, for existing and fresh installs. No migration and no
+`register(defaults:)` entry; the resolver treats a missing or unknown value as
+`floating`. Nobody's Quota Meter moves after an update.
 
-A screen has a notch when `NSScreen.safeAreaInsets.top > 0` and
-`auxiliaryTopLeftArea` / `auxiliaryTopRightArea` are non-nil.
+### Notched screen
 
-Only one presentation is visible at a time. The notch presentation follows the
-Quota Meter's desired visibility: if the user hid the Quota Meter, no wings
-show.
+A screen is notched when `NSScreen.safeAreaInsets.top > 0` and both
+`auxiliaryTopLeftArea` and `auxiliaryTopRightArea` are non-nil. When more than
+one screen qualifies, the notched screen is the built-in one
+(`CGDisplayIsBuiltin`); if none is built-in, the first qualifying screen in
+`NSScreen.screens` order.
 
-### Default: opt-in (owner decision, 2026-10-13)
+### Target screen (for `automatic`)
 
-The default is `floating` for existing and fresh installs. The notch is
-opt-in. Nobody's Quota Meter moves after an update.
+The target screen is the screen that holds the floating window's frame:
 
-### Discoverability: toolbar switch
+1. While the floating window is open: the screen with the largest intersection
+   with its frame.
+2. While it is not open: the screen with the largest intersection with its
+   autosaved frame (`AgentCockpitHUDWindow.limits`).
+3. When that frame intersects no connected screen, or there is no saved frame:
+   the primary screen (`NSScreen.screens[0]`).
 
-Opt-in needs a visible way in. Each presentation's toolbar carries one switch
-to the other:
+### When placement re-resolves
 
-- **Floating window toolbar:** a "Move to notch" button. It shows only while a
-  notched screen is connected. It sets `QuotaMeterPlacement` to `notch`.
-- **Notch panel toolbar:** a "Move to floating window" button. It sets
-  `QuotaMeterPlacement` to `floating`. The window reopens at its autosaved
-  frame.
+The coordinator re-resolves placement only on these events:
 
-Both go through `QuotaMeterPresentationCoordinator`, so the switch is one
-continuous visible cockpit. `automatic` is offered in Settings only.
+- app launch;
+- the user shows the Quota Meter;
+- `NSApplication.didChangeScreenParametersNotification` (display attached or
+  removed, lid closed or opened, resolution or scaling changed), debounced by
+  0.5 s so multi-step topology changes resolve once;
+- the placement preference changes (Settings, View menu or toolbar switch).
+
+Dragging the floating window to another screen does **not** re-resolve. A user
+who drags the window onto the built-in display has chosen that position; the
+window stays floating until the next event above.
+
+Only one presentation is presented at a time, except for the brief overlap
+allowed during a handoff (see "Handoff").
+
+## Discoverability
+
+The opt-in has three entry points:
+
+1. **Settings → Quota Meter → Placement** (Floating / Notch / Automatic). This
+   is the canonical path.
+2. **View menu → Quota Meter Placement** submenu with the same three choices.
+   Keyboard-reachable; it also covers the notch panel's lack of keyboard focus.
+3. **Toolbar shortcuts** for users who already use the chrome:
+   - Floating window toolbar: "Move to notch". It shows only while a notched
+     screen is connected and sets `QuotaMeterPlacement` to `notch`.
+   - Notch panel toolbar: "Move to floating window". It sets
+     `QuotaMeterPlacement` to `floating`.
 
 The floating toolbar is hidden by default (`QuotaMeterChrome` is on-demand),
-so the button alone is not enough. The existing "Right-click for controls"
-hint stays the route to it. The plan must also add the placement picker to
-Settings → Quota Meter and a line in the release notes.
+so the toolbar button is a shortcut, not the main way in. Release notes get one
+line pointing at Settings.
+
+All three routes change only the preference; the coordinator does the switch.
 
 ## Collapsed state: wings
 
@@ -78,60 +114,84 @@ Two black wings extend the notch sideways inside the menu bar row. Each wing
 has one fixed width (about 95 pt) in every state. It never widens.
 
 - **Codex is always the left wing. Claude is always the right wing.**
-- Each wing shows: provider icon, one percent, and a run-out chip.
-- The percent is the tighter of the 5h and weekly numbers for that provider. It
-  honours the existing `UsageDisplayMode` (left / used).
-- The run-out chip (`▸2h`) shows only while that provider has a burning
-  session and a projection exists. It reuses the `HUDLimitsProjectionToken`
-  logic.
-- Under the text, one small tick per burning session, up to four. A session
-  counts as burning when its runway row has confidence `.direct` or `.mixed`.
-  Waiting, idle and cloud rows get no tick.
+- A wing shows a provider cell (see "Provider cell") and, only when that cell
+  is a number, the runway indicators (see "Runway indicators").
 
-### States
+### Provider cell
 
-| State | Wing content |
-|---|---|
-| Nothing burning | Icon and percent, dimmed. No chip, no ticks. |
-| Burning | Icon, percent, run-out chip, ticks. |
-| Will run out before reset | Same layout. Percent turns red, chip turns amber. No size change. The reset countdown shows on hover only. |
-| Sign-in needed, rate-limited, reconnecting, idle, probing | The number is replaced by an icon plus one short word. Never show a stale or invented number. |
-| 5h window absent | `∞` in place of the percent, as the floating window does. |
+The wing uses the same state source and the same precedence as the floating
+window's provider row (`HUDLimitsRowsPanel.row(entry:)`), first match wins:
 
-Short bad-state strings, all localised: "Sign in", "Limited", "Retrying",
-"Idle", "Probing". VoiceOver gets the full wording.
+| Order | State | Wing content |
+|---|---|---|
+| 1 | `presentationState == .needsAction` | Icon + "Sign in" |
+| 2 | Probe visible for this source | Icon + "Probing" (or "Probe failed") |
+| 3 | `presentationState == .idle` ("no active session") | Icon + "Idle" |
+| 4 | `.reconnecting` and rate-limited | Icon + "Limited" |
+| 5 | `.reconnecting` otherwise | Icon + "Retrying" |
+| 6 | `.live` | Icon + percent (see below) |
+
+"Idle" here is the provider-level state the floating window already shows as
+"no active session". It is unrelated to idle runway rows.
+
+Words come from localised resources. If a localised word does not fit the
+fixed width, the wing shows the icon plus the state's SF Symbol only; the full
+word goes to the tooltip and VoiceOver.
+
+**Percent selection (`.live` only).** Candidates are the finite windows the
+provider currently reports: 5h if present, weekly if present.
+
+- Show the candidate with the least remaining quota (in "used" mode, the most
+  used), honouring `UsageDisplayMode`.
+- When the shown window is weekly, a dim "wk" tag follows the number. The 5h
+  window carries no tag.
+- Show `∞` only when the provider reports no finite window at all.
+
+### Runway indicators
+
+Shown only when the provider cell is a number:
+
+- **Ticks:** one small tick per burning session, up to four. A session is
+  burning when its runway row has confidence `.direct` or `.mixed`. Waiting,
+  idle and cloud rows get no tick.
+- **Run-out chip** (`▸2h`): shown while at least one session burns and the
+  provider has a projection. It is the provider-level projection the floating
+  window already shows (`fiveHourProjectedRunoutAt` via
+  `HUDLimitsProjectionToken`), not a per-session value.
+- **Will run out before reset:** same layout; the percent turns red and the
+  chip turns amber. No size change. The reset countdown shows on hover only.
 
 ### One provider hidden
 
 When `QuotaMeterHiddenProviders` leaves one provider, it takes both wings: 5h
-on the left, weekly on the right. Ticks and chip sit on the left wing.
+on the left, weekly on the right, each its own number with no "wk" tag needed.
+Ticks and chip sit on the left wing.
 
-### Crowded menu bar
+### Crowded menu bar: Wings / Minimal
 
 macOS has no supported, permission-free API for where other apps' menus and
-status items sit. v1 does not detect collisions.
-
-v1 ships a manual setting, `QuotaMeterNotchStyle`:
+status items sit. v1 does not detect collisions. A manual setting,
+`QuotaMeterNotchStyle`, offers:
 
 - **Wings** (default): as described above.
-- **Minimal**: each wing becomes a 3 pt hairline under the notch. The bar's
-  fill is the same percent and its colour follows the same state rules. Hover
-  still opens the panel.
+- **Minimal**: each wing becomes a 3 pt hairline under the notch. Its fill is
+  the same percent; its colour follows the same state rules.
 
-In Minimal the wing windows shrink to the hairline, so the menu bar pixels
-beside the notch belong to the app underneath. `floating` remains the escape
-hatch. Automatic collision avoidance is follow-up research.
+In Minimal the wing panels shrink to the hairline, so the menu bar pixels
+beside the notch belong to the app underneath. The hover target is the notch
+sensor over the black notch area itself, which never holds menu content, so
+hover stays usable without a 3 pt target. `floating` remains the escape hatch.
 
 ### Full-screen apps
 
-In a full-screen Space the top strip is black and empty. Wings stay visible
-there.
+Acceptance criterion, confirmed or revised by the spike: in a full-screen Space
+the wings stay visible in the black top strip.
 
 ## Expanded state: hover panel
 
-Hovering either wing, or the notch, opens one black panel that drops from the
-notch. It uses the existing dwell timings (350 ms to open, 700 ms to close
-after the pointer leaves).
+Hovering either wing, or the notch sensor, opens one black panel that drops
+from the notch. It uses the existing dwell timings (350 ms to open, 700 ms to
+close after the pointer leaves).
 
 - Two columns. Codex under the left wing, Claude under the right wing.
 - Each column, top to bottom:
@@ -146,53 +206,61 @@ after the pointer leaves).
   `QuotaMeterRunwayPresentation` apply unchanged.
 - Clicking a session row focuses that session, as today.
 - Right-click on the panel reveals the toolbar (Probe, provider visibility,
-  runway popovers, Settings, Open Agent Sessions). The Pin button is hidden in
-  the notch presentation. The stored Pin preference is not changed (see
-  "Invariants").
+  runway popovers, Settings, Open Agent Sessions, Move to floating window). The
+  Pin button is hidden in the notch presentation; the stored Pin preference is
+  not changed.
 - With one provider visible, the panel is one column.
-- Every toolbar action must also be reachable from the app's menus or
-  Settings, because a non-activating panel is not keyboard-reachable.
+- Every toolbar action is also reachable from the app's menus or Settings.
 
 The panel always renders dark, because it extends black hardware. It ignores
 the system appearance and `CockpitHUDReduceTransparency`.
 
+## Hardware spike (spike plan scope)
+
+Throwaway code on a real notched Mac, discarded afterwards. It must build the
+full provisional topology, not just the wings:
+
+- left wing panel, right wing panel;
+- notch hover sensor over the notch rect;
+- a provisional drop-down panel with one button and `canBecomeKey == true`,
+  `canBecomeMain == false`;
+- a Minimal-style hairline variant.
+
+It must verify:
+
+1. `.statusBar` level with `.nonactivatingPanel` draws over the menu bar row
+   and does not block app menus or status items outside the panels, including
+   Agent Sessions' own status item.
+2. Notch geometry from `NSScreen` at default and scaled resolutions.
+3. Hover crossing wing → notch sensor → drop panel and back without flicker;
+   clicks and right-clicks; the panel button works without activating the app.
+4. App menus and system pop-up menus open normally and outrank the panels.
+5. Full-screen Spaces, Stage Manager, Mission Control.
+6. Display attach and detach, lid close and reopen, sleep and wake, and rapid
+   repeats of these; panels are torn down and recreated without leaks.
+7. A handoff prototype in both directions (see "Handoff"), measuring the
+   overlap or gap.
+
+Findings are written into this spec ("Spike findings" section, added then).
+If they contradict "Panel topology" or "Handoff", those sections change before
+the production plan is written.
+
 ## Architecture
 
-### Step 0: hardware spike (throwaway)
-
-The window and input mechanism is the riskiest part and is unproven. Before
-any production code, build a throwaway prototype on a real notched Mac: plain
-black left and right panels, nothing else. Verify:
-
-- `.statusBar` level and `.nonactivatingPanel` draw correctly over the menu
-  bar row and do not block app menus or status items outside the panels.
-- Notch coordinates from `NSScreen`, at default and scaled resolutions.
-- Mouse enter and exit across wing → notch → panel, clicks and right-clicks.
-- Menus still open normally. System pop-up menus outrank the panels.
-- Full-screen Spaces, Stage Manager, Mission Control.
-- Display attach and detach, lid close and reopen, sleep and wake.
-
-The code is discarded. The findings fix the panel topology below. If the spike
-contradicts this section, the spec is revised before the plan is written.
-
-### Panel topology
+### Panel topology (provisional until the spike)
 
 Several small panels, not one large panel with click pass-through.
 `ignoresMouseEvents` applies to a whole window, so one window cannot pass
 clicks through some regions only.
 
-- Left wing panel: covers only the left wing.
-- Right wing panel: covers only the right wing.
-- Notch hover sensor: an invisible panel over the logical notch rect, if the
-  spike shows it is needed.
+- Left wing panel and right wing panel: cover only their wing (or hairline).
+- Notch sensor: an invisible panel over the notch rect.
 - Expanded panel: exists only while open.
 
 Each is a borderless `NSPanel` with `.nonactivatingPanel`, `level =
 .statusBar`, `hidesOnDeactivate = false`, non-opaque, no shadow on the wings.
 Collection behaviour: `.canJoinAllSpaces`, `.stationary`,
-`.fullScreenAuxiliary`, `.ignoresCycle`. No higher level than `.statusBar`.
-The expanded panel may need `canBecomeKey == true`, `canBecomeMain == false`
-so its controls work without activating the app.
+`.fullScreenAuxiliary`, `.ignoresCycle`. No level higher than `.statusBar`.
 
 Notch panels carry their own window identifiers.
 `AppWindowRouter.existingWindow(identifier: "AgentCockpit")` must never find
@@ -202,156 +270,231 @@ one.
 
 - **`NotchGeometry`** (pure value type). Input: screen frame, safe-area insets,
   auxiliary left and right rects. Output: notch rect, wing rects, hairline
-  rects, panel rect. No AppKit calls inside. All geometry is recomputed from
+  rects, sensor rect, panel rect. No AppKit calls inside. Recomputed from
   `NSScreen` on every change; no notch coordinates are persisted.
-- **`QuotaMeterPlacementResolver`** (pure function). Input: placement
-  preference, desired visibility, target screen, available screens. Output:
-  `hidden`, `floating` or `notch(displayID)`.
-- **`QuotaMeterPresentationCoordinator`** (`@MainActor`). The single owner of
-  Quota Meter presentation:
-  - owns desired visibility, independent of which presentation shows it;
-  - calls the resolver and owns the notch controller;
+- **`QuotaMeterPlacementResolver`** (pure function). Input: placement value
+  (possibly absent), desired visibility, screen descriptors (frame, notched,
+  built-in), floating frame (live or autosaved). Output: `hidden`, `floating`,
+  or `notch(displayID)`. It applies the "Notched screen" and "Target screen"
+  rules above.
+- **`QuotaMeterPresentationCoordinator`** (`@MainActor`, app-scoped). The
+  single owner of Quota Meter presentation. It:
+  - owns desired visibility, persisted as `QuotaMeterDesiredVisible`;
+  - calls the resolver on the events in "When placement re-resolves";
+  - owns the notch panel controller and the runway store;
   - opens the SwiftUI `Window` scene only for the floating presentation;
   - exposes one `isPresented` for the View menu checkmark;
-  - is the only caller of the usage models' cockpit visible/pinned lifecycle;
-  - observes `NSApplication.didChangeScreenParametersNotification` and
-    re-resolves. Display-driven switches must not activate the app.
-    `showAgentCockpitWindow()` activates today, so the coordinator needs a
-    non-activating path for these switches.
+  - is the only caller of the usage models' `setCockpitVisible` (see
+    "Usage-model lifecycle");
+  - performs handoffs (see "Handoff") without activating the app.
 
   `AppWindowRouter`, the View-menu toggle and
-  `maybeRestorePinnedCockpitOnLaunch` route through the coordinator.
-  `CockpitWindowVisibility` stops being the source of truth for visibility.
+  `maybeRestorePinnedCockpitOnLaunch` route through it.
+  `CockpitWindowVisibility` may remain as a read-only facade derived from the
+  coordinator; it stops being a mutable source of truth. The
+  `setCockpitVisible` calls in `AgentCockpitHUDView` (today at lines 785–808,
+  on appear, disappear and pin change) move to the coordinator.
 - **`QuotaMeterNotchPanelController`**. Owns the notch panels and their frames.
-  Orders the panels out before the coordinator restores the floating window.
 - **`NotchWingView`** and **`NotchExpandedPanelView`** (SwiftUI). Notch-only
   state lives here: expanded or collapsed, pointer containment, notch style.
 
-### Shared data: two extractions, not one model
+### Usage-model lifecycle
 
-`HUDLimitsProviderEntry` is private to `AgentCockpitHUDView.swift` (line 2782)
-and built inside `HUDLimitsRowsPanel` (lines 3874–3915). The runway snapshots
-are `@State` in that panel (lines 3809–3810) and its loaders are called from
-the view (lines 4265, 4274).
+The usage models take one signal, `setCockpitVisible(visible, pinned)`. A
+pinned cockpit is treated like the menu bar and keeps polling while the app is
+inactive; an unpinned one polls only while the app is active. The coordinator
+sends exactly this table:
+
+| Desired visible | Presented as | Stored Pin | Signal sent |
+|---|---|---|---|
+| no | — | any | `(false, false)` |
+| yes | floating | off | `(true, false)` |
+| yes | floating | on | `(true, true)` |
+| yes | notch | any | `(true, true)` |
+
+Rules:
+
+- The coordinator sends a signal only when the table's output changes.
+- A handoff in either direction changes at most the `pinned` value. It never
+  sends `visible = false` in between.
+- App active/inactive stays inside the models (`setAppActive`), unchanged.
+- Launch: the coordinator computes the row from the persisted inputs and sends
+  it once, after resolving placement.
+- `CockpitHUDPinned` is read, never written, by placement changes.
+
+Consequence (accepted by the owner, 2026-10-13): a user whose floating window
+is unpinned gets background polling while the Quota Meter is in the notch,
+because the notch is always on top.
+
+### Desired visibility and launch
+
+- `QuotaMeterDesiredVisible` is written whenever the user shows or hides the
+  Quota Meter, by any route.
+- First launch after the update, with the key absent: the coordinator keeps
+  today's behaviour (pinned restore via `CockpitHUDPinned`; otherwise the
+  SwiftUI scene's own restoration) and records the result as the key.
+- Later launches: if the key is true, the coordinator resolves placement and
+  presents accordingly; it never opens the floating scene directly before
+  resolving.
+
+### Handoff
+
+Rule: **show the new presentation first, then hide the old one.** A brief
+overlap is allowed (target: under 250 ms); a gap is not.
+
+- **Floating → notch:** order the notch panels front, then close the floating
+  window. The model signal changes `pinned` only.
+- **Notch → floating:** open the floating window without activating the app.
+  When it reports on screen (`NSWindow.didChangeOcclusionStateNotification`
+  with `.visible`, or a 1 s timeout), order the notch panels out. The model
+  signal changes `pinned` only.
+
+The spike measures the real overlap and confirms the signals.
+
+### Shared data: two extractions
+
+`HUDLimitsProviderEntry` is private to `AgentCockpitHUDView.swift` and built
+inside `HUDLimitsRowsPanel`. The runway snapshots are `@State` in that panel
+and refreshed by `runRunwayRefreshLoop()`, a 5 s loop started from the view's
+`.task`.
 
 1. **`QuotaMeterProviderPresentation`** plus a builder. A pure value type and a
-   pure mapping from the existing model values and preferences. No polling, no
+   pure mapping from the existing model values and preferences, including the
+   provider-cell precedence and percent-selection rules above. No polling, no
    copied source state.
-2. **`QuotaMeterRunwayStore`** (`@MainActor`, observable). The one owner of
-   the Codex and Claude runway snapshots, their loader tasks, cancellation and
-   request identity. Both presentations read it, so the loaders run once.
+2. **`QuotaMeterRunwayStore`** (`@MainActor`, observable facade):
+   - **Lifetime:** one instance, created and owned by the coordinator for the
+     app's lifetime.
+   - **Activation:** active while the Quota Meter is presented in either
+     presentation and runway visibility is not `alwaysOff`. Inactive otherwise:
+     the loop stops and in-flight tasks are cancelled.
+   - **Loop:** keeps today's 5 s cadence and today's request building
+     (`HUDRunwayRequestBuilder`, `RunwaySnapshotAssembly`), moved out of the
+     view.
+   - **Per provider:** one in-flight task; a request key derived from the
+     request inputs; a monotonic generation. A result whose generation is older
+     than the current one is dropped (latest wins).
+   - **Actor boundary:** loader work (`CodexRunwaySnapshotLoader`,
+     `ClaudeRunwaySnapshotLoader`: file reads, parsing) runs off the main actor;
+     only the finished snapshot is published on `@MainActor`.
+   - Both presentations read it, so the loaders run once.
 
 `CodexUsageModel`, `ClaudeUsageModel` and `CodexActiveSessionsModel` stay the
-source of truth. Do not add a shadow model that subscribes to their
-`@Published` properties and republishes copies. The extraction must not
-republish unchanged values; the existing publication throttling must survive.
+source of truth. No shadow model republishes their `@Published` values. The
+extraction must not republish unchanged values; the existing publication
+throttling must survive.
 
-Floating-only state stays in the floating view: pinning, hover and chrome
-reveal, resize anchor, toolbar presentation, window geometry.
+Floating-only state stays in the floating view: hover and chrome reveal,
+resize anchor, toolbar presentation, window geometry.
 
-`AgentCockpitHUDView.swift` is 5,905 lines. New notch views go in new files.
-Move `HUDRunwayPanel` and `HUDRunwayLoadBar` to their own file so both
+`AgentCockpitHUDView.swift` is about 5,900 lines. New notch views go in new
+files. Move `HUDRunwayPanel` and `HUDRunwayLoadBar` to their own file so both
 presentations can use them; do not restructure the rest.
 
 ### Invariants
 
-- Notch panels never use the floating window's autosave name
-  (`AgentCockpitHUDWindow.limits`) and never write the floating frame.
-- Switching to the notch preserves the autosaved floating frame. A
-  display-driven fallback reopens the floating window at that frame.
-- Switching presentations never changes `CockpitHUDPinned`. The notch being
-  topmost does not set the Pin preference.
-- Launch restore resolves placement first, then restores the resolved
-  presentation. It does not open the floating scene directly.
-- Floating → notch is one continuous visible cockpit for the usage models. It
-  is never reported as hidden then visible.
+- Notch panels never use the floating window's autosave name and never write
+  the floating frame.
+- Switching to the notch preserves the autosaved floating frame. Returning to
+  floating reopens at that frame (or, if it intersects no connected screen, at
+  the default position on the primary screen).
+- Placement changes never write `CockpitHUDPinned`.
+- Launch restore resolves placement first, then presents.
+- The usage models never see `visible = false` during a handoff.
 
 ## Energy
 
-The collapsed notch UI adds no timers, animations or polling beyond the
-source-model polling that an always-visible Quota Meter already needs.
+What the notch adds beyond today's visible Quota Meter:
 
 - No `TimelineView`, animation loop, display link or timer in the collapsed
-  state. Tick and percent updates come from model publishes only.
-- `RunwayShimmerTicker` stays presentation-local. It runs only while the
+  state. Wing updates come from model and runway-store publishes only.
+- `RunwayShimmerTicker` stays presentation-local and runs only while the
   expanded panel is visible and a row burns. Reduce Motion disables it.
-- One runway refresh loop, owned by `QuotaMeterRunwayStore`.
 - Display changes are handled from notifications only.
 
-Known cost: the usage models treat a pinned cockpit as always visible and keep
-polling while the app is inactive. A notch presentation is always visible, so
-a user whose floating window is unpinned today will get more background
-polling in the notch. Accepted by the owner on 2026-10-13: the notch is
-opt-in, so the user chooses it. The plan must state how the coordinator
-reports the notch to the models and measure the difference.
+What it inherits (known costs):
+
+- The runway store's 5 s loop runs while the Quota Meter is presented, as it
+  does today while the floating window is open. The notch is presented for
+  longer (always on top), so the loop runs for longer.
+- Usage-model background polling, per "Usage-model lifecycle".
+
+The production plan measures both against an unpinned floating baseline.
 
 ## Accessibility
 
-- **VoiceOver:** one element per wing with provider, quota, burn and run-out
-  state, and the full bad-state wording. Session rows stay actionable.
+- **VoiceOver:** one element per wing: provider, which window the number is
+  (5h or weekly), quota, burn and run-out state, and the full bad-state wording.
+  Session rows stay actionable.
 - **Reduce Motion:** no open and close animation, no shimmer.
 - **Increase Contrast:** state must not depend on dimming or on red and amber
   alone; provide a high-contrast text and border path.
-- **Localisation:** all wing strings come from localised resources.
+- **Localisation:** all wing strings come from localised resources, with the
+  icon-only fallback above.
+- **Keyboard:** every action is reachable from menus or Settings.
 
 ## Risks and open questions
 
-1. **Window and input mechanism.** Covered by the step 0 spike. Nothing else
-   starts until it passes.
-2. **Background polling increase** for users who are unpinned today. Accepted;
-   measure it. See Energy.
-3. **Discoverability of an opt-in feature.** The toolbar switch sits behind a
-   right-click. Watch whether users find it.
-4. **Notch size varies** by model and by display scaling. All geometry comes
-   from `NSScreen` at run time; no hard-coded widths except the wing width.
-5. **Third-party notch apps** (Vibe Island, NotchNook, boring.notch) draw in
-   the same place. No coordination is possible. Document it; `floating` is the
+1. **Window and input mechanism.** Covered by the spike; nothing else starts
+   until it passes.
+2. **Background polling and the runway loop** run longer in the notch. Accepted;
+   measured in the production plan.
+3. **Discoverability.** Settings and the View menu are the real ways in; watch
+   whether users find them.
+4. **Notch size varies** by model and display scaling. All geometry comes from
+   `NSScreen` at run time; only the wing width is fixed.
+5. **Third-party notch apps** (Vibe Island, NotchNook, boring.notch) draw in the
+   same place. No coordination is possible. Document it; `floating` is the
    escape hatch.
-6. **Review coverage.** The architecture review did not read the runway
-   loaders, `CodexActiveSessionsModel`, the menu bar files,
-   `PreferencesConstants.swift`, entitlements or tests. The plan must check
-   preference migration and sandbox entitlements against the source.
+6. **Unverified code claims.** The 2026-10-17 review could not read source
+   (Repo MCP returned empty reads). Claims checked locally on 2026-10-17: the
+   provider-cell order (`HUDLimitsRowsPanel.row(entry:)`), the 5 s runway loop,
+   the `setCockpitVisible` callers and the pinned-as-menu polling rule. The
+   production plan re-checks the rest against source.
 
 ## Testing
 
 - `NotchGeometry`: unit tests with fixed inputs for 14" and 16" at default and
-  scaled resolutions, and for a screen with no notch.
-- `QuotaMeterPlacementResolver`: table test over preference × visibility ×
-  target screen × available screens.
-- `QuotaMeterPresentationCoordinator`: lifecycle tests for presentation
-  switching, screen selection, desired visibility, pinned launch restore,
-  non-activating display migration and preserved autosave frame. One test
-  asserts the models see one continuous visible cockpit across a switch.
-- Wing state mapping (model state → percent, colour, chip, tick count, bad
-  state): unit tests on the builder, including the one-provider case.
-- Energy: a debug counter or test asserting one runway loader owner and no
-  notch timer while collapsed.
-- Both extractions: the existing Quota Meter tests must pass unchanged, with
-  the same test count.
+  scaled resolutions, a screen with no notch, and two notched screens.
+- `QuotaMeterPlacementResolver`: table test over placement (including absent) ×
+  desired visibility × screens × floating frame (on built-in, on external,
+  orphaned, absent).
+- `QuotaMeterPresentationCoordinator`: lifecycle tests for every row of the
+  usage-model table and every transition between rows; handoff in both
+  directions never emits `visible = false`; launch with the desired-visibility
+  key absent and present; screen-change debounce; dragging does not
+  re-resolve; autosaved frame preserved.
+- Provider presentation builder: precedence table, percent selection (5h only,
+  weekly only, both, neither), "wk" tag, one-provider case.
+- `QuotaMeterRunwayStore`: activation and deactivation, latest-wins with an
+  out-of-order completion, cancellation on deactivate, one loader per provider.
+- Both extractions: the existing Quota Meter tests pass unchanged, with the same
+  test count.
 - Visual: render `NotchWingView` and `NotchExpandedPanelView` to PNG with
-  `ImageRenderer` for each state. This is supplementary; it cannot test window
-  level, Spaces or clicks.
-- Hardware matrix, run once in the spike and once at feature-complete:
-  built-in display only, external extended desktop, external with lid closed,
-  lid reopen, full-screen Space, Stage Manager, scaled resolution, an app with
-  long menus, a crowded status area, sleep and wake.
+  `ImageRenderer` for each state, including the longest localised words. This
+  is supplementary; it cannot test window level, Spaces or clicks.
+- Hardware matrix, run in the spike and again at feature-complete: built-in
+  only, external extended desktop, external with lid closed, lid reopen,
+  full-screen Space, Stage Manager, scaled resolution, an app with long menus, a
+  crowded status area including Agent Sessions' own item, sleep and wake.
 
-## Implementation order
+## Implementation order (outline for the production plan)
 
-Steps 1–4 ship with no visible change. Each step is independently shippable.
+Written up as the production plan only after the spike findings are in this
+spec. Steps 1–4 ship with no visible change; each step is independently
+shippable.
 
-0. Hardware spike (throwaway).
 1. Placement and screen types: `QuotaMeterPlacement`, screen descriptors,
    `NotchGeometry`, resolver, table tests.
 2. `QuotaMeterProviderPresentation` and builder. Floating window unchanged.
 3. `QuotaMeterRunwayStore`. Floating window wired to it first.
-4. `QuotaMeterPresentationCoordinator`, resolving everything to floating.
-   View menu and pinned restore routed through it.
+4. `QuotaMeterPresentationCoordinator`, resolving everything to floating. View
+   menu, pinned restore and the `setCockpitVisible` calls routed through it.
 5. Notch panel controller and collapsed wings, behind the `notch` preference.
 6. Expanded panel with session actions and right-click toolbar.
-7. Toolbar switch in both presentations and the Settings placement picker.
-8. Accessibility, localisation and energy pass.
-9. Wings / Minimal notch style.
+7. Settings placement picker, View-menu submenu, toolbar shortcuts.
+8. Wings / Minimal notch style.
+9. Accessibility, localisation and energy pass, covering both styles.
 10. Hardware regression QA.
 
 ## Prior art
@@ -362,7 +505,10 @@ vendor claim, not verified here. CodexBar shows limits in the menu bar only.
 
 ## Review record
 
-Architecture review 2026-10-12 via Repo MCP, ChatGPT web, 5.6 Extra High (not
-the Sol Pro profile; not recorded in the `chatgpt-run` journal). Verdict:
-proceed with changes. The review was partial: the tunnel dropped before all
-requested files were read. All nine findings are applied in this revision.
+- 2026-10-12, architecture review via Repo MCP, ChatGPT web, 5.6 Extra High
+  (not the Sol Pro profile; not journaled). Proceed with changes; partial
+  (tunnel dropped). All nine findings applied 2026-10-13.
+- 2026-10-17, XHigh spec review via Repo MCP, ChatGPT web, GPT-5.6 Sol Extra
+  High, commit-pinned to 3152f1a0, journaled (run a3fef95b). NO-SHIP. Source
+  reads returned empty, so only spec-internal findings. All 13 findings
+  applied in this revision.
