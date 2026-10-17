@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Free models read as Free.** A session that ran only on free models with no published API price, such as OpenCode's Big Pickle or a `-free` route, shows Free in Session Info instead of a dash.
+
 ## [5.7] - 2026-10-14
 
 ### Highlights

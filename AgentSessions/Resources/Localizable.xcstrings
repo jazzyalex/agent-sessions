@@ -10129,6 +10129,40 @@
         }
       }
     },
+    "Free": {
+      "comment": "Session info cost value for a session that ran only on free models with no published API price.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "免费"
+          }
+        }
+      }
+    },
+    "Free model with no published API price: %@": {
+      "comment": "Session info copy. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free model with no published API price: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "免费模型，没有公开的 API 价格：%@"
+          }
+        }
+      }
+    },
     "Fresh": {
       "comment": "User-visible Session info copy.",
       "localizations": {

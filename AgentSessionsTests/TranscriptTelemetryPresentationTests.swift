@@ -301,6 +301,58 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
         XCTAssertFalse(value.help.contains("free route"))
     }
 
+    func testFreeModelWithoutListPriceShowsFree() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: nil,
+                                             unpricedModels: ["big-pickle", "Nemotron-3-Ultra-Free"],
+                                             missingPriceComponents: [],
+                                             priceTableUpdated: "2026-10-15")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "Free")
+        XCTAssertTrue(value.help.contains("big-pickle"))
+        XCTAssertTrue(value.help.contains("Nemotron-3-Ultra-Free"))
+    }
+
+    func testFreeModelNextToAnUnpricedPaidModelStaysAbsent() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: nil,
+                                             unpricedModels: ["big-pickle", "grok-code"],
+                                             missingPriceComponents: [],
+                                             priceTableUpdated: "2026-10-15")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—")
+    }
+
+    func testFreeModelNextToMissingEvidenceStaysAbsent() {
+        let estimate = TelemetryCostEstimate(apiEquivalentUSD: nil,
+                                             unpricedModels: ["big-pickle"],
+                                             missingPriceComponents: ["glm-4.7:cacheWrite"],
+                                             priceTableUpdated: "2026-10-15")
+        let value = TranscriptTelemetryPresentation.costValue(telemetry(cost: estimate),
+                                                              locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—")
+    }
+
+    func testFreeModelNextToPricedUsageStaysAbsent() {
+        let paid = TelemetryUsageEvent(
+            recordID: "paid", observedAt: nil, anchorLine: 0,
+            usageFamily: "opencode.step-finish.tokens", ownership: .session,
+            model: "glm-4.7", reasoningEffort: nil, speed: "standard",
+            freshInputTokens: 10, cacheReadTokens: 0, cacheWrite5mTokens: 0,
+            cacheWrite1hTokens: 0, outputTokens: 5, contextInputTokens: 10)
+            .priced(usd: 0.02, revision: 1, updated: "2026-10-15", manifestFingerprint: "f")
+        var base = telemetry(events: [paid])
+        base = SessionTelemetry(source: .opencode, initialConfiguration: nil, currentConfiguration: nil,
+                                configurationChanges: [], usageSlices: [], usageEvents: base.usageEvents,
+                                usageSummary: base.usageSummary,
+                                costEstimate: TelemetryCostEstimate(apiEquivalentUSD: nil,
+                                                                    unpricedModels: ["big-pickle"],
+                                                                    missingPriceComponents: [],
+                                                                    priceTableUpdated: "2026-10-15"))
+        let value = TranscriptTelemetryPresentation.costValue(base, locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(value.text, "—", "a paid part must never read as Free")
+    }
+
     func testUnpricedReasonsAreSpecific() {
         XCTAssertEqual(TranscriptTelemetryPresentation.unpricedReason(forModel: "qwen3.5-9b", locale: Locale(identifier: "en_US")),
                        "No published price for local model: qwen3.5-9b")

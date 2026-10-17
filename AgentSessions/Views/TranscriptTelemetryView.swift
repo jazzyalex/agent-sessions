@@ -230,6 +230,17 @@ enum TranscriptTelemetryPresentation {
         if unpriced.isEmpty && missing.isEmpty {
             return .absent(localized("No priceable usage was recorded in this transcript.", locale: locale))
         }
+        // Only free models with no list price, and nothing priced beside them:
+        // the honest figure is "Free", not an unexplained dash.
+        let unpricedModels = telemetry.costEstimate?.unpricedModels ?? []
+        let pricedUsage = telemetry.usageEvents.contains {
+            $0.ownership == .session && ($0.apiEquivalentUSD ?? 0) > 0
+        }
+        if missing.isEmpty, !pricedUsage, unpricedModels.allSatisfy(isFreeModel) {
+            return Value(text: localized("Free", locale: locale),
+                         help: localized("Free model with no published API price: \(unpricedModels.joined(separator: ", "))",
+                                         locale: locale))
+        }
         // Missing evidence is not a missing price row: those components get their
         // own sentence. Everything else still reads as a missing entry.
         var evidence: [String] = []
@@ -270,6 +281,14 @@ enum TranscriptTelemetryPresentation {
                              locale: locale)
         }
         return nil
+    }
+
+    /// A model its provider gives away: a free-route string (`-free`, `:free`,
+    /// `cline-free/`) or OpenCode's `big-pickle`. It only reaches here when its
+    /// base model has no price row, since a priced base is billed at list price.
+    static func isFreeModel(_ slug: String) -> Bool {
+        slug.lowercased() == "big-pickle"
+            || ModelPriceKeyResolver.resolve(slug, aliases: [:])?.viaFreeRoute == true
     }
 
     /// Local models carry a parameter-count tag (`qwen3.5-9b`); unreleased models
