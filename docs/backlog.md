@@ -307,7 +307,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   and a parser change that never displays private mirror identifiers.
 
 ### Telemetry: Kimi, Qwen and OpenClaw all carry token telemetry — build the accumulators
-> **open** · sev: med · urg: med · verified 2026-10-01
+> **partial** · sev: low · urg: low · verified 2026-10-15
+- **Update 2026-10-15:** tokens shipped for all three — `KimiTelemetryAccumulator`, `QwenTelemetryReader`, `OpenClawTelemetryProvider`, each descriptor `tokens: .supported` (5.6, `d819824c`..`eec26ad2`). Cost is still `.partial` for all three; that is the only residue. The Review below describes the pre-fix state.
 - **Review 2026-10-01:** The engine still dispatches only Codex, Claude, Pi, and Copilot; Kimi, Qwen, and OpenClaw descriptors still declare telemetry unavailable. Recommendation: keep open and implement after choosing each provider's authoritative usage layer and overlap/deduplication rules.
 - **Evidence:** AgentSessions/Telemetry/SessionTelemetryEngine.swift:91,182-203; AgentSessions/Kimi/KimiSourceDescriptor.swift:13; AgentSessions/Qwen/QwenSourceDescriptor.swift:31; AgentSessions/Model/OpenClawSourceDescriptor.swift:15.
 
@@ -996,7 +997,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   behavior on a repeat selection without stale data.
 
 ### Crash diagnostics surfaced XCTest test-host aborts as end-user crashes
-> **partial** · sev: high · urg: high · verified 2026-10-07
+> **partial** · sev: med · urg: low · verified 2026-10-15
+- **Update 2026-10-15:** fixed in code. `Later` persists dismissed IDs (`testLaterSuppressesTheSameCrashOnNextLaunchWhileRetainingTheReport`); XCTest-injected reports are ignored (`testDetectOnLaunchIgnoresXCTestInjectedIPSReport`); the Droid reader stats the open descriptor (`SessionFileStat.precise(fromFileDescriptor:)`, `testDroidPropagatesDescriptorReadErrorsAsUnavailable`). Left: the manual restart check and one green full-suite run. Close after those.
 
 - **What:** the app repeatedly showed a crash report after restart because choosing `Later`
   left the queued report eligible for detection on every launch. The queued reports were not
@@ -1035,7 +1037,8 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ## Transcript UI
 
 ### Session info does not expose known models for most agents
-> **partial** · sev: med · urg: med · verified 2026-10-07
+> **partial** · sev: low · urg: low · verified 2026-10-15
+- **Update 2026-10-15:** the premise is stale. All 17 sources have telemetry and every descriptor declares `configuration` supported or partial (`testQuickFactsCoverEveryRegisteredSource`). Line citations below have drifted. Residue: per-provider model-history gaps marked `.partial` (Devin, Fx, Antigravity, Claude).
 - **Review 2026-10-07:** provider-neutral quick facts now use loaded `Session` metadata for all registered sources, while detailed telemetry remains source-specific. Keep partial for the remaining raw-metadata, latency, and unsupported-history gaps recorded above.
 - **Evidence:** [SessionInfoQuickFacts.swift](../AgentSessions/Telemetry/SessionInfoQuickFacts.swift), [SessionTelemetryEngine.swift](../AgentSessions/Telemetry/SessionTelemetryEngine.swift), and [SessionSourceRegistry.swift](../AgentSessions/Model/SessionSourceRegistry.swift).
 
@@ -1533,34 +1536,11 @@ the latter is tracked separately above until its lifecycle semantics are known.
 
 
 ### `rebuild_stage0_baseline.py` is blind to `db_roots`, so it sweeps the wrong OpenCode store
-> **open** · sev: med · urg: low · verified 2026-10-01
-- **Review 2026-10-01:** The _all_sessions() helper still reads roots, glob, exclude_globs, and required_types only; it never reads OpenCode's configured db_roots. Recommendation: keep open and fix before trusting the next OpenCode baseline rebuild; the false-clean risk remains.
-- **Evidence:** scripts/rebuild_stage0_baseline.py:107-117; docs/agent-support/agent-watch-config.json:131.
+> **done** 2026-10-02 (`2a2b25e0`)
 
-- **What:** the rebuild tool reported "opencode: fixture already covers every bucket/key
-  on disk" while the same day's weekly reported `part.patch` as drift. Both ran; only one
-  looked at the live data. `_all_sessions()` builds its file list from
-  `weekly.local_schema.roots` + `glob` and never consults `db_roots`, so for OpenCode it
-  swept the stale legacy `storage/session` directory — **1 session** — instead of
-  `opencode.db`, which holds ~8,900 parts. The tool then reports full coverage, which is
-  the most dangerous possible answer: a false clean from an instrument aimed at the wrong
-  corpus.
-- **Where:** [rebuild_stage0_baseline.py:107](../scripts/rebuild_stage0_baseline.py:107)
-  (`_all_sessions`); OpenCode's `db_roots` is declared in
-  [agent-watch-config.json](../docs/agent-support/agent-watch-config.json) under
-  `agents.opencode.weekly.local_schema`. Weekly reads it via the
-  `opencode_latest_session` fingerprint kind; the rebuild tool has no equivalent branch.
-- **Fix shape:** teach `_all_sessions` to fall back to the DB path when `db_roots` is set,
-  reusing the weekly fingerprinter. Note the emit side is the harder half — OpenCode
-  fixtures are a multi-file `storage_v2` tree, not JSONL lines, so a DB-sourced record has
-  to be written out as `part/<messageID>/NNN.json` **and** registered in the matrix's
-  `evidence_fixtures` before it counts.
-- **Why deferred:** the 2026-08-21 gap was closed by hand, so nothing is currently
-  mis-stated in the fixtures. The risk is the next sweep trusting the tool again.
-- **Risk if wrong:** silent. This class of bug never errors — it returns "all clear" and
-  the drift stays invisible until something downstream breaks.
-- **To close:** running the tool for OpenCode reports the same missing pairs the weekly
-  does, or it refuses to answer for agents whose corpus it cannot read.
+The rebuild tool now reads `db_roots` and fails closed for OpenCode DB baselines instead
+of reporting a false clean (`rebuild_stage0_baseline.py`; the commit adds 17 regression
+tests).
 
 ### Hand-maintained per-source lists drift every time an agent is added
 > **done** 2026-08-16
@@ -2127,33 +2107,12 @@ this. The entry sat `verified —` and read as open work for two weeks.
 ## QM / Runway
 
 ### Headless Codex and OpenCode CLI sessions disappear from live presence discovery
-> **open** · sev: med · urg: high · verified 2026-10-01
-- **Review 2026-10-01:** Current PresenceEngine builds a headless allowlist for Claude only. Codex discovery receives a Desktop allowlist but no headless PID set, and OpenCode receives neither; the shared parser defaults headlessEligiblePIDs to empty. Recommendation: keep open at high urgency; add headless eligibility for Codex/OpenCode and test no-TTY admission plus Desktop exclusion.
-- **Evidence:** AgentSessions/Services/PresenceEngine.swift:1253-1278; AgentSessions/Services/CodexActiveSessionsModel.swift:3192.
+> **done** 2026-10-02 (`b7893c77`)
 
-- **What:** The process fallback admits a no-TTY process only when its PID is in
-  `headlessEligiblePIDs`. `PresenceEngine` builds and passes that allowlist only for
-  Claude. Codex uses `lsof -c codex` with the default empty allowlist, and OpenCode has
-  the same TTY-only `ps` filter. Therefore a headless Codex or OpenCode CLI session
-  without a fresh registry presence is dropped before live rows are built, so its
-  current session and live token usage cannot appear in Quota Meter.
-- **Where:** [`PresenceEngine.swift:1253`](../AgentSessions/Services/PresenceEngine.swift:1253)
-  builds only `claudeHeadlessPIDs`; [`PresenceEngine.swift:1278`](../AgentSessions/Services/PresenceEngine.swift:1278)
-  calls Codex discovery without an allowlist; [`PresenceEngine.swift:1257`](../AgentSessions/Services/PresenceEngine.swift:1257)
-  applies the TTY guard to OpenCode; the shared admission rule is
-  [`CodexActiveSessionsModel.swift:3192`](../AgentSessions/Services/CodexActiveSessionsModel.swift:3192).
-- **Fix shape:** derive headless PID sets for Codex and OpenCode using the existing
-  app-bundle exclusion, pass them to `discoverLsofPIDInfos`, and mark those presences
-  as headless. TTY remains metadata, never the CLI identity test. Keep the OpenCode
-  live-token view independent of quota/reset tracking.
-- **Why deferred:** this entry records the confirmed bug for an urgent implementation
-  pass; the current change is backlog-only and does not alter discovery behavior.
-- **Risk if wrong:** headless agent work is silently absent from the live session list,
-  and the Quota Meter under-reports active token use or shows no active session.
-- **To close:** regression fixtures prove no-TTY Codex and OpenCode CLI processes are
-  admitted, app-bundle processes are classified separately, registry and process
-  discoveries do not duplicate rows, and live OpenCode token totals join to the correct
-  current session.
+Headless Codex and OpenCode PID sets now reach discovery (`PresenceEngine.swift`
+`headlessAgentPIDs`). Tests: `PresenceEngineTests` no-TTY admission, same-cwd join and
+registry/process dedupe; `HeadlessAgentPresenceTests` app-bundle separation. Not
+re-checked: the OpenCode live-token-total join beyond the exact-session test.
 
 ### Quota Meter v2 needs one immutable, end-to-end evidence contract
 > **partial** · sev: high · urg: low · verified 2026-10-01
@@ -2226,7 +2185,7 @@ by TTL from the `cache_creation` sub-object. Tests:
 `testOneHourCacheWritesPriceAtDoubleInput`, `testFiveMinuteCacheWritesPriceAtTheFiveMinuteRate`,
 `testFlatCacheCreationStillPricesWhenSubObjectAbsent`,
 `testCacheCreationSubObjectReplacesFlatTotalRatherThanAddingToIt`, and
-`testServedManifestMatchesTheBundledTable` — which pins the two-copy trap this entry warned
+`testServedV2ManifestEqualsTheBundledTable` (renamed in `11c56516`) — which pins the two-copy trap this entry warned
 about, and failed for real before `RunwayPriceTable.bundledJSON` was advanced to match
 `docs/prices.json`.
 
