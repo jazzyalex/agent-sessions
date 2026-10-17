@@ -512,3 +512,8 @@ vendor claim, not verified here. CodexBar shows limits in the menu bar only.
   High, commit-pinned to 3152f1a0, journaled (run a3fef95b). NO-SHIP. Source
   reads returned empty, so only spec-internal findings. All 13 findings
   applied in this revision.
+- 2026-10-17, XHigh review of the spike plan via Repo MCP, ChatGPT web,
+  GPT-5.6 Sol Extra High, commit-pinned 32c02443..40419a2a, journaled (run
+  286a7034). NO-SHIP: 1 blocker (a visibility timeout counted as a successful
+  handoff), 2 majors, 4 minors. All applied to the spike plan; see its
+  "Review record".
