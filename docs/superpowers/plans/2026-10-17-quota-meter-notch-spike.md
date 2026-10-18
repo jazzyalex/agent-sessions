@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- Throwaway code. Never add it to `AgentSessions.xcodeproj`; never commit it. Task 1 adds `tools/notch-spike/` to `.git/info/exclude`.
-- Commits only when the owner asks (repo rule). The only intended commit is the spec update in Task 6, with `git commit -- <paths>`.
+- Never add the spike to `AgentSessions.xcodeproj`. Owner decision 2026-10-18: the spike is committed in `tools/notch-spike/` as the visual reference for production (it was first planned as never committed; the `.git/info/exclude` line is removed). Build output stays ignored (`tools/notch-spike/.gitignore`).
+- Commits only when the owner asks (repo rule), always with `git commit -- <paths>`.
 - Panels: borderless `NSPanel`, `.nonactivatingPanel`, `level = .statusBar`, `hidesOnDeactivate = false`, non-opaque, no shadow on wings. Collection behaviour `[.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`. No level above `.statusBar`.
 - Notched screen: `safeAreaInsets.top > 0` and both `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` non-nil; prefer `CGDisplayIsBuiltin`.
 - Wing width: 95 pt. Hairline height: 3 pt. Dwell: 350 ms to open, 700 ms to close.
@@ -417,8 +417,28 @@ git commit -m "docs(spec): add notch spike findings" -- docs/superpowers/specs/2
 
 - [ ] **Step 6: Remove the spike.**
 
-Run: `rm -rf tools/notch-spike ~/Library/Logs/AgentSessions-NotchSpike` after copying the log into the scratch area if the owner wants it kept, and remove the `tools/notch-spike/` line from `.git/info/exclude`.
+Run: `rm -rf tools/notch-spike ~/Library/Logs/AgentSessions-NotchSpike ~/Library/Preferences/notch-spike.plist` after copying the log into the scratch area if the owner wants it kept, and remove the `tools/notch-spike/` line from `.git/info/exclude`.
 Expected: `git status --short` shows no spike paths.
+
+### Task 7: Strip on screens without a notch; strip click menu (owner design change 2026-10-17)
+
+Runs before Task 6's owner checklist. Spec: "Owner decisions 2026-10-17", "Strip screen and geometry", "Old menu bar item", "Hardware spike" items 8–9.
+
+**Files:**
+- Modify: `tools/notch-spike/Sources/NotchSpikeCore/SpikeGeometry.swift`, `Sources/notch-spike/SpikeController.swift`, `SpikeMenu.swift`, `SpikeApp.swift`, `CHECKLIST.md`
+- Test: `tools/notch-spike/Tests/NotchSpikeCoreTests/SpikeGeometryTests.swift`
+
+**Interfaces:**
+- Produces: `SpikeGeometry.virtualLayout(screenFrame: CGRect, menuBarHeight: CGFloat, sensorWidth: CGFloat = 24, wingWidth: CGFloat = 95, hairline: CGFloat = 3, dropSize: CGSize = CGSize(width: 620, height: 190)) -> SpikeLayout`. Virtual notch: width `sensorWidth`, centred on `screenFrame.midX`, top at `screenFrame.maxY`, height `menuBarHeight`, or 24 when `menuBarHeight <= 0`. Wings, hairlines, sensor and drop panel follow the same rules as `layout(...)`.
+- Controller: target screen = the notched screen if one exists, else `NSScreen.screens[0]`; `layout` log line gains `mode=notch|virtual`.
+- `SpikeMenu` no longer owns an `NSStatusItem`; it exposes `let menu: NSMenu`. A left click on a wing or the sensor pops it up from that panel (`NSMenu.popUp(positioning:at:in:)`) and logs `menu.open role= app_active= frontmost=`, then `menu.close app_active=` when tracking ends. Drop-panel clicks do not open it. Terminal commands stay.
+
+- [ ] **Step 1: Write the failing tests** `virtualNotchIsCentredInTheMenuBar` (2560×1440, menu bar 25 → notch `(1268, 1415, 24, 25)`, left wing `(1173, 1415, 95, 25)`, right wing `(1292, 1415, 95, 25)`, drop panel `(970, 1225, 620, 190)`) and `virtualNotchFallsBackWhenMenuBarAutoHides` (menu bar 0 → notch `(1268, 1416, 24, 24)`).
+- [ ] **Step 2: Run** `swift test --filter virtualNotch`. Expected: compile failure, `virtualLayout` not found.
+- [ ] **Step 3: Implement** `virtualLayout`, the target-screen rule, the click menu, and remove the status item.
+- [ ] **Step 4: Run** `swift test && swift build`. Expected: 19 tests passed.
+- [ ] **Step 5: Smoke run on the external display with the lid closed.** Expected log: `layout ... mode=virtual` with the Step 1 rects for the LG and `panel.placed` lines matching them.
+- [ ] **Step 6: Checklist.** Add V1 (strip visible at the top centre of the LG, lid closed), V2 (hover opens the panel there), V3 (clicking a wing opens the menu with another app frontmost; `menu.open app_active=false`), V4 (open the lid: strip moves to the notch; close it: back to the LG centre). C6 drops "NS".
 
 ## Review record
 

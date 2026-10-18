@@ -1,7 +1,9 @@
 # Quota Meter notch presentation — design
 
-Date: 2026-10-12. Revised 2026-10-13 (architecture review) and 2026-10-17
-(XHigh spec review, verdict NO-SHIP; all 13 findings applied).
+Date: 2026-10-12. Revised 2026-10-13 (architecture review), 2026-10-17
+(XHigh spec review, verdict NO-SHIP; all 13 findings applied) and 2026-10-17
+(owner design change: strip on every screen, old menu bar item replaced; see
+"Owner decisions 2026-10-17").
 Status: draft, awaiting owner review
 
 ## Problem
@@ -12,19 +14,42 @@ that display.
 
 ## Goal
 
-Show the Quota Meter data in the menu bar row beside the notch on the built-in
-display. Cover no window content while collapsed. Keep the floating window
-unchanged for external monitors.
+Offer two Quota Meter designs and let the user choose:
+
+- **Menu bar strip** ("strip", called the notch presentation in the
+  architecture sections): the Quota Meter data in the menu bar row. On a
+  notched screen it sits beside the notch; on a screen without a notch it sits
+  at the top centre (see "Strip screen and geometry"). Covers no window content
+  while collapsed.
+- **Floating window**: unchanged.
+
+The default follows the screen: floating on large external monitors, the strip
+on a MacBook. The strip replaces the old menu bar status item (see "Old menu
+bar item").
 
 Out of scope for v1:
 
 - Transient pop-ups when a session starts or stops burning.
 - A wing that changes width by state.
 - Automatic detection of menu bar collisions (see "Crowded menu bar").
-- Any change to the menu bar status item (`UsageMenuBarLabel`).
-- Any change to the floating window's layout or behaviour, except one addition:
-  the "Move to notch" toolbar button (see "Discoverability").
+- Any change to the floating window's layout or behaviour, except two
+  additions: the "Move to menu bar" toolbar button and the one-time hint (see
+  "Discoverability").
 - Any feature that needs Accessibility or Screen Recording permission.
+
+## Owner decisions 2026-10-17
+
+These replace the 2026-10-13 opt-in default where they conflict.
+
+1. The strip also shows on screens without a notch, at the top centre.
+2. The user chooses menu bar strip or floating window.
+3. Default: floating for large monitors, strip for MacBooks (`automatic`).
+4. Existing installs stay on floating and get a one-time "Try the menu bar
+   strip" hint in the floating toolbar. Fresh installs get `automatic`.
+5. Clicking the strip opens the same menu as the old menu bar item. Hover
+   still opens the expanded panel.
+6. The old menu bar status item is removed. The floating window gives access
+   to the main window and Settings, so floating mode needs no status item.
 
 ## Plans and gate
 
@@ -43,23 +68,40 @@ One new preference, `QuotaMeterPlacement`:
 | Value | Behaviour |
 |---|---|
 | `floating` | Floating window always. Today's behaviour. |
-| `notch` | Notch on the notched screen; floating window when no notched screen is connected. |
-| `automatic` | Notch when the target screen is the notched screen; floating window otherwise. |
+| `menuBar` | Strip on the target screen, notched or not. |
+| `automatic` | Strip when the target screen is the built-in display; floating window otherwise. |
 
-**Default (owner decision, 2026-10-13).** An absent key resolves to
-`floating`, for existing and fresh installs. No migration and no
-`register(defaults:)` entry; the resolver treats a missing or unknown value as
-`floating`. Nobody's Quota Meter moves after an update.
+**Default (owner decision, 2026-10-17; replaces 2026-10-13).**
 
-### Notched screen
+- Fresh installs: `automatic`, written once at first launch.
+- Existing installs (any install that ran an earlier version): an absent key
+  resolves to `floating`, so nobody's Quota Meter moves after the update.
+  They get the one-time hint (see "Discoverability").
+- Users who had the old menu bar item on (`MenuBarEnabled == true`) get
+  `menuBar` on the update, because the strip replaces what they chose.
+- The resolver treats an unknown value as `floating`.
 
-A screen is notched when `NSScreen.safeAreaInsets.top > 0` and both
-`auxiliaryTopLeftArea` and `auxiliaryTopRightArea` are non-nil. When more than
-one screen qualifies, the notched screen is the built-in one
-(`CGDisplayIsBuiltin`); if none is built-in, the first qualifying screen in
-`NSScreen.screens` order.
+How the app tells a fresh install from an existing one is the builder's call;
+it must use a key that every earlier version wrote.
 
-### Target screen (for `automatic`)
+### Strip screen and geometry
+
+The strip goes on the target screen (below). Each screen with a menu bar has
+its own, so the strip shows on that one screen only.
+
+- **Notched screen** (`safeAreaInsets.top > 0` and both
+  `auxiliaryTopLeftArea` and `auxiliaryTopRightArea` non-nil): wings flank the
+  hardware notch; the notch sensor covers the notch rect. Notch x comes from
+  the auxiliary rects' widths (`frame.minX + auxLeft.width` to
+  `frame.maxX − auxRight.width`), which are right in any coordinate space.
+- **Screen without a notch**: a virtual notch, a black sensor 24 pt wide
+  centred on `frame.midX`, with the wings flanking it, so the strip reads as
+  one black pill (95 + 24 + 95 pt). Height is the menu bar height
+  (`frame.maxY − visibleFrame.maxY`), or 24 pt when the menu bar auto-hides.
+  Long app menus on the left can reach the centre on narrow screens; Minimal
+  style and `floating` are the escape hatches.
+
+### Target screen
 
 The target screen is the screen that holds the floating window's frame:
 
@@ -90,27 +132,55 @@ allowed during a handoff (see "Handoff").
 
 ## Discoverability
 
-The opt-in has three entry points:
+The choice has four entry points:
 
-1. **Settings → Quota Meter → Placement** (Floating / Notch / Automatic). This
-   is the canonical path.
+1. **Settings → Quota Meter → Placement** (Floating window / Menu bar /
+   Automatic). This is the canonical path.
 2. **View menu → Quota Meter Placement** submenu with the same three choices.
-   Keyboard-reachable; it also covers the notch panel's lack of keyboard focus.
-3. **Toolbar shortcuts** for users who already use the chrome:
-   - Floating window toolbar: "Move to notch". It shows only while a notched
-     screen is connected and sets `QuotaMeterPlacement` to `notch`.
-   - Notch panel toolbar: "Move to floating window". It sets
-     `QuotaMeterPlacement` to `floating`.
+   Keyboard-reachable; it also covers the strip's lack of keyboard focus.
+3. **Toolbar and menu shortcuts:**
+   - Floating window toolbar: "Move to menu bar". Sets `QuotaMeterPlacement`
+     to `menuBar`.
+   - Strip click menu and expanded-panel toolbar: "Move to floating window".
+     Sets `QuotaMeterPlacement` to `floating`.
+4. **One-time hint for existing installs:** "Try the menu bar strip" in the
+   floating toolbar, with "Try it" (sets `menuBar`) and a close button. It
+   shows the first time the toolbar is revealed after the update and never
+   again once acted on or closed.
 
 The floating toolbar is hidden by default (`QuotaMeterChrome` is on-demand),
-so the toolbar button is a shortcut, not the main way in. Release notes get one
-line pointing at Settings.
+so most existing users may never see the hint; the owner accepted that
+trade-off for safety. Release notes get one line pointing at Settings.
 
-All three routes change only the preference; the coordinator does the switch.
+All routes change only the preference; the coordinator does the switch.
+
+## Old menu bar item
+
+The old status item (`UsageMenuBarLabel`, `StatusItemController`,
+`MenuBarEnabled`) is removed. Its label duplicates the strip.
+
+- **Its menu moves to the strip's click menu**, unchanged in content: sign-in
+  "Fix…" rows, the live-session line ("N active • M waiting"), Open/Hide Quota
+  Meter, Open/Hide Agent Sessions, the usage lines and reset credits, Hard
+  Refresh per provider, copy-setup-command, Open Settings…, Show/Hide Dock
+  Icon, Quit. Its label options (Source, Style, Scope, reset-indicator
+  checkboxes, "Hide Menu Bar Item") are dropped, since they configured the old
+  label.
+- **Settings:** the Menu Bar tab and its keys (`MenuBarEnabled`,
+  `MenuBarShowLiveSessionIcons`, reset-time toggles, `MenuBarShowPills`,
+  `MenuBarScope`, `MenuBarStyle`, `MenuBarSource`) are retired.
+- **Hidden Dock icon:** today allowed only while the status item is on or the
+  Quota Meter is pinned. New rule: allowed only while the strip is presented
+  or the floating window is pinned. If neither holds (for example the user
+  switches to floating and unpins), the Dock icon comes back. The old
+  "status item could not be shown" recovery path goes away with the item.
+- **Polling:** the old label kept usage polling alive in the background
+  (`setMenuVisible`). The strip already counts as visible and pinned in the
+  usage-model table, so background polling is unchanged.
 
 ## Collapsed state: wings
 
-Two black wings extend the notch sideways inside the menu bar row. Each wing
+Two black wings extend the notch (or the virtual notch) sideways inside the menu bar row. Each wing
 has one fixed width (about 95 pt) in every state. It never widens.
 
 - **Codex is always the left wing. Claude is always the right wing.**
@@ -189,12 +259,14 @@ the wings stay visible in the black top strip.
 
 ## Expanded state: hover panel
 
-Hovering either wing, or the notch sensor, opens one black panel that drops
-from the notch. It uses the existing dwell timings (350 ms to open, 700 ms to
-close after the pointer leaves).
+Clicking a wing or the sensor opens the strip menu (see "Old menu bar item").
+Hovering the strip grows the notch shape into the expanded panel (see "Visual
+design"). It opens 0.3 s after the pointer enters and closes 0.1 s after the
+pointer leaves.
 
-- Two columns. Codex under the left wing, Claude under the right wing.
-- Each column, top to bottom:
+- The floating Quota Meter's layout, stacked (revised 2026-10-18; replaces
+  two columns): Codex block, a divider, Claude block. Each block, top to
+  bottom:
   1. The full limits line: 5h percent, run-out chip, 5h reset, weekly percent,
      weekly reset.
   2. The extra lines the floating window shows with chrome revealed (Codex
@@ -209,7 +281,7 @@ close after the pointer leaves).
   runway popovers, Settings, Open Agent Sessions, Move to floating window). The
   Pin button is hidden in the notch presentation; the stored Pin preference is
   not changed.
-- With one provider visible, the panel is one column.
+- With one provider visible, the panel shows one block.
 - Every toolbar action is also reachable from the app's menus or Settings.
 
 The panel always renders dark, because it extends black hardware. It ignores
@@ -240,6 +312,11 @@ It must verify:
    repeats of these; panels are torn down and recreated without leaks.
 7. A handoff prototype in both directions (see "Handoff"), measuring the
    overlap or gap.
+8. The top-centre strip on a screen without a notch (an external display with
+   the lid closed): placement, hover, clicks, menus, and switching between the
+   two screen kinds on lid open and close.
+9. Clicking a wing opens an `NSMenu` from the strip without activating the
+   app; the menu draws above the panels.
 
 Findings are written into this spec ("Spike findings" section, added then).
 If they contradict "Panel topology" or "Handoff", those sections change before
@@ -247,20 +324,46 @@ the production plan is written.
 
 ## Architecture
 
-### Panel topology (provisional until the spike)
+### Panel topology (revised 2026-10-18 after the prior-art study)
 
-Several small panels, not one large panel with click pass-through.
-`ignoresMouseEvents` applies to a whole window, so one window cannot pass
-clicks through some regions only.
+One panel per target screen, as boring.notch and codex-island do it. The
+earlier design (several small panels) is replaced.
 
-- Left wing panel and right wing panel: cover only their wing (or hairline).
-- Notch sensor: an invisible panel over the notch rect.
-- Expanded panel: exists only while open.
+- The panel is sized for the expanded state and pinned top-centre on the
+  notch (or virtual notch). It is clear; only the SwiftUI notch shape draws.
+- **Click pass-through:** the hosting view's `hitTest` returns nil outside the
+  current shape rect, and global plus local mouse monitors (`mouseMoved`,
+  `leftMouseDragged`) toggle `ignoresMouseEvents` so the window takes events
+  only while the pointer is inside the shape. `acceptsFirstMouse` is true.
+- **Hover** comes from the same mouse monitors, not from `NSTrackingArea`
+  (a window that ignores mouse events gets no tracking events).
 
-Each is a borderless `NSPanel` with `.nonactivatingPanel`, `level =
-.statusBar`, `hidesOnDeactivate = false`, non-opaque, no shadow on the wings.
-Collection behaviour: `.canJoinAllSpaces`, `.stationary`,
-`.fullScreenAuxiliary`, `.ignoresCycle`. No level higher than `.statusBar`.
+Borderless `NSPanel` with `.nonactivatingPanel`, `canBecomeKey == false`,
+`canBecomeMain == false`, `level = .statusBar`, `hidesOnDeactivate = false`,
+non-opaque, no window shadow (the shape draws its own when open). Collection
+behaviour: `.canJoinAllSpaces`, `.stationary`, `.fullScreenAuxiliary`,
+`.ignoresCycle`. No level higher than `.statusBar` (best apps use
+`.mainMenu + 3`; the spike checks whether `.statusBar` is enough).
+
+### Visual design (revised 2026-10-18; owner approved the look on the LG)
+
+- **Shape:** one animatable `NotchShape`: flat top flush with the screen edge,
+  concave quad-curve flares into the menu bar, rounded bottom corners. Radii:
+  closed top 6 / bottom 14, open top 19 / bottom 24. Pure black; a 1 pt black
+  line inset by the flare hides seams at the screen edge.
+- **Collapsed (mockup A):** wings 104 pt each beside the notch: Codex icon,
+  percent, run-out chip on the left; mirrored Claude on the right. Percent
+  green when healthy, orange under 30 %, red at 10 % or less; chip amber when
+  the provider will run out before reset.
+- **Expanded:** the same shape grows into the floating Quota Meter's content,
+  in its own styles (SF Mono 12 pt medium limits rows, 11 pt runway rows,
+  5 pt runway bars that breathe every 0.8 s, `hudProjectionColor` orange).
+  A 0.5 pt white 12 % stroke and a black 50 % shadow (radius 20, y 10) appear
+  only while open.
+- **Motion:** open `spring(response 0.42, damping 0.82)`, close
+  `spring(response 0.45, damping 1.0)`. Content fades in 0.22 s after a
+  0.08 s delay (scale 0.98, top anchor) and fades out in 0.1 s. A
+  `.levelChange` haptic plays on hover enter.
 
 Notch panels carry their own window identifiers.
 `AppWindowRouter.existingWindow(identifier: "AgentCockpit")` must never find
@@ -269,14 +372,16 @@ one.
 ### New units
 
 - **`NotchGeometry`** (pure value type). Input: screen frame, safe-area insets,
-  auxiliary left and right rects. Output: notch rect, wing rects, hairline
+  auxiliary left and right rects, menu bar height (for the virtual notch on a
+  screen without one). Output: notch rect, wing rects, hairline
   rects, sensor rect, panel rect. No AppKit calls inside. Recomputed from
   `NSScreen` on every change; no notch coordinates are persisted.
 - **`QuotaMeterPlacementResolver`** (pure function). Input: placement value
   (possibly absent), desired visibility, screen descriptors (frame, notched,
   built-in), floating frame (live or autosaved). Output: `hidden`, `floating`,
-  or `notch(displayID)`. It applies the "Notched screen" and "Target screen"
-  rules above.
+  or `notch(displayID)` (the strip, on any screen). It applies the "Strip
+  screen and geometry", "Target screen" and default rules above (fresh,
+  existing, and `MenuBarEnabled` installs).
 - **`QuotaMeterPresentationCoordinator`** (`@MainActor`, app-scoped). The
   single owner of Quota Meter presentation. It:
   - owns desired visibility, persisted as `QuotaMeterDesiredVisible`;
@@ -455,9 +560,12 @@ The production plan measures both against an unpinned floating baseline.
 ## Testing
 
 - `NotchGeometry`: unit tests with fixed inputs for 14" and 16" at default and
-  scaled resolutions, a screen with no notch, and two notched screens.
+  scaled resolutions, a screen with no notch (virtual notch, including an
+  auto-hidden menu bar), a built-in screen whose origin is not (0,0), and two
+  notched screens.
 - `QuotaMeterPlacementResolver`: table test over placement (including absent) ×
-  desired visibility × screens × floating frame (on built-in, on external,
+  install kind (fresh, existing, `MenuBarEnabled`) × desired visibility ×
+  screens × floating frame (on built-in, on external,
   orphaned, absent).
 - `QuotaMeterPresentationCoordinator`: lifecycle tests for every row of the
   usage-model table and every transition between rows; handoff in both
@@ -490,12 +598,16 @@ shippable.
 3. `QuotaMeterRunwayStore`. Floating window wired to it first.
 4. `QuotaMeterPresentationCoordinator`, resolving everything to floating. View
    menu, pinned restore and the `setCockpitVisible` calls routed through it.
-5. Notch panel controller and collapsed wings, behind the `notch` preference.
+5. Strip panel controller and collapsed wings on both screen kinds, behind the
+   `menuBar` preference; strip click menu.
 6. Expanded panel with session actions and right-click toolbar.
 7. Settings placement picker, View-menu submenu, toolbar shortcuts.
 8. Wings / Minimal notch style.
 9. Accessibility, localisation and energy pass, covering both styles.
-10. Hardware regression QA.
+10. Remove the old menu bar item: retire its keys and Settings tab, migrate
+    `MenuBarEnabled` users to `menuBar`, new hidden-Dock-icon rule, defaults
+    for fresh and existing installs, one-time hint.
+11. Hardware regression QA.
 
 ## Prior art
 
