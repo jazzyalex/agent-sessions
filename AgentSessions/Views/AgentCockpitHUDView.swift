@@ -618,10 +618,52 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     }
 }
 
+/// Where the Quota Meter view is hosted: the floating window, or the expanded menu bar strip.
+enum QuotaMeterSurface {
+    case window
+    /// Content only: no toolbar, window chrome or right-click controls; always dark;
+    /// counts as pinned for usage polling because the strip stays on screen.
+    case strip
+}
+
+/// The single owner of the usage models' cockpit signal and `Cockpit.hudOpen`. Every Quota
+/// Meter surface on screen registers under its own ID, so a rebuild, a handoff or a second
+/// surface can never clear or overwrite another surface's signal. Applies on the next
+/// run-loop turn, so a handoff (old surface out, new surface in) does not flash "hidden".
+@MainActor
+enum QuotaMeterPollingRegistry {
+    private static var surfaces: [UUID: QuotaMeterPollingSignal.Surface] = [:]
+    private static var applied: QuotaMeterPollingSignal?
+    private static var applyScheduled = false
+
+    static func set(_ id: UUID, _ surface: QuotaMeterPollingSignal.Surface?) {
+        guard surfaces[id] != surface else { return }
+        surfaces[id] = surface
+        guard !applyScheduled else { return }
+        applyScheduled = true
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                applyScheduled = false
+                apply()
+            }
+        }
+    }
+
+    private static func apply() {
+        let signal = QuotaMeterPollingSignal.combine(Array(surfaces.values))
+        guard signal != applied else { return }
+        applied = signal
+        UserDefaults.standard.set(signal.visible, forKey: PreferencesKey.Cockpit.hudOpen)
+        CodexUsageModel.shared.setCockpitVisible(signal.visible, pinned: signal.pinned)
+        ClaudeUsageModel.shared.setCockpitVisible(signal.visible, pinned: signal.pinned)
+    }
+}
+
 struct AgentCockpitHUDView: View {
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
+    let surface: QuotaMeterSurface
     @Environment(CodexActiveSessionsModel.self) var activeCodex
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -745,6 +787,8 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.quotaMeterHiddenProviders) private var quotaMeterHiddenProvidersRaw = QuotaMeterProviderVisibility.defaultRawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
+    @AppStorage(PreferencesKey.quotaMeterPlacement) private var quotaMeterPlacementRaw = QuotaMeterPlacement.floating.rawValue
+    @AppStorage(PreferencesKey.quotaMeterStripHintDismissed) private var quotaMeterStripHintDismissed = false
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
     @State private var showProviderVisibilityPopover = false
@@ -754,10 +798,12 @@ struct AgentCockpitHUDView: View {
     @EnvironmentObject private var codexUsageModel: CodexUsageModel
     @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer,
+         surface: QuotaMeterSurface = .window) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.opencodeIndexer = opencodeIndexer
+        self.surface = surface
         _derivedState = StateObject(
             wrappedValue: AgentCockpitHUDDerivedStateModel(
                 codexIndexer: codexIndexer,
@@ -768,30 +814,35 @@ struct AgentCockpitHUDView: View {
         )
     }
 
+    private var pollingSurface: QuotaMeterPollingSignal.Surface {
+        surface == .strip ? .strip : .window(pinned: isPinned)
+    }
+
     var body: some View {
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
         Group {
-            switch appAppearance {
-            case .light: hudContent.preferredColorScheme(.light)
-            case .dark: hudContent.preferredColorScheme(.dark)
-            case .system: hudContent
+            if surface == .strip {
+                // The strip extends black hardware, so it is always dark.
+                hudContent.environment(\.colorScheme, .dark)
+            } else {
+                switch appAppearance {
+                case .light: hudContent.preferredColorScheme(.light)
+                case .dark: hudContent.preferredColorScheme(.dark)
+                case .system: hudContent
+                }
             }
         }
         .onAppear {
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
             activeCodex.setCockpitWindowVisible(true, consumerID: activeConsumerID)
-            UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
             CodexUsageModel.shared.setAppActive(NSApp.isActive)
-            CodexUsageModel.shared.setCockpitVisible(true, pinned: isPinned)
             ClaudeUsageModel.shared.setAppActive(NSApp.isActive)
-            ClaudeUsageModel.shared.setCockpitVisible(true, pinned: isPinned)
+            QuotaMeterPollingRegistry.set(activeConsumerID, pollingSurface)
         }
         .onDisappear {
             activeCodex.setCockpitWindowVisible(false, consumerID: activeConsumerID)
             activeCodex.setCockpitConsumerVisible(false, consumerID: activeConsumerID)
-            UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
-            CodexUsageModel.shared.setCockpitVisible(false, pinned: false)
-            ClaudeUsageModel.shared.setCockpitVisible(false, pinned: false)
+            QuotaMeterPollingRegistry.set(activeConsumerID, nil)
             cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
         }
@@ -803,9 +854,8 @@ struct AgentCockpitHUDView: View {
             CodexUsageModel.shared.setAppActive(false)
             ClaudeUsageModel.shared.setAppActive(false)
         }
-        .onChange(of: isPinned) { _, newPinned in
-            CodexUsageModel.shared.setCockpitVisible(true, pinned: newPinned)
-            ClaudeUsageModel.shared.setCockpitVisible(true, pinned: newPinned)
+        .onChange(of: isPinned) { _, _ in
+            QuotaMeterPollingRegistry.set(activeConsumerID, pollingSurface)
         }
     }
 
@@ -892,6 +942,7 @@ struct AgentCockpitHUDView: View {
             refreshPresentationState(canonicalRows: latestCanonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onHover { hovering in
+            guard surface == .window else { return }
             handleCompactWindowHoverChange(hovering)
         }
         // Dismissing a popover from outside the HUD produces no hover event, so
@@ -918,11 +969,11 @@ struct AgentCockpitHUDView: View {
         // Both are overlays, never members of the layout: the no-expansion
         // promise of .onDemand is structural, not a rule a later edit has to
         // remember.
-        .applyIf(quotaMeterChrome.respondsToRightClick) { view in
+        .applyIf(surface == .window && quotaMeterChrome.respondsToRightClick) { view in
             view.overlay(HUDRightClickCatcher(onRightClick: revealChromeOnDemand))
         }
         .overlay(alignment: .bottom) {
-            if showsRightClickHint {
+            if surface == .window && showsRightClickHint {
                 HUDRightClickHintPill()
                     .padding(.bottom, 6)
                     .transition(.opacity)
@@ -942,7 +993,20 @@ struct AgentCockpitHUDView: View {
     private func configuredHUDContent(snapshot: HUDRowsSnapshot,
                                       displayState: HUDPresentationState,
                                       showsCompactToolbar: Bool) -> AnyView {
-        AnyView(
+        if surface == .strip {
+            // The strip draws its own black notch shape around this content.
+            return AnyView(
+                hudStack(snapshot: snapshot, displayState: displayState, showsCompactToolbar: false)
+                    .fixedSize()
+                    .background(
+                        CockpitWindowVisibilityObserver { isVisible in
+                            handleWindowVisibilityChange(isVisible: isVisible)
+                        } onKeyWindowChanged: { _ in }
+                        .allowsHitTesting(false)
+                    )
+            )
+        }
+        return AnyView(
             hudStack(
                 snapshot: snapshot,
                 displayState: displayState,
@@ -993,6 +1057,13 @@ struct AgentCockpitHUDView: View {
                     .fill(Color.primary.opacity(0.10))
                     .frame(height: 0.5)
                     .transition(.opacity)
+                if surface == .window && showsMenuBarStripHint {
+                    menuBarStripHint
+                        .transition(.opacity)
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 0.5)
+                }
             }
 
             if !activeEnabled {
@@ -1003,11 +1074,14 @@ struct AgentCockpitHUDView: View {
 
             HUDLimitsRowsPanel(
                 activeRows: displayState.rowsForDisplay,
-                showsChrome: showsCompactToolbar,
+                // The strip has no toolbar to reveal, so its extra lines always show.
+                showsChrome: surface == .strip ? true : showsCompactToolbar,
                 hiddenProvidersRaw: $quotaMeterHiddenProvidersRaw
             )
 
-            hiddenShortcuts
+            if surface == .window {
+                hiddenShortcuts
+            }
         }
     }
 
@@ -1392,9 +1466,55 @@ struct AgentCockpitHUDView: View {
             }
             cockpitChromeButton
             toolbarHairline
+            cockpitMoveToMenuBarButton
             cockpitPinButton
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Switches the Quota Meter to the menu bar strip (placement `menuBar`).
+    private var cockpitMoveToMenuBarButton: some View {
+        Button {
+            quotaMeterStripHintDismissed = true
+            quotaMeterPlacementRaw = QuotaMeterPlacement.menuBar.rawValue
+        } label: {
+            Image(systemName: "menubar.rectangle")
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+        .help("Move to menu bar")
+    }
+
+    /// One-time hint for installs that predate the strip (fresh installs mark it dismissed).
+    private var showsMenuBarStripHint: Bool {
+        !quotaMeterStripHintDismissed
+            && QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) == .floating
+    }
+
+    private var menuBarStripHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "menubar.rectangle")
+                .foregroundStyle(.secondary)
+            Text("Try the menu bar strip")
+                .font(.system(size: 11, weight: .medium))
+            Spacer(minLength: 8)
+            Button("Try It") {
+                quotaMeterStripHintDismissed = true
+                quotaMeterPlacementRaw = QuotaMeterPlacement.menuBar.rawValue
+            }
+            .controlSize(.small)
+            Button {
+                quotaMeterStripHintDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     /// The Quota Meter's chrome strips `.titled` and disables the standard

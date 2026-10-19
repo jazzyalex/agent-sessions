@@ -108,6 +108,8 @@ enum AppWindowRouter {
         guard !AppRuntime.isRunningTests else { return }
         guard shouldRestorePinnedCockpitOnLaunch() else { return }
         guard existingWindow(identifier: cockpitWindowIdentifier) == nil else { return }
+        // In the menu bar placement the strip is the Quota Meter; no window to restore.
+        guard !QuotaMeterPresentationCoordinator.shared.resolvesToStrip() else { return }
         openWindow()
     }
 }
@@ -197,14 +199,12 @@ struct AgentSessionsApp: App {
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
-    @State private var statusItemController: StatusItemController? = nil
     @State private var analyticsToggleObserver: NSObjectProtocol?
     @State private var mainWindowCloseObserver: NSObjectProtocol?
     @State private var menuBarDefaultsObserver: NSObjectProtocol?
     @State private var lastObservedMenuBarEnabled: Bool?
     @State private var lastObservedHideDockIcon: Bool?
     @State private var lastObservedPinnedCockpitAvailable: Bool?
-    @State private var didRestoreDockForUnavailableMenuBar: Bool = false
     @State private var didRunStartupTasks: Bool = false
     @State private var isDockRecentCleanupScheduled: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
@@ -255,6 +255,7 @@ struct AgentSessionsApp: App {
 
     init() {
         guard !AppRuntime.isRunningTests else { return }
+        Self.applyQuotaMeterPlacementDefaults()
 #if DEBUG
         // Beachball watchdog for the "make every action instant" perf pass (lever #0).
         DispatchQueue.main.async { MainThreadStallMonitor.shared.start() }
@@ -572,6 +573,7 @@ final class CockpitWindowVisibility: ObservableObject {
 
     func refresh() {
         isVisible = AppWindowRouter.isAgentCockpitWindowVisible
+            || QuotaMeterPresentationCoordinator.shared.isStripPresented
     }
 }
 
@@ -602,11 +604,7 @@ private struct AgentCockpitMenu: View {
         Toggle("Quota Meter", isOn: Binding(
             get: { visibility.isVisible },
             set: { shouldShow in
-                if shouldShow {
-                    openWindow(id: "AgentCockpit")
-                } else {
-                    AppWindowRouter.closeAgentCockpitWindow()
-                }
+                QuotaMeterPresentationCoordinator.shared.setQuotaMeterVisible(shouldShow)
                 visibility.refresh()
             }
         ))
@@ -617,7 +615,19 @@ private struct AgentCockpitMenu: View {
                 ? "Show or hide the Quota Meter."
                 : "Enable live session detection (Beta) in Settings → Quota Meter."
         )
+
+        Picker("Quota Meter Placement", selection: Binding(
+            get: { QuotaMeterPlacement.current(raw: placementRaw) },
+            set: { placementRaw = $0.rawValue }
+        )) {
+            ForEach(QuotaMeterPlacement.allCases) { placement in
+                Text(placement.title).tag(placement)
+            }
+        }
+        .disabled(!liveSessionsFeatureEnabled)
     }
+
+    @AppStorage(PreferencesKey.quotaMeterPlacement) private var placementRaw: String = QuotaMeterPlacement.floating.rawValue
 }
 
 private struct OpenPinnedSessionsWindowButton: View {
@@ -737,9 +747,9 @@ extension AgentSessionsApp {
             UpdaterController.shared = updaterController
         }
         DeprecatedCockpitDefaultsCleanup.run()
-        ensureStatusItemController()
         setupMenuBarDefaultsObserverIfNeeded()
         updateUsageModels()
+        startQuotaMeterPresentation()
         // NOTE: the runway $-burn price list is deliberately NOT fetched here. It
         // refreshes lazily, only once the $ presentation is actually used, so the
         // app makes no network call for a feature you never open — which is what
@@ -903,7 +913,8 @@ extension AgentSessionsApp {
 
     private func handleMenuBarEnabledChange(_ enabled: Bool) {
         guard !AppRuntime.isRunningTests else { return }
-        DockIconPreferenceController.setMenuBarEnabled(enabled)
+        // `MenuBarEnabled` follows the strip (written by the placement coordinator). Losing it
+        // changes only the effective policy below, never the stored "Hide Dock icon" choice.
         let pinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable()
         let effectiveHideDockIcon = (enabled || pinnedCockpitAvailable) ? hideDockIcon : false
         lastObservedMenuBarEnabled = enabled
@@ -914,20 +925,6 @@ extension AgentSessionsApp {
     }
 
     @MainActor
-    private func handleMenuBarVisibilityChange(_ isVisible: Bool) {
-        guard !AppRuntime.isRunningTests else { return }
-        if isVisible {
-            didRestoreDockForUnavailableMenuBar = false
-            return
-        }
-        guard hideDockIcon, menuBarEnabled, !didRestoreDockForUnavailableMenuBar else { return }
-        guard !DockIconPreferenceController.isPinnedCockpitAvailable() else { return }
-        didRestoreDockForUnavailableMenuBar = true
-        UserDefaults.standard.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
-        Self.applyActivationPolicy(hideDockIcon: false, menuBarEnabled: menuBarEnabled)
-        AppWindowRouter.showAgentSessionsWindow()
-    }
-
     private func setupMenuBarDefaultsObserverIfNeeded() {
         guard !AppRuntime.isRunningTests else { return }
         guard menuBarDefaultsObserver == nil else { return }
@@ -942,12 +939,11 @@ extension AgentSessionsApp {
             queue: .main
         ) { [self] _ in
             let nextMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
-            var nextHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+            // Effective, not stored: without the strip or a pinned window the Dock icon shows,
+            // but the user's choice is kept for when the strip returns (e.g. lid reopened).
+            let nextHideDockIcon = (defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false)
+                && DockIconPreferenceController.hasDockHiddenReachability(defaults: defaults)
             let nextPinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults)
-            if !DockIconPreferenceController.hasDockHiddenReachability(defaults: defaults), nextHideDockIcon {
-                DockIconPreferenceController.reconcileReachability(defaults: defaults)
-                nextHideDockIcon = false
-            }
 
             guard nextMenuBarEnabled != self.lastObservedMenuBarEnabled
                 || nextHideDockIcon != self.lastObservedHideDockIcon
@@ -994,26 +990,44 @@ extension AgentSessionsApp {
         }()
         let claudeTrackingEnabled = claudeEnabled && claudeAgentEnabled
         claudeUsageModel.setEnabled(claudeTrackingEnabled)
-
-        if effectiveMenuBarEnabled {
-            ensureStatusItemController()
-        }
-        statusItemController?.setEnabled(effectiveMenuBarEnabled)
     }
 
-    private func ensureStatusItemController() {
+    /// Creates the menu bar strip and hands it to the placement coordinator (idempotent).
+    private func startQuotaMeterPresentation() {
         guard !AppRuntime.isRunningTests else { return }
-        guard statusItemController == nil else { return }
-        let controller = StatusItemController(indexer: indexer,
-                                              claudeIndexer: claudeIndexer,
-                                              opencodeIndexer: opencodeIndexer,
-                                              activeSessions: activeCodexSessions,
-                                              codexStatus: codexUsageModel,
-                                              claudeStatus: claudeUsageModel)
-        controller.visibilityDidChange = { [self] isVisible in
-            handleMenuBarVisibilityChange(isVisible)
+        let coordinator = QuotaMeterPresentationCoordinator.shared
+        guard !coordinator.isStarted else { return }
+        let strip = QuotaStripController(codexIndexer: indexer,
+                                         claudeIndexer: claudeIndexer,
+                                         opencodeIndexer: opencodeIndexer,
+                                         activeCodex: activeCodexSessions,
+                                         codexUsage: codexUsageModel,
+                                         claudeUsage: claudeUsageModel)
+        // The old status item's menu, now opened by clicking the strip (held by the closure).
+        let menuController = StatusItemController(indexer: indexer,
+                                                  claudeIndexer: claudeIndexer,
+                                                  opencodeIndexer: opencodeIndexer,
+                                                  activeSessions: activeCodexSessions,
+                                                  codexStatus: codexUsageModel,
+                                                  claudeStatus: claudeUsageModel)
+        strip.menuProvider = { menuController.makeMenu() }
+        coordinator.onDecisionChange = { [weak coordinator] userInitiated in
+            // `MenuBarEnabled` now means "the strip is on screen": the app's existing
+            // activation-policy logic reads it as menu bar reachability.
+            let presented = coordinator?.isStripPresented ?? false
+            if UserDefaults.standard.bool(forKey: PreferencesKey.menuBarEnabled) != presented {
+                UserDefaults.standard.set(presented, forKey: PreferencesKey.menuBarEnabled)
+            }
+            // Only a user's own change may clear their stored "Hide Dock icon" choice. A display
+            // or lid change only changes the effective policy, so the Dock icon hides again
+            // when the strip comes back.
+            if userInitiated {
+                DockIconPreferenceController.reconcileReachability()
+            }
         }
-        statusItemController = controller
+        coordinator.start(stripController: strip, openWindow: {
+            AppWindowRouter.openAgentCockpitWindow?()
+        })
     }
 
     private func setupAnalytics() {
@@ -1457,5 +1471,26 @@ private extension OnboardingWindowPresenter {
         hv.needsLayout = true
         hv.setNeedsDisplay(hv.bounds)
         hv.displayIfNeeded()
+    }
+}
+
+// MARK: - Quota Meter placement defaults
+
+extension AgentSessionsApp {
+    /// Runs once per launch, before Sparkle starts (Sparkle writes `SUHasLaunchedBefore`).
+    /// Fresh installs get `automatic` and never see the "Try the menu bar strip" hint;
+    /// old menu bar item users get `menuBar`; other existing installs keep `floating`.
+    static func applyQuotaMeterPlacementDefaults(defaults: UserDefaults = .standard) {
+        let isFreshInstall = defaults.object(forKey: "SUHasLaunchedBefore") == nil
+            && defaults.object(forKey: "OnboardingFirstLaunchDate") == nil
+        guard let value = QuotaMeterPlacementDefaults.valueToWrite(
+            storedRaw: defaults.string(forKey: PreferencesKey.quotaMeterPlacement),
+            menuBarEnabled: defaults.bool(forKey: PreferencesKey.menuBarEnabled),
+            isFreshInstall: isFreshInstall
+        ) else { return }
+        defaults.set(value.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
+        if isFreshInstall {
+            defaults.set(true, forKey: PreferencesKey.quotaMeterStripHintDismissed)
+        }
     }
 }

@@ -116,6 +116,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) var usageLimitCockpitProjectionEnabled: Bool = true
     @AppStorage(PreferencesKey.quotaMeterEnlarged) var quotaMeterEnlarged: Bool = false
     @AppStorage(PreferencesKey.quotaMeterChrome) var quotaMeterChromeRaw: String = QuotaMeterChrome.onDemand.rawValue
+    @AppStorage(PreferencesKey.quotaMeterPlacement) var quotaMeterPlacementRaw: String = QuotaMeterPlacement.floating.rawValue
     @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexSource) var usageLimitDiagnosticsCodexSource: String = ""
@@ -453,7 +454,8 @@ struct PreferencesView: View {
             case .usageProbes:
                 usageProbesTab
             case .menuBar:
-                menuBarTab
+                // The Menu Bar pane is retired with the old status item; old deep links land here.
+                agentCockpitTab
             case .unified:
                 unifiedTab
             case .advanced:
@@ -1389,12 +1391,12 @@ extension PreferencesTab {
     /// The app-wide panes, in sidebar order.
     static let generalSidebarTabs: [PreferencesTab] = [
         .general, .agentCockpit, .unified, .usageTracking,
-        .limitAlerts, .usageProbes, .menuBar, .advanced, .about
+        .limitAlerts, .usageProbes, .advanced, .about
     ]
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
+    // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Advanced → About → Agents
     var visibleTabs: [PreferencesTab] {
         PreferencesTab.generalSidebarTabs + PreferencesTab.sidebarAgentTabs
     }

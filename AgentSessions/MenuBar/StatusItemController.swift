@@ -11,17 +11,12 @@ private final class AuthStatusBox {
 
 @MainActor
 final class StatusItemController: NSObject {
-    private var statusItem: NSStatusItem?
-    private var hosting: NSHostingView<AnyView>?
     private let indexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
     private let activeSessions: CodexActiveSessionsModel
     private let codexStatus: CodexUsageModel
     private let claudeStatus: ClaudeUsageModel
-    private var cancellables: Set<AnyCancellable> = []
-    private var lengthUpdateScheduled: Bool = false
-    var visibilityDidChange: ((Bool) -> Void)?
 
     init(indexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
@@ -38,146 +33,12 @@ final class StatusItemController: NSObject {
         super.init()
     }
 
-    func setEnabled(_ enabled: Bool) {
-        guard !AppRuntime.isRunningTests else {
-            if !enabled {
-                removeStatusItem()
-            }
-            return
-        }
-        if enabled {
-            ensureStatusItem()
-        } else {
-            removeStatusItem()
-        }
-    }
+    /// The status item is retired: the menu bar strip shows this menu on click
+    /// (`QuotaStripController.menuProvider`). Kept so existing callers stay valid.
+    func setEnabled(_ enabled: Bool) {}
 
-    private func ensureStatusItem() {
-        guard statusItem == nil else { return }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem = item
-
-        if let button = item.button {
-            // Clear any default title/image and embed SwiftUI label view
-            button.title = ""
-            button.image = nil
-            let labelView = UsageMenuBarLabel()
-                .environment(activeSessions)
-                .environmentObject(indexer)
-                .environmentObject(claudeIndexer)
-                .environmentObject(opencodeIndexer)
-                .environmentObject(codexStatus)
-                .environmentObject(claudeStatus)
-            let hv = NSHostingView(rootView: AnyView(labelView))
-            hv.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(hv)
-            NSLayoutConstraint.activate([
-                hv.leadingAnchor.constraint(equalTo: button.leadingAnchor),
-                hv.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-                hv.topAnchor.constraint(equalTo: button.topAnchor),
-                hv.bottomAnchor.constraint(equalTo: button.bottomAnchor)
-            ])
-            self.hosting = hv
-            scheduleLengthUpdate()
-            scheduleVisibilityCheck()
-
-            button.target = self
-            button.action = #selector(togglePopover(_:))
-        }
-
-        // Keep width in sync with live-session and usage changes.
-        //
-        // `activeSessions` (an `@Observable` model, post-W6) no longer has a
-        // synthesized `objectWillChange` to subscribe to as a single
-        // catch-all. `scheduleLengthUpdate` -> `updateLength()` just
-        // re-measures `hv.fittingSize` and is cheap + coalesced
-        // (`lengthUpdateScheduled` debounce), so — unlike the SwiftUI view
-        // bodies this migration scopes down to only their actually-read
-        // properties — there is no payoff to narrowing this imperative,
-        // off-body Combine subscriber to only `membershipTicks` (the one
-        // that actually changes `LiveSessionMenuBarLabel`'s rendered
-        // content/width today). Subscribing all three explicit bridge
-        // subjects reproduces the old `objectWillChange`-catch-all trigger
-        // surface exactly, at negligible cost.
-        cancellables.removeAll()
-        activeSessions.membershipTicks
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
-            .store(in: &cancellables)
-        activeSessions.badgeTicks
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
-            .store(in: &cancellables)
-        activeSessions.presenceUpdates
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
-            .store(in: &cancellables)
-        codexStatus.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
-            .store(in: &cancellables)
-        claudeStatus.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
-            .store(in: &cancellables)
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                let isEnabled = UserDefaults.standard.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
-                if isEnabled {
-                    self.scheduleLengthUpdate()
-                } else {
-                    self.removeStatusItem()
-                }
-            }
-            .store(in: &cancellables)
-
-        // No popover; we construct an NSMenu on demand in togglePopover
-    }
-
-    private func updateLength() {
-        guard let item = statusItem, let hv = hosting else { return }
-        let size = hv.fittingSize
-        item.length = max(24, size.width)
-        scheduleVisibilityCheck()
-    }
-
-    private func scheduleLengthUpdate() {
-        guard !lengthUpdateScheduled else { return }
-        lengthUpdateScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lengthUpdateScheduled = false
-            self.updateLength()
-        }
-    }
-
-    private func removeStatusItem() {
-        if let item = statusItem {
-            NSStatusBar.system.removeStatusItem(item)
-            statusItem = nil
-        }
-        cancellables.removeAll()
-        visibilityDidChange?(false)
-        // nothing else
-    }
-
-    private func scheduleVisibilityCheck() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-            guard let self else { return }
-            self.visibilityDidChange?(self.statusItem?.button?.window != nil)
-        }
-    }
-
-    @objc private func togglePopover(_ sender: Any?) {
-        guard let button = statusItem?.button, let item = statusItem else { return }
-        let menu = buildMenu()
-        item.menu = menu
-        // This will anchor the menu and close it automatically on selection
-        button.performClick(nil)
-        item.menu = nil
-    }
+    /// The strip's click menu: the old menu bar item's menu without its label options.
+    func makeMenu() -> NSMenu { buildMenu() }
 
     // MARK: - Menu
     private func buildMenu() -> NSMenu {
@@ -188,19 +49,11 @@ final class StatusItemController: NSObject {
         let codexUsageEnabled = d.object(forKey: PreferencesKey.codexUsageEnabled) as? Bool ?? false
         let claudeUsageEnabled = d.object(forKey: PreferencesKey.claudeUsageEnabled) as? Bool ?? false
         let liveSessionsEnabled = d.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool ?? true
-        let showLiveSessionIcons = d.object(forKey: PreferencesKey.MenuBar.showLiveSessionIcons) as? Bool ?? true
         let codexTrackingEnabled = codexAgentEnabled && codexUsageEnabled
         let claudeTrackingEnabled = claudeAgentEnabled && claudeUsageEnabled
         let anyUsageTrackingEnabled = codexTrackingEnabled || claudeTrackingEnabled
-        let desiredSource = MenuBarSource(rawValue: d.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue) ?? .codex
-        let style = MenuBarStyleKind(rawValue: d.string(forKey: "MenuBarStyle") ?? MenuBarStyleKind.bars.rawValue) ?? .bars
-        let scope = MenuBarScope(rawValue: d.string(forKey: "MenuBarScope") ?? MenuBarScope.both.rawValue) ?? .both
-        let source: MenuBarSource = {
-            if codexTrackingEnabled && claudeTrackingEnabled { return desiredSource }
-            if codexTrackingEnabled { return .codex }
-            if claudeTrackingEnabled { return .claude }
-            return desiredSource
-        }()
+        // The strip shows both providers, so the menu lists every tracked one.
+        let source: MenuBarSource = .both
 
         // Auth remediation (Task 12): one quiet line per provider whose CLI
         // auth needs attention (signed out / expired / CLI missing). Mirrors
@@ -228,25 +81,12 @@ final class StatusItemController: NSObject {
             )
             menu.addItem(makeTitleItem(String(localized: "Live Sessions", comment: "Heading for active agent sessions in the menu bar menu.")))
             menu.addItem(makeTitleItem(String(localized: "\(summary.activeCount) active • \(summary.waitingCount) waiting", comment: "Menu bar summary of active and waiting agent sessions.")))
-            let cockpitVisible = AppWindowRouter.isAgentCockpitWindowVisible
-            menu.addItem(makeActionItem(
-                title: cockpitVisible ? String(localized: "Hide Quota Meter", comment: "Menu command that hides the Quota Meter window.") : String(localized: "Open Quota Meter", comment: "Menu command that opens the Quota Meter window."),
-                action: cockpitVisible ? #selector(hideAgentCockpit) : #selector(openAgentCockpit)
-            ))
             let sessionsVisible = AppWindowRouter.isAgentSessionsWindowVisible
             menu.addItem(makeActionItem(
                 title: sessionsVisible ? String(localized: "Hide Agent Sessions", comment: "Menu command that hides the main app window.") : String(localized: "Open Agent Sessions", comment: "Menu command that opens the main app window."),
                 action: sessionsVisible ? #selector(hideAgentSessions) : #selector(openAgentSessions)
             ))
         }
-
-        let liveSessionsToggle = makeCheckboxItem(
-            title: String(localized: "Show Active/Waiting sessions", comment: "Menu toggle for active and waiting session icons."),
-            checked: showLiveSessionIcons,
-            action: #selector(toggleShowLiveSessionIcons)
-        )
-        liveSessionsToggle.isEnabled = liveSessionsEnabled
-        menu.addItem(liveSessionsToggle)
 
         if liveSessionsEnabled && anyUsageTrackingEnabled {
             menu.addItem(NSMenuItem.separator())
@@ -312,40 +152,6 @@ final class StatusItemController: NSObject {
 
             menu.addItem(NSMenuItem.separator())
 
-            menu.addItem(makeTitleItem(String(localized: "Menu Bar Label", comment: "Heading for menu bar label settings.")))
-            let showCodexResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
-            let showClaudeResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
-            let codexToggle = makeCheckboxItem(title: String(localized: "Show Codex reset indicators", comment: "Menu toggle for Codex reset indicators."), checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
-            codexToggle.isEnabled = codexTrackingEnabled
-            menu.addItem(codexToggle)
-            let claudeToggle = makeCheckboxItem(title: String(localized: "Show Claude reset indicators", comment: "Menu toggle for Claude reset indicators."), checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
-            claudeToggle.isEnabled = claudeTrackingEnabled
-            menu.addItem(claudeToggle)
-
-            menu.addItem(NSMenuItem.separator())
-
-            menu.addItem(makeTitleItem(String(localized: "Source", comment: "Heading for menu bar usage source choices.")))
-            let srcCodex = makeRadioItem(title: String(localized: MenuBarSource.codex.title), selected: source == .codex, action: #selector(setSourceCodex))
-            srcCodex.isEnabled = codexTrackingEnabled
-            menu.addItem(srcCodex)
-            let srcClaude = makeRadioItem(title: String(localized: MenuBarSource.claude.title), selected: source == .claude, action: #selector(setSourceClaude))
-            srcClaude.isEnabled = claudeTrackingEnabled
-            menu.addItem(srcClaude)
-            let srcBoth = makeRadioItem(title: String(localized: MenuBarSource.both.title), selected: source == .both, action: #selector(setSourceBoth))
-            srcBoth.isEnabled = codexTrackingEnabled && claudeTrackingEnabled
-            menu.addItem(srcBoth)
-
-            menu.addItem(makeTitleItem(String(localized: "Style", comment: "Heading for menu bar display style choices.")))
-            menu.addItem(makeRadioItem(title: String(localized: MenuBarStyleKind.bars.title), selected: style == .bars, action: #selector(setStyleBars)))
-            menu.addItem(makeRadioItem(title: String(localized: MenuBarStyleKind.numbers.title), selected: style == .numbers, action: #selector(setStyleNumbers)))
-
-            menu.addItem(makeTitleItem(String(localized: "Scope", comment: "Heading for menu bar quota scope choices.")))
-            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.fiveHour.title), selected: scope == .fiveHour, action: #selector(setScope5h)))
-            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.weekly.title), selected: scope == .weekly, action: #selector(setScopeWeekly)))
-            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.both.title), selected: scope == .both, action: #selector(setScopeBoth)))
-
-            menu.addItem(NSMenuItem.separator())
-
             if codexTrackingEnabled {
                 menu.addItem(makeActionItem(title: String(localized: "Hard Refresh Codex", comment: "Menu command that force-refreshes Codex usage."), action: #selector(refreshCodexHard)))
             }
@@ -355,8 +161,12 @@ final class StatusItemController: NSObject {
             menu.addItem(NSMenuItem.separator())
         }
 
-        menu.addItem(makeActionItem(title: String(localized: "Open Settings…", comment: "Menu command that opens Settings."), action: #selector(openMenuBarPreferences)))
-        menu.addItem(makeActionItem(title: String(localized: "Hide Menu Bar Item", comment: "Menu command that hides the app menu bar item."), action: #selector(hideMenuBar)))
+        // Always present: the strip's way back to the floating window, whatever is enabled.
+        menu.addItem(makeActionItem(
+            title: String(localized: "Move to Floating Window", comment: "Menu command that switches the Quota Meter from the menu bar strip to the floating window."),
+            action: #selector(moveToFloatingWindow)
+        ))
+        menu.addItem(makeActionItem(title: String(localized: "Open Settings…", comment: "Menu command that opens Settings."), action: #selector(openQuotaMeterPreferences)))
         menu.addItem(makeActionItem(
             title: DockIconPreferenceController.dockIconMenuTitle(defaults: d),
             action: #selector(toggleHideDockIcon)
@@ -375,18 +185,6 @@ final class StatusItemController: NSObject {
     private func makeActionItem(title: String, action: Selector) -> NSMenuItem {
         let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
         it.target = self
-        return it
-    }
-    private func makeRadioItem(title: String, selected: Bool, action: Selector) -> NSMenuItem {
-        let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        it.target = self
-        it.state = selected ? .on : .off
-        return it
-    }
-    private func makeCheckboxItem(title: String, checked: Bool, action: Selector) -> NSMenuItem {
-        let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        it.target = self
-        it.state = checked ? .on : .off
         return it
     }
     private func makeAuthAlertItem(provider: AuthProvider, status: UsageAuthStatus) -> NSMenuItem {
@@ -436,50 +234,20 @@ final class StatusItemController: NSObject {
     }
 
     // MARK: - Actions
-    @objc private func setSourceCodex() { UserDefaults.standard.set(MenuBarSource.codex.rawValue, forKey: "MenuBarSource"); updateLength() }
-    @objc private func setSourceClaude() { UserDefaults.standard.set(MenuBarSource.claude.rawValue, forKey: "MenuBarSource"); updateLength() }
-    @objc private func setSourceBoth() { UserDefaults.standard.set(MenuBarSource.both.rawValue, forKey: "MenuBarSource"); updateLength() }
-    @objc private func setStyleBars() { UserDefaults.standard.set(MenuBarStyleKind.bars.rawValue, forKey: "MenuBarStyle"); updateLength() }
-    @objc private func setStyleNumbers() { UserDefaults.standard.set(MenuBarStyleKind.numbers.rawValue, forKey: "MenuBarStyle"); updateLength() }
-    @objc private func setScope5h() { UserDefaults.standard.set(MenuBarScope.fiveHour.rawValue, forKey: "MenuBarScope"); updateLength() }
-    @objc private func setScopeWeekly() { UserDefaults.standard.set(MenuBarScope.weekly.rawValue, forKey: "MenuBarScope"); updateLength() }
-    @objc private func setScopeBoth() { UserDefaults.standard.set(MenuBarScope.both.rawValue, forKey: "MenuBarScope"); updateLength() }
-    @objc private func toggleShowCodexResetTimes() {
-        let d = UserDefaults.standard
-        let current = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
-        d.set(!current, forKey: PreferencesKey.MenuBar.showCodexResetTimes)
-        updateLength()
+    @objc private func openQuotaMeterPreferences() {
+        if let updater = UpdaterController.shared {
+            PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .agentCockpit)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
-    @objc private func toggleShowClaudeResetTimes() {
-        let d = UserDefaults.standard
-        let current = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
-        d.set(!current, forKey: PreferencesKey.MenuBar.showClaudeResetTimes)
-        updateLength()
-    }
-
-    @objc private func toggleShowLiveSessionIcons() {
-        let d = UserDefaults.standard
-        let current = d.object(forKey: PreferencesKey.MenuBar.showLiveSessionIcons) as? Bool ?? true
-        d.set(!current, forKey: PreferencesKey.MenuBar.showLiveSessionIcons)
-        updateLength()
+    @objc private func moveToFloatingWindow() {
+        UserDefaults.standard.set(QuotaMeterPlacement.floating.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
     }
     @objc private func openUsagePreferences() {
         if let updater = UpdaterController.shared {
             PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .usageTracking)
         }
         NSApp.activate(ignoringOtherApps: true)
-    }
-    @objc private func openMenuBarPreferences() {
-        if let updater = UpdaterController.shared {
-            PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .menuBar)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-    }
-    @objc private func openAgentCockpit() {
-        AppWindowRouter.showAgentCockpitWindow()
-    }
-    @objc private func hideAgentCockpit() {
-        AppWindowRouter.closeAgentCockpitWindow()
     }
     @objc private func openAgentSessions() {
         AppWindowRouter.showAgentSessionsWindow()
@@ -512,10 +280,6 @@ final class StatusItemController: NSObject {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString("claude", forType: .string)
-    }
-    @objc private func hideMenuBar() {
-        DockIconPreferenceController.setMenuBarEnabled(false)
-        // The App listens to this key and hides the status item.
     }
     @objc private func toggleHideDockIcon() {
         DockIconPreferenceController.toggleDockIconHidden()
@@ -579,7 +343,6 @@ extension StatusItemController {
     }
 
     private func presentFailureAlert(title: LocalizedStringResource, diagnostics: Any) {
-        guard let win = NSApp.windows.first else { return }
         let alert = NSAlert()
         alert.messageText = String(localized: title)
         if let d = diagnostics as? CodexProbeDiagnostics {
@@ -589,6 +352,13 @@ extension StatusItemController {
         }
         alert.alertStyle = .warning
         alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in a probe failure alert."))
-        alert.beginSheetModal(for: win) { _ in }
+        // Sheet on a real titled window when one is visible; the strip's borderless panel can
+        // be the first window and cannot host a sheet, so fall back to an app-modal alert.
+        if let win = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) }) {
+            alert.beginSheetModal(for: win) { _ in }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 }

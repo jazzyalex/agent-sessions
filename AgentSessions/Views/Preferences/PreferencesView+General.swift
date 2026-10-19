@@ -162,6 +162,26 @@ extension PreferencesView {
 
             sectionHeader("Quota Meter")
             VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Placement") {
+                    Picker("", selection: Binding(
+                        get: { QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) },
+                        set: { quotaMeterPlacementRaw = $0.rawValue }
+                    )) {
+                        ForEach(QuotaMeterPlacement.allCases) { placement in
+                            Text(placement.title).tag(placement)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+                    .help("Show the Quota Meter as a floating window or as a strip at the top of the screen.")
+                }
+
+                Text(QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw).detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 labeledRow("Projection") {
                     Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
                         .toggleStyle(.checkbox)
@@ -263,7 +283,7 @@ extension PreferencesView {
                 get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
                 set: { DockIconPreferenceController.setDockIconHidden($0) }
             ))
-            .help("Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.")
+            .help("Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar.")
 
             sectionHeader("Claude Archived Sessions")
             VStack(alignment: .leading, spacing: 8) {

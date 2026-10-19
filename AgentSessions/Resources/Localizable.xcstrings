@@ -3196,38 +3196,6 @@
         }
       }
     },
-    "Add a menu bar item that shows live session counts and usage details when available": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a menu bar item that shows live session counts and usage details when available"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加菜单栏项目，在可用时显示实时会话数量和用量详情"
-          }
-        }
-      }
-    },
-    "Add pill containers around usage meters. Off by default to keep the menu bar compact.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add pill containers around usage meters. Off by default to keep the menu bar compact."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在用量计量器周围添加胶囊形容器。默认关闭，以保持菜单栏紧凑。"
-          }
-        }
-      }
-    },
     "Add the agent you use": {
       "localizations": {
         "en": {
@@ -4414,6 +4382,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "自动：使用 OAuth 端点（60 秒）；仅在下方选择启用时回退到 CLI tmux。仅 Web API：使用 claude.ai 会话 Cookie。仅 tmux：旧版行为。"
+          }
+        }
+      }
+    },
+    "Automatic": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动"
           }
         }
       }
@@ -10049,6 +10033,22 @@
         }
       }
     },
+    "Floating Window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Floating Window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浮动窗口"
+          }
+        }
+      }
+    },
     "Focus a live agent": {
       "localizations": {
         "en": {
@@ -10799,40 +10799,6 @@
         }
       }
     },
-    "Hide Menu Bar Item": {
-      "comment": "Menu command that hides the app menu bar item.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hide Menu Bar Item"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隐藏菜单栏项目"
-          }
-        }
-      }
-    },
-    "Hide Quota Meter": {
-      "comment": "Menu command that hides the Quota Meter window.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hide Quota Meter"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隐藏额度监视器"
-          }
-        }
-      }
-    },
     "Hide Session info (⇧⌘I)": {
       "comment": "Tooltip for the button that closes the Session info inspector. Preserve the keyboard shortcut symbols.",
       "localizations": {
@@ -11088,6 +11054,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "洞察"
+          }
+        }
+      }
+    },
+    "Idle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空闲"
           }
         }
       }
@@ -12443,6 +12425,22 @@
         }
       }
     },
+    "Limited": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limited"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已限流"
+          }
+        }
+      }
+    },
     "List price. This session ran on a free route.": {
       "comment": "Session info tooltip note appended to the API price estimate when the session ran on a free or promotional route.",
       "localizations": {
@@ -12815,35 +12813,18 @@
         }
       }
     },
-    "Menu Bar Item": {
+    "Menu bar on the MacBook display, floating window on external monitors.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Menu Bar Item"
+            "value": "Menu bar on the MacBook display, floating window on external monitors."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "菜单栏项目"
-          }
-        }
-      }
-    },
-    "Menu Bar Label": {
-      "comment": "Heading for menu bar label settings.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Menu Bar Label"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "菜单栏标签"
+            "value": "在 MacBook 显示屏上显示于菜单栏，在外接显示器上显示为浮动窗口。"
           }
         }
       }
@@ -13090,6 +13071,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "在匹配项之间跳转"
+          }
+        }
+      }
+    },
+    "Move to Floating Window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Floating Window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移至浮动窗口"
+          }
+        }
+      }
+    },
+    "Move to menu bar": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to menu bar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移至菜单栏"
           }
         }
       }
@@ -14294,23 +14307,6 @@
         }
       }
     },
-    "Open Quota Meter": {
-      "comment": "Menu command that opens the Quota Meter window.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open Quota Meter"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开额度监视器"
-          }
-        }
-      }
-    },
     "Open Quota Meter settings": {
       "localizations": {
         "en": {
@@ -15150,6 +15146,22 @@
         }
       }
     },
+    "Placement": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Placement"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置"
+          }
+        }
+      }
+    },
     "Play a sound when a low, predicted, exhausted, or reset-complete alert fires. Scheduled reset reminders use macOS notification sound when banners are enabled.": {
       "localizations": {
         "en": {
@@ -15520,6 +15532,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即通过提供商 CLI 探测用量（可能消耗令牌）。"
+          }
+        }
+      }
+    },
+    "Probing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Probing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "探测中"
           }
         }
       }
@@ -16056,6 +16084,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "额度监视器"
+          }
+        }
+      }
+    },
+    "Quota Meter Placement": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota Meter Placement"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器位置"
           }
         }
       }
@@ -16724,18 +16768,18 @@
         }
       }
     },
-    "Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.": {
+    "Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon."
+            "value": "Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当可通过菜单栏项目或固定的额度监视器访问 Agent Sessions 时，从程序坞中隐藏它。如果两种方式都不可用，Agent Sessions 会恢复程序坞图标。"
+            "value": "当可通过菜单栏横条或固定的额度监视器访问 Agent Sessions 时，从程序坞中隐藏它。如果两者都不可用，隐藏程序坞图标会将额度监视器移至菜单栏。"
           }
         }
       }
@@ -17106,6 +17150,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "继续工作流子会话时，会转到其父会话。"
+          }
+        }
+      }
+    },
+    "Retrying": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrying"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试中"
           }
         }
       }
@@ -17962,23 +18022,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在扫描会话文件…"
-          }
-        }
-      }
-    },
-    "Scope": {
-      "comment": "Heading for menu bar quota scope choices.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scope"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "范围"
           }
         }
       }
@@ -19522,23 +19565,6 @@
         }
       }
     },
-    "Show Active/Waiting sessions": {
-      "comment": "Menu toggle for active and waiting session icons.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show Active/Waiting sessions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示活跃/等待中的会话"
-          }
-        }
-      }
-    },
     "Show Claude cloud sessions in Quota Meter (experimental)": {
       "localizations": {
         "en": {
@@ -19551,40 +19577,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在额度监视器中显示 Claude 云端会话（实验性）"
-          }
-        }
-      }
-    },
-    "Show Claude reset indicators": {
-      "comment": "Menu toggle for Claude reset indicators.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show Claude reset indicators"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示 Claude 重置指示器"
-          }
-        }
-      }
-    },
-    "Show Codex reset indicators": {
-      "comment": "Menu toggle for Codex reset indicators.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show Codex reset indicators"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示 Codex 重置指示器"
           }
         }
       }
@@ -19856,38 +19848,6 @@
         }
       }
     },
-    "Show menu bar icons": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show menu bar icons"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示菜单栏图标"
-          }
-        }
-      }
-    },
-    "Show menu bar item": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show menu bar item"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示菜单栏项目"
-          }
-        }
-      }
-    },
     "Show only %@ blocks": {
       "comment": "Tooltip for a transcript role chip while every role is shown.",
       "localizations": {
@@ -20072,22 +20032,6 @@
         }
       }
     },
-    "Show or hide the Active/Waiting session indicators in the menu bar label.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show or hide the Active/Waiting session indicators in the menu bar label."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示或隐藏菜单栏标签中的“活跃/等待”会话指示器。"
-          }
-        }
-      }
-    },
     "Show or hide the Agent source column in the Unified list": {
       "localizations": {
         "en": {
@@ -20232,22 +20176,6 @@
         }
       }
     },
-    "Show pills in menu bar": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show pills in menu bar"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在菜单栏中显示胶囊标签"
-          }
-        }
-      }
-    },
     "Show probe sessions in Quota Meter (debug)": {
       "localizations": {
         "en": {
@@ -20344,6 +20272,22 @@
         }
       }
     },
+    "Show the Quota Meter as a floating window or as a strip at the top of the screen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the Quota Meter as a floating window or as a strip at the top of the screen."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将额度监视器显示为浮动窗口，或显示为屏幕顶部的横条。"
+          }
+        }
+      }
+    },
     "Show the usage meters along the bottom of the main window. Turn this off if you read usage in the menu bar or the Quota Meter — tracking keeps running either way.": {
       "localizations": {
         "en": {
@@ -20356,38 +20300,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在主窗口底部显示用量表。如果你在菜单栏或额度监视器中查看用量，可将其关闭；无论是否显示，跟踪都会继续运行。"
-          }
-        }
-      }
-    },
-    "Show the ↻ reset indicator next to the Claude usage meter when the menu bar label is displaying usage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show the ↻ reset indicator next to the Claude usage meter when the menu bar label is displaying usage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "菜单栏标签显示用量时，在 Claude 用量表旁显示 ↻ 重置指示器"
-          }
-        }
-      }
-    },
-    "Show the ↻ reset indicator next to the Codex usage meter when the menu bar label is displaying usage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show the ↻ reset indicator next to the Codex usage meter when the menu bar label is displaying usage"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "菜单栏标签显示用量时，在 Codex 用量表旁显示 ↻ 重置指示器"
           }
         }
       }
@@ -20517,6 +20429,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "支线对话"
+          }
+        }
+      }
+    },
+    "Sign in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录"
           }
         }
       }
@@ -21050,23 +20978,6 @@
         }
       }
     },
-    "Style": {
-      "comment": "Heading for menu bar display style choices.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Style"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "样式"
-          }
-        }
-      }
-    },
     "Subagent": {
       "localizations": {
         "en": {
@@ -21556,6 +21467,38 @@
         }
       }
     },
+    "The Quota Meter is a floating window you can place anywhere.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Quota Meter is a floating window you can place anywhere."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器是一个可放在任意位置的浮动窗口。"
+          }
+        }
+      }
+    },
+    "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器位于屏幕顶部的刘海旁。悬停可展开；点击可打开菜单。"
+          }
+        }
+      }
+    },
     "The account is signed in, but it does not currently have access to %@ usage. Check the account plan, or hide this provider from Quota Meter while tracking remains enabled.": {
       "comment": "User-visible copy from UsageAuthStatus. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -21602,22 +21545,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法准备崩溃报告邮件草稿。"
-          }
-        }
-      }
-    },
-    "The menu bar item shows active and waiting sessions first. Usage controls and reset details appear below when usage tracking is enabled.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The menu bar item shows active and waiting sessions first. Usage controls and reset details appear below when usage tracking is enabled."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "菜单栏项目会优先显示活跃和等待中的会话。启用用量跟踪后，下方会显示用量控制项和重置详情。"
           }
         }
       }
@@ -21702,6 +21629,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "对话记录中的思考"
+          }
+        }
+      }
+    },
+    "Try It": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try It"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试试看"
           }
         }
       }
@@ -22445,6 +22388,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "了解翻译流程"
+          }
+        }
+      }
+    },
+    "Try the menu bar strip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try the menu bar strip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试试菜单栏横条"
           }
         }
       }

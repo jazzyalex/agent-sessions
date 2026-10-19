@@ -257,6 +257,51 @@ enum QuotaMeterChrome: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where the Quota Meter appears: the floating window or the menu bar strip.
+/// Fresh installs get `.automatic`, existing installs keep `.floating`
+/// (see `QuotaMeterPlacementDefaults`).
+enum QuotaMeterPlacement: String, CaseIterable, Identifiable {
+    case floating
+    case menuBar
+    case automatic
+
+    static let storageKey = PreferencesKey.quotaMeterPlacement
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .floating: return "Floating Window"
+        case .menuBar: return "Menu Bar"
+        case .automatic: return "Automatic"
+        }
+    }
+
+    var detail: LocalizedStringResource {
+        switch self {
+        case .floating:
+            return "The Quota Meter is a floating window you can place anywhere."
+        case .menuBar:
+            return "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu."
+        case .automatic:
+            return "Menu bar on the MacBook display, floating window on external monitors."
+        }
+    }
+
+    var choice: PlacementChoice {
+        switch self {
+        case .floating: return .floating
+        case .menuBar: return .menuBar
+        case .automatic: return .automatic
+        }
+    }
+
+    /// Unknown or absent values resolve to `.floating`.
+    static func current(raw: String?) -> QuotaMeterPlacement {
+        raw.flatMap(QuotaMeterPlacement.init(rawValue:)) ?? .floating
+    }
+}
+
 enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case alwaysOn = "always_on"

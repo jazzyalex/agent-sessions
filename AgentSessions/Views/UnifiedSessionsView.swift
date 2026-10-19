@@ -2089,7 +2089,7 @@ struct UnifiedSessionsView: View {
             ) { _ in
                 ToolbarIcon(systemName: "rectangle.3.group")
             } action: {
-                openWindow(id: "AgentCockpit")
+                QuotaMeterPresentationCoordinator.shared.showQuotaMeter()
             }
             .disabled(!liveSessionsFeatureEnabled)
             .accessibilityLabel(Text("Quota Meter"))

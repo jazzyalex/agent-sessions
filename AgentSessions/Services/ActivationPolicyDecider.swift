@@ -19,10 +19,13 @@ enum DockIconPreferenceController {
         defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
     }
 
+    /// A pinned floating window keeps the app reachable only while the Quota Meter is the
+    /// floating window; in strip placement the stored pin is not shown anywhere.
     static func isPinnedCockpitAvailable(defaults: UserDefaults = .standard) -> Bool {
         let liveSessionsEnabled = defaults.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool ?? true
         let pinnedCockpit = defaults.object(forKey: PreferencesKey.Cockpit.hudPinned) as? Bool ?? false
-        return liveSessionsEnabled && pinnedCockpit
+        let floatingDecision = defaults.string(forKey: "QuotaMeterPresentationDecision") != "strip"
+        return liveSessionsEnabled && pinnedCockpit && floatingDecision
     }
 
     static func hasDockHiddenReachability(defaults: UserDefaults = .standard) -> Bool {
@@ -33,8 +36,13 @@ enum DockIconPreferenceController {
         isDockIconHidden(defaults: defaults) ? "Show Dock Icon" : "Hide Dock Icon"
     }
 
+    /// `MenuBarEnabled` is written by the Quota Meter placement coordinator and means "the
+    /// menu bar strip is on screen". Hiding the Dock icon without that or a pinned window
+    /// switches the Quota Meter to the menu bar so the app stays reachable.
     static func setDockIconHidden(_ hidden: Bool, defaults: UserDefaults = .standard) {
-        if hidden, !isPinnedCockpitAvailable(defaults: defaults) {
+        if hidden, !hasDockHiddenReachability(defaults: defaults) {
+            defaults.set(QuotaMeterPlacement.menuBar.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
+            defaults.set(false, forKey: PreferencesKey.quotaMeterStripHidden)
             defaults.set(true, forKey: PreferencesKey.menuBarEnabled)
         }
         defaults.set(hidden, forKey: PreferencesKey.Advanced.hideDockIcon)

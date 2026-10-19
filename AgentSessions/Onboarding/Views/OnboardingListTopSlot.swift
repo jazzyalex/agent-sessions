@@ -772,7 +772,7 @@ private struct QuotaMeterPromoActivator: View {
             claudeUsageEnabled = true
         }
         coordinator.recordQuotaMeterActivated()
-        AppWindowRouter.showAgentCockpitWindow()
+        QuotaMeterPresentationCoordinator.shared.showQuotaMeter()
     }
 }
 
