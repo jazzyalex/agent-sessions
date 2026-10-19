@@ -30,18 +30,36 @@ final class ActivationPolicyDeciderTests: XCTestCase {
         XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool, true)
     }
 
-    func testDockIconPreferenceToggleEnablesMenuBarBeforeHidingDockIcon() {
+    func testDockIconPreferenceToggleRequestsMenuBarPlacementBeforeHidingDockIcon() {
         let defaults = UserDefaults(suiteName: "DockIconPreferenceControllerTests")!
         defaults.removePersistentDomain(forName: "DockIconPreferenceControllerTests")
+        defaults.set(true, forKey: PreferencesKey.quotaMeterStripHidden)
 
         XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Hide Dock Icon")
 
         let hidden = DockIconPreferenceController.toggleDockIconHidden(defaults: defaults)
 
         XCTAssertTrue(hidden)
-        XCTAssertTrue(defaults.bool(forKey: PreferencesKey.menuBarEnabled))
+        // The strip is the menu bar presence now: the toggle requests it and unhides it.
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.quotaMeterPlacement), QuotaMeterPlacement.menuBar.rawValue)
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden))
+        // Only the placement coordinator publishes MenuBarEnabled, once the strip is on screen.
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.menuBarEnabled))
         XCTAssertTrue(defaults.bool(forKey: PreferencesKey.Advanced.hideDockIcon))
         XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Show Dock Icon")
+    }
+
+    func testPinnedCockpitDoesNotCountWhileTheStripIsTheQuotaMeter() {
+        let defaults = UserDefaults(suiteName: "DockIconPreferenceControllerStripDecisionTests")!
+        defaults.removePersistentDomain(forName: "DockIconPreferenceControllerStripDecisionTests")
+        defaults.set(true, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        defaults.set(true, forKey: PreferencesKey.Cockpit.hudPinned)
+        defaults.set("strip", forKey: QuotaMeterPresentationCoordinator.decisionKey)
+
+        XCTAssertFalse(DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults))
+
+        defaults.set("floating", forKey: QuotaMeterPresentationCoordinator.decisionKey)
+        XCTAssertTrue(DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults))
     }
 
     func testDockIconPreferenceToggleUsesPinnedCockpitWithoutEnablingMenuBar() {

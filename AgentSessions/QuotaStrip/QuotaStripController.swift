@@ -35,6 +35,8 @@ final class QuotaStripController {
     private var panel: QuotaStripPanel?
     private var host: QuotaStripHostingView<AnyView>?
     private var model: QuotaStripModel?
+    /// Geometry of the screen the strip is on now; updated on every rebuild and reposition.
+    private var currentLayout: QuotaStripLayout?
     private var sizeObservation: AnyCancellableBox?
     private var mouseMonitors: [Any] = []
     private var pointerInside = false
@@ -93,6 +95,7 @@ final class QuotaStripController {
         panel = nil
         host = nil
         model = nil
+        currentLayout = nil
         pointerInside = false
         isPresented = false
         screenID = nil
@@ -136,10 +139,13 @@ final class QuotaStripController {
         panel.contentView = host
         self.panel = panel
 
-        // The expanded size is measured after layout; keep the panel pinned top-centre.
+        currentLayout = layout
+        // The expanded size is measured after layout; keep the panel pinned top-centre on the
+        // layout current at that moment (a display rearrangement repositions without a rebuild).
         sizeObservation = AnyCancellableBox(model.$expandedContentSize.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, let model = self.model, let screen = self.currentScreen() else { return }
+                guard let self, let model = self.model, let layout = self.currentLayout,
+                      let screen = self.currentScreen() else { return }
                 self.panel?.setFrame(self.frame(for: model, on: screen, layout: layout), display: true)
             }
         })
@@ -151,8 +157,10 @@ final class QuotaStripController {
 
     private func reposition(on screen: NSScreen, layout: QuotaStripLayout) {
         guard let model, let panel else { return }
+        currentLayout = layout
         panel.setFrame(frame(for: model, on: screen, layout: layout), display: true)
         panel.orderFrontRegardless()
+        updatePointer()
     }
 
     private func frame(for model: QuotaStripModel, on screen: NSScreen, layout: QuotaStripLayout) -> CGRect {

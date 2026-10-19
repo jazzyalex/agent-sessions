@@ -18,7 +18,7 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
     var onDecisionChange: ((_ userInitiated: Bool) -> Void)?
 
     /// Written after every re-resolve: "strip" or "floating". Dock reachability reads it.
-    static let decisionKey = "QuotaMeterPresentationDecision"
+    nonisolated static let decisionKey = "QuotaMeterPresentationDecision"
 
     private var strip: QuotaStripController?
     private var openWindow: (() -> Void)?
@@ -27,7 +27,6 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
     private var pendingScreenWork: DispatchWorkItem?
     private var lastPlacementRaw: String?
     private var lastStripHidden = false
-    private var lastTracking = false
     /// Set when the strip left the built-in display only because that display went away
     /// (lid closed); `automatic` then returns to it when it comes back. Cleared by any user
     /// placement change.
@@ -44,7 +43,6 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
         self.openWindow = openWindow
         lastPlacementRaw = defaults.string(forKey: PreferencesKey.quotaMeterPlacement)
         lastStripHidden = defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden)
-        lastTracking = isTracking
 
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -84,8 +82,8 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
     }
 
     /// Show the Quota Meter wherever it belongs (onboarding, menus).
-    /// Resolves first, so a caller that just turned usage tracking on (onboarding) gets the
-    /// placement that applies now, not the stale one.
+    /// Resolves first, so the caller gets the placement that applies to the current screens
+    /// and settings, not a decision made before they changed.
     func showQuotaMeter() {
         if defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden) {
             defaults.set(false, forKey: PreferencesKey.quotaMeterStripHidden)
@@ -99,19 +97,12 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
 
     // MARK: - Resolution
 
-    private var isTracking: Bool {
-        let codex = (defaults.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true)
-            && defaults.bool(forKey: PreferencesKey.codexUsageEnabled)
-        let claude = (defaults.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true)
-            && defaults.bool(forKey: PreferencesKey.claudeUsageEnabled)
-        return codex || claude
-    }
-
+    /// Placement does not depend on usage tracking (the wings observe it themselves), so only
+    /// the placement choice and the strip-hidden flag trigger a re-resolve.
     private func defaultsChanged() {
         let raw = defaults.string(forKey: PreferencesKey.quotaMeterPlacement)
         let hidden = defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden)
-        let tracking = isTracking
-        guard raw != lastPlacementRaw || hidden != lastStripHidden || tracking != lastTracking else { return }
+        guard raw != lastPlacementRaw || hidden != lastStripHidden else { return }
         if raw != lastPlacementRaw {
             // A new placement choice always shows the meter there, even if the strip was
             // hidden from the View menu earlier, and forgets any pending lid-reopen return.
@@ -120,7 +111,6 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
         }
         lastPlacementRaw = raw
         lastStripHidden = defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden)
-        lastTracking = tracking
         reresolve(reason: "preference", userInitiated: true)
     }
 
