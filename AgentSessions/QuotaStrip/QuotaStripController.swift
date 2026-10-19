@@ -39,6 +39,7 @@ final class QuotaStripController {
     private var currentLayout: QuotaStripLayout?
     private var sizeObservation: AnyCancellableBox?
     private var styleObservation: AnyCancellableBox?
+    private var popoverObservation: AnyCancellableBox?
     private var mouseMonitors: [Any] = []
     private var pointerInside = false
     private var hoverTimer: Timer?
@@ -86,6 +87,7 @@ final class QuotaStripController {
         mouseMonitors = []
         sizeObservation = nil
         styleObservation = nil
+        popoverObservation = nil
         panel?.orderOut(nil)
         // Removing the content view runs SwiftUI's onDisappear, so the mounted Quota Meter
         // unregisters its consumers before the panel goes away.
@@ -152,11 +154,16 @@ final class QuotaStripController {
                       let screen = self.currentScreen(), let panel = self.panel else { return }
                 let target = self.frame(for: model, on: screen, layout: layout)
                 // Grow at once so the animating shape has room; shrink after the shape's
-                // animation, so it is never clipped by a panel that got smaller first.
-                let grows = target.width >= panel.frame.width && target.height >= panel.frame.height
-                if grows {
-                    panel.setFrame(target, display: true)
-                } else {
+                // animation, so it is never clipped by a panel that got smaller first. Axes are
+                // handled independently: a growing axis grows now even when the other shrinks.
+                let current = panel.frame
+                let interimSize = CGSize(width: max(current.width, target.width),
+                                         height: max(current.height, target.height))
+                let interim = CGRect(x: (layout.notch.midX - interimSize.width / 2).rounded(),
+                                     y: screen.frame.maxY - interimSize.height,
+                                     width: interimSize.width, height: interimSize.height)
+                panel.setFrame(interim, display: true)
+                if interim.size != target.size {
                     let shrinkDelay = QuotaStripRootView<EmptyView>.shrinkDelay
                     DispatchQueue.main.asyncAfter(deadline: .now() + shrinkDelay) { [weak self] in
                         guard let self, let model = self.model, let layout = self.currentLayout,
@@ -165,6 +172,13 @@ final class QuotaStripController {
                     }
                 }
             }
+        })
+
+        // When a toolbar popover closes (by any means, including a click elsewhere in this
+        // app), re-check the pointer at once instead of waiting for the next mouse move.
+        popoverObservation = AnyCancellableBox(model.$toolbarPopoverOpen.dropFirst().sink { [weak self] open in
+            guard !open else { return }
+            DispatchQueue.main.async { self?.updatePointer() }
         })
 
         // Wings / Minimal can change in Settings while the strip is up.
