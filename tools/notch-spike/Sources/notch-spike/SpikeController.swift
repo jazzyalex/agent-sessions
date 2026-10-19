@@ -34,8 +34,6 @@ final class SpikeController {
     private var lastScreensChanged: Date?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var mouseMonitors: [Any] = []
-    /// True after a to-floating handoff; a rebuild then keeps the strip hidden.
-    private(set) var notchHidden = false
 
     final class Weak {
         weak var value: SpikePanel?
@@ -71,21 +69,12 @@ final class SpikeController {
         }
     }
 
-    func showNotchPanels() {
-        notchHidden = false
+    private func showPanel() {
         guard let panel else { return }
         panel.orderFrontRegardless()
         log.write("panel.placed", ["role": panel.role, "frame": Self.str(panel.frame), "gen": String(generation)])
         updateMouseState()
     }
-
-    func hideNotchPanels() {
-        notchHidden = true
-        collapse(reason: "hide")
-        panel?.orderOut(nil)
-    }
-
-    func anyWingPanel() -> NSWindow? { panel }
 
     // MARK: - Building
 
@@ -139,11 +128,7 @@ final class SpikeController {
         self.panel = panel
         log.write("expanded.size", ["size": "\(model.expandedSize.width)x\(model.expandedSize.height)",
                                     "panel": Self.str(frame)])
-        if notchHidden {
-            log.write("panels.kept-hidden", ["gen": String(generation)])
-        } else {
-            showNotchPanels()
-        }
+        showPanel()
     }
 
     private func logAlive(gen: Int, after delay: TimeInterval) {

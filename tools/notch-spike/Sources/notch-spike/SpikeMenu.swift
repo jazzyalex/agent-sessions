@@ -7,8 +7,6 @@ final class SpikeMenu: NSObject {
     let menu = NSMenu()
     private let controller: SpikeController
     private let log: SpikeLog
-    var onHandoffToFloating: () -> Void = {}
-    var onHandoffToNotch: () -> Void = {}
 
     init(controller: SpikeController, log: SpikeLog) {
         self.controller = controller
@@ -16,9 +14,6 @@ final class SpikeMenu: NSObject {
         super.init()
         add(menu, "Style: Wings", #selector(styleWings))
         add(menu, "Style: Minimal", #selector(styleMinimal))
-        menu.addItem(.separator())
-        add(menu, "Handoff → floating", #selector(handoffToFloating))
-        add(menu, "Handoff → menu bar strip", #selector(handoffToNotch))
         menu.addItem(.separator())
         add(menu, "Mark checklist step…", #selector(mark))
         add(menu, "Open log", #selector(openLog))
@@ -33,8 +28,6 @@ final class SpikeMenu: NSObject {
 
     @objc private func styleWings() { controller.style = .wings }
     @objc private func styleMinimal() { controller.style = .minimal }
-    @objc private func handoffToFloating() { onHandoffToFloating() }
-    @objc private func handoffToNotch() { onHandoffToNotch() }
 
     @objc private func mark() {
         let alert = NSAlert()
