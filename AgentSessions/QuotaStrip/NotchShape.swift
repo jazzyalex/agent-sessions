@@ -7,10 +7,10 @@ struct NotchShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
 
-    static let closedTop: CGFloat = 6
-    static let closedBottom: CGFloat = 14
-    static let openTop: CGFloat = 19
-    static let openBottom: CGFloat = 24
+    static let closedTop = QuotaStripSizing.closedTopRadius
+    static let closedBottom = QuotaStripSizing.closedBottomRadius
+    static let openTop = QuotaStripSizing.openTopRadius
+    static let openBottom = QuotaStripSizing.openBottomRadius
 
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(topRadius, bottomRadius) }

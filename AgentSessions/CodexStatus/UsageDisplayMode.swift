@@ -302,6 +302,37 @@ enum QuotaMeterPlacement: String, CaseIterable, Identifiable {
     }
 }
 
+/// How much of the menu bar strip shows while collapsed. Minimal keeps the menu bar
+/// beside the notch free for other apps (no collision detection exists).
+enum QuotaMeterNotchStyle: String, CaseIterable, Identifiable {
+    case wings
+    case minimal
+
+    static let storageKey = PreferencesKey.quotaMeterNotchStyle
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .wings: return "Wings"
+        case .minimal: return "Minimal"
+        }
+    }
+
+    var detail: LocalizedStringResource {
+        switch self {
+        case .wings:
+            return "Percentages and run-out times beside the notch."
+        case .minimal:
+            return "Two thin bars under the notch. The menu bar beside it stays free; hover the notch to expand."
+        }
+    }
+
+    static func current(raw: String?) -> QuotaMeterNotchStyle {
+        raw.flatMap(QuotaMeterNotchStyle.init(rawValue:)) ?? .wings
+    }
+}
+
 enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case alwaysOn = "always_on"

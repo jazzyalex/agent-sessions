@@ -135,6 +135,22 @@
         }
       }
     },
+    "Choose how much of the menu bar the collapsed strip uses.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose how much of the menu bar the collapsed strip uses."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择收起的横条占用多少菜单栏空间。"
+          }
+        }
+      }
+    },
     "Choose the Cline sessions folder": {
       "localizations": {
         "en": {
@@ -12877,6 +12893,22 @@
         }
       }
     },
+    "Minimal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "极简"
+          }
+        }
+      }
+    },
     "Model": {
       "comment": "User-visible Session info copy.",
       "localizations": {
@@ -13081,6 +13113,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Move to Floating Window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移至浮动窗口"
+          }
+        }
+      }
+    },
+    "Move to floating window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to floating window"
           }
         },
         "zh-Hans": {
@@ -14966,6 +15014,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "待处理报告："
+          }
+        }
+      }
+    },
+    "Percentages and run-out times beside the notch.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Percentages and run-out times beside the notch."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在刘海旁显示百分比和耗尽时间。"
           }
         }
       }
@@ -20962,6 +21026,22 @@
         }
       }
     },
+    "Strip Style": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strip Style"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "横条样式"
+          }
+        }
+      }
+    },
     "Structured cards with collapsible tool calls.": {
       "localizations": {
         "en": {
@@ -22533,6 +22613,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "新增两个智能体：Devin CLI 和 fx。"
+          }
+        }
+      }
+    },
+    "Two thin bars under the notch. The menu bar beside it stays free; hover the notch to expand.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Two thin bars under the notch. The menu bar beside it stays free; hover the notch to expand."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刘海下方显示两条细条，旁边的菜单栏保持空闲；将指针悬停在刘海上即可展开。"
           }
         }
       }
@@ -24310,6 +24406,22 @@
         }
       }
     },
+    "Wings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wings"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "两翼"
+          }
+        }
+      }
+    },
     "Wk: %@": {
       "comment": "User-visible copy from CockpitFooterView. Preserve runtime placeholders and allow value reordering for grammar.",
       "localizations": {
@@ -24355,6 +24467,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作流子智能体会显示在启动它们的会话下方，并带有工作流标记。"
+          }
+        }
+      }
+    },
+    "Working": {
+      "comment": "Menu bar strip accessibility: a session of this agent is working.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作中"
           }
         }
       }
@@ -24487,6 +24616,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "你的会话"
+          }
+        }
+      }
+    },
+    "Your turn": {
+      "comment": "Menu bar strip accessibility: a session of this agent finished and waits for the user.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your turn"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轮到你了"
           }
         }
       }

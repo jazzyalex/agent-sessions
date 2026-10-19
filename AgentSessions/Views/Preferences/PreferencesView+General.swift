@@ -182,6 +182,28 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) != .floating {
+                    labeledRow("Strip Style") {
+                        Picker("", selection: Binding(
+                            get: { QuotaMeterNotchStyle.current(raw: quotaMeterNotchStyleRaw) },
+                            set: { quotaMeterNotchStyleRaw = $0.rawValue }
+                        )) {
+                            ForEach(QuotaMeterNotchStyle.allCases) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 240)
+                        .help("Choose how much of the menu bar the collapsed strip uses.")
+                    }
+
+                    Text(QuotaMeterNotchStyle.current(raw: quotaMeterNotchStyleRaw).detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 labeledRow("Projection") {
                     Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
                         .toggleStyle(.checkbox)

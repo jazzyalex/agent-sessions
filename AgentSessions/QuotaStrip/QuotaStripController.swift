@@ -38,10 +38,10 @@ final class QuotaStripController {
     /// Geometry of the screen the strip is on now; updated on every rebuild and reposition.
     private var currentLayout: QuotaStripLayout?
     private var sizeObservation: AnyCancellableBox?
+    private var styleObservation: AnyCancellableBox?
     private var mouseMonitors: [Any] = []
     private var pointerInside = false
     private var hoverTimer: Timer?
-    private var unmountTimer: Timer?
     /// This controller's registration in `QuotaMeterPollingRegistry`.
     private let pollingID = UUID()
 
@@ -82,11 +82,10 @@ final class QuotaStripController {
         QuotaMeterPollingRegistry.set(pollingID, nil)
         hoverTimer?.invalidate()
         hoverTimer = nil
-        unmountTimer?.invalidate()
-        unmountTimer = nil
         mouseMonitors.forEach(NSEvent.removeMonitor)
         mouseMonitors = []
         sizeObservation = nil
+        styleObservation = nil
         panel?.orderOut(nil)
         // Removing the content view runs SwiftUI's onDisappear, so the mounted Quota Meter
         // unregisters its consumers before the panel goes away.
@@ -105,6 +104,11 @@ final class QuotaStripController {
 
     private func build(on screen: NSScreen, layout: QuotaStripLayout) {
         let model = QuotaStripModel(notchWidth: layout.notch.width, notchHeight: layout.notch.height)
+        // Set before any hit rect is computed (the first `updatePointer` below).
+        model.minimal = Self.minimalStyle
+        // Loaded for as long as the strip is on screen, like the floating window, so hovering
+        // shows current sessions and runway at once; hidden parts pause their animations.
+        model.contentMounted = true
         self.model = model
         let hud = AgentCockpitHUDView(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer,
                                       opencodeIndexer: opencodeIndexer, surface: .strip)
@@ -145,11 +149,34 @@ final class QuotaStripController {
         sizeObservation = AnyCancellableBox(model.$expandedContentSize.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, let model = self.model, let layout = self.currentLayout,
-                      let screen = self.currentScreen() else { return }
-                self.panel?.setFrame(self.frame(for: model, on: screen, layout: layout), display: true)
+                      let screen = self.currentScreen(), let panel = self.panel else { return }
+                let target = self.frame(for: model, on: screen, layout: layout)
+                // Grow at once so the animating shape has room; shrink after the shape's
+                // animation, so it is never clipped by a panel that got smaller first.
+                let grows = target.width >= panel.frame.width && target.height >= panel.frame.height
+                if grows {
+                    panel.setFrame(target, display: true)
+                } else {
+                    let shrinkDelay = QuotaStripRootView<EmptyView>.shrinkDelay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + shrinkDelay) { [weak self] in
+                        guard let self, let model = self.model, let layout = self.currentLayout,
+                              let screen = self.currentScreen() else { return }
+                        self.panel?.setFrame(self.frame(for: model, on: screen, layout: layout), display: true)
+                    }
+                }
             }
         })
 
+        // Wings / Minimal can change in Settings while the strip is up.
+        styleObservation = AnyCancellableBox(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let model = self.model, model.minimal != Self.minimalStyle else { return }
+                    withAnimation(Self.closeSpring) { model.minimal = Self.minimalStyle }
+                    self.updatePointer()
+                }
+            })
         monitorMouse()
         panel.orderFrontRegardless()
         updatePointer()
@@ -173,6 +200,10 @@ final class QuotaStripController {
         NSScreen.screens.first { Self.displayID($0) == screenID }
     }
 
+    private static var minimalStyle: Bool {
+        QuotaMeterNotchStyle.current(raw: UserDefaults.standard.string(forKey: PreferencesKey.quotaMeterNotchStyle)) == .minimal
+    }
+
     static func displayID(_ screen: NSScreen) -> UInt32? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
@@ -192,6 +223,16 @@ final class QuotaStripController {
         if let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] event in
             MainActor.assumeIsolated { (self?.handleClick(event) ?? false) ? nil : event }
         }) { mouseMonitors.append(clicks) }
+        // A click in another app closes the open panel, even when a toolbar popover is up
+        // (a transient popover from a non-activating panel may not close by itself).
+        if let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let model = self.model, model.expanded else { return }
+                self.hoverTimer?.invalidate()
+                model.toolbarPopoverOpen = false
+                self.setExpanded(false)
+            }
+        }) { mouseMonitors.append(outside) }
     }
 
     private func shapeScreenRect() -> CGRect? {
@@ -203,23 +244,39 @@ final class QuotaStripController {
     private func updatePointer() {
         let inside = shapeScreenRect()?.contains(NSEvent.mouseLocation) ?? false
         panel?.ignoresMouseEvents = !inside
-        guard inside != pointerInside else { return }
+        guard inside != pointerInside else {
+            // A toolbar popover held the panel open while the pointer was outside; once it
+            // closes, the next pointer move starts the close.
+            if !inside, let model, model.expanded, hoverTimer?.isValid != true, !isPopoverOpen {
+                scheduleClose()
+            }
+            return
+        }
         pointerInside = inside
         hoverTimer?.invalidate()
         guard let model else { return }
         if inside {
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-            unmountTimer?.invalidate()
-            unmountTimer = nil
-            // Mount now, during the open dwell, so the content loads and is measured first.
-            if !model.contentMounted { model.contentMounted = true }
             guard !model.expanded else { return }
             scheduleHover(after: Self.openDelay) { [weak self] in self?.setExpanded(true) }
-        } else if !model.expanded {
-            scheduleUnmount()
-        } else {
-            scheduleHover(after: Self.closeDelay) { [weak self] in self?.setExpanded(false) }
+        } else if model.expanded, !isPopoverOpen {
+            scheduleClose()
         }
+    }
+
+    private func scheduleClose() {
+        scheduleHover(after: Self.closeDelay) { [weak self] in
+            guard let self else { return }
+            // A popover opened from the right-click toolbar keeps the panel open.
+            if self.isPopoverOpen { return }
+            self.setExpanded(false)
+        }
+    }
+
+    /// A popover from the expanded panel's own toolbar is on screen (it lives outside the
+    /// shape). Reported by the Quota Meter view through the model.
+    private var isPopoverOpen: Bool {
+        model?.toolbarPopoverOpen ?? false
     }
 
     private func scheduleHover(after delay: TimeInterval, _ action: @escaping @MainActor () -> Void) {
@@ -234,22 +291,7 @@ final class QuotaStripController {
     private func setExpanded(_ expanded: Bool) {
         guard let model, model.expanded != expanded else { return }
         withAnimation(expanded ? Self.openSpring : Self.closeSpring) { model.expanded = expanded }
-        if !expanded { scheduleUnmount() }
         updatePointer()
-    }
-
-    /// Unmounts the Quota Meter content once the close animation has finished, unless the
-    /// pointer came back.
-    private func scheduleUnmount() {
-        unmountTimer?.invalidate()
-        let timer = Timer(timeInterval: 1.0, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, let model = self.model, !model.expanded, !self.pointerInside else { return }
-                model.contentMounted = false
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        unmountTimer = timer
     }
 
     private func handleClick(_ event: NSEvent) -> Bool {

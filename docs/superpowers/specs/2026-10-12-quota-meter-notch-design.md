@@ -213,23 +213,47 @@ provider currently reports: 5h if present, weekly if present.
 
 - Show the candidate with the least remaining quota (in "used" mode, the most
   used), honouring `UsageDisplayMode`.
-- When the shown window is weekly, a dim "wk" tag follows the number. The 5h
-  window carries no tag.
+- A dim tag follows the number: "5h" or "wk" (owner 2026-10-19: both windows are
+  tagged, so the 5h number is as clear as the weekly one).
 - Show `∞` only when the provider reports no finite window at all.
 
 ### Runway indicators
 
+Revised 2026-10-19 after the visual and logic audit and the owner's choices.
 Shown only when the provider cell is a number:
 
-- **Ticks:** one small tick per burning session, up to four. A session is
-  burning when its runway row has confidence `.direct` or `.mixed`. Waiting,
-  idle and cloud rows get no tick.
-- **Run-out chip** (`▸2h`): shown while at least one session burns and the
-  provider has a projection. It is the provider-level projection the floating
-  window already shows (`fiveHourProjectedRunoutAt` via
-  `HUDLimitsProjectionToken`), not a per-session value.
-- **Will run out before reset:** same layout; the percent turns red and the
-  chip turns amber. No size change. The reset countdown shows on hover only.
+- **Agent activity mark** (owner 2026-10-19: agent-level in the strip,
+  session-level in the hover panel and the floating window's runway): at most
+  one small mark beside the number, from live presences (probe directories
+  excluded):
+  - dim white dot: at least one session of that agent is working (seen
+    active-working within 30 s, so it does not flicker);
+  - blue (accent) ring: a session stopped working within the last 10 minutes
+    and has not started again, so it is the user's turn; wins over the dot;
+  - nothing: quiet.
+  Not orange or green, so it never reads as the system's microphone/camera
+  dots or as the burn colour. No continuous animation. The app cannot yet tell
+  a session blocked on a permission prompt from one that simply finished; the
+  ring covers both. It replaces the orange tick bars, a "×2" count and a
+  circled count, all of which read poorly.
+- **Run-out chip** (`▸2h`): the panel's own 5h run-out label
+  (`formatUsageProjectionLabel`, so it ages out after 3 minutes and rounds as
+  there), cut to its leading unit (`▸2h 5m` → `▸2h`), bold, in the projection
+  orange. Shown only beside a 5h number; beside a weekly number it would read as
+  the week's run-out.
+- **Tone** follows what is left only (green ≥ 30 %, orange < 30 %, red ≤ 10 %).
+  The earlier "red when it will run out before reset" rule was removed: the
+  projection tracker only publishes run-outs that fall before the reset, so the
+  percent was red nearly all the time. The chip carries the warning, as in the
+  panel. In the strip's hover panel, healthy percents use the same green.
+- **Order:** the right wing mirrors the left (owner 2026-10-19): `icon 54% wk ●
+  ▸2h` … `▸2h ● 5h 56% icon`. When a wing is too narrow, the activity mark
+  drops first, then the chip.
+- With one provider filling both wings, a window the provider lacks shows as
+  `∞` with its tag (`∞ 5h`), never a bare `∞`; the chip and the count go on the
+  5h wing only.
+- The expanded Quota Meter stays loaded while the strip is on screen (owner: the
+  on-hover load took 8–9 s), with its runway shimmer paused while collapsed.
 
 ### One provider hidden
 
@@ -244,7 +268,9 @@ status items sit. v1 does not detect collisions. A manual setting,
 `QuotaMeterNotchStyle`, offers:
 
 - **Wings** (default): as described above.
-- **Minimal**: each wing becomes a 3 pt hairline under the notch. Its fill is
+- **Minimal**: each wing becomes a 3 pt hairline on the bottom edge of the menu
+  bar row beside the notch (2026-10-19: inside the row, so it never covers app
+  windows below the bar). Its fill is
   the same percent; its colour follows the same state rules.
 
 In Minimal the wing panels shrink to the hairline, so the menu bar pixels

@@ -165,3 +165,24 @@ Rules for the cell builder: non-live states → text "Sign in" / "Probing" / "Id
   - Q6 No old menu bar item anywhere; Settings has no Menu Bar tab.
   - Q7 Hide the Dock icon in strip mode, switch to floating unpinned: the Dock icon returns.
 - [ ] **Step 4: Fresh-context code review** (Repo MCP, commit-pinned) once the owner asks to commit; fix; commit and push on request.
+
+## Follow-up (owner request 2026-10-19): the four spec features not covered above
+
+### Task 9: Will-run-out turns the percent red
+- `QuotaStripCellBuilder`: when `chipWarns`, tone is `.critical` (spec "Runway indicators": percent red, chip amber, no size change).
+- Test `testWillRunOutTurnsPercentRed`: 5h 50 %, runout before reset → tone `.critical`, `chipWarns`.
+
+### Task 10: Runway ticks in the wings
+- `StripCellInput.burningSessions: Int` (default 0); `StripCell.ticks: Int` = `min(4, burningSessions)` only for a live number, else 0.
+- Burning sessions per provider = live presences of that source whose `liveState == .activeWorking`, probe directories excluded (the collapsed strip does not run the runway loaders; Ruling: active-working presence stands in for runway `.direct`/`.mixed`).
+- Wing draws up to four 6×2 pt orange ticks under the number, inside the wing; no width change.
+- Tests `testTicksOnlyForLiveNumbers`, `testTicksClampAtFour`.
+
+### Task 11: Right-click toolbar on the open panel
+- `.strip` surface: right-click reveals the HUD header (same as on-demand chrome); the Pin button is hidden; a "Move to floating window" button replaces "Move to menu bar". The header collapses when the panel collapses.
+- `QuotaStripController` keeps the panel open while a toolbar popover is on screen.
+
+### Task 12: Wings / Minimal style
+- `QuotaMeterNotchStyle` (`wings` default, `minimal`), key `QuotaMeterNotchStyle`; Settings "Strip Style" row (Wings / Minimal) with a caption.
+- Minimal: collapsed shape is the notch (or virtual notch) only, which is the hover and click target; two 3 pt hairlines under the wing positions, filled by percent left, coloured by the cell tone.
+- Test: geometry unchanged; visual check by the owner.

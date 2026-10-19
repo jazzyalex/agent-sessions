@@ -789,6 +789,9 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
     @AppStorage(PreferencesKey.quotaMeterPlacement) private var quotaMeterPlacementRaw = QuotaMeterPlacement.floating.rawValue
     @AppStorage(PreferencesKey.quotaMeterStripHintDismissed) private var quotaMeterStripHintDismissed = false
+    /// Set only inside the menu bar strip.
+    @Environment(\.quotaStripExpanded) private var stripExpanded
+    @Environment(\.quotaStripPopoverReporter) private var reportStripPopover
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
     @State private var showProviderVisibilityPopover = false
@@ -948,8 +951,19 @@ struct AgentCockpitHUDView: View {
         // Dismissing a popover from outside the HUD produces no hover event, so
         // re-run the collapse decision once it closes.
         .onChange(of: isToolbarPopoverOpen) { _, open in
+            // The strip owns its open/close; it only needs to know a popover is up. Its header
+            // must not run the window's hover-collapse (the strip never reports hover).
+            if surface == .strip {
+                reportStripPopover?(open)
+                return
+            }
             guard !open, !isPointerInsideWindow else { return }
             handleCompactWindowHoverChange(false)
+        }
+        // The strip's right-click toolbar goes away when the strip collapses.
+        .onChange(of: stripExpanded) { _, expanded in
+            guard surface == .strip, expanded == false, demandRevealed else { return }
+            demandRevealed = false
         }
         // The mode is changed *from the toolbar*, so the new mode must not yank
         // the toolbar — and the popover anchored to it — out from under the
@@ -969,7 +983,7 @@ struct AgentCockpitHUDView: View {
         // Both are overlays, never members of the layout: the no-expansion
         // promise of .onDemand is structural, not a rule a later edit has to
         // remember.
-        .applyIf(surface == .window && quotaMeterChrome.respondsToRightClick) { view in
+        .applyIf(surface == .strip || quotaMeterChrome.respondsToRightClick) { view in
             view.overlay(HUDRightClickCatcher(onRightClick: revealChromeOnDemand))
         }
         .overlay(alignment: .bottom) {
@@ -996,7 +1010,7 @@ struct AgentCockpitHUDView: View {
         if surface == .strip {
             // The strip draws its own black notch shape around this content.
             return AnyView(
-                hudStack(snapshot: snapshot, displayState: displayState, showsCompactToolbar: false)
+                hudStack(snapshot: snapshot, displayState: displayState, showsCompactToolbar: demandRevealed)
                     .fixedSize()
                     .background(
                         CockpitWindowVisibilityObserver { isVisible in
@@ -1160,7 +1174,8 @@ struct AgentCockpitHUDView: View {
     /// Explicit reveal on right-click. The hint keeps recurring on later hovers —
     /// right-click is the only route to the toolbar, so the reminder never retires.
     private func revealChromeOnDemand() {
-        guard quotaMeterChrome.respondsToRightClick else { return }
+        // The strip has no hover chrome: right-click is always its way to the toolbar.
+        guard surface == .strip || quotaMeterChrome.respondsToRightClick else { return }
         cancelCompactToolbarHideTask()
         guard !demandRevealed else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -1464,10 +1479,18 @@ struct AgentCockpitHUDView: View {
             if showProbe {
                 cockpitProbeButton
             }
-            cockpitChromeButton
+            if surface == .window {
+                cockpitChromeButton
+            }
             toolbarHairline
-            cockpitMoveToMenuBarButton
-            cockpitPinButton
+            if surface == .window {
+                cockpitMoveToMenuBarButton
+                cockpitPinButton
+            } else {
+                // The strip hides Pin (the stored preference is unchanged) and offers the
+                // way back to the floating window instead.
+                cockpitMoveToFloatingButton
+            }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -1483,6 +1506,18 @@ struct AgentCockpitHUDView: View {
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
         .help("Move to menu bar")
+    }
+
+    /// Switches the Quota Meter back to the floating window (placement `floating`).
+    private var cockpitMoveToFloatingButton: some View {
+        Button {
+            quotaMeterPlacementRaw = QuotaMeterPlacement.floating.rawValue
+        } label: {
+            Image(systemName: "macwindow")
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+        .help("Move to floating window")
     }
 
     /// One-time hint for installs that predate the strip (fresh installs mark it dismissed).
@@ -4684,6 +4719,10 @@ private struct HUDRunwayPanel: View {
     // burning — an empty/idle/waiting bar ignores the tick, so a static runway
     // now issues zero periodic wakeups instead of 75/min. Reduce Motion pauses it.
     @StateObject private var shimmer = RunwayShimmerTicker()
+    @Environment(\.quotaStripExpanded) private var stripExpanded
+
+    /// Reduce Motion pauses the shimmer, and so does a collapsed (hidden) menu bar strip.
+    private var shimmerAllowed: Bool { !reduceMotion && stripExpanded != false }
 
     /// A row whose load bar is actually filled and animated. Waiting/idle rows
     /// keep an empty track, so they need no shimmer.
@@ -4760,10 +4799,12 @@ private struct HUDRunwayPanel: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 0.5)
         }
-        .onAppear { shimmer.setActive(hasAnimatedBar && !reduceMotion) }
+        .onAppear { shimmer.setActive(hasAnimatedBar && shimmerAllowed) }
         .onDisappear { shimmer.setActive(false) }
-        .onChange(of: hasAnimatedBar) { _, active in shimmer.setActive(active && !reduceMotion) }
-        .onChange(of: reduceMotion) { _, reduced in shimmer.setActive(hasAnimatedBar && !reduced) }
+        .onChange(of: hasAnimatedBar) { _, active in shimmer.setActive(active && shimmerAllowed) }
+        .onChange(of: reduceMotion) { _, _ in shimmer.setActive(hasAnimatedBar && shimmerAllowed) }
+        // In the collapsed menu bar strip the panel is loaded but hidden: no shimmer timer.
+        .onChange(of: stripExpanded) { _, _ in shimmer.setActive(hasAnimatedBar && shimmerAllowed) }
     }
 
     /// Burn-rate cell. A finished session shows a calm dash; everything else
@@ -5537,6 +5578,9 @@ private func runwayLensLabel(_ text: String, active: Bool) -> some View {
 
 private struct HUDLimitsProviderText: View {
     let entry: HUDLimitsProviderEntry
+    /// Inside the menu bar strip: healthy percents use the wings' green, so the number you
+    /// hovered keeps its colour when the panel opens. nil (floating window) changes nothing.
+    @Environment(\.quotaStripExpanded) private var stripExpanded
     let mode: UsageDisplayMode
     var showResets: Bool = true
     var onlyBottleneck: Bool = false
@@ -5585,7 +5629,9 @@ private struct HUDLimitsProviderText: View {
         return stale ? "--" : "\(pct(left))%"
     }
     private func percentColor(left: Int, absent: Bool, stale: Bool) -> Color {
-        (absent || stale) ? .secondary : hudPctColor(left)
+        if absent || stale { return .secondary }
+        if stripExpanded != nil, left >= 30 { return QuotaStripPalette.healthy }
+        return hudPctColor(left)
     }
 
     private var activeLensWindow: RunwayLensWindow? {

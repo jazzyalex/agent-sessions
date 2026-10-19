@@ -117,6 +117,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.quotaMeterEnlarged) var quotaMeterEnlarged: Bool = false
     @AppStorage(PreferencesKey.quotaMeterChrome) var quotaMeterChromeRaw: String = QuotaMeterChrome.onDemand.rawValue
     @AppStorage(PreferencesKey.quotaMeterPlacement) var quotaMeterPlacementRaw: String = QuotaMeterPlacement.floating.rawValue
+    @AppStorage(PreferencesKey.quotaMeterNotchStyle) var quotaMeterNotchStyleRaw: String = QuotaMeterNotchStyle.wings.rawValue
     @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexSource) var usageLimitDiagnosticsCodexSource: String = ""

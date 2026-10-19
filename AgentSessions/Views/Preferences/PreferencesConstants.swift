@@ -41,6 +41,7 @@ enum PreferencesKey {
     static let quotaMeterPlacement = "QuotaMeterPlacement"
     static let quotaMeterStripHidden = "QuotaMeterStripHidden"
     static let quotaMeterStripHintDismissed = "QuotaMeterStripHintDismissed"
+    static let quotaMeterNotchStyle = "QuotaMeterNotchStyle"
     static let usageLimitNotificationExhaustedEnabled = "UsageLimitNotificationExhaustedEnabled"
     static let usageLimitNotificationFiveHourResetEnabled = "UsageLimitNotificationFiveHourResetEnabled"
     static let usageLimitDiagnosticsCodexSource = "UsageLimitDiagnosticsCodexSource"

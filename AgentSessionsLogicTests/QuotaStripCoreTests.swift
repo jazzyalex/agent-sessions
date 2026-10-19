@@ -44,6 +44,37 @@ final class QuotaStripCoreTests: XCTestCase {
         XCTAssertEqual(l.notch, CGRect(x: 1268, y: 1416, width: 24, height: 24))
     }
 
+    // MARK: Sizing (Wings / Minimal)
+
+    private let notchSizing = QuotaStripSizing(notchWidth: 184, notchHeight: 32)
+    private let content = CGSize(width: 300, height: 200)
+
+    func testMinimalCollapsedShapeIsTheNotchOnly() {
+        // Wings: wing · notch · wing plus the two 6 pt flares.
+        XCTAssertEqual(notchSizing.collapsedSize(minimal: false), CGSize(width: 404, height: 32))
+        // Minimal: the notch plus its flares; the menu bar beside it is not covered.
+        XCTAssertEqual(notchSizing.collapsedSize(minimal: true), CGSize(width: 196, height: 32))
+        let virtual = QuotaStripSizing(notchWidth: 24, notchHeight: 25)
+        XCTAssertEqual(virtual.collapsedSize(minimal: true), CGSize(width: 36, height: 25))
+    }
+
+    func testPanelDoesNotMoveWhenTheStyleChanges() {
+        let panel = notchSizing.panelSize(content: content)
+        // Expanded width never narrower than the wings (+40), plus 40 pt shadow margin a side.
+        XCTAssertEqual(notchSizing.expandedSize(content: content), CGSize(width: 444, height: 210))
+        XCTAssertEqual(panel, CGSize(width: 524, height: 260))
+        let wings = notchSizing.hitRect(expanded: false, minimal: false, content: content)
+        let minimal = notchSizing.hitRect(expanded: false, minimal: true, content: content)
+        XCTAssertEqual(wings, CGRect(x: 60, y: 0, width: 404, height: 32))
+        XCTAssertEqual(minimal, CGRect(x: 164, y: 0, width: 196, height: 32))
+        XCTAssertEqual(wings.midX, minimal.midX) // both centred on the notch
+    }
+
+    func testExpandedHitRectCoversTheOpenShape() {
+        let open = notchSizing.hitRect(expanded: true, minimal: true, content: content)
+        XCTAssertEqual(open, CGRect(x: 40, y: 0, width: 444, height: 210))
+    }
+
     // MARK: Placement
 
     private let builtin = PlacementScreen(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982), isBuiltin: true)
@@ -89,11 +120,11 @@ final class QuotaStripCoreTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// `projection` is the panel formatter's label (`formatUsageProjectionLabel`), already
+    /// nil when stale, so the wing and the panel agree on when and what to show.
     private func input(_ state: StripCellInput.State = .live, five: Int? = nil, week: Int? = nil,
-                       runout: TimeInterval? = nil, reset: TimeInterval? = nil) -> StripCellInput {
-        StripCellInput(state: state, fiveHourLeft: five, weekLeft: week,
-                       projectedRunout: runout.map { now.addingTimeInterval($0) },
-                       fiveHourResetAt: reset.map { now.addingTimeInterval($0) }, now: now)
+                       projection: String? = nil) -> StripCellInput {
+        StripCellInput(state: state, fiveHourLeft: five, weekLeft: week, projection: projection)
     }
 
     func testCellStates() {
@@ -114,7 +145,7 @@ final class QuotaStripCoreTests: XCTestCase {
         XCTAssertEqual(weekly.tone, .healthy)
         let fiveHour = QuotaStripCellBuilder.cell(input(five: 24, week: 80))
         XCTAssertEqual(fiveHour.text, "24%")
-        XCTAssertNil(fiveHour.tag)
+        XCTAssertEqual(fiveHour.tag, "5h") // owner 2026-10-19: both windows are tagged
         XCTAssertEqual(fiveHour.tone, .warning)
         XCTAssertEqual(QuotaStripCellBuilder.cell(input(five: 8)).tone, .critical)
         let none = QuotaStripCellBuilder.cell(input())
@@ -135,9 +166,20 @@ final class QuotaStripCoreTests: XCTestCase {
     }
 
     func testCellChipHiddenWhenProjectionOff() {
-        var i = input(five: 50, runout: 40 * 60)
+        var i = input(five: 50, projection: "▸40m")
         i.showsProjection = false
         XCTAssertNil(QuotaStripCellBuilder.cell(i).chip)
+    }
+
+    func testEmptyWindowIsTaggedNotBareInfinity() {
+        // Codex alone: no 5h window, so the 5h wing says "∞ 5h", never a bare "∞".
+        var i = input(week: 61)
+        i.weekLeft = nil
+        i.emptyTag = "5h"
+        let cell = QuotaStripCellBuilder.cell(i)
+        XCTAssertEqual(cell.text, "∞")
+        XCTAssertEqual(cell.tag, "5h")
+        XCTAssertEqual(cell.tone, .muted)
     }
 
     // MARK: Polling signal
@@ -167,11 +209,66 @@ final class QuotaStripCoreTests: XCTestCase {
                        .floating)
     }
 
-    func testCellChip() {
-        XCTAssertEqual(QuotaStripCellBuilder.cell(input(five: 50, runout: 40 * 60)).chip, "▸40m")
-        XCTAssertEqual(QuotaStripCellBuilder.cell(input(five: 50, runout: 130 * 60)).chip, "▸2h")
-        XCTAssertTrue(QuotaStripCellBuilder.cell(input(five: 50, runout: 40 * 60, reset: 90 * 60)).chipWarns)
-        XCTAssertFalse(QuotaStripCellBuilder.cell(input(five: 50, runout: 40 * 60, reset: 20 * 60)).chipWarns)
-        XCTAssertNil(QuotaStripCellBuilder.cell(input(five: 50, runout: -60)).chip)
+    func testRunOutNeverChangesThePercentTone() {
+        // Audit 2026-10-19: every projection the tracker publishes is before the reset, so a
+        // red "will run out" percent was nearly always on. The chip carries the warning.
+        let cell = QuotaStripCellBuilder.cell(input(five: 84, projection: "▸2h 5m"))
+        XCTAssertEqual(cell.tone, .healthy)
+        XCTAssertEqual(cell.chip, "▸2h")
+    }
+
+    func testChipOnlyBesideAFiveHourNumber() {
+        // The weekly window is shown (less left); a 5h run-out next to it would read as "the
+        // week runs out in 2h".
+        let weekly = QuotaStripCellBuilder.cell(input(five: 60, week: 40, projection: "▸2h"))
+        XCTAssertEqual(weekly.tag, "wk")
+        XCTAssertNil(weekly.chip)
+        XCTAssertEqual(QuotaStripCellBuilder.cell(input(five: 40, week: 60, projection: "▸2h")).chip, "▸2h")
+    }
+
+    func testChipIsTheFormattersLabelCutToItsFirstUnit() {
+        // Same rounding as the panel ("▸2h 5m" there); the wing keeps the leading unit.
+        XCTAssertEqual(QuotaStripCellBuilder.compactChip("▸2h 5m"), "▸2h")
+        XCTAssertEqual(QuotaStripCellBuilder.compactChip("▸40m"), "▸40m")
+        XCTAssertEqual(QuotaStripCellBuilder.compactChip("▸1d 3h"), "▸1d")
+        XCTAssertEqual(QuotaStripCellBuilder.compactChip("▸<1m"), "▸<1m")
+        // A stale projection reaches the builder as nil (the formatter drops it after 3 min).
+        XCTAssertNil(QuotaStripCellBuilder.cell(input(five: 50, projection: nil)).chip)
+    }
+
+    func testFillFractionOnlyForNumbers() {
+        XCTAssertEqual(QuotaStripCellBuilder.cell(input(five: 50)).fillFraction, 0.5)
+        XCTAssertNil(QuotaStripCellBuilder.cell(input(.needsAction, five: 50)).fillFraction)
+        var unlimited = input()
+        unlimited.workingSessions = 2
+        XCTAssertEqual(QuotaStripCellBuilder.cell(unlimited).activity, .none)
+    }
+
+    func testAgentActivityIsOneMarkPerWing() {
+        // Owner 2026-10-19: agent-level in the strip, session detail in the panel.
+        var i = input(five: 50)
+        XCTAssertEqual(QuotaStripCellBuilder.cell(i).activity, .none)
+        i.workingSessions = 3
+        XCTAssertEqual(QuotaStripCellBuilder.cell(i).activity, .working)
+        // A session that just finished is the user's turn, and that wins over working.
+        i.finishedSessions = 1
+        XCTAssertEqual(QuotaStripCellBuilder.cell(i).activity, .yourTurn)
+        i.workingSessions = 0
+        XCTAssertEqual(QuotaStripCellBuilder.cell(i).activity, .yourTurn)
+    }
+
+    func testActivityOnlyBesideLiveNumbers() {
+        var signIn = input(.needsAction, five: 50)
+        signIn.workingSessions = 2
+        XCTAssertEqual(QuotaStripCellBuilder.cell(signIn).activity, .none)
+    }
+
+    func testHairlineFillFollowsTheShownPercent() {
+        var used = input(five: 30)
+        used.showsUsed = true
+        let cell = QuotaStripCellBuilder.cell(used)
+        XCTAssertEqual(cell.text, "70%")
+        XCTAssertEqual(cell.fillFraction, 0.7)
+        XCTAssertEqual(cell.tone, .healthy)
     }
 }
