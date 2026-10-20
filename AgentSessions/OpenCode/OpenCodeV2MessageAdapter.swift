@@ -31,11 +31,22 @@ enum OpenCodeV2MessageAdapter {
         case "user":
             var message: [String: Any] = ["role": "user"]
             if let created { message["time"] = ["created": created] }
-            var parts: [(id: String, dict: [String: Any])] = []
-            if let text = data["text"] as? String {
-                parts.append((rowID + "-text", ["type": "text", "text": text]))
+            let files = (data["files"] as? [[String: Any]]) ?? []
+            // Attachments are named in the visible user text, so a prompt that
+            // is only an image or file is not shown as an empty turn.
+            var visibleLines: [String] = []
+            if let text = data["text"] as? String,
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                visibleLines.append(text)
             }
-            for (index, file) in ((data["files"] as? [[String: Any]]) ?? []).enumerated() {
+            if let attachments = attachmentLine(files) {
+                visibleLines.append(attachments)
+            }
+            var parts: [(id: String, dict: [String: Any])] = []
+            if !visibleLines.isEmpty {
+                parts.append((rowID + "-text", ["type": "text", "text": visibleLines.joined(separator: "\n\n")]))
+            }
+            for (index, file) in files.enumerated() {
                 var part: [String: Any] = ["type": "file"]
                 if let mime = file["mime"] as? String { part["mime"] = mime }
                 if let name = file["name"] as? String { part["filename"] = name }
@@ -71,17 +82,11 @@ enum OpenCodeV2MessageAdapter {
                 }
             }
             // One assistant row is one model request, which is exactly what a
-            // v1 step-finish part records.
-            if let tokens = data["tokens"] as? [String: Any] {
-                var stepFinish: [String: Any] = ["type": "step-finish", "tokens": tokens]
-                if let finish = data["finish"] { stepFinish["reason"] = finish }
-                if let cost = data["cost"] { stepFinish["cost"] = cost }
-                if let model = data["model"] as? [String: Any] {
-                    if let id = model["id"] { stepFinish["modelID"] = id }
-                    if let variant = model["variant"] { stepFinish["variant"] = variant }
-                }
-                parts.append((rowID + "-step-finish", stepFinish))
-            }
+            // v1 step-finish part records. Every assistant row gets one, even
+            // when `tokens` is absent or malformed: the usage reducer then sees
+            // an incomplete step-finish and reports the session total as
+            // unavailable instead of publishing a partial sum as complete.
+            parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"])))
             return Adapted(message: message, parts: parts)
 
         case "shell":
@@ -116,18 +121,40 @@ enum OpenCodeV2MessageAdapter {
             var part = data
             part["type"] = type
             var parts: [(id: String, dict: [String: Any])] = [(rowID + "-meta", part)]
-            // A compaction request is billed like any model step.
-            if type == "compaction", let tokens = data["tokens"] as? [String: Any] {
-                var stepFinish: [String: Any] = ["type": "step-finish", "reason": "compaction", "tokens": tokens]
-                if let cost = data["cost"] { stepFinish["cost"] = cost }
-                if let model = data["model"] as? [String: Any] {
-                    if let id = model["id"] { stepFinish["modelID"] = id }
-                    if let variant = model["variant"] { stepFinish["variant"] = variant }
-                }
-                parts.append((rowID + "-step-finish", stepFinish))
+            // A compaction request is billed like any model step. Its usage is
+            // optional in the schema (running compactions and some completed
+            // ones carry none), so only a present `tokens` value counts; a
+            // malformed one still fails the session total closed.
+            if type == "compaction", data["tokens"] != nil {
+                parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: "compaction")))
             }
             return Adapted(message: message, parts: parts)
         }
+    }
+
+    /// v1-shaped step-finish part. `tokens` is copied as stored, whatever its
+    /// shape, so the reducer's strict token validation decides completeness.
+    private static func stepFinishPart(data: [String: Any], reason: Any?) -> [String: Any] {
+        var part: [String: Any] = ["type": "step-finish"]
+        if let tokens = data["tokens"] { part["tokens"] = tokens }
+        if let reason { part["reason"] = reason }
+        if let cost = data["cost"] { part["cost"] = cost }
+        if let model = data["model"] as? [String: Any] {
+            if let id = model["id"] { part["modelID"] = id }
+            if let variant = model["variant"] { part["variant"] = variant }
+        }
+        return part
+    }
+
+    /// "[Attached: shot.png, notes.pdf]" for a v2 user row's files, or nil.
+    private static func attachmentLine(_ files: [[String: Any]]) -> String? {
+        guard !files.isEmpty else { return nil }
+        let names = files.map { file in
+            (file["name"] as? String).map { ($0 as NSString).lastPathComponent }
+                ?? (file["mime"] as? String)
+                ?? "file"
+        }
+        return "[Attached: \(names.joined(separator: ", "))]"
     }
 
     /// v2 tool item → v1 tool part (`callID`, `tool`, `state.output`, `state.time.start/end`).

@@ -74,21 +74,25 @@ struct OpenCodeSqliteReader {
         guard hasV2Store(db) else {
             return querySessionList(db: db, dbPath: url.path)
         }
-        guard let v2Sessions = querySessionListV2(db: db, dbPath: url.path) else { return nil }
-        // A fresh 2.0 database still has the v1 tables; a missing or unreadable
-        // v1 store must not hide the v2 sessions.
-        let v1Sessions = tableExists(db, table: "session")
-            ? (querySessionList(db: db, dbPath: url.path) ?? [])
-            : []
-        // Same precedence as v2SessionExists: the v2 row replaces its v1 row
-        // only when it is strictly newer.
-        let v1ByID = Dictionary(v1Sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let preferredV2 = v2Sessions.filter { v2 in
-            guard let v1 = v1ByID[v2.id] else { return true }
-            return (v2.endTime ?? .distantPast) > (v1.endTime ?? .distantPast)
+        let hasV1Store = tableExists(db, table: "session")
+        // Pick the store for each ID first, over all rows including archived
+        // ones, with the same rule as v2SessionExists. Each store's list query
+        // then drops its own archived rows, so a session archived in the
+        // chosen store stays hidden even when the other store's copy is not
+        // archived, and listing agrees with full loading.
+        guard let v2IDs = v2PreferredSessionIDs(db, hasV1Store: hasV1Store),
+              let v2Sessions = querySessionListV2(db: db, dbPath: url.path) else { return nil }
+        // A database with only the v2 store has no v1 rows to merge. A v1 store
+        // that exists but cannot be read is a failure, not an empty store:
+        // returning only the v2 rows would hide every uncopied v1 session.
+        let v1Sessions: [Session]
+        if hasV1Store {
+            guard let rows = querySessionList(db: db, dbPath: url.path) else { return nil }
+            v1Sessions = rows
+        } else {
+            v1Sessions = []
         }
-        let v2IDs = Set(preferredV2.map(\.id))
-        return (preferredV2 + v1Sessions.filter { !v2IDs.contains($0.id) })
+        return (v2Sessions.filter { v2IDs.contains($0.id) } + v1Sessions.filter { !v2IDs.contains($0.id) })
             .sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
     }
 
@@ -1231,8 +1235,7 @@ struct OpenCodeSqliteReader {
                                 dbPath: dbPath)
     }
 
-    /// Converts one message and its parts into transcript events. Shared by the
-    /// v1 (`message` + `part`) and v2 (`session_message`) readers.
+    /// Converts one v1 message and its parts into transcript events.
     private static func appendMessageEvents(msgID: String,
                                             timestamp ts: Date?,
                                             rawJSON: String,
@@ -1252,21 +1255,7 @@ struct OpenCodeSqliteReader {
             commandCount += partEvents.tool.filter { $0.kind == .tool_call }.count
 
             // Meta event for the raw message
-            let messageMetaEvent = SessionEvent(
-                id: msgID + "-meta",
-                timestamp: ts,
-                kind: .meta,
-                role: msg.role,
-                text: nil,
-                toolName: nil,
-                toolInput: nil,
-                toolOutput: nil,
-                messageID: msgID,
-                parentID: nil,
-                isDelta: false,
-                rawJSON: rawJSON
-            )
-            events.append(messageMetaEvent)
+            events.append(messageMetaEvent(msgID: msgID, timestamp: ts, role: msg.role, rawJSON: rawJSON))
 
             if !partEvents.text.isEmpty {
                 events.append(contentsOf: partEvents.text)
@@ -1313,6 +1302,23 @@ struct OpenCodeSqliteReader {
             }
             events.append(contentsOf: partEvents.tool)
             events.append(contentsOf: partEvents.meta)
+    }
+
+    private static func messageMetaEvent(msgID: String, timestamp: Date?, role: String?, rawJSON: String) -> SessionEvent {
+        SessionEvent(
+            id: msgID + "-meta",
+            timestamp: timestamp,
+            kind: .meta,
+            role: role,
+            text: nil,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: msgID,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: rawJSON
+        )
     }
 
     private static func buildFullSession(id: String,
@@ -1388,33 +1394,58 @@ struct OpenCodeSqliteReader {
     //
     // The copy is lossy: on a real 2.1.1 database it dropped every assistant
     // step of some older sessions while their v1 rows stayed complete. So the v2
-    // row is used only when it has no v1 row or is strictly newer, which means
-    // the session was continued in OpenCode 2.x. An untouched migrated session
-    // keeps reading from its original v1 rows.
+    // row is used only when it has no v1 row, is strictly newer, or was archived
+    // only in v2, which means the session changed in OpenCode 2.x. An untouched
+    // migrated session keeps reading from its original v1 rows.
 
     private static func hasV2Store(_ db: OpaquePointer?) -> Bool {
         tableExists(db, table: "session_v2") && tableExists(db, table: "session_message")
     }
 
+    /// The one precedence rule, as SQL over a `session_v2 v` row: read it from
+    /// the v2 store unless a v1 row exists that is at least as new. An archive
+    /// recorded only in v2 also counts as a 2.x change, so archiving a migrated
+    /// session in OpenCode 2.x hides it even if time_updated did not move.
+    private static let v2PreferredPredicate = """
+        NOT EXISTS (
+            SELECT 1 FROM session s
+            WHERE s.id = v.id
+              AND s.time_updated >= v.time_updated
+              AND NOT (v.time_archived IS NOT NULL AND s.time_archived IS NULL)
+        )
+        """
+
     /// True when this session should be read from the v2 store (see above).
     private static func v2SessionExists(_ db: OpaquePointer?, sessionID: String) -> Bool {
-        guard hasV2Store(db),
-              let v2Updated = sessionTimeUpdated(db, table: "session_v2", sessionID: sessionID) else { return false }
-        guard tableExists(db, table: "session"),
-              let v1Updated = sessionTimeUpdated(db, table: "session", sessionID: sessionID) else { return true }
-        return v2Updated > v1Updated
-    }
-
-    private static func sessionTimeUpdated(_ db: OpaquePointer?, table: String, sessionID: String) -> Int64? {
+        guard hasV2Store(db) else { return false }
+        let sql = tableExists(db, table: "session")
+            ? "SELECT 1 FROM session_v2 v WHERE v.id = ? AND \(v2PreferredPredicate) LIMIT 1;"
+            : "SELECT 1 FROM session_v2 v WHERE v.id = ? LIMIT 1;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT time_updated FROM \(table) WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else {
-            return nil
-        }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
                           unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return sqlite3_column_int64(stmt, 0)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
+    /// IDs read from the v2 store, chosen over all rows including archived
+    /// ones with the same rule as v2SessionExists. nil means a query failure.
+    private static func v2PreferredSessionIDs(_ db: OpaquePointer?, hasV1Store: Bool) -> Set<String>? {
+        let sql = hasV1Store
+            ? "SELECT v.id FROM session_v2 v WHERE \(v2PreferredPredicate);"
+            : "SELECT id FROM session_v2;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        var ids = Set<String>()
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            ids.insert(text(stmt, 0))
+            step = sqlite3_step(stmt)
+        }
+        guard step == SQLITE_DONE else { return nil }
+        return ids
     }
 
     private struct V2Row {
@@ -1577,25 +1608,33 @@ struct OpenCodeSqliteReader {
                           unsafeBitCast(-1, to: sqlite3_destructor_type.self))
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         let session = v2SessionRow(stmt)
-        guard let scan = v2Rows(db: db, sessionID: sessionID) else { return nil }
+        // A cancelled scan holds only a prefix of the rows. Returning it would
+        // look like a complete transcript.
+        guard let scan = v2Rows(db: db, sessionID: sessionID), !scan.cancelled else { return nil }
 
         var events: [SessionEvent] = []
         var commandCount = 0
         for row in scan.rows {
             guard let adapted = adaptedV2Row(row),
                   let message = decodeMessageJSON(adapted.message) else { continue }
-            let partDicts = adapted.parts.map { part in
-                (id: part.id,
-                 dict: part.dict,
-                 rawJSON: OpenCodeSessionParser.cappedPartJSON(obj: part.dict, source: nil))
+            let timestamp = dateFromMillis(row.timeCreated)
+            events.append(messageMetaEvent(msgID: row.id, timestamp: timestamp, role: message.role, rawJSON: row.data))
+            // Expand one part at a time so text, reasoning and tool items keep
+            // the order of the row's `content` array. (The shared builder groups
+            // a message's events by kind, which in v1 spans a whole turn.)
+            for part in adapted.parts {
+                let partEvents = OpenCodeSessionParser.buildPartEvents(
+                    for: message,
+                    effectiveMsgID: row.id,
+                    parts: [(id: part.id,
+                             dict: part.dict,
+                             rawJSON: OpenCodeSessionParser.cappedPartJSON(obj: part.dict, source: nil))],
+                    fallbackTimestamp: timestamp)
+                commandCount += partEvents.tool.filter { $0.kind == .tool_call }.count
+                events.append(contentsOf: partEvents.text)
+                events.append(contentsOf: partEvents.tool)
+                events.append(contentsOf: partEvents.meta)
             }
-            appendMessageEvents(msgID: row.id,
-                                timestamp: dateFromMillis(row.timeCreated),
-                                rawJSON: row.data,
-                                message: message,
-                                partDicts: partDicts,
-                                events: &events,
-                                commandCount: &commandCount)
         }
         return buildFullSession(id: session.id,
                                 title: session.title,

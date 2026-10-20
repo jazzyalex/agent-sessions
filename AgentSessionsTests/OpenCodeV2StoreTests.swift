@@ -184,6 +184,142 @@ final class OpenCodeV2StoreTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && $0.text == "v1 answer" })
     }
 
+    // MARK: - Review follow-ups
+
+    func testSessionArchivedOnlyInV2IsHiddenEvenWithoutATimestampChange() throws {
+        try createV1Tables()
+        try createV2Tables()
+        try insertSameAgeCopy(id: "ses_arch_v2", v1Archived: nil, v2Archived: 4000)
+        try insertSameAgeCopy(id: "ses_arch_v2_newer", v1Archived: nil, v2Archived: 4000, v2Updated: 3500)
+
+        let ids = try XCTUnwrap(OpenCodeSqliteReader.listSessionsIfReadable(customRoot: dbURL.path)).map(\.id)
+        XCTAssertFalse(ids.contains("ses_arch_v2"), "archiving in OpenCode 2.x must hide the stale v1 copy")
+        XCTAssertFalse(ids.contains("ses_arch_v2_newer"))
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_arch_v2"))
+        XCTAssertTrue(full.events.contains { $0.text == "v2 copy" }, "list and load pick the same store")
+    }
+
+    func testSessionArchivedOnlyInV1StaysHiddenAndLoadsFromV1() throws {
+        try createV1Tables()
+        try createV2Tables()
+        try insertSameAgeCopy(id: "ses_arch_v1", v1Archived: 4000, v2Archived: nil)
+
+        let ids = try XCTUnwrap(OpenCodeSqliteReader.listSessionsIfReadable(customRoot: dbURL.path)).map(\.id)
+        XCTAssertFalse(ids.contains("ses_arch_v1"), "the unarchived v2 copy must not resurface it")
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_arch_v1"))
+        XCTAssertTrue(full.events.contains { $0.text == "v1 copy" })
+    }
+
+    func testUnreadableV1StoreFailsTheListInsteadOfHidingV1Sessions() throws {
+        // A v1 `session` table the list query cannot read (here: no title or
+        // directory column) must not look like an empty v1 store.
+        try exec("""
+        CREATE TABLE session (id TEXT PRIMARY KEY, time_updated INTEGER NOT NULL, time_archived INTEGER);
+        INSERT INTO session VALUES ('ses_hidden_v1', 1000, NULL);
+        """)
+        try createV2Tables()
+        try insertNativeV2Session()
+
+        XCTAssertNil(OpenCodeSqliteReader.listSessionsIfReadable(customRoot: dbURL.path))
+    }
+
+    func testAssistantStepWithoutTokensMakesUsageUnavailable() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_no_tokens', 'ses_native', 'assistant', 10, 9070, 9070,
+            '{"time":{"created":9070},"agent":"build","model":{"id":"m","providerID":"p"},"content":[{"type":"text","text":"x"}]}');
+        """)
+
+        let telemetry = try await telemetry(for: "ses_native")
+        XCTAssertNotNil(telemetry.usageSummary?.unavailableReason,
+                        "a step without usage evidence must not leave the other steps' sum looking complete")
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 0)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+    }
+
+    func testAssistantStepWithMalformedTokensMakesUsageUnavailable() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_bad_tokens', 'ses_native', 'assistant', 10, 9070, 9070,
+            '{"time":{"created":9070},"agent":"build","model":{"id":"m","providerID":"p"},"content":[],"tokens":{"input":"12","output":1}}');
+        """)
+
+        let telemetry = try await telemetry(for: "ses_native")
+        XCTAssertNotNil(telemetry.usageSummary?.unavailableReason)
+        XCTAssertTrue(telemetry.usageEvents.isEmpty)
+    }
+
+    func testCompactionUsageCountsAndCompactionWithoutUsageDoesNot() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_compact_used', 'ses_native', 'compaction', 10, 9070, 9070,
+            '{"time":{"created":9070},"status":"completed","reason":"auto","summary":"s","recent":"r","model":{"id":"deepseek-v4.1-flash-free","providerID":"opencode"},"tokens":{"input":20,"output":4,"reasoning":0,"cache":{"read":0,"write":0}}}');
+        INSERT INTO session_message VALUES ('msg_compact_free', 'ses_native', 'compaction', 11, 9080, 9080,
+            '{"time":{"created":9080},"status":"completed","reason":"manual","summary":"s","recent":"r"}');
+        """)
+
+        let telemetry = try await telemetry(for: "ses_native")
+        XCTAssertNil(telemetry.usageSummary?.unavailableReason)
+        XCTAssertEqual(telemetry.usageEvents.count, 3)
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 171 + 24)
+    }
+
+    func testFileOnlyAndMixedUserTurnsAreVisible() throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_file_only', 'ses_native', 'user', 10, 9070, 9070,
+            '{"time":{"created":9070},"text":"","files":[{"mime":"image/png","name":"/Users/me/Shot 1.png","data":"iVBORw0KGgo="}],"agents":[]}');
+        INSERT INTO session_message VALUES ('msg_mixed', 'ses_native', 'user', 11, 9080, 9080,
+            '{"time":{"created":9080},"text":"match this layout","files":[{"mime":"application/pdf","name":"spec.pdf","data":"JVBERi0="}],"agents":[]}');
+        """)
+
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        let users = full.events.filter { $0.kind == .user }
+        XCTAssertTrue(users.contains { $0.text == "[Attached: Shot 1.png]" })
+        XCTAssertTrue(users.contains { $0.text == "match this layout\n\n[Attached: spec.pdf]" })
+        XCTAssertFalse(users.contains { ($0.text ?? "").isEmpty }, "no empty user turns")
+        XCTAssertTrue(full.events.contains { $0.kind == .meta && $0.text == "[OpenCode part: file]" },
+                      "the attachment payload stays available as metadata")
+    }
+
+    func testAssistantContentKeepsItsOrderWithinOneStep() throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_ordered', 'ses_native', 'assistant', 10, 9070, 9070,
+            '{"time":{"created":9070},"agent":"build","model":{"id":"m","providerID":"p"},"content":[{"type":"text","text":"first I look"},{"type":"tool","id":"call_ls","name":"shell","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.txt"}]},"time":{"created":9071,"completed":9072}},{"type":"text","text":"then I answer"}],"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}');
+        """)
+
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        let step = full.events.filter { $0.messageID == "msg_ordered" || $0.messageID == "call_ls" }
+            .filter { $0.kind != .meta }
+        XCTAssertEqual(step.map(\.kind), [.assistant, .tool_call, .tool_result, .assistant])
+        XCTAssertEqual(step.first?.text, "first I look")
+        XCTAssertEqual(step.last?.text, "then I answer")
+    }
+
+    func testCancelledV2LoadReturnsNilInsteadOfAPartialTranscript() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        let path = dbURL.path
+
+        let task = Task.detached { () -> Session? in
+            // The sleep throws once the task is cancelled; the load then runs
+            // with Task.isCancelled already true.
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: "ses_native")
+        }
+        task.cancel()
+        let result = await task.value
+        XCTAssertNil(result)
+        XCTAssertNotNil(OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: "ses_native"),
+                        "the same load succeeds when not cancelled")
+    }
+
     func testV1UserMessageWithObjectDiffsKeepsItsPrompt() throws {
         // OpenCode stores summary.diffs as {file, patch} objects. Decoding them
         // as strings used to drop the whole user message.
@@ -224,6 +360,28 @@ final class OpenCodeV2StoreTests: XCTestCase {
     }
 
     // MARK: - Fixture
+
+    private func telemetry(for id: String) async throws -> SessionTelemetry {
+        let engine = SessionTelemetryEngine(priceTable: RunwayPriceTable(loadBundled: true, readCache: false))
+        let value = await engine.telemetry(for: selected(id))
+        return try XCTUnwrap(value)
+    }
+
+    /// A migrated session present in both stores with the same time_updated
+    /// (3000) unless `v2Updated` says otherwise.
+    private func insertSameAgeCopy(id: String, v1Archived: Int?, v2Archived: Int?, v2Updated: Int = 3000) throws {
+        let v1Archive = v1Archived.map(String.init) ?? "NULL"
+        let v2Archive = v2Archived.map(String.init) ?? "NULL"
+        try exec("""
+        INSERT INTO session VALUES (\(sql(id)), 'proj', NULL, 's', '/tmp/repo', 'Copy', '1.19.3', 1000, 3000, \(v1Archive), NULL);
+        INSERT INTO message VALUES (\(sql(id + "_m")), \(sql(id)), 1000, 1000, '{"role":"user","time":{"created":1000}}');
+        INSERT INTO part VALUES (\(sql(id + "_p")), \(sql(id + "_m")), \(sql(id)), 1000, 1000, '{"type":"text","text":"v1 copy"}');
+        INSERT INTO session_v2 (id, project_id, slug, directory, title, version, time_created, time_updated, time_archived)
+        VALUES (\(sql(id)), 'proj', 's', '/tmp/repo', 'Copy', '1.19.3', 1000, \(v2Updated), \(v2Archive));
+        INSERT INTO session_message VALUES (\(sql(id + "_m")), \(sql(id)), 'user', 0, 1000, 1000,
+            '{"time":{"created":1000},"text":"v2 copy"}');
+        """)
+    }
 
     private func selected(_ id: String) -> Session {
         Session(id: id, source: .opencode, startTime: nil, endTime: nil, model: nil,
