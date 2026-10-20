@@ -551,7 +551,7 @@
       <tr class="primary"><td class="name">Cursor</td><td class="surf">Agents Window &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Antigravity</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">GitHub Copilot</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
-      <tr><td class="name">OpenCode</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">OpenCode<em>2.x in 6.0</em></td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Pi</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Hermes</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
       <tr><td class="name">Kimi Code</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
@@ -608,9 +608,10 @@
         <div class="copy">
           <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M4 16h16"/><path d="m12 16 4-4.5"/><circle cx="12" cy="16" r="1.3" fill="currentColor" stroke="none"/></svg></div>
           <h3 style="font-size:28px;">Quota Meter</h3>
-          <p>How fast each session burns <em>your</em> plan — and how much you have left. Quota Meter reads your Codex and Claude 5-hour and weekly limits alongside active-session burn, so one glance shows which sessions use your quota and when each limit resets. Three ways to keep it in view:</p>
+          <p>How fast each session burns <em>your</em> plan — and how much you have left. Quota Meter reads your Codex and Claude 5-hour and weekly limits alongside active-session burn, so one glance shows which sessions use your quota and when each limit resets. Keep it in view:</p>
           <ul class="blist">
-            <li><b>Always-on widget</b> — a tiny window that keeps your Codex &amp; Claude 5h / weekly runway on screen.</li>
+            <li><b>In the notch</b> — weekly Codex and Claude levels sit beside the MacBook camera, or at the top center of a display without a notch. Hover to open the full meter with session burn; move away and it folds back.</li>
+            <li><b>Always-on widget</b> — or keep it as a tiny desktop window with your Codex &amp; Claude 5h / weekly runway on screen.</li>
             <li><b>Session Runway</b> — per-session burn bars show active Codex usage. Weekly local estimates include archived session history and show pace without a run-out time.</li>
             <li><b>Priced per model</b> — the <code>$</code> lens rates each model in a session separately, so an Opus orchestrator driving Sonnet subagents is costed at what each actually runs at rather than blended into one number.</li>
             <li><b>Run-out predictions</b> — freshness-aware ETAs where the measured quota data supports them.</li>
@@ -618,8 +619,8 @@
           </ul>
         </div>
         <div class="shots">
-          <img src="assets/quota-meter-session-burn.png"
-               alt="Quota Meter showing weekly burn rates for active Codex sessions and a Claude session">
+          <video src="assets/quota-meter-notch.mp4" autoplay muted loop playsinline
+                 aria-label="Quota Meter in the MacBook notch: weekly Codex and Claude levels beside the camera open into the full meter with per-session burn rates on hover"></video>
         </div>
       </div>
     </div>
