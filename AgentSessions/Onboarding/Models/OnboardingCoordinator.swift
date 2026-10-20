@@ -210,6 +210,13 @@ final class OnboardingCoordinator: ObservableObject {
     /// The one-time notch intro dialog on screen, with its buttons. nil when not shown.
     @Published var notchIntroVariant: NotchIntroVariant?
 
+    /// The intro has been decided for this launch (shown or ruled out); later triggers are
+    /// ignored so it never interrupts work. Launch-scoped here because the list pane remounts.
+    var notchIntroSettledThisLaunch = false
+    /// First evaluation with a ready audience and nothing blocking; starts the short window
+    /// in which late-arriving sessions may still bring the intro up.
+    var notchIntroAudienceReadyAt: Date?
+
     /// The Quota Meter card appeared this launch. Kept here, not in the top slot's view
     /// state, because the list pane remounts (layout and transcript toggles) and would
     /// forget it, letting the notch intro show in the same launch as the card.

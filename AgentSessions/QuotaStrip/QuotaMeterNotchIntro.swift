@@ -32,11 +32,36 @@ struct NotchIntroInput: Equatable {
     var quotaMeterCardOnScreen: Bool
 }
 
+/// What the launch does with the intro at one evaluation.
+enum NotchIntroDecision: Equatable {
+    case show(NotchIntroVariant)
+    /// Not yet: evaluate again on the next trigger.
+    case wait
+    /// Decided for this launch: no more evaluations, so the dialog never interrupts work later.
+    case settle
+}
+
 /// The one-time notch intro: who sees it and with which buttons. Spec:
 /// docs/superpowers/specs/2026-10-12-quota-meter-notch-design.md, "Notch intro".
 enum QuotaMeterNotchIntro {
     /// Set the moment the dialog appears, and by any user placement change before it.
     static let shownKey = "QuotaMeterNotchIntroShown"
+
+    /// How long after the audience is first ready, with nothing blocking, late-arriving Codex
+    /// or Claude sessions may still bring the dialog up. After that it would interrupt work.
+    static let lateSessionWindow: TimeInterval = 60
+
+    /// `secondsSinceAudienceReady` counts from the first evaluation that had a ready audience
+    /// and no blocking surface (nil before that), so a long setup window does not use it up.
+    static func decision(for input: NotchIntroInput, secondsSinceAudienceReady: TimeInterval?) -> NotchIntroDecision {
+        if input.alreadyShown || input.quotaMeterCardOnScreen { return .settle }
+        guard input.audienceReady, !input.blockingSurfaceOpen, let elapsed = secondsSinceAudienceReady else {
+            return .wait
+        }
+        guard elapsed <= lateSessionWindow else { return .settle }
+        if let variant = variant(for: input) { return .show(variant) }
+        return .wait
+    }
 
     /// nil means "not now": either never (already shown, no Codex or Claude sessions) or not
     /// yet (audience unknown, another surface on screen, the Quota Meter card holds the launch).

@@ -354,6 +354,40 @@ final class QuotaMeterNotchIntroTests: XCTestCase {
         XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(codexTracking: false, notchHidden: true)), .turnOnTracking)
     }
 
+    // MARK: When the decision settles for this launch
+
+    func testEligibleUserIsShown() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(), secondsSinceAudienceReady: 0), .show(.moveToNotch))
+    }
+
+    func testAudienceNotReadyWaits() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(audienceReady: false), secondsSinceAudienceReady: nil), .wait)
+    }
+
+    func testBlockingSurfaceWaitsEvenAfterWindow() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(blockingSurfaceOpen: true), secondsSinceAudienceReady: 600), .wait)
+    }
+
+    func testNoSessionsWaitsBrieflyForLateSessions() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(hasCodex: false), secondsSinceAudienceReady: 10), .wait)
+    }
+
+    func testNoSessionsSettlesAfterWindow() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(hasCodex: false), secondsSinceAudienceReady: 61), .settle)
+    }
+
+    func testLateSessionsAfterWindowAreIgnored() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(), secondsSinceAudienceReady: 61), .settle)
+    }
+
+    func testAlreadyShownSettles() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(alreadyShown: true), secondsSinceAudienceReady: 0), .settle)
+    }
+
+    func testQuotaMeterCardSettles() {
+        XCTAssertEqual(QuotaMeterNotchIntro.decision(for: input(quotaMeterCardOnScreen: true), secondsSinceAudienceReady: 0), .settle)
+    }
+
     func testShownKeyIsStable() {
         XCTAssertEqual(QuotaMeterNotchIntro.shownKey, "QuotaMeterNotchIntroShown")
     }

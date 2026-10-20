@@ -244,7 +244,11 @@ appearances. No intro text inside the picture.
    not block it).
 
 **When.** As soon as both hold after launch: the moment the app opens for an
-update, right after the setup window closes for a fresh install.
+update, right after the setup window closes for a fresh install. Codex or
+Claude sessions that reach the index within 60 s of that moment still count;
+after that the decision is settled for the launch, so the dialog never pops up
+mid-session (for example the first time someone runs Codex hours later, or
+after Help → Power Tips closes).
 
 **Once.** A new key, `QuotaMeterNotchIntroShown`, is set the moment the
 dialog appears, so quitting or ignoring it never brings it back. No version

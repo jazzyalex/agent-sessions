@@ -92,7 +92,8 @@ struct OnboardingListTopSlot: View {
     }
 
     private func evaluateNotchIntro() {
-        guard coordinator.notchIntroVariant == nil, TopSlotDebugOverride.current == nil else { return }
+        guard coordinator.notchIntroVariant == nil, !coordinator.notchIntroSettledThisLaunch,
+              TopSlotDebugOverride.current == nil else { return }
         let input = NotchIntroInput(
             alreadyShown: UserDefaults.standard.bool(forKey: QuotaMeterNotchIntro.shownKey),
             audienceReady: audienceReady,
@@ -105,8 +106,18 @@ struct OnboardingListTopSlot: View {
             blockingSurfaceOpen: coordinator.presentation != nil || coordinator.isWhatsNewPanelPresented,
             quotaMeterCardOnScreen: selectedCard == .quotaMeter || coordinator.quotaMeterCardShownThisLaunch
         )
-        if let variant = QuotaMeterNotchIntro.variant(for: input) {
+        if input.audienceReady, !input.blockingSurfaceOpen, coordinator.notchIntroAudienceReadyAt == nil {
+            coordinator.notchIntroAudienceReadyAt = Date()
+        }
+        let elapsed = coordinator.notchIntroAudienceReadyAt.map { Date().timeIntervalSince($0) }
+        switch QuotaMeterNotchIntro.decision(for: input, secondsSinceAudienceReady: elapsed) {
+        case .show(let variant):
+            coordinator.notchIntroSettledThisLaunch = true
             coordinator.presentNotchIntro(variant)
+        case .settle:
+            coordinator.notchIntroSettledThisLaunch = true
+        case .wait:
+            break
         }
     }
 
