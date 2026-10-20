@@ -748,6 +748,74 @@
         }
       }
     },
+    "Codex and Claude limits sit beside the camera. Hover to open the full Quota Meter with live session burn; move away and it folds back. Choose Notch, Desktop or Automatic in Settings.": {
+      "comment": "Body for the Agent Sessions 6.0 What's New highlight about the Quota Meter in the notch. Notch, Desktop and Automatic are the placement options in Settings.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex and Claude limits sit beside the camera. Hover to open the full Quota Meter with live session burn; move away and it folds back. Choose Notch, Desktop or Automatic in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 和 Claude 的额度显示在摄像头旁。悬停即可打开完整的额度监视器，查看实时会话消耗；移开指针后它会收起。可在设置中选择刘海、桌面或自动。"
+          }
+        }
+      }
+    },
+    "OpenCode 2.x sessions": {
+      "comment": "Title for the Agent Sessions 6.0 What's New highlight about reading sessions from OpenCode 2.0 and later.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode 2.x sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode 2.x 会话"
+          }
+        }
+      }
+    },
+    "Sessions started in OpenCode 2.0 and later now appear in the list, and sessions carried over from 1.x keep their full history.": {
+      "comment": "Body for the Agent Sessions 6.0 What's New highlight about OpenCode 2.x sessions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessions started in OpenCode 2.0 and later now appear in the list, and sessions carried over from 1.x keep their full history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 OpenCode 2.0 及更高版本中开始的会话现在会出现在列表中，从 1.x 迁移过来的会话也会保留完整历史。"
+          }
+        }
+      }
+    },
+    "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list.": {
+      "comment": "One-line teaser for the Agent Sessions 6.0 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器移入刘海，OpenCode 2.x 会话也加入了列表。"
+          }
+        }
+      }
+    },
     "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.": {
       "comment": "One-line teaser for the Agent Sessions 5.7 What's New card. Session Info is the product feature name.",
       "localizations": {

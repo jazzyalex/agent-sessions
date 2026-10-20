@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.7/AgentSessions-5.7.dmg"><b>Download Agent Sessions 5.7</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg"><b>Download Agent Sessions 6.0</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -33,6 +33,16 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 6.0
+
+<p align="center">
+  <img src="https://jazzyalex.github.io/agent-sessions/assets/quota-meter-notch-small.gif" alt="Quota Meter in the MacBook notch: Codex and Claude weekly levels beside the camera open into the full meter with per-session burn rates on hover" width="480"/>
+</p>
+
+- **Quota Meter in the notch.** Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back. Pick Notch, Desktop or Automatic, and Wings or Minimal, in Settings.
+- **OpenCode 2.x sessions.** Sessions started in OpenCode 2.0 and later now reach the list, and sessions carried over from 1.x keep their full history.
+- **Also:** the notch takes over the menu bar limits item, free models read as Free in Session Info, and OpenCode prompts that recorded file changes no longer go missing.
 
 ## What's New in 5.7
 
@@ -127,7 +137,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-5.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.7/AgentSessions-5.7.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-6.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 

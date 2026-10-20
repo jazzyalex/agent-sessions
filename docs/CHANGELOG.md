@@ -4,9 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **Quota Meter in the notch.** Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back.
+- **OpenCode 2.x sessions.** OpenCode 2.0 keeps new sessions in a new store, so they never reached the list. They do now, and sessions carried over from 1.x keep their full history.
+
+### Features
+
+- **Notch, Desktop or Automatic.** Pick where the Quota Meter lives in Settings, the View menu or its toolbar. Automatic uses the notch on the MacBook display and the desktop window on external monitors.
+- **Wings or Minimal.** Wings shows both agents beside the notch; Minimal draws two thin bars under it and leaves the menu bar free. Right-click the open notch for its toolbar.
+
 ### Improvements
 
+- **The notch takes over the menu bar limits item.** If you used it, the Quota Meter moves to the notch, and a click on the notch opens the same menu. Desktop setups stay as they are, with a one-time offer to try the notch.
 - **Free models read as Free.** A session that ran only on free models with no published API price, such as OpenCode's Big Pickle or a `-free` route, shows Free in Session Info instead of a dash.
+
+### Bug Fixes
+
+- **OpenCode prompts no longer go missing.** A message that recorded file changes failed to load, which hid its prompt from the transcript.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- The support matrix verifies OpenCode 2.1.1 and monitors the 2.x session store.
 
 ## [5.7] - 2026-10-14
 

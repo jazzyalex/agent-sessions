@@ -116,10 +116,33 @@ enum WhatsNewCatalog {
         "5.4": "Cline CLI and Cline Desktop join the lineup, with local sessions you can browse and search in one place.",
         "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories.",
         "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.",
-        "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents."
+        "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.",
+        "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.0": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "macbook",
+                title: "Quota Meter in the notch",
+                body: "Codex and Claude limits sit beside the camera. Hover to open the full Quota Meter with live session burn; move away and it folds back. Choose Notch, Desktop or Automatic in Settings."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "square.stack.3d.up",
+                title: "OpenCode 2.x sessions",
+                body: "Sessions started in OpenCode 2.0 and later now appear in the list, and sessions carried over from 1.x keep their full history."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.7": [
             WhatsNewItem(
                 kind: .highlight,
