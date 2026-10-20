@@ -165,10 +165,44 @@ def capture_opencode(dest_root: Path) -> list[CaptureResult]:
     return results
 
 
+def _export_latest_opencode_v2_session(conn: sqlite3.Connection, db_path: Path) -> dict | None:
+    """OpenCode 2.x: newest session_v2 row and its session_message rows, or None
+    when the database has no 2.x store or a 1.x build wrote the newest session."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table';")}
+    if not {"session_v2", "session_message"} <= tables:
+        return None
+    row = conn.execute(
+        """
+        SELECT id, project_id, parent_id, slug, directory, title, version, time_created, time_updated
+        FROM session_v2
+        WHERE time_archived IS NULL
+        ORDER BY time_updated DESC
+        LIMIT 1;
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    if "session" in tables:
+        v1_newest = conn.execute("SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;").fetchone()[0]
+        if v1_newest is not None and v1_newest > row["time_updated"]:
+            return None
+    messages = [
+        {"id": r["id"], "type": r["type"], "seq": r["seq"], "data": json.loads(r["data"])}
+        for r in conn.execute(
+            "SELECT id, type, seq, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT 50;",
+            (row["id"],),
+        )
+    ]
+    return {"backend": "sqlite", "store": "session_v2", "db": str(db_path), "session": dict(row), "messages": messages}
+
+
 def _export_latest_opencode_sqlite_session(db_path: Path) -> dict:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        v2 = _export_latest_opencode_v2_session(conn, db_path)
+        if v2 is not None:
+            return v2
         row = conn.execute(
             """
             SELECT id, project_id, parent_id, slug, directory, title, version, time_created, time_updated

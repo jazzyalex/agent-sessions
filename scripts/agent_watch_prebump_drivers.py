@@ -676,6 +676,24 @@ class CopilotPromptDriver:
 DRIVERS["copilot_prompt"] = CopilotPromptDriver()
 
 
+def _opencode_major_version(env: dict[str, str]) -> int:
+    """Major version of the installed `opencode` (`opencode v2.1.1` -> 2); 1 when unknown."""
+    try:
+        proc = subprocess.run(
+            ["opencode", "--version"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 1
+    match = re.search(r"(\d+)\.\d+\.\d+", proc.stdout or "")
+    return int(match.group(1)) if match else 1
+
+
 class OpenCodeRunDriver:
     name = "opencode_run"
 
@@ -689,21 +707,22 @@ class OpenCodeRunDriver:
         env["XDG_DATA_HOME"] = str(data_home)
         env["XDG_CONFIG_HOME"] = str(config_home)
         env["XDG_STATE_HOME"] = str(state_home)
+        # Config `prebump.model` picks a provider whose sign-in works.
+        model_args = ["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []
+        if _opencode_major_version(env) >= 2:
+            # OpenCode 2.x removed --pure and --dir. Its default `run` connects
+            # to a per-user background service on a fixed port, which collides
+            # with the owner's live service and would outlive the sandbox;
+            # --standalone runs a private server for this one invocation.
+            # --auto approves the tool call that keeps the sample from being thin.
+            argv = ["opencode", "run", "--standalone", "--auto", "--format", "json", *model_args, prompt]
+        else:
+            argv = ["opencode", "run", "--pure", "--format", "json", "--dir", str(sandbox), *model_args, prompt]
         run_started = time.time()
         try:
             proc = subprocess.run(
-                [
-                    "opencode",
-                    "run",
-                    "--pure",
-                    "--format",
-                    "json",
-                    "--dir",
-                    str(sandbox),
-                    # Config `prebump.model` picks a provider whose sign-in works.
-                    *(["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []),
-                    prompt,
-                ],
+                argv,
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

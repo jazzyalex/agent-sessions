@@ -3877,6 +3877,30 @@ def _opencode_fixture_file_schema_fingerprint(path: Path) -> dict[str, Any]:
         return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 0}
 
     p = str(path).replace("\\", "/")
+    # OpenCode 2.x SQLite rows: one file per session_v2 row, and one per
+    # session_message row stored as {"type": <row type>, "data": <data JSON>}.
+    if "/sqlite_v2/session_v2/" in p:
+        return {
+            "file": str(path),
+            "type_counts": {"session_v2": 1},
+            "type_keys": {"session_v2": sorted(k for k, v in obj.items() if v is not None)},
+            "parse_errors": 0,
+        }
+    if "/sqlite_v2/session_message/" in p:
+        data = obj.get("data")
+        if not isinstance(data, dict):
+            return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 1}
+        keys: dict[str, set[str]] = {}
+        counts: dict[str, int] = {}
+        for bucket, bucket_obj in _opencode_v2_message_buckets(str(obj.get("type") or ""), data):
+            counts[bucket] = counts.get(bucket, 0) + 1
+            keys.setdefault(bucket, set()).update(k for k, v in bucket_obj.items() if v is not None)
+        return {
+            "file": str(path),
+            "type_counts": {k: counts[k] for k in sorted(counts)},
+            "type_keys": {k: sorted(keys[k]) for k in sorted(keys)},
+            "parse_errors": 0,
+        }
     if "/storage_v2/session/" in p or "/storage_legacy/session/" in p:
         event_type = "session"
     elif "/storage_v2/message/" in p:
@@ -4353,6 +4377,108 @@ def _devin_sqlite_latest_session_schema_fingerprint(
     }
 
 
+def _opencode_v2_message_buckets(row_type: str, data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """
+    Schema buckets for one OpenCode 2.x `session_message` row.
+
+    2.x stores a session as typed rows (user, assistant step, shell, system,
+    compaction, idle, ...) whose `data` JSON nests the interesting structure:
+    an assistant step's `content` array holds text/reasoning/tool items and each
+    tool item has a `state` whose shape depends on its status. Bucket those
+    levels separately so drift inside them is visible. Tool `input` and
+    `metadata` stay opaque: they are tool-defined, not OpenCode format.
+    Used for both the live database and the fixture files, so the two sides
+    always share one alphabet.
+    """
+    kind = row_type or "unknown"
+    buckets: list[tuple[str, dict[str, Any]]] = [(f"session_message.{kind}", data)]
+    if kind == "assistant":
+        for item in data.get("content") or []:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type") if isinstance(item.get("type"), str) else "unknown"
+            buckets.append((f"session_message.assistant.content.{item_type}", item))
+            state = item.get("state")
+            if item_type == "tool" and isinstance(state, dict):
+                status = state.get("status") if isinstance(state.get("status"), str) else "unknown"
+                buckets.append((f"session_message.assistant.tool_state.{status}", state))
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict):
+            buckets.append(("session_message.assistant.tokens", tokens))
+    elif kind == "user":
+        for item in data.get("files") or []:
+            if isinstance(item, dict):
+                buckets.append(("session_message.user.file", item))
+    return buckets
+
+
+def _opencode_v2_store_fingerprint(
+    conn: sqlite3.Connection, db_path: Path, *, max_messages: int
+) -> dict[str, Any] | None:
+    """
+    Fingerprint the newest OpenCode 2.x session from session_v2 + session_message.
+
+    Returns None when the database has no 2.x store, or when its newest v1
+    session is newer than its newest 2.x session (a 1.x build is writing).
+    """
+    tables = {
+        str(r[0])
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table';").fetchall()
+    }
+    if not {"session_v2", "session_message"} <= tables:
+        return None
+    v2_row = conn.execute(
+        "SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT 1;"
+    ).fetchone()
+    if v2_row is None:
+        return None
+    if "session" in tables:
+        v1_newest = conn.execute(
+            "SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;"
+        ).fetchone()[0]
+        if v1_newest is not None and v1_newest > v2_row["time_updated"]:
+            return None
+
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors = 0
+    rows_parsed = 0
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, v in obj.items():
+            if v is not None:
+                ks.add(k)
+
+    _add("session_v2", {k: v2_row[k] for k in v2_row.keys()})
+    rows = conn.execute(
+        "SELECT type, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT ?;",
+        (v2_row["id"], max(0, int(max_messages))),
+    ).fetchall()
+    for row in rows:
+        try:
+            data = json.loads(str(row["data"]))
+        except Exception:
+            parse_errors += 1
+            continue
+        if not isinstance(data, dict):
+            continue
+        for bucket, obj in _opencode_v2_message_buckets(str(row["type"]), data):
+            _add(bucket, obj)
+        rows_parsed += 1
+    return {
+        "file": str(db_path),
+        "store": "session_v2",
+        "session_version": v2_row["version"],
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "message_rows_parsed": rows_parsed,
+        "part_rows_parsed": 0,
+        "parse_errors": parse_errors,
+    }
+
+
 def _opencode_sqlite_latest_session_schema_fingerprint(
     db_path: Path, *, max_messages: int, max_parts: int
 ) -> dict[str, Any]:
@@ -4392,6 +4518,11 @@ def _opencode_sqlite_latest_session_schema_fingerprint(
         }
 
     try:
+        # OpenCode 2.x writes new sessions only to session_v2/session_message
+        # (the v1 tables stay, frozen). Sample the store being written.
+        v2_fp = _opencode_v2_store_fingerprint(conn, db_path, max_messages=max_messages)
+        if v2_fp is not None:
+            return v2_fp
         session_row = conn.execute(
             """
             SELECT id, project_id, parent_id, slug, directory, title, version,

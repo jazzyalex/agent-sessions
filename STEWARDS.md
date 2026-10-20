@@ -85,7 +85,7 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 | Claude Code | @jazzyalex (maintainer) | 2026-10-12 · 2.1.296 | Maintained |
 | Cursor Agent | steward wanted | 2026-08-13 · 2026.8.11 | Best-effort |
 | GitHub Copilot CLI | steward wanted | 2026-10-13 · 1.0.97 | Best-effort |
-| OpenCode | steward wanted | 2026-10-13 · 1.19.0 | Best-effort |
+| OpenCode | steward wanted | 2026-10-20 · 2.1.1 | Best-effort |
 | Antigravity CLI | steward wanted | 2026-08-13 · 1.1.12 | Best-effort |
 | Pi | steward wanted | 2026-10-13 · 1.1.0 | Best-effort |
 | Kimi Code | steward wanted | 2026-08-17 · 0.36.1 | Best-effort |

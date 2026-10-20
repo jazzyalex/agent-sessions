@@ -622,9 +622,27 @@ the legacy JSON tree when no database is present.
 - **Migration flags:** look for `version`, `migration`, `schema_version` fields in
   session records or new migration files in the OpenCode repo.
 
+### OpenCode 2.x (2026-10)
+OpenCode 2.0 keeps the v1 `session`/`message`/`part` tables in `opencode.db`, frozen, and
+writes new sessions only to `session_v2` + `session_message` (typed rows ordered by `seq`:
+user, assistant step, shell, system, synthetic, skill, compaction, idle, ...). It also copies
+v1 sessions into the v2 tables with the same IDs, and that copy can drop assistant steps of
+older sessions, which is why the app reads a v2 row only when it is newer than its v1 row.
+- Upstream is npm `@opencode/cli`; GitHub Releases stop at 1.19.3 even though v2 tags exist.
+- `opencode run` in 2.x has no `--pure`/`--dir`, and by default talks to a per-user
+  background service on a fixed port. The `opencode_run` driver passes `--standalone --auto`
+  on 2.x so the sandbox gets a private server that cannot collide with the owner's live one.
+- The fingerprint buckets are `session_v2`, `session_message.<type>`,
+  `session_message.assistant.content.<item>`, `session_message.assistant.tool_state.<status>`,
+  `session_message.assistant.tokens` and `session_message.user.file` (see
+  `_opencode_v2_message_buckets`). The baseline is `Resources/Fixtures/stage0/agents/opencode/sqlite_v2/`,
+  built from every 2.x row on disk with values redacted. When a 2.x sample is clean, all v1
+  buckets show under `missing_keys`; that is expected, not drift.
+
 ### Detection in agent_watch.py
-- `opencode_storage_latest_session` checks `db_roots` first and fingerprints
-  `session`, `message`, and `part` rows from `opencode.db`.
+- `opencode_latest_session` fingerprints the newest 2.x session from `session_v2` +
+  `session_message` when that store holds the newest session; otherwise it checks
+  `db_roots` and fingerprints `session`, `message`, and `part` rows from `opencode.db`.
 - If no database is present, `_opencode_storage_session_tree_schema_fingerprint()`
   walks the legacy JSON tree for a session and reports keys per record kind.
 - Risk keywords in `docs/agent-support/agent-watch-config.json` still flag release notes mentioning

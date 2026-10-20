@@ -1,0 +1,142 @@
+{
+  "data": {
+    "agent": "redacted",
+    "content": [
+      {
+        "native": {
+          "anthropic": {
+            "redactedData": "redacted",
+            "signature": "redacted"
+          },
+          "openai": {
+            "itemId": "redacted",
+            "reasoningEncryptedContent": "redacted"
+          },
+          "reasoningField": "redacted",
+          "xai": {
+            "itemId": "redacted",
+            "reasoningEncryptedContent": "redacted"
+          }
+        },
+        "text": "redacted",
+        "time": {
+          "completed": 0,
+          "created": 0
+        },
+        "type": "reasoning"
+      },
+      {
+        "native": {
+          "openai": {
+            "itemId": "redacted",
+            "phase": "redacted"
+          }
+        },
+        "text": "redacted",
+        "type": "text"
+      },
+      {
+        "executed": false,
+        "id": "redacted",
+        "name": "todowrite",
+        "native": {
+          "anthropic": {
+            "caller": {
+              "type": "direct"
+            }
+          },
+          "openai": {
+            "itemId": "redacted"
+          }
+        },
+        "state": {
+          "content": [
+            {
+              "text": "redacted",
+              "type": "text"
+            }
+          ],
+          "input": {},
+          "metadata": {},
+          "status": "completed"
+        },
+        "time": {
+          "completed": 0,
+          "created": 0,
+          "ran": 0
+        },
+        "type": "tool"
+      },
+      {
+        "executed": false,
+        "id": "redacted",
+        "name": "todowrite",
+        "native": {
+          "anthropic": {
+            "caller": {
+              "type": "direct"
+            }
+          },
+          "openai": {
+            "itemId": "redacted"
+          }
+        },
+        "state": {
+          "content": [
+            {
+              "text": "redacted",
+              "type": "text"
+            }
+          ],
+          "error": {
+            "message": "redacted",
+            "type": "tool.execution"
+          },
+          "input": {},
+          "metadata": {},
+          "status": "error"
+        },
+        "time": {
+          "completed": 0,
+          "created": 0,
+          "ran": 0
+        },
+        "type": "tool"
+      }
+    ],
+    "cost": 0,
+    "error": {
+      "message": "redacted",
+      "type": "provider.error"
+    },
+    "finish": "stop",
+    "model": {
+      "id": "redacted",
+      "providerID": "redacted",
+      "variant": "redacted"
+    },
+    "rawFinish": "redacted",
+    "snapshot": {
+      "end": "redacted",
+      "files": [
+        "redacted"
+      ],
+      "start": "redacted"
+    },
+    "time": {
+      "completed": 0,
+      "created": 0,
+      "streamed": 0
+    },
+    "tokens": {
+      "cache": {
+        "read": 0,
+        "write": 0
+      },
+      "input": "redacted",
+      "output": 0,
+      "reasoning": 0
+    }
+  },
+  "type": "assistant"
+}

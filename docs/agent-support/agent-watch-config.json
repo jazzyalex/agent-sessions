@@ -121,7 +121,11 @@
       "installed_version_cmd": ["opencode", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.opencode.max_verified_version",
       "upstream": [
-        { "kind": "github_latest_release", "repo": "anomalyco/opencode" }
+        {
+          "kind": "npm_latest",
+          "package": "@opencode/cli",
+          "note": "OpenCode 2.x ships as npm @opencode/cli. GitHub Releases stopped at 1.19.3 although v2.x tags exist, and the old opencode-ai package stays on 1.x."
+        }
       ],
       "risk_keywords": {
         "schema": ["storage", "migration", "schema", "format", "json", "jsonl", "session", "sqlite", "bolt", "bbolt", "badger", "database", "db"],
@@ -153,9 +157,9 @@
       },
       "prebump": {
         "driver": "opencode_run",
-        "model": "openai/gpt-6-luna",
+        "model": "opencode/deepseek-v4.1-flash-free",
         "sandbox": {"mode": "home_override", "subdir": "opencode_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Use the shell tool to run pwd, then say hello in one sentence.",
         "timeout_seconds": 180,
         "env_vars": [
           "ANTHROPIC_API_KEY",

@@ -10,6 +10,17 @@
 #
 entries:
   - agent_sessions_version: "5.6-unreleased"
+    as_of_date_utc: "2026-10-20"
+    as_of_commit: "545a0f69+working-tree"
+    note: "OpenCode 2.x check. 2.x stores sessions in new session_v2/session_message tables; the app reader (c4e21e01, 2badae02, cc7870c0) and monitoring now cover them."
+    verified:
+      opencode:
+        sessions:
+          max_verified_version: "2.1.1"
+          scope: "latest; installed and upstream (npm @opencode/cli) both 2.1.1"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261020-215234-201674Z-p42358-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261020-215312-323639Z-p42511/report.json"]
+          notes: "Fresh 2.1.1 standalone session with a shell tool call matches the new sqlite_v2 baseline (0 unknown types/keys); weekly samples session_v2 and reports supports_latest. Upstream source moved from GitHub releases (stopped at 1.19.3) to npm @opencode/cli. Driver uses --standalone --auto on 2.x and model opencode/deepseek-v4.1-flash-free (openai/gpt-6-luna has no route in 2.x). Value pass: assistant tokens/cost/model handled (telemetry); compaction tokens handled; content `native` provider state is noise; session_v2 time_idle/time_viewed/idle_outcome are watch."
+  - agent_sessions_version: "5.6-unreleased"
     as_of_date_utc: "2026-10-13"
     as_of_commit: "6467bbe0+working-tree"
     note: "Format check after driver fixes for Pi, OpenCode and Antigravity and the owner's Grok and Hermes sign-ins. Five agents have fresh matching sessions."

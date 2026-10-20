@@ -1,0 +1,25 @@
+{
+  "data": {
+    "agents": [],
+    "files": [
+      {
+        "data": "",
+        "mention": {
+          "end": 0,
+          "start": 0,
+          "text": "redacted"
+        },
+        "mime": "redacted",
+        "name": "fixture.png",
+        "source": {
+          "type": "inline"
+        }
+      }
+    ],
+    "text": "redacted",
+    "time": {
+      "created": 0
+    }
+  },
+  "type": "user"
+}

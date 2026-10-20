@@ -61,11 +61,18 @@ def _write_hermes_state_db(path: Path, *, marker: str | None, started_at: float,
         conn.close()
 
 
+def _opencode_version(argv, version):
+    import subprocess as _sp
+    return _sp.CompletedProcess(argv, 0, stdout=f"opencode v{version}\n", stderr="")
+
+
 def test_opencode_driver_runs_and_returns_storage_session(tmp_path):
     sb = tmp_path / "sb"
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        if argv == ["opencode", "--version"]:
+            return _opencode_version(argv, "1.19.3")
         assert argv[:5] == ["opencode", "run", "--pure", "--format", "json"]
         assert "--dir" in argv
         assert env is not None
@@ -96,6 +103,8 @@ def test_opencode_driver_accepts_current_sqlite_store(tmp_path):
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        if argv == ["opencode", "--version"]:
+            return _opencode_version(argv, "1.19.3")
         assert env is not None
         db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
         db.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +117,36 @@ def test_opencode_driver_accepts_current_sqlite_store(tmp_path):
 
     assert res.ok is True
     assert res.session_path == sb / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def test_opencode_2x_driver_runs_standalone_in_the_sandbox(tmp_path):
+    # 2.x removed --pure/--dir, and its default background service listens on a
+    # fixed port shared with the owner's live OpenCode.
+    sb = tmp_path / "sb"
+    sb.mkdir()
+    seen = {}
+
+    def fake_run(argv, *, env=None, cwd=None, **kwargs):
+        if argv == ["opencode", "--version"]:
+            return _opencode_version(argv, "2.1.1")
+        seen["argv"], seen["cwd"] = argv, cwd
+        db = Path(env["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        db.write_bytes(b"SQLite format 3\x00")
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    env = {"HOME": str(sb), "AGENT_WATCH_MODEL": "opencode/deepseek-v4.1-flash-free"}
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        res = drv_mod.DRIVERS["opencode_run"].run(sb, env, "Say hi.", timeout=30)
+
+    assert res.ok is True
+    assert seen["argv"] == [
+        "opencode", "run", "--standalone", "--auto", "--format", "json",
+        "--model", "opencode/deepseek-v4.1-flash-free", "Say hi.",
+    ]
+    assert "--pure" not in seen["argv"] and "--dir" not in seen["argv"]
+    assert seen["cwd"] == str(sb)
 
 
 def test_openclaw_driver_runs_and_returns_session_jsonl(tmp_path):
