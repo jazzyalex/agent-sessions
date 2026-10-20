@@ -4405,6 +4405,15 @@ def _opencode_v2_message_buckets(row_type: str, data: dict[str, Any]) -> list[tu
         tokens = data.get("tokens")
         if isinstance(tokens, dict):
             buckets.append(("session_message.assistant.tokens", tokens))
+        # Structures the app reads for usage and model attribution get their
+        # own buckets, so a rename inside them (cache.read, model.id) is drift
+        # rather than an unchanged outer key.
+        cache = tokens.get("cache") if isinstance(tokens, dict) else None
+        if isinstance(cache, dict):
+            buckets.append(("session_message.assistant.tokens.cache", cache))
+        model = data.get("model")
+        if isinstance(model, dict):
+            buckets.append(("session_message.assistant.model", model))
     elif kind == "user":
         for item in data.get("files") or []:
             if isinstance(item, dict):
@@ -4419,7 +4428,10 @@ def _opencode_v2_store_fingerprint(
     Fingerprint the newest OpenCode 2.x session from session_v2 + session_message.
 
     Returns None when the database has no 2.x store, or when its newest v1
-    session is newer than its newest 2.x session (a 1.x build is writing).
+    session is at least as new as its newest 2.x session. OpenCode copies v1
+    sessions into session_v2 with the same time_updated, and that copy can drop
+    assistant steps, so an equal timestamp means "untouched migrated copy" and
+    the original v1 rows are the faithful sample (same rule as the app reader).
     """
     tables = {
         str(r[0])
@@ -4436,7 +4448,8 @@ def _opencode_v2_store_fingerprint(
         v1_newest = conn.execute(
             "SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;"
         ).fetchone()[0]
-        if v1_newest is not None and v1_newest > v2_row["time_updated"]:
+        v2_updated = v2_row["time_updated"]
+        if v1_newest is not None and (v2_updated is None or v1_newest >= v2_updated):
             return None
 
     type_keys: dict[str, set[str]] = {}
@@ -4463,6 +4476,9 @@ def _opencode_v2_store_fingerprint(
             parse_errors += 1
             continue
         if not isinstance(data, dict):
+            # Valid JSON that is not an object (`[]`, `null`, a scalar) is as
+            # unreadable to the app as invalid JSON.
+            parse_errors += 1
             continue
         for bucket, obj in _opencode_v2_message_buckets(str(row["type"]), data):
             _add(bucket, obj)
@@ -4474,6 +4490,9 @@ def _opencode_v2_store_fingerprint(
         "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "message_rows_parsed": rows_parsed,
+        # Physical rows, so nested buckets do not inflate the thin-sample and
+        # nonempty-observation gates. A session header alone counts as zero.
+        "parsed_messages": rows_parsed,
         "part_rows_parsed": 0,
         "parse_errors": parse_errors,
     }
@@ -4822,6 +4841,21 @@ def _schema_diff(
         "observed_event_count": observed_event_count,
         "is_empty": (not unknown_types and not missing_types and not unknown_keys and not missing_keys),
     }
+
+
+def _weekly_schema_matches(schema_diff: dict[str, Any], fingerprint: dict[str, Any]) -> bool:
+    """
+    Weekly schema verdict: no unknown types/keys AND no unreadable records.
+
+    Unreadable records can hide drift, so a sample with parse errors is not
+    schema-clean whatever its readable keys say. Records the count in
+    `schema_diff["parse_errors"]`. A fingerprint with no integer count is
+    treated as zero errors, as before.
+    """
+    raw = fingerprint.get("parse_errors")
+    parse_errors = raw if isinstance(raw, int) and raw >= 0 else 0
+    schema_diff["parse_errors"] = parse_errors
+    return bool(schema_diff.get("unknown_only_is_empty")) and parse_errors == 0
 
 
 def _prebump_schema_check(
@@ -6816,7 +6850,7 @@ def main(argv: list[str]) -> int:
                                 baseline_type_keys=baseline_type_keys,
                                 observed_event_count=_observed_event_count(local_fp),
                             )
-                        schema_matches_baseline = bool(schema_diff.get("unknown_only_is_empty"))
+                        schema_matches_baseline = _weekly_schema_matches(schema_diff, local_fp)
                         if kind == "deepseek_harness_sessions":
                             weekly_schema_diff = schema_diff
                         weekly_details["baseline_schema"] = {

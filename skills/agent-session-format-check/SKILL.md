@@ -634,14 +634,22 @@ older sessions, which is why the app reads a v2 row only when it is newer than i
   on 2.x so the sandbox gets a private server that cannot collide with the owner's live one.
 - The fingerprint buckets are `session_v2`, `session_message.<type>`,
   `session_message.assistant.content.<item>`, `session_message.assistant.tool_state.<status>`,
-  `session_message.assistant.tokens` and `session_message.user.file` (see
+  `session_message.assistant.tokens`, `session_message.assistant.tokens.cache`,
+  `session_message.assistant.model` and `session_message.user.file` (see
   `_opencode_v2_message_buckets`). The baseline is `Resources/Fixtures/stage0/agents/opencode/sqlite_v2/`,
-  built from every 2.x row on disk with values redacted. When a 2.x sample is clean, all v1
-  buckets show under `missing_keys`; that is expected, not drift.
+  built from every 2.x row on disk with values redacted; `test_v2_fixture_values_follow_the_redaction_policy`
+  allows only placeholders and discriminators. When a 2.x sample is clean, all v1 buckets show
+  under `missing_keys`; that is expected, not drift.
+- The 2.x store is sampled only when its newest session is strictly newer than the newest v1
+  one. Equal timestamps mean an untouched migrated copy, which can be lossy, so v1 is sampled.
+- The prebump requires `session_message.user`, `session_message.assistant` and
+  `session_message.assistant.tool_state.completed`, and counts physical rows: a session header
+  alone, or a reply without a completed tool call, fails. Non-object or invalid `data` rows are
+  parse errors, which fail both the prebump and (for every agent) the weekly schema verdict.
 
 ### Detection in agent_watch.py
 - `opencode_latest_session` fingerprints the newest 2.x session from `session_v2` +
-  `session_message` when that store holds the newest session; otherwise it checks
+  `session_message` when that store holds a strictly newer session; otherwise it checks
   `db_roots` and fingerprints `session`, `message`, and `part` rows from `opencode.db`.
 - If no database is present, `_opencode_storage_session_tree_schema_fingerprint()`
   walks the legacy JSON tree for a session and reports keys per record kind.

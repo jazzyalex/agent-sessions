@@ -160,6 +160,11 @@
         "model": "opencode/deepseek-v4.1-flash-free",
         "sandbox": {"mode": "home_override", "subdir": "opencode_sandbox"},
         "prompt": "Use the shell tool to run pwd, then say hello in one sentence.",
+        "required_schema_buckets": [
+          "session_message.user",
+          "session_message.assistant",
+          "session_message.assistant.tool_state.completed"
+        ],
         "timeout_seconds": 180,
         "env_vars": [
           "ANTHROPIC_API_KEY",

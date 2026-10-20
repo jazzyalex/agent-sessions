@@ -184,16 +184,33 @@ def _export_latest_opencode_v2_session(conn: sqlite3.Connection, db_path: Path) 
         return None
     if "session" in tables:
         v1_newest = conn.execute("SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;").fetchone()[0]
-        if v1_newest is not None and v1_newest > row["time_updated"]:
+        # Equal time_updated is an untouched migrated copy, which can be lossy;
+        # the original v1 rows are the faithful export (same rule as agent_watch).
+        v2_updated = row["time_updated"]
+        if v1_newest is not None and (v2_updated is None or v1_newest >= v2_updated):
             return None
-    messages = [
-        {"id": r["id"], "type": r["type"], "seq": r["seq"], "data": json.loads(r["data"])}
-        for r in conn.execute(
-            "SELECT id, type, seq, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT 50;",
-            (row["id"],),
-        )
-    ]
-    return {"backend": "sqlite", "store": "session_v2", "db": str(db_path), "session": dict(row), "messages": messages}
+    messages = []
+    for r in conn.execute(
+        "SELECT id, type, seq, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT 50;",
+        (row["id"],),
+    ):
+        entry = {"id": r["id"], "type": r["type"], "seq": r["seq"]}
+        # One malformed row must not cost the whole review export: keep it raw
+        # and flagged, since malformed data is exactly what a reviewer needs.
+        try:
+            entry["data"] = json.loads(r["data"])
+        except (TypeError, ValueError) as exc:
+            entry["parse_error"] = str(exc)
+            entry["raw_data"] = r["data"]
+        messages.append(entry)
+    return {
+        "backend": "sqlite",
+        "store": "session_v2",
+        "db": str(db_path),
+        "session": dict(row),
+        "messages": messages,
+        "parse_errors": sum(1 for m in messages if "parse_error" in m),
+    }
 
 
 def _export_latest_opencode_sqlite_session(db_path: Path) -> dict:
