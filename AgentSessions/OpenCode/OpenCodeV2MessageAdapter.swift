@@ -88,7 +88,13 @@ enum OpenCodeV2MessageAdapter {
                 "status": data["status"] ?? "completed",
                 "input": ["command": data["command"] ?? ""],
             ]
-            if let output = data["output"] { state["output"] = output }
+            // Shell output is a page object {output, cursor, size, truncated}
+            // (packages/schema/src/shell.ts); show its text, not the wrapper.
+            if let page = data["output"] as? [String: Any] {
+                if let text = page["output"] as? String { state["output"] = text }
+            } else if let text = data["output"] as? String {
+                state["output"] = text
+            }
             if let exit = data["exit"] { state["metadata"] = ["exit": exit] }
             var stateTime: [String: Any] = [:]
             if let created { stateTime["start"] = created }

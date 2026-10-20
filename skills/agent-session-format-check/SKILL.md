@@ -654,7 +654,13 @@ older sessions, which is why the app reads a v2 row only when it is newer than i
   `required_field_violations` and as a parse error.
 - Parse errors (invalid JSON, non-object `data`, required-field violations) fail the prebump
   and, for every agent, the weekly schema verdict. They are summed across all sampled sessions,
-  and a clean prebump cannot replace a weekly verdict whose own sample has parse errors.
+  a clean prebump cannot replace a weekly verdict whose own sample has parse errors, and the
+  compatibility verdict reports them as `format_drift_detected` with the
+  `sample_unreadable_records` blocker. Qwen's glued-object lines, which the app parser
+  recovers, count as `tolerated_glued_lines`, not parse errors (`_GLUED_OBJECT_AGENTS`).
+- Row types and `session_v2` columns the app handles but the disk has not produced yet (the
+  `shell` row; fork, share, revert and workspace columns) are seeded in the fixture from the
+  upstream schema, so their first appearance is not reported as drift.
 
 ### Detection in agent_watch.py
 - `opencode_latest_session` fingerprints the newest 2.x session from `session_v2` +

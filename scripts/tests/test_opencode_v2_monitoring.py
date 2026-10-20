@@ -141,7 +141,7 @@ def test_committed_v2_fixture_matches_a_clean_v2_sample(tmp_path):
     db = tmp_path / "opencode.db"
     _write_db(db, v1_updated=100, v2_updated=200)
     fixtures = sorted(str(p) for p in FIXTURE_ROOT.rglob("*.json"))
-    assert len(fixtures) == 7
+    assert len(fixtures) == 8
 
     baseline = agent_watch._baseline_type_keys_for_agent("opencode", fixtures)
     sample = agent_watch._opencode_sqlite_latest_session_schema_fingerprint(db, max_messages=250, max_parts=2500)
@@ -497,6 +497,79 @@ def test_weekly_parse_errors_block_a_clean_prebump_substitution(tmp_path):
     assert agent_watch._prebump_may_replace_weekly_verdict(None) is True
 
 
+def _assess(**overrides):
+    args = dict(
+        verified="2.1.1", installed="2.1.1", upstream="2.1.1", upstream_sources_configured=True,
+        upstream_errors=[], installed_newer_than_verified=False, upstream_newer_than_verified=False,
+        monitoring_failed=False, schema_matches_baseline=False,
+        schema_diff={"unknown_only_is_empty": True, "parse_errors": 3, "coverage_ratio": 1.0,
+                     "observed_event_count": 100},
+        sample_freshness={"is_stale": False}, fresh_evidence_source="latest_prebump_report",
+        probe_failed=False, real_session_driver_configured=True,
+    )
+    args.update(overrides)
+    return agent_watch._build_compatibility_assessment(**args)
+
+
+def test_unreadable_weekly_sample_blocks_supports_latest_even_with_a_clean_prebump():
+    # The reviewer's reproduction: steady state, clean prebump report on disk,
+    # current weekly sample has 3 unreadable records and no unknown keys.
+    weekly = {"unknown_only_is_empty": True, "parse_errors": 3, "coverage_ratio": 1.0, "observed_event_count": 100}
+    result = _assess(weekly_schema_diff=weekly)
+
+    assert result["verdict"] == "format_drift_detected"
+    assert "sample_unreadable_records" in result["blockers"]
+    assert result["supports_latest"] is False
+    assert result["supports_installed"] is False
+    assert "unreadable records" in result["next_action"]
+
+
+def test_unreadable_sample_without_a_prebump_names_its_cause():
+    result = _assess(fresh_evidence_source=None, installed_newer_than_verified=True, verified="2.1.0")
+    assert result["verdict"] == "format_drift_detected"
+    assert "sample_unreadable_records" in result["blockers"]
+
+
+def test_readable_sample_with_a_clean_prebump_still_supports_latest():
+    clean = {"unknown_only_is_empty": True, "parse_errors": 0, "coverage_ratio": 1.0, "observed_event_count": 100}
+    result = _assess(schema_matches_baseline=True, schema_diff=clean, weekly_schema_diff=clean)
+    assert result["verdict"] == "supports_latest"
+    assert "sample_unreadable_records" not in result["blockers"]
+
+
+def _qwen_glued_fixture() -> Path:
+    return REPO / "Resources" / "Fixtures" / "stage0" / "agents" / "qwen" / "019f0000-0000-7000-8000-000000000005.jsonl"
+
+
+def test_qwen_glued_objects_are_tolerated_like_the_app_parser(tmp_path):
+    fp = agent_watch._schema_fingerprint_for_agent("qwen", _qwen_glued_fixture(), 5000)
+    assert fp["parse_errors"] == 0
+    assert fp["tolerated_glued_lines"] == 1
+    assert sum(fp["type_counts"].values()) == 2, "both glued objects are fingerprinted"
+
+    schema_diff = {"unknown_only_is_empty": True}
+    assert agent_watch._weekly_schema_matches(schema_diff, fp) is True
+
+
+def test_glued_line_with_junk_stays_a_parse_error(tmp_path):
+    line = _qwen_glued_fixture().read_text(encoding="utf-8").strip()
+    first, second = (json.dumps(o) for o in agent_watch._glued_json_objects(line))
+    for bad in (f"junk{line}", f"{line}junk", f"{first}junk{second}", f"{first} [1]"):
+        path = tmp_path / f"{abs(hash(bad))}.jsonl"
+        path.write_text(bad + "\n", encoding="utf-8")
+        fp = agent_watch._schema_fingerprint_for_agent("qwen", path, 5000)
+        assert fp["parse_errors"] == 1, bad
+        assert fp["tolerated_glued_lines"] == 0, bad
+
+
+def test_glued_lines_are_parse_errors_for_agents_whose_parser_does_not_recover_them(tmp_path):
+    path = tmp_path / "rollout.jsonl"
+    path.write_text('{"type":"a"}{"type":"b"}\n', encoding="utf-8")
+    fp = agent_watch._schema_fingerprint_for_agent("claude", path, 5000)
+    assert fp["parse_errors"] == 1
+    assert fp["tolerated_glued_lines"] == 0
+
+
 def test_parse_errors_in_a_later_sampled_session_reach_the_merged_fingerprint():
     first = {"file": "/s/newest.jsonl", "parse_errors": 0, "type_keys": {}}
     second = {"file": "/s/older.jsonl", "parse_errors": 2, "type_keys": {}}
@@ -566,9 +639,9 @@ _FIXTURE_PLACEHOLDERS = {"redacted", "fixture.png", "fixture", "/tmp/fixture", "
 _FIXTURE_DISCRIMINATOR_VALUES = {
     "type": {
         "assistant", "compaction", "direct", "idle", "inline", "provider.error", "reasoning",
-        "synthetic", "system", "text", "tool", "tool.execution", "user",
+        "shell", "synthetic", "system", "text", "tool", "tool.execution", "user",
     },
-    "status": {"completed", "error"},
+    "status": {"completed", "error", "exited"},
     "reason": {"auto"},
     "outcome": {"succeeded"},
     "finish": {"stop"},
@@ -586,7 +659,35 @@ _FIXTURE_KEYS = {
     "summary_additions", "summary_deletions", "summary_files", "text", "time", "time_created", "time_idle",
     "time_updated", "time_viewed", "title", "tokens", "tokens_cache_read", "tokens_cache_write",
     "tokens_input", "tokens_output", "tokens_reasoning", "type", "variant", "version", "write", "xai",
+    # shell rows
+    "command", "cursor", "exit", "shellID", "size", "truncated",
+    # session_v2 columns that are NULL on the owner's disk but exist in the schema
+    "fork_boundary", "fork_session_id", "permission", "revert", "share_url", "summary_diffs",
+    "time_compacting", "time_suspended", "workspace_id",
 }
+
+
+def test_shell_row_and_schema_only_session_columns_are_not_drift(tmp_path):
+    # The app renders shell rows and these columns exist upstream; neither had
+    # appeared on the owner's disk when the fixture was built.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200, rows_override=[
+        ("msg_u", "user", 0, {"time": {"created": 1}, "text": "hi", "files": [], "agents": []}),
+        ("msg_sh", "shell", 1, {"time": {"created": 2, "completed": 3}, "shellID": "sh_1", "command": "ls",
+                                "status": "exited", "exit": 0,
+                                "output": {"output": "a.txt", "cursor": 5, "size": 5, "truncated": False}}),
+    ])
+    fp = _fingerprint(db)
+    schema_diff = agent_watch._schema_diff(
+        observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
+        observed_event_count=agent_watch._observed_event_count(fp),
+    )
+    assert "session_message.shell" in fp["type_keys"]
+    assert schema_diff["unknown_types"] == [] and schema_diff["unknown_keys"] == {}
+
+    baseline = _baseline()
+    for column in ("fork_session_id", "fork_boundary", "share_url", "revert", "workspace_id", "time_suspended"):
+        assert column in baseline["session_v2"], column
 
 
 def _fixture_string_violations(value, key=None, path="$"):
@@ -611,7 +712,7 @@ def _fixture_string_violations(value, key=None, path="$"):
 
 def test_v2_fixture_values_follow_the_redaction_policy():
     files = sorted(FIXTURE_ROOT.rglob("*.json"))
-    assert len(files) == 7
+    assert len(files) == 8
     violations = []
     for path in files:
         obj = json.loads(path.read_text(encoding="utf-8"))

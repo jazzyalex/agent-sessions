@@ -1,0 +1,19 @@
+{
+  "data": {
+    "command": "redacted",
+    "exit": 0,
+    "output": {
+      "cursor": 0,
+      "output": "redacted",
+      "size": 0,
+      "truncated": false
+    },
+    "shellID": "redacted",
+    "status": "exited",
+    "time": {
+      "completed": 0,
+      "created": 0
+    }
+  },
+  "type": "shell"
+}

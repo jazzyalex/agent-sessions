@@ -589,6 +589,44 @@ def test_run_prebump_config_gate_empty_roots(tmp_path, monkeypatch, capsys):
     assert "roots" in err
 
 
+def test_run_prebump_config_gate_rejects_both_required_bucket_forms(tmp_path, monkeypatch, capsys):
+    """A per-store map and a single list together are ambiguous: exit 4, not a silent winner."""
+    import agent_watch
+    import agent_watch_prebump_drivers as drv_mod
+
+    monkeypatch.setitem(drv_mod.DRIVERS, "fake", _FakeGoodDriver())
+    cfg = _make_codex_cfg(tmp_path)
+    cfg["agents"]["codex"]["prebump"]["required_schema_buckets"] = ["session_meta"]
+    cfg["agents"]["codex"]["prebump"]["required_schema_buckets_by_store"] = {"legacy": ["session_meta"]}
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.chdir(REPO)
+    rc = agent_watch.main([
+        "--mode", "prebump", "--config", str(cfg_path),
+        "--agent", "codex", "--keep-sandbox",
+    ])
+    assert rc == 4
+    assert "not both" in capsys.readouterr().err
+
+
+def test_run_prebump_config_gate_rejects_malformed_store_map(tmp_path, monkeypatch, capsys):
+    import agent_watch
+    import agent_watch_prebump_drivers as drv_mod
+
+    monkeypatch.setitem(drv_mod.DRIVERS, "fake", _FakeGoodDriver())
+    cfg = _make_codex_cfg(tmp_path)
+    cfg["agents"]["codex"]["prebump"]["required_schema_buckets_by_store"] = {"legacy": "session_meta"}
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.chdir(REPO)
+    rc = agent_watch.main([
+        "--mode", "prebump", "--config", str(cfg_path),
+        "--agent", "codex", "--keep-sandbox",
+    ])
+    assert rc == 4
+    assert "required_schema_buckets_by_store" in capsys.readouterr().err
+
+
 def test_run_prebump_config_gate_allows_empty_required_types(tmp_path, monkeypatch):
     """A: valid contract with required_types: [] passes the gate
     (Copilot case — must not regress)."""

@@ -118,6 +118,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/synthetic.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/compaction.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle.json"
+      - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/shell.json"
   hermes:
     max_verified_version: "0.21.5"
     version_field: "not_logged"

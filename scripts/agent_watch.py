@@ -1254,12 +1254,48 @@ def _nested_bucket_walk(
             )
 
 
+# Agents whose writer can glue several JSON objects onto one physical line and
+# whose app parser recovers them (QwenJSONL.objects(inPhysicalLine:)). For these,
+# such a line is a tolerated format quirk, not an unreadable record.
+_GLUED_OBJECT_AGENTS = {"qwen"}
+
+_JSON_WHITESPACE = " \t\n\r"
+
+
+def _glued_json_objects(line: str) -> list[dict[str, Any]] | None:
+    """Split a line made only of whitespace-separated JSON objects.
+
+    Mirrors QwenJSONL.objects(inPhysicalLine:) in the app: every piece must be
+    a JSON object and nothing else may appear between or around them, so junk
+    anywhere rejects the whole line (None). One object is not "glued".
+    """
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    index = 0
+    while True:
+        while index < len(line) and line[index] in _JSON_WHITESPACE:
+            index += 1
+        if index == len(line):
+            break
+        if line[index] != "{":
+            return None
+        try:
+            obj, index = decoder.raw_decode(line, index)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(obj, dict):
+            return None
+        objects.append(obj)
+    return objects if len(objects) > 1 else None
+
+
 def _nested_jsonl_schema_fingerprint(
     path: Path,
     max_lines: int,
     max_depth: int = _NESTED_FINGERPRINT_MAX_DEPTH,
     opaque_keys: frozenset[str] = frozenset(),
     typed_list_keys: frozenset[str] = frozenset(),
+    glued_objects: bool = False,
 ) -> dict[str, Any]:
     """Like `_jsonl_schema_fingerprint`, but walks into nested payload wrappers.
 
@@ -1272,23 +1308,30 @@ def _nested_jsonl_schema_fingerprint(
     type_keys: dict[str, set[str]] = {}
     type_counts: dict[str, int] = {}
     parse_errors: int = 0
+    tolerated_glued_lines: int = 0
     total_lines: int = 0
 
     for raw in _tail_lines(path, max_lines):
         total_lines += 1
+        line = raw.strip()
         try:
-            obj = json.loads(raw.strip())
+            objs = [json.loads(line)]
         except json.JSONDecodeError:
-            parse_errors += 1
-            continue
-        if not isinstance(obj, dict):
-            continue
-        t = obj.get("type")
-        event_type = t if isinstance(t, str) and t else "<missing-type>"
-        type_counts[event_type] = type_counts.get(event_type, 0) + 1
-        _nested_bucket_walk(
-            event_type, obj, type_keys, 0, max_depth, opaque_keys, typed_list_keys
-        )
+            glued = _glued_json_objects(line) if glued_objects else None
+            if glued is None:
+                parse_errors += 1
+                continue
+            tolerated_glued_lines += 1
+            objs = glued
+        for obj in objs:
+            if not isinstance(obj, dict):
+                continue
+            t = obj.get("type")
+            event_type = t if isinstance(t, str) and t else "<missing-type>"
+            type_counts[event_type] = type_counts.get(event_type, 0) + 1
+            _nested_bucket_walk(
+                event_type, obj, type_keys, 0, max_depth, opaque_keys, typed_list_keys
+            )
 
     return {
         "file": str(path),
@@ -1296,6 +1339,7 @@ def _nested_jsonl_schema_fingerprint(
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "parsed_lines": total_lines,
         "parse_errors": parse_errors,
+        "tolerated_glued_lines": tolerated_glued_lines,
         "nested_depth": max_depth,
         "nested_opaque_keys": sorted(opaque_keys),
         "nested_typed_list_keys": sorted(typed_list_keys),
@@ -3325,6 +3369,7 @@ def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -
             max_lines=max_lines,
             opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get(agent_name, ())),
             typed_list_keys=frozenset(_NESTED_TYPED_LIST_KEYS.get(agent_name, ())),
+            glued_objects=agent_name in _GLUED_OBJECT_AGENTS,
         )
     return _jsonl_schema_fingerprint(path, max_lines=max_lines)
 
@@ -5809,6 +5854,17 @@ def _build_compatibility_assessment(
     unknown_schema_drift = (
         selected_schema_drift or weekly_schema_drift or failed_prebump_schema_drift
     )
+    # Unreadable records (invalid JSON, non-object rows, rows missing fields
+    # the reader needs) can hide drift. They block support claims on their own,
+    # whatever an older clean prebump says: the evidence-source string alone
+    # must not turn a failing current sample into supports_latest.
+    unreadable_records = any(
+        isinstance(d, dict) and isinstance(d.get("parse_errors"), int) and d["parse_errors"] > 0
+        for d in (schema_diff, weekly_schema_diff)
+    )
+    if unreadable_records:
+        fresh_schema_evidence = False
+        latest_real_session_evidence = False
     if fresh_schema_required:
         thin_sample = (
             isinstance(fresh_schema_diff, dict)
@@ -5828,7 +5884,9 @@ def _build_compatibility_assessment(
         blockers.append("probe_or_discovery_failed")
     if unknown_schema_drift:
         blockers.append("schema_unknowns_detected")
-    elif schema_matches_baseline is None:
+    if unreadable_records:
+        blockers.append("sample_unreadable_records")
+    if not (unknown_schema_drift or unreadable_records) and schema_matches_baseline is None:
         blockers.append("schema_baseline_not_checked")
     if sample_is_stale:
         blockers.append(str(sample_freshness.get("stale_reason") or "stale_sample"))
@@ -5869,11 +5927,17 @@ def _build_compatibility_assessment(
         supports_installed = False if installed else None
         supports_latest = False if upstream else None
         confidence = "high"
-    elif unknown_schema_drift:
+    elif unknown_schema_drift or unreadable_records:
         verdict = "format_drift_detected"
         scope = "none"
-        next_action = "triage schema unknowns, update fixtures/parsers, then rerun weekly/prebump"
+        next_action = (
+            "triage schema unknowns, update fixtures/parsers, then rerun weekly/prebump"
+            if unknown_schema_drift
+            else "inspect the sample's unreadable records (parse_errors, required_field_violations), "
+            "fix the parser or fingerprint, then rerun weekly/prebump"
+        )
         supports_latest = False if upstream else None
+        supports_installed = False if installed else None
         confidence = "high"
     elif sample_is_stale and (installed_newer_than_verified or upstream_newer_than_verified):
         verdict = "blocked_stale_sample"
@@ -6295,6 +6359,12 @@ def _run_prebump(
         ):
             _reasons.append(
                 "required_schema_buckets_by_store must map store names to lists of non-empty strings"
+            )
+        if "required_schema_buckets_by_store" in _pb and "required_schema_buckets" in _pb:
+            # The map silently wins in _required_schema_buckets_for; refuse the
+            # ambiguity instead of ignoring one of the lists.
+            _reasons.append(
+                "use either required_schema_buckets or required_schema_buckets_by_store, not both"
             )
         if "required_evidence_buckets" in _pb and (
             not isinstance(_required_evidence_buckets, list)

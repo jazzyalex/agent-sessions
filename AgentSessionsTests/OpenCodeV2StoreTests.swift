@@ -93,9 +93,10 @@ final class OpenCodeV2StoreTests: XCTestCase {
 
         let shell = try XCTUnwrap(visible.first { $0.kind == .tool_call && $0.toolName == "shell" })
         XCTAssertTrue((shell.toolInput ?? "").contains("git status"))
-        XCTAssertTrue(visible.contains {
-            $0.kind == .tool_result && $0.parentID == shell.id && ($0.toolOutput ?? "").contains("clean")
-        })
+        let shellResult = try XCTUnwrap(visible.first { $0.kind == .tool_result && $0.parentID == shell.id })
+        // 2.x stores shell output as a page object; the transcript shows its text.
+        XCTAssertEqual(shellResult.toolOutput, "nothing to commit, working tree clean\nExit Code: 0")
+        XCTAssertFalse((shellResult.toolOutput ?? "").contains("cursor"))
 
         XCTAssertFalse(visible.contains { ($0.text ?? "").contains("The available tools have changed") },
                        "system rows are model-facing context, not conversation")
@@ -517,7 +518,7 @@ final class OpenCodeV2StoreTests: XCTestCase {
             ("msg_native_a2", "assistant", 3, 9030,
              #"{"time":{"created":9030,"completed":9040},"agent":"build","model":\#(model),"content":[{"type":"text","text":"Big Pickle is still listed."}],"finish":"stop","cost":0,"tokens":{"input":50,"output":3,"reasoning":1,"cache":{"read":0,"write":0}}}"#),
             ("msg_native_sh", "shell", 4, 9050,
-             #"{"time":{"created":9050,"completed":9051},"shellID":"sh_1","command":"git status","status":"completed","exit":0,"output":"nothing to commit, working tree clean"}"#),
+             #"{"time":{"created":9050,"completed":9051},"shellID":"sh_1","command":"git status","status":"exited","exit":0,"output":{"output":"nothing to commit, working tree clean","cursor":37,"size":37,"truncated":false}}"#),
             ("msg_native_idle", "idle", 5, 9060,
              #"{"time":{"created":9060},"outcome":"succeeded"}"#),
         ]
