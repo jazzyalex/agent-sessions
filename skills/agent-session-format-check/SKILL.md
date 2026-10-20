@@ -642,10 +642,19 @@ older sessions, which is why the app reads a v2 row only when it is newer than i
   under `missing_keys`; that is expected, not drift.
 - The 2.x store is sampled only when its newest session is strictly newer than the newest v1
   one. Equal timestamps mean an untouched migrated copy, which can be lossy, so v1 is sampled.
-- The prebump requires `session_message.user`, `session_message.assistant` and
-  `session_message.assistant.tool_state.completed`, and counts physical rows: a session header
-  alone, or a reply without a completed tool call, fails. Non-object or invalid `data` rows are
-  parse errors, which fail both the prebump and (for every agent) the weekly schema verdict.
+- The prebump's required buckets depend on the store the fresh session landed in
+  (`required_schema_buckets_by_store`): 2.x needs `session_message.user`,
+  `session_message.assistant` and `session_message.assistant.tool_state.completed`; 1.x needs
+  `message.user`, `message.assistant` and `part.tool`. It counts physical rows, so a session
+  header alone, or a reply without a completed tool call, fails.
+- Every v2 bucket has a `.shape` companion (`<key>:<json type>`), so a type change such as
+  `model` becoming a string is an unknown key, not just a missing nested bucket. Fields the app
+  reader needs (`user.text`, `assistant.model.id`, the five token counts, a tool's `id`, `name`
+  and `state.status`) are checked on every row; a row missing one is counted in
+  `required_field_violations` and as a parse error.
+- Parse errors (invalid JSON, non-object `data`, required-field violations) fail the prebump
+  and, for every agent, the weekly schema verdict. They are summed across all sampled sessions,
+  and a clean prebump cannot replace a weekly verdict whose own sample has parse errors.
 
 ### Detection in agent_watch.py
 - `opencode_latest_session` fingerprints the newest 2.x session from `session_v2` +

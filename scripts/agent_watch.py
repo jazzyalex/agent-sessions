@@ -3216,6 +3216,7 @@ def _dsh_merge_fingerprints(
         }
         for fingerprint in fingerprints
     ]
+    _merge_sampled_parse_errors(merged, fingerprints)
     return merged
 
 
@@ -4418,7 +4419,72 @@ def _opencode_v2_message_buckets(row_type: str, data: dict[str, Any]) -> list[tu
         for item in data.get("files") or []:
             if isinstance(item, dict):
                 buckets.append(("session_message.user.file", item))
-    return buckets
+    # Key names alone cannot see a type change: `model` turning from an object
+    # into a string keeps the key and drops the nested bucket, which reads as
+    # "not observed" rather than drift. Each bucket therefore gets a `.shape`
+    # companion whose keys are "<key>:<json type>", so a new type is a new key.
+    shaped: list[tuple[str, dict[str, Any]]] = []
+    for bucket, obj in buckets:
+        shaped.append((bucket, obj))
+        shaped.append((f"{bucket}.shape", {f"{k}:{_json_type_name(v)}": True for k, v in obj.items() if v is not None}))
+    return shaped
+
+
+def _json_type_name(value: Any) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "null"
+
+
+def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) -> list[str]:
+    """
+    Fields the app's 2.x reader depends on that are missing or of the wrong type.
+
+    Additive drift shows up as unknown keys; a *removed* field does not, because
+    a key absent from a sample only reads as "not observed". These are the
+    fields whose loss breaks transcript rendering or usage accounting, so
+    their absence counts as an unreadable record instead.
+    """
+    problems: list[str] = []
+
+    def number(obj: Any, key: str) -> bool:
+        value = obj.get(key) if isinstance(obj, dict) else None
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    if row_type == "user":
+        if not isinstance(data.get("text"), str):
+            problems.append("user.text")
+    elif row_type == "assistant":
+        model = data.get("model")
+        if not isinstance(model, dict) or not isinstance(model.get("id"), str):
+            problems.append("assistant.model.id")
+        if not isinstance(data.get("content"), list):
+            problems.append("assistant.content")
+        tokens = data.get("tokens")
+        for key in ("input", "output", "reasoning"):
+            if not number(tokens, key):
+                problems.append(f"assistant.tokens.{key}")
+        cache = tokens.get("cache") if isinstance(tokens, dict) else None
+        for key in ("read", "write"):
+            if not number(cache, key):
+                problems.append(f"assistant.tokens.cache.{key}")
+        for item in data.get("content") or []:
+            if not isinstance(item, dict) or item.get("type") != "tool":
+                continue
+            state = item.get("state")
+            if not isinstance(item.get("id"), str) or not isinstance(item.get("name"), str):
+                problems.append("assistant.tool.id_name")
+            if not isinstance(state, dict) or not isinstance(state.get("status"), str):
+                problems.append("assistant.tool.state.status")
+    return problems
 
 
 def _opencode_v2_store_fingerprint(
@@ -4456,6 +4522,7 @@ def _opencode_v2_store_fingerprint(
     type_counts: dict[str, int] = {}
     parse_errors = 0
     rows_parsed = 0
+    required_field_violations: dict[str, int] = {}
 
     def _add(event_type: str, obj: dict[str, Any]) -> None:
         type_counts[event_type] = type_counts.get(event_type, 0) + 1
@@ -4480,6 +4547,12 @@ def _opencode_v2_store_fingerprint(
             # unreadable to the app as invalid JSON.
             parse_errors += 1
             continue
+        violations = _opencode_v2_required_field_violations(str(row["type"]), data)
+        if violations:
+            # The row parses but the reader cannot use it; gate it like a parse error.
+            parse_errors += 1
+            for problem in violations:
+                required_field_violations[problem] = required_field_violations.get(problem, 0) + 1
         for bucket, obj in _opencode_v2_message_buckets(str(row["type"]), data):
             _add(bucket, obj)
         rows_parsed += 1
@@ -4495,6 +4568,7 @@ def _opencode_v2_store_fingerprint(
         "parsed_messages": rows_parsed,
         "part_rows_parsed": 0,
         "parse_errors": parse_errors,
+        "required_field_violations": dict(sorted(required_field_violations.items())),
     }
 
 
@@ -4856,6 +4930,57 @@ def _weekly_schema_matches(schema_diff: dict[str, Any], fingerprint: dict[str, A
     parse_errors = raw if isinstance(raw, int) and raw >= 0 else 0
     schema_diff["parse_errors"] = parse_errors
     return bool(schema_diff.get("unknown_only_is_empty")) and parse_errors == 0
+
+
+def _required_schema_buckets_for(prebump_cfg: dict[str, Any], fingerprint: dict[str, Any]) -> list[str] | None:
+    """
+    Required prebump buckets for the store the fresh session was written to.
+
+    `required_schema_buckets_by_store` maps a fingerprint's `store` to its
+    list; a fingerprint without `store` uses the "legacy" entry. OpenCode needs
+    this because one driver serves 1.x (message/part rows) and 2.x
+    (session_message rows), whose bucket names share nothing. Without the map,
+    `required_schema_buckets` applies as before.
+    """
+    by_store = prebump_cfg.get("required_schema_buckets_by_store")
+    if isinstance(by_store, dict):
+        store = fingerprint.get("store") if isinstance(fingerprint.get("store"), str) else "legacy"
+        selected = by_store.get(store)
+        return list(selected) if isinstance(selected, list) else []
+    return prebump_cfg.get("required_schema_buckets")
+
+
+def _merge_sampled_parse_errors(merged: dict[str, Any], sampled: list[dict[str, Any]]) -> None:
+    """
+    Sum parse errors over every sampled fingerprint into `merged`.
+
+    Multi-session sampling starts from the first fingerprint's dict, so without
+    this an unreadable record in any later sample would vanish from the union
+    and the weekly gate would see zero. Per-file counts are kept as evidence.
+    """
+    per_file: dict[str, int] = {}
+    total = 0
+    for fingerprint in sampled:
+        raw = fingerprint.get("parse_errors")
+        count = raw if isinstance(raw, int) and raw >= 0 else 0
+        total += count
+        if count:
+            per_file[str(fingerprint.get("file"))] = count
+    merged["parse_errors"] = total
+    merged["parse_errors_by_file"] = per_file
+
+
+def _prebump_may_replace_weekly_verdict(weekly_schema_diff: dict[str, Any] | None) -> bool:
+    """
+    A clean prebump proves the CLI writes parseable sessions; it says nothing
+    about unreadable records in the sessions weekly just sampled. When the
+    weekly sample has parse errors, keep its failing verdict instead of
+    substituting the older clean prebump result.
+    """
+    if not isinstance(weekly_schema_diff, dict):
+        return True
+    raw = weekly_schema_diff.get("parse_errors")
+    return not (isinstance(raw, int) and raw > 0)
 
 
 def _prebump_schema_check(
@@ -6146,6 +6271,20 @@ def _run_prebump(
             or any(not isinstance(item, str) or not item for item in _required_schema_buckets)
         ):
             _reasons.append("required_schema_buckets must be a list of non-empty strings")
+        _by_store = _pb.get("required_schema_buckets_by_store")
+        if "required_schema_buckets_by_store" in _pb and (
+            not isinstance(_by_store, dict)
+            or not _by_store
+            or any(
+                not isinstance(store, str) or not store
+                or not isinstance(buckets, list)
+                or any(not isinstance(item, str) or not item for item in buckets)
+                for store, buckets in _by_store.items()
+            )
+        ):
+            _reasons.append(
+                "required_schema_buckets_by_store must map store names to lists of non-empty strings"
+            )
         if "required_evidence_buckets" in _pb and (
             not isinstance(_required_evidence_buckets, list)
             or any(
@@ -6413,7 +6552,7 @@ def _run_prebump(
             schema_diff, fresh_matches = _prebump_schema_check(
                 fingerprint=fp,
                 baseline_type_keys=baseline_type_keys,
-                required_schema_buckets=pb.get("required_schema_buckets"),
+                required_schema_buckets=_required_schema_buckets_for(pb, fp),
                 required_evidence_buckets=pb.get("required_evidence_buckets"),
                 agent_name=agent_name,
             )
@@ -6720,6 +6859,7 @@ def main(argv: list[str]) -> int:
                                 for t, n in (fp.get("type_counts") or {}).items():
                                     merged_counts[t] = merged_counts.get(t, 0) + int(n)
                             local_fp["type_counts"] = dict(sorted(merged_counts.items()))
+                            _merge_sampled_parse_errors(local_fp, sampled_fps)
                         if local_fp is not None:
                             local_fp["sampled_files"] = [str(fp.get("file")) for fp in sampled_fps]
                 elif kind == "antigravity_markdown_newest":
@@ -7075,7 +7215,9 @@ def main(argv: list[str]) -> int:
                     if isinstance(prebump_sample, dict):
                         sample_freshness = dict(prebump_sample)
                         sample_freshness["mode_context"] = "latest_prebump_report"
-                    if prebump_evidence.get("schema_matches_baseline") is True:
+                    if prebump_evidence.get("schema_matches_baseline") is True and _prebump_may_replace_weekly_verdict(
+                        weekly_schema_diff
+                    ):
                         schema_matches_baseline = True
                         schema_diff = prebump_evidence.get("schema_diff") if isinstance(prebump_evidence.get("schema_diff"), dict) else schema_diff
                     fresh_evidence_available = True

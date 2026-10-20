@@ -6,6 +6,7 @@ prebump fingerprints must sample the store being written, and the committed
 sqlite_v2 fixture must describe it in the same buckets.
 """
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -179,9 +180,83 @@ PREBUMP_REQUIRED = [
 ]
 
 
-def test_configured_prebump_requires_user_assistant_and_completed_tool_buckets():
+LEGACY_REQUIRED = ["message.user", "message.assistant", "part.tool"]
+
+
+def _opencode_prebump_cfg() -> dict:
     cfg = json.loads((REPO / "docs" / "agent-support" / "agent-watch-config.json").read_text())
-    assert cfg["agents"]["opencode"]["prebump"]["required_schema_buckets"] == PREBUMP_REQUIRED
+    return cfg["agents"]["opencode"]["prebump"]
+
+
+def test_configured_prebump_requires_buckets_per_store():
+    pb = _opencode_prebump_cfg()
+    assert "required_schema_buckets" not in pb, "a single list cannot serve both 1.x and 2.x"
+    assert pb["required_schema_buckets_by_store"] == {"session_v2": PREBUMP_REQUIRED, "legacy": LEGACY_REQUIRED}
+
+
+def _write_v1_only_db(path: Path) -> None:
+    """A 1.x database: no 2.x tables, one tool-using session in message/part."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, directory TEXT,
+                title TEXT, version TEXT, time_created INTEGER, time_updated INTEGER,
+                time_archived INTEGER, summary_additions INTEGER, summary_deletions INTEGER,
+                summary_files INTEGER, summary_diffs TEXT
+            );
+            CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+            CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+            INSERT INTO session VALUES ('ses_1','p',NULL,'s','/tmp','t','1.19.3',1,2,NULL,NULL,NULL,NULL,NULL);
+            INSERT INTO message VALUES ('msg_u','ses_1',1,'{"role":"user","time":{"created":1}}');
+            INSERT INTO message VALUES ('msg_a','ses_1',2,'{"role":"assistant","time":{"created":2},"modelID":"m","providerID":"p"}');
+            INSERT INTO part VALUES ('prt_t','msg_a','ses_1',2,'{"type":"tool","tool":"bash","callID":"c1","state":{"status":"completed"}}');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _matrix_baseline() -> dict:
+    """The baseline the prebump really uses: every OpenCode evidence fixture in the matrix."""
+    text = (REPO / "docs" / "agent-support" / "agent-support-matrix.yml").read_text()
+    block = text.split("\n  opencode:\n", 1)[1].split("\n  hermes:\n", 1)[0]
+    paths = [str(REPO / p) for p in re.findall(r'- "(Resources/Fixtures/stage0/agents/opencode/[^"]+)"', block)]
+    assert len(paths) > 7, "the matrix lists both the 1.x and the 2.x fixtures"
+    return agent_watch._baseline_type_keys_for_agent("opencode", paths)
+
+
+def test_valid_1x_session_passes_the_prebump_gate_with_legacy_buckets(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_v1_only_db(db)
+    fp = _fingerprint(db)
+    required = agent_watch._required_schema_buckets_for(_opencode_prebump_cfg(), fp)
+
+    _, matches = agent_watch._prebump_schema_check(
+        fingerprint=fp, baseline_type_keys=_matrix_baseline(), required_schema_buckets=required
+    )
+
+    assert "store" not in fp
+    assert required == LEGACY_REQUIRED
+    assert matches is True
+    # The 2.x list would have rejected this valid 1.x session outright.
+    _, with_v2_list = agent_watch._prebump_schema_check(
+        fingerprint=fp, baseline_type_keys=_matrix_baseline(), required_schema_buckets=PREBUMP_REQUIRED
+    )
+    assert with_v2_list is False
+
+
+def test_2x_session_gets_the_2x_bucket_list(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)
+    assert agent_watch._required_schema_buckets_for(_opencode_prebump_cfg(), _fingerprint(db)) == PREBUMP_REQUIRED
+
+
+def test_agents_without_a_store_map_keep_their_single_list():
+    assert agent_watch._required_schema_buckets_for({"required_schema_buckets": ["a"]}, {"store": "x"}) == ["a"]
+    assert agent_watch._required_schema_buckets_for({}, {}) is None
 
 
 def test_header_only_v2_session_fails_the_prebump_gate(tmp_path):
@@ -293,8 +368,17 @@ def test_nested_cache_token_rename_is_drift(tmp_path):
         observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
         observed_event_count=agent_watch._observed_event_count(fp),
     )
-    assert schema_diff["unknown_keys"] == {"session_message.assistant.tokens.cache": ["hit"]}
+    assert schema_diff["unknown_keys"]["session_message.assistant.tokens.cache"] == ["hit"]
+    assert fp["required_field_violations"] == {"assistant.tokens.cache.read": 1}
     assert agent_watch._weekly_schema_matches(schema_diff, fp) is False
+
+
+def _weekly(fp: dict) -> tuple[dict, bool]:
+    schema_diff = agent_watch._schema_diff(
+        observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
+        observed_event_count=agent_watch._observed_event_count(fp),
+    )
+    return schema_diff, agent_watch._weekly_schema_matches(schema_diff, fp)
 
 
 def test_model_structure_change_is_drift(tmp_path):
@@ -302,11 +386,104 @@ def test_model_structure_change_is_drift(tmp_path):
     _write_db(db, v1_updated=100, v2_updated=200,
               mutate_assistant=lambda a: a.__setitem__("model", {"ref": "p/m"}))
     fp = _fingerprint(db)
-    schema_diff = agent_watch._schema_diff(
-        observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
-        observed_event_count=agent_watch._observed_event_count(fp),
+    schema_diff, matches = _weekly(fp)
+    assert schema_diff["unknown_keys"]["session_message.assistant.model"] == ["ref"]
+    assert fp["required_field_violations"] == {"assistant.model.id": 1}
+    assert matches is False
+
+
+def test_model_turning_into_a_string_is_drift_not_missing_coverage(tmp_path):
+    # The nested model bucket disappears; the shape bucket records the new type.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200,
+              mutate_assistant=lambda a: a.__setitem__("model", "opencode/m"))
+    fp = _fingerprint(db)
+    schema_diff, matches = _weekly(fp)
+    assert "session_message.assistant.model" not in fp["type_keys"]
+    assert schema_diff["unknown_keys"]["session_message.assistant.shape"] == ["model:string"]
+    assert matches is False
+
+
+def test_cache_turning_into_an_array_is_drift(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200,
+              mutate_assistant=lambda a: a["tokens"].__setitem__("cache", [0, 0]))
+    schema_diff, matches = _weekly(_fingerprint(db))
+    assert schema_diff["unknown_keys"]["session_message.assistant.tokens.shape"] == ["cache:array"]
+    assert matches is False
+
+
+def test_removed_required_field_without_replacement_fails_the_gates(tmp_path):
+    # Only key *removals*: no unknown key appears, so the schema diff alone is clean.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200,
+              mutate_assistant=lambda a: (a["model"].pop("id"), a["tokens"].pop("output")))
+    fp = _fingerprint(db)
+    schema_diff, matches = _weekly(fp)
+    assert schema_diff["unknown_only_is_empty"] is True
+    assert fp["required_field_violations"] == {"assistant.model.id": 1, "assistant.tokens.output": 1}
+    assert fp["parse_errors"] == 1
+    assert matches is False
+    _, prebump_ok = agent_watch._prebump_schema_check(
+        fingerprint=fp, baseline_type_keys=_baseline(), required_schema_buckets=PREBUMP_REQUIRED
     )
-    assert schema_diff["unknown_keys"] == {"session_message.assistant.model": ["ref"]}
+    assert prebump_ok is False
+
+
+def test_tool_item_without_status_fails_the_gates(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200,
+              mutate_assistant=lambda a: a["content"][1]["state"].pop("status"))
+    fp = _fingerprint(db)
+    assert fp["required_field_violations"] == {"assistant.tool.state.status": 1}
+    assert _weekly(fp)[1] is False
+
+
+def test_clean_sample_has_no_required_field_violations(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)
+    fp = _fingerprint(db)
+    assert fp["required_field_violations"] == {}
+    assert fp["parse_errors"] == 0
+
+
+def test_weekly_parse_errors_block_a_clean_prebump_substitution(tmp_path):
+    # An earlier clean prebump must not replace a failing weekly verdict whose
+    # own sample has unreadable records.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200,
+              rows_override=[("msg_u", "user", 0, {"text": "hi"}), ("msg_bad", "assistant", 1, "[]")])
+    weekly_diff, weekly_ok = _weekly(_fingerprint(db))
+    assert weekly_ok is False
+    assert agent_watch._prebump_may_replace_weekly_verdict(weekly_diff) is False
+
+    clean = tmp_path / "clean.db"
+    _write_db(clean, v1_updated=100, v2_updated=200)
+    clean_diff, clean_ok = _weekly(_fingerprint(clean))
+    assert clean_ok is True
+    assert agent_watch._prebump_may_replace_weekly_verdict(clean_diff) is True
+    assert agent_watch._prebump_may_replace_weekly_verdict(None) is True
+
+
+def test_parse_errors_in_a_later_sampled_session_reach_the_merged_fingerprint():
+    first = {"file": "/s/newest.jsonl", "parse_errors": 0, "type_keys": {}}
+    second = {"file": "/s/older.jsonl", "parse_errors": 2, "type_keys": {}}
+    merged = dict(first)
+
+    agent_watch._merge_sampled_parse_errors(merged, [first, second])
+
+    assert merged["parse_errors"] == 2
+    assert merged["parse_errors_by_file"] == {"/s/older.jsonl": 2}
+    assert agent_watch._weekly_schema_matches({"unknown_only_is_empty": True}, merged) is False
+
+
+def test_dsh_merge_sums_parse_errors_across_samples():
+    fps = [
+        {"file": "/d/a.jsonl.zstd", "parse_errors": 0, "type_keys": {}, "type_counts": {}},
+        {"file": "/d/b.jsonl.zstd", "parse_errors": 1, "type_keys": {}, "type_counts": {}},
+    ]
+    merged = agent_watch._dsh_merge_fingerprints(fps)
+    assert merged["parse_errors"] == 1
 
 
 def test_capture_export_keeps_malformed_rows_instead_of_dropping_the_export(tmp_path):
@@ -325,6 +502,19 @@ def test_capture_export_keeps_malformed_rows_instead_of_dropping_the_export(tmp_
     assert export["messages"][0]["data"] == {"text": "hi"}
 
 
+def test_capture_export_flags_valid_json_that_is_not_an_object(tmp_path):
+    import capture_latest_agent_sessions as capture
+
+    for raw in ("[]", "null", "42"):
+        db = tmp_path / f"{abs(hash(raw))}.db"
+        _write_db(db, v1_updated=100, v2_updated=200,
+                  rows_override=[("msg_u", "user", 0, {"text": "hi"}), ("msg_bad", "assistant", 1, raw)])
+        export = capture._export_latest_opencode_sqlite_session(db)
+        bad = export["messages"][1]
+        assert export["parse_errors"] == 1, raw
+        assert bad["raw_data"] == raw and "not an object" in bad["parse_error"] and "data" not in bad
+
+
 def test_capture_export_uses_v1_rows_on_equal_timestamps(tmp_path):
     import capture_latest_agent_sessions as capture
 
@@ -336,16 +526,42 @@ def test_capture_export_uses_v1_rows_on_equal_timestamps(tmp_path):
 
 
 # The only string values the sqlite_v2 fixture may contain. Anything else is
-# real data that escaped redaction.
+# real data that escaped redaction. Every list is exact: a fixture rebuild that
+# brings a new value or key must update it here on purpose.
 _FIXTURE_PLACEHOLDERS = {"redacted", "fixture.png", "fixture", "/tmp/fixture", "ses_fixture_v2", "proj_fixture", "2.1.1", ""}
-# Schema discriminators, which are the schema itself and survive redaction.
-_FIXTURE_DISCRIMINATOR_KEYS = {"type", "status", "reason", "outcome", "finish"}
-_FIXTURE_TOOL_NAMES = {"todowrite", "shell", "read", "edit", "write", "grep", "glob", "list", "bash", "task", "webfetch"}
+# Schema discriminators are the schema itself and survive redaction, but only
+# with these exact values.
+_FIXTURE_DISCRIMINATOR_VALUES = {
+    "type": {
+        "assistant", "compaction", "direct", "idle", "inline", "provider.error", "reasoning",
+        "synthetic", "system", "text", "tool", "tool.execution", "user",
+    },
+    "status": {"completed", "error"},
+    "reason": {"auto"},
+    "outcome": {"succeeded"},
+    "finish": {"stop"},
+    "name": {"todowrite", "fixture.png"},
+}
+# Every object key that may appear. Keys come from OpenCode's schema; an
+# unexpected one may be a map keyed by real data (a path, an ID, a secret).
+_FIXTURE_KEYS = {
+    "agent", "agents", "anthropic", "cache", "caller", "completed", "content", "cost", "created", "data",
+    "directory", "end", "error", "executed", "files", "finish", "id", "idle_outcome", "input", "itemId",
+    "mention", "message", "metadata", "mime", "model", "name", "native", "openai", "outcome", "output",
+    "parent_id", "path", "phase", "project_id", "providerID", "ran", "rawFinish", "read", "reason",
+    "reasoning", "reasoningEncryptedContent", "reasoningField", "redactedData", "resume_attempts",
+    "signature", "slug", "snapshot", "source", "start", "state", "status", "streamed", "summary",
+    "summary_additions", "summary_deletions", "summary_files", "text", "time", "time_created", "time_idle",
+    "time_updated", "time_viewed", "title", "tokens", "tokens_cache_read", "tokens_cache_write",
+    "tokens_input", "tokens_output", "tokens_reasoning", "type", "variant", "version", "write", "xai",
+}
 
 
 def _fixture_string_violations(value, key=None, path="$"):
     if isinstance(value, dict):
         for k, v in value.items():
+            if k not in _FIXTURE_KEYS:
+                yield f"{path}: unexpected key {k!r}"
             yield from _fixture_string_violations(v, k, f"{path}.{k}")
     elif isinstance(value, list):
         for i, v in enumerate(value):
@@ -353,9 +569,7 @@ def _fixture_string_violations(value, key=None, path="$"):
     elif isinstance(value, str):
         if value in _FIXTURE_PLACEHOLDERS:
             return
-        if key in _FIXTURE_DISCRIMINATOR_KEYS and len(value) <= 40 and " " not in value:
-            return
-        if key == "name" and value in _FIXTURE_TOOL_NAMES:
+        if value in _FIXTURE_DISCRIMINATOR_VALUES.get(key, set()):
             return
         yield f"{path}={value!r}"
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -384,4 +598,17 @@ def test_redaction_policy_catches_a_leaked_prompt_path_and_secret():
         }
     }
     found = list(_fixture_string_violations(leaked))
-    assert len(found) == 4, found
+    # text, name, the non-zero count, plus "auth" as an unexpected key and its value.
+    assert len(found) == 5, found
+
+
+def test_redaction_policy_catches_secrets_in_discriminators_and_keys():
+    leaked = {
+        "type": "sk-live-abc",  # short, no spaces: the old length rule let it through
+        "status": "completed",
+        "time": {"/Users/someone/project": 0},  # a map keyed by real data
+    }
+    found = list(_fixture_string_violations(leaked))
+    assert any("sk-live-abc" in item for item in found), found
+    assert any("/Users/someone/project" in item for item in found), found
+    assert not any("completed" in item for item in found), found

@@ -198,10 +198,18 @@ def _export_latest_opencode_v2_session(conn: sqlite3.Connection, db_path: Path) 
         # One malformed row must not cost the whole review export: keep it raw
         # and flagged, since malformed data is exactly what a reviewer needs.
         try:
-            entry["data"] = json.loads(r["data"])
+            decoded = json.loads(r["data"])
         except (TypeError, ValueError) as exc:
             entry["parse_error"] = str(exc)
             entry["raw_data"] = r["data"]
+        else:
+            if isinstance(decoded, dict):
+                entry["data"] = decoded
+            else:
+                # Valid JSON but not an object ([], null, 42): unreadable to the
+                # app, and counted as a parse error by agent_watch too.
+                entry["parse_error"] = f"data is JSON {type(decoded).__name__}, not an object"
+                entry["raw_data"] = r["data"]
         messages.append(entry)
     return {
         "backend": "sqlite",
