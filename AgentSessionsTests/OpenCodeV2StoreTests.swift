@@ -320,6 +320,58 @@ final class OpenCodeV2StoreTests: XCTestCase {
                         "the same load succeeds when not cancelled")
     }
 
+    func testCancellationMidScanReturnsNilAndStopsReading() async throws {
+        try createV2Tables()
+        try insertNativeV2Session() // six session_message rows
+        let path = dbURL.path
+
+        let outcome = await Task.detached { () -> (session: Session?, rowsRead: Int) in
+            var rowsRead = 0
+            let session = OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: "ses_native") { count in
+                rowsRead = count
+                // Cancel the running load after its second row.
+                if count == 2 { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+            return (session, rowsRead)
+        }.value
+
+        XCTAssertNil(outcome.session, "rows already collected must not escape as a full transcript")
+        XCTAssertEqual(outcome.rowsRead, 2, "the scan stops at the next row after cancellation")
+    }
+
+    func testCancelledLoadOfEmptyV2SessionReturnsNil() async throws {
+        try createV2Tables()
+        try exec("""
+        INSERT INTO session_v2 (id, project_id, slug, directory, title, version, time_created, time_updated)
+        VALUES ('ses_empty', 'proj', 'e', '/tmp/repo', 'Empty', '2.1.1', 1000, 1000);
+        """)
+        let path = dbURL.path
+
+        let task = Task.detached { () -> Session? in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: "ses_empty")
+        }
+        task.cancel()
+        let result = await task.value
+        XCTAssertNil(result, "a cancelled load reports cancellation even when there are no rows to read")
+        XCTAssertNotNil(OpenCodeSqliteReader.loadFullSession(customRoot: path, sessionID: "ses_empty"))
+    }
+
+    func testGeneratedTitleFallsBackToAttachmentNamesForFileOnlyFirstPrompt() throws {
+        try createV2Tables()
+        try exec("""
+        INSERT INTO session_v2 (id, project_id, slug, directory, title, version, time_created, time_updated)
+        VALUES ('ses_file_title', 'proj', 'f', '/tmp/repo', 'New session - 2026-10-20T19:14:36.000Z', '2.1.1', 1000, 2000);
+        INSERT INTO session_message VALUES ('msg_ft_u', 'ses_file_title', 'user', 0, 1000, 1000,
+            '{"time":{"created":1000},"text":"","files":[{"mime":"image/png","name":"/Users/me/Shot 1.png","data":"iVBORw0KGgo="}],"agents":[]}');
+        """)
+
+        let listed = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        let full = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_file_title"))
+        XCTAssertTrue(listed.title.contains("Shot 1.png"), "got \(listed.title)")
+        XCTAssertEqual(listed.title, full.title, "list and transcript agree on the fallback title")
+    }
+
     func testV1UserMessageWithObjectDiffsKeepsItsPrompt() throws {
         // OpenCode stores summary.diffs as {file, patch} objects. Decoding them
         // as strings used to drop the whole user message.

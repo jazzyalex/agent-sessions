@@ -32,19 +32,9 @@ enum OpenCodeV2MessageAdapter {
             var message: [String: Any] = ["role": "user"]
             if let created { message["time"] = ["created": created] }
             let files = (data["files"] as? [[String: Any]]) ?? []
-            // Attachments are named in the visible user text, so a prompt that
-            // is only an image or file is not shown as an empty turn.
-            var visibleLines: [String] = []
-            if let text = data["text"] as? String,
-               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                visibleLines.append(text)
-            }
-            if let attachments = attachmentLine(files) {
-                visibleLines.append(attachments)
-            }
             var parts: [(id: String, dict: [String: Any])] = []
-            if !visibleLines.isEmpty {
-                parts.append((rowID + "-text", ["type": "text", "text": visibleLines.joined(separator: "\n\n")]))
+            if let visible = visibleUserText(data) {
+                parts.append((rowID + "-text", ["type": "text", "text": visible]))
             }
             for (index, file) in files.enumerated() {
                 var part: [String: Any] = ["type": "file"]
@@ -130,6 +120,21 @@ enum OpenCodeV2MessageAdapter {
             }
             return Adapted(message: message, parts: parts)
         }
+    }
+
+    /// The text a v2 user row shows in the transcript and session titles: its
+    /// prompt plus an "[Attached: ...]" line naming any files, so a prompt that
+    /// is only an image or file is not an empty turn. nil when both are empty.
+    static func visibleUserText(_ data: [String: Any]) -> String? {
+        var lines: [String] = []
+        if let text = data["text"] as? String,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append(text)
+        }
+        if let attachments = attachmentLine((data["files"] as? [[String: Any]]) ?? []) {
+            lines.append(attachments)
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n\n")
     }
 
     /// v1-shaped step-finish part. `tokens` is copied as stored, whatever its

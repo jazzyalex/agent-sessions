@@ -100,6 +100,15 @@ struct OpenCodeSqliteReader {
 
     /// Returns a Session with fully loaded events for the given session ID.
     static func loadFullSession(customRoot: String?, sessionID: String) -> Session? {
+        loadFullSession(customRoot: customRoot, sessionID: sessionID, afterV2Row: nil)
+    }
+
+    /// Test seam: `afterV2Row` runs after each OpenCode 2.x `session_message`
+    /// row is read, so a test can cancel mid-scan at a known row. Production
+    /// callers use the overload above.
+    static func loadFullSession(customRoot: String?,
+                                sessionID: String,
+                                afterV2Row: ((Int) -> Void)?) -> Session? {
         let metricIdentity = SessionInfoMetricsIdentity(source: .opencode, sessionID: sessionID)
         SessionInfoMetrics.shared.beginTranscript(identity: metricIdentity)
         defer { SessionInfoMetrics.shared.endTranscript(identity: metricIdentity) }
@@ -110,7 +119,7 @@ struct OpenCodeSqliteReader {
             return nil
         }
         defer { sqlite3_close(db) }
-        return queryFullSession(db: db, sessionID: sessionID, dbPath: url.path)
+        return queryFullSession(db: db, sessionID: sessionID, dbPath: url.path, afterV2Row: afterV2Row)
     }
 
     // MARK: - Freshness probe
@@ -1148,9 +1157,12 @@ struct OpenCodeSqliteReader {
         return nil
     }
 
-    private static func queryFullSession(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
+    private static func queryFullSession(db: OpaquePointer?,
+                                         sessionID: String,
+                                         dbPath: String,
+                                         afterV2Row: ((Int) -> Void)?) -> Session? {
         if v2SessionExists(db, sessionID: sessionID) {
-            return queryFullSessionV2(db: db, sessionID: sessionID, dbPath: dbPath)
+            return queryFullSessionV2(db: db, sessionID: sessionID, dbPath: dbPath, afterV2Row: afterV2Row)
         }
         // 1. Session metadata
         let hasParent = tableHasColumn(db, table: "session", column: "parent_id")
@@ -1458,7 +1470,13 @@ struct OpenCodeSqliteReader {
     }
 
     /// Reads a session's v2 rows in `seq` order. nil means a query failure.
-    private static func v2Rows(db: OpaquePointer?, sessionID: String) -> (rows: [V2Row], cancelled: Bool)? {
+    /// Cancellation is checked before the first row, between rows, and after
+    /// the last one, so an empty or fully read session also reports it.
+    /// `afterRow` is a test seam called after each collected row.
+    private static func v2Rows(db: OpaquePointer?,
+                               sessionID: String,
+                               afterRow: ((Int) -> Void)? = nil) -> (rows: [V2Row], cancelled: Bool)? {
+        if Task.isCancelled { return ([], true) }
         let sql = "SELECT id, type, seq, time_created, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
@@ -1475,10 +1493,11 @@ struct OpenCodeSqliteReader {
                               timeCreated: sqlite3_column_int64(stmt, 3),
                               timeUpdated: sqlite3_column_int64(stmt, 4),
                               data: text(stmt, 5)))
+            afterRow?(rows.count)
             step = sqlite3_step(stmt)
         }
         guard step == SQLITE_DONE else { return nil }
-        return (rows, false)
+        return (rows, Task.isCancelled)
     }
 
     private static func decodeObject(_ string: String) -> [String: Any]? {
@@ -1588,10 +1607,10 @@ struct OpenCodeSqliteReader {
             sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
                               unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             while firstUserTitle == nil, sqlite3_step(stmt) == SQLITE_ROW {
-                if let object = decodeObject(text(stmt, 0)),
-                   let userText = object["text"] as? String,
-                   !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    firstUserTitle = userText
+                // Same visible text as the transcript, so a file-only first
+                // prompt titles the row by its attachment names.
+                if let object = decodeObject(text(stmt, 0)) {
+                    firstUserTitle = OpenCodeV2MessageAdapter.visibleUserText(object)
                 }
             }
         }
@@ -1599,7 +1618,10 @@ struct OpenCodeSqliteReader {
         return (count, firstUserTitle)
     }
 
-    private static func queryFullSessionV2(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
+    private static func queryFullSessionV2(db: OpaquePointer?,
+                                           sessionID: String,
+                                           dbPath: String,
+                                           afterV2Row: ((Int) -> Void)?) -> Session? {
         let sql = "SELECT \(v2SessionColumns) FROM session_v2 WHERE id = ? LIMIT 1;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
@@ -1610,7 +1632,8 @@ struct OpenCodeSqliteReader {
         let session = v2SessionRow(stmt)
         // A cancelled scan holds only a prefix of the rows. Returning it would
         // look like a complete transcript.
-        guard let scan = v2Rows(db: db, sessionID: sessionID), !scan.cancelled else { return nil }
+        guard let scan = v2Rows(db: db, sessionID: sessionID, afterRow: afterV2Row),
+              !scan.cancelled else { return nil }
 
         var events: [SessionEvent] = []
         var commandCount = 0
