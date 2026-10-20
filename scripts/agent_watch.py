@@ -4394,7 +4394,10 @@ def _opencode_v2_message_buckets(row_type: str, data: dict[str, Any]) -> list[tu
     kind = row_type or "unknown"
     buckets: list[tuple[str, dict[str, Any]]] = [(f"session_message.{kind}", data)]
     if kind == "assistant":
-        for item in data.get("content") or []:
+        content = data.get("content")
+        # A wrong-typed `content` (1, "x", {}) shows up in the .shape bucket and
+        # as a required-field violation; it must not raise here.
+        for item in content if isinstance(content, list) else []:
             if not isinstance(item, dict):
                 continue
             item_type = item.get("type") if isinstance(item.get("type"), str) else "unknown"
@@ -4416,7 +4419,8 @@ def _opencode_v2_message_buckets(row_type: str, data: dict[str, Any]) -> list[tu
         if isinstance(model, dict):
             buckets.append(("session_message.assistant.model", model))
     elif kind == "user":
-        for item in data.get("files") or []:
+        files = data.get("files")
+        for item in files if isinstance(files, list) else []:
             if isinstance(item, dict):
                 buckets.append(("session_message.user.file", item))
     # Key names alone cannot see a type change: `model` turning from an object
@@ -4466,8 +4470,10 @@ def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) 
         model = data.get("model")
         if not isinstance(model, dict) or not isinstance(model.get("id"), str):
             problems.append("assistant.model.id")
-        if not isinstance(data.get("content"), list):
+        content = data.get("content")
+        if not isinstance(content, list):
             problems.append("assistant.content")
+            content = []
         tokens = data.get("tokens")
         for key in ("input", "output", "reasoning"):
             if not number(tokens, key):
@@ -4476,7 +4482,7 @@ def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) 
         for key in ("read", "write"):
             if not number(cache, key):
                 problems.append(f"assistant.tokens.cache.{key}")
-        for item in data.get("content") or []:
+        for item in content:
             if not isinstance(item, dict) or item.get("type") != "tool":
                 continue
             state = item.get("state")
@@ -4946,7 +4952,12 @@ def _required_schema_buckets_for(prebump_cfg: dict[str, Any], fingerprint: dict[
     if isinstance(by_store, dict):
         store = fingerprint.get("store") if isinstance(fingerprint.get("store"), str) else "legacy"
         selected = by_store.get(store)
-        return list(selected) if isinstance(selected, list) else []
+        if isinstance(selected, list):
+            return list(selected)
+        # Fail closed: a store the config does not know must not drop the
+        # requirement to nothing. This bucket name can never be observed, so
+        # the gate reports it as missing and the prebump fails.
+        return [f"<unmapped store: {store}>"]
     return prebump_cfg.get("required_schema_buckets")
 
 

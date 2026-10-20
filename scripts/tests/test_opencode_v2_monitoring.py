@@ -254,6 +254,38 @@ def test_2x_session_gets_the_2x_bucket_list(tmp_path):
     assert agent_watch._required_schema_buckets_for(_opencode_prebump_cfg(), _fingerprint(db)) == PREBUMP_REQUIRED
 
 
+def test_unmapped_store_fails_the_prebump_gate_closed(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)
+    fp = dict(_fingerprint(db), store="session_v3")
+    required = agent_watch._required_schema_buckets_for(_opencode_prebump_cfg(), fp)
+
+    schema_diff, matches = agent_watch._prebump_schema_check(
+        fingerprint=fp, baseline_type_keys=_baseline(), required_schema_buckets=required
+    )
+
+    assert required == ["<unmapped store: session_v3>"]
+    assert matches is False
+    assert schema_diff["missing_required_schema_buckets"] == ["<unmapped store: session_v3>"]
+
+
+def test_wrong_typed_content_and_files_are_violations_not_crashes(tmp_path):
+    for bad in (1, True, "text", {"type": "text"}):
+        assert "assistant.content" in agent_watch._opencode_v2_required_field_violations(
+            "assistant", {"model": {"id": "m"}, "content": bad,
+                          "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}}
+        ), bad
+        buckets = dict(agent_watch._opencode_v2_message_buckets("assistant", {"content": bad}))
+        assert f"content:{agent_watch._json_type_name(bad)}" in buckets["session_message.assistant.shape"]
+        agent_watch._opencode_v2_message_buckets("user", {"text": "", "files": bad})
+
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200, mutate_assistant=lambda a: a.__setitem__("content", 1))
+    fp = _fingerprint(db)
+    assert fp["required_field_violations"] == {"assistant.content": 1}
+    assert _weekly(fp)[1] is False
+
+
 def test_agents_without_a_store_map_keep_their_single_list():
     assert agent_watch._required_schema_buckets_for({"required_schema_buckets": ["a"]}, {"store": "x"}) == ["a"]
     assert agent_watch._required_schema_buckets_for({}, {}) is None
