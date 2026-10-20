@@ -87,6 +87,8 @@ struct OnboardingListTopSlot: View {
         // The setup window or the What's New panel closing lets a waiting intro appear.
         .onChange(of: coordinator.presentation) { _, _ in evaluateNotchIntro() }
         .onChange(of: coordinator.isWhatsNewPanelPresented) { _, _ in evaluateNotchIntro() }
+        // Codex or Claude sessions can land in an index update after the audience is ready.
+        .onChange(of: providers) { _, _ in evaluateNotchIntro() }
     }
 
     private func evaluateNotchIntro() {

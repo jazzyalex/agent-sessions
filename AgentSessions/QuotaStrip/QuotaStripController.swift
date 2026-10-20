@@ -327,6 +327,9 @@ final class QuotaStripController {
         let point = host.topLeft(host.convert(event.locationInWindow, from: nil))
         guard model.hitRect.contains(point) else { return false }
         let inNotchRow = point.y <= model.notchHeight
+        // With a toolbar popover open, let the click just close it: collapsing the panel now
+        // would leave the popover anchored to a toolbar that is no longer visible.
+        guard !isPopoverOpen else { return false }
         guard !model.expanded || inNotchRow, let menu = menuProvider?() else { return false }
         hoverTimer?.invalidate()
         // Drop the menu the way a status item does: flush under the menu bar, from the

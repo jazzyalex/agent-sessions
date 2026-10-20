@@ -105,19 +105,30 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
         defaults.set(QuotaMeterPlacement.menuBar.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
     }
 
-    /// Opens the notch panel briefly once the strip is on screen. A placement change presents
-    /// the strip asynchronously, so this waits up to `presentTimeout` and then gives up
-    /// silently (for example when no screen can take the strip).
-    func peekStrip(duration: TimeInterval = 3, presentTimeout: TimeInterval = 2) {
+    /// Opens the notch panel briefly once the strip is on screen. Always starts after
+    /// `startDelay`, so the dialog that asked for it has finished closing even when the strip
+    /// is already up. A placement change presents the strip asynchronously, so this then
+    /// waits up to `presentTimeout` and gives up silently (for example when no screen can
+    /// take the strip).
+    func peekStrip(duration: TimeInterval = 3, startDelay: TimeInterval = 0.4,
+                   presentTimeout: TimeInterval = 2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.peekWhenPresented(duration: duration, attemptsLeft: Int(presentTimeout / 0.1))
+            }
+        }
+    }
+
+    private func peekWhenPresented(duration: TimeInterval, attemptsLeft: Int) {
         guard let strip else { return }
         if strip.isPresented {
             strip.peek(duration: duration)
             return
         }
-        guard presentTimeout > 0 else { return }
+        guard attemptsLeft > 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             MainActor.assumeIsolated {
-                self?.peekStrip(duration: duration, presentTimeout: presentTimeout - 0.1)
+                self?.peekWhenPresented(duration: duration, attemptsLeft: attemptsLeft - 1)
             }
         }
     }

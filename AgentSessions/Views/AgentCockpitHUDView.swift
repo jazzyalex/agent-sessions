@@ -4015,15 +4015,26 @@ private struct HUDLimitsRowsPanel: View {
         return out
     }
 
-    private var shouldReserveFiveHourProjectionSlot: Bool {
-        guard projectedRunoutEnabled else { return false }
-        return entries.contains { entry in
-            formatUsageProjectionLabel(
-                runoutAt: entry.fiveHourProjectedRunoutAt,
-                observedAt: entry.fiveHourProjectionObservedAt,
-                now: clockNow
-            ) != nil
-        }
+    /// Panel-wide column decisions, computed once per body pass from the same `entries`
+    /// snapshot (building `entries` is not cheap, and every row needs these).
+    private struct RowLayout {
+        let alignColumns: Bool
+        let weeklyGrid: Bool
+        let reserveProjectionSlot: Bool
+    }
+
+    private func rowLayout(for rows: [HUDLimitsProviderEntry]) -> RowLayout {
+        RowLayout(
+            alignColumns: rows.count > 1,
+            weeklyGrid: rows.contains { $0.weeklyHeader != nil },
+            reserveProjectionSlot: projectedRunoutEnabled && rows.contains { entry in
+                formatUsageProjectionLabel(
+                    runoutAt: entry.fiveHourProjectedRunoutAt,
+                    observedAt: entry.fiveHourProjectionObservedAt,
+                    now: clockNow
+                ) != nil
+            }
+        )
     }
 
     @AppStorage(PreferencesKey.claudeCloudSessionsEnabled)
@@ -4082,8 +4093,10 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     var body: some View {
+        let rows = entries
+        let layout = rowLayout(for: rows)
         Group {
-            if entries.isEmpty {
+            if rows.isEmpty {
                 emptyRow
             } else {
                 VStack(spacing: 0) {
@@ -4094,7 +4107,7 @@ private struct HUDLimitsRowsPanel: View {
                     // (minSize == maxSize) with clipped content, so every time the line
                     // appeared it silently cut the last row off the bottom.
                     cloudStatusLine
-                    ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
                             // Group separation: whitespace does the grouping, with a
                             // stronger full-bleed rule on top. This is deliberately
@@ -4105,7 +4118,7 @@ private struct HUDLimitsRowsPanel: View {
                                 .fill(Color.primary.opacity(0.18))
                                 .frame(height: 1)
                         }
-                        row(entry: entry)
+                        row(entry: entry, layout: layout)
                         if entry.source == .claude,
                            showsChrome,
                            rowShowsLiveMeter(entry),
@@ -4154,7 +4167,7 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     @ViewBuilder
-    private func row(entry: HUDLimitsProviderEntry) -> some View {
+    private func row(entry: HUDLimitsProviderEntry, layout: RowLayout) -> some View {
         HStack(spacing: 0) {
             // Same shared-state degradation as the footer / menu bar / limits bar:
             // never render a misleading "0% / no reset" meter for a provider whose
@@ -4194,15 +4207,18 @@ private struct HUDLimitsRowsPanel: View {
                     showResets: true,
                     onlyBottleneck: false,
                     showProjection: true,
-                    alignColumns: entries.count > 1,
-                    weeklyGrid: entries.contains { $0.weeklyHeader != nil },
-                    reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
+                    alignColumns: layout.alignColumns,
+                    weeklyGrid: layout.weeklyGrid,
+                    reserveProjectionSlot: layout.reserveProjectionSlot,
                     enlarged: quotaMeterEnlarged,
                     now: clockNow
                 )
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
                     .allowsTightening(true)
+                    // Spare row width goes to the flexible week-reset column, not the Spacer,
+                    // so the reset ends on the same edge as the runway bars.
+                    .layoutPriority(1)
             }
             Spacer(minLength: 0)
         }
