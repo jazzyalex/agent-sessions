@@ -537,6 +537,109 @@ def test_readable_sample_with_a_clean_prebump_still_supports_latest():
     assert "sample_unreadable_records" not in result["blockers"]
 
 
+def test_unreadable_store_is_monitoring_broken_not_format_drift(tmp_path):
+    # session_v2 without time_archived makes the store query fail, like a
+    # locked or half-migrated database would.
+    db = tmp_path / "opencode.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE session_v2 (id TEXT, time_updated INTEGER);"
+        "CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, data TEXT);"
+    )
+    conn.close()
+    fp = _fingerprint(db)
+    assert fp["error"].startswith("sqlite_query_failed")
+
+    schema_diff = agent_watch._schema_diff(
+        observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
+        observed_event_count=agent_watch._observed_event_count(fp),
+    )
+    assert agent_watch._weekly_schema_matches(schema_diff, fp) is False
+    assert schema_diff["read_failed"] is True and schema_diff["parse_errors"] == 0
+
+    result = _assess(schema_diff=schema_diff, weekly_schema_diff=schema_diff)
+    assert result["verdict"] == "monitoring_broken"
+    assert "sample_read_failed" in result["blockers"]
+    assert "sample_unreadable_records" not in result["blockers"]
+    assert "could not be read" in result["next_action"]
+
+
+def test_missing_database_file_is_a_read_failure(tmp_path):
+    fp = _fingerprint(tmp_path / "missing" / "opencode.db")
+    assert fp["error"].startswith("sqlite_open_failed")
+    assert agent_watch._sample_read_failed(fp) is True
+
+
+def test_hermes_state_db_failure_is_a_read_failure(tmp_path):
+    db = tmp_path / "state.db"
+    db.write_bytes(b"not a database at all, just bytes")
+    fp = agent_watch._hermes_state_db_latest_session_schema_fingerprint(db, max_messages=10)
+    assert fp["read_failed"] is True
+    assert agent_watch._sample_read_failed(fp) is True
+
+
+def test_record_level_parse_errors_are_still_format_findings():
+    fp = {"parse_errors": 2, "type_keys": {}}
+    schema_diff = {"unknown_only_is_empty": True}
+    assert agent_watch._weekly_schema_matches(schema_diff, fp) is False
+    assert "read_failed" not in schema_diff
+    result = _assess(schema_diff=dict(schema_diff, coverage_ratio=1.0, observed_event_count=100))
+    assert result["verdict"] == "format_drift_detected"
+    assert "sample_unreadable_records" in result["blockers"]
+
+
+def test_read_failure_in_any_sampled_session_marks_the_union():
+    first = {"file": "/s/a", "parse_errors": 0}
+    second = {"file": "/s/b", "parse_errors": 1, "error": "sqlite_query_failed: database is locked"}
+    merged = dict(first)
+    agent_watch._merge_sampled_parse_errors(merged, [first, second])
+    assert merged["read_failed"] is True
+    assert merged["error"] == "sqlite_query_failed: database is locked"
+
+
+def test_non_null_schema_only_session_v2_columns_are_not_drift(tmp_path):
+    # A forked, shared, reverted, compacting, suspended session in a workspace:
+    # every column the owner's disk has only ever left NULL carries a value.
+    db = tmp_path / "opencode.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE session_v2 (
+            id TEXT PRIMARY KEY, project_id TEXT, workspace_id TEXT, parent_id TEXT, fork_session_id TEXT,
+            fork_boundary TEXT, slug TEXT, directory TEXT, path TEXT, title TEXT, version TEXT, share_url TEXT,
+            summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT,
+            metadata TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
+            tokens_cache_read INTEGER, tokens_cache_write INTEGER, revert TEXT, permission TEXT, agent TEXT,
+            model TEXT, time_created INTEGER, time_updated INTEGER, time_compacting INTEGER,
+            time_archived INTEGER, time_suspended INTEGER, resume_attempts INTEGER, time_idle INTEGER,
+            time_viewed INTEGER, idle_outcome TEXT
+        );
+        CREATE TABLE session_message (
+            id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+            time_created INTEGER, time_updated INTEGER, data TEXT
+        );
+        INSERT INTO session_v2 VALUES (
+            'ses_f', 'p', 'wrk_1', 'ses_parent', 'ses_src', 'msg_9', 's', '/tmp', 'sub', 't', '2.1.1',
+            'https://opencode.ai/s/x', 1, 2, 3, '[]', '{}', 0.5, 1, 2, 3, 4, 5, '{"messageID":"m"}',
+            '[]', 'build', '{"id":"m"}', 1, 2, 3, NULL, 4, 1, 5, 6, 'succeeded'
+        );
+        INSERT INTO session_message VALUES ('msg_u', 'ses_f', 'user', 0, 1, 1, '{"text":"hi","files":[],"agents":[]}');
+        """
+    )
+    conn.close()
+    fp = _fingerprint(db)
+    for column in ("workspace_id", "fork_session_id", "fork_boundary", "share_url", "summary_diffs",
+                   "revert", "permission", "time_compacting", "time_suspended"):
+        assert column in fp["type_keys"]["session_v2"], column
+
+    schema_diff = agent_watch._schema_diff(
+        observed_type_keys=fp["type_keys"], baseline_type_keys=_baseline(),
+        observed_event_count=agent_watch._observed_event_count(fp),
+    )
+    assert schema_diff["unknown_keys"].get("session_v2") is None
+    assert "session_v2" not in schema_diff["unknown_types"]
+
+
 def _qwen_glued_fixture() -> Path:
     return REPO / "Resources" / "Fixtures" / "stage0" / "agents" / "qwen" / "019f0000-0000-7000-8000-000000000005.jsonl"
 

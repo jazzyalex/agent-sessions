@@ -3697,6 +3697,9 @@ def _antigravity_markdown_schema_fingerprint(path: Path, max_lines: int) -> dict
                     keys.add("fenced_code_content")
     except OSError:
         parse_errors += 1
+        read_failed = True
+    else:
+        read_failed = False
 
     if parsed_lines == 0 and parse_errors == 0:
         parse_errors = 1
@@ -3707,6 +3710,7 @@ def _antigravity_markdown_schema_fingerprint(path: Path, max_lines: int) -> dict
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "parsed_lines": parsed_lines,
         "parse_errors": parse_errors,
+        "read_failed": read_failed,
     }
 
 
@@ -3812,7 +3816,7 @@ def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
     except Exception:
-        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 1}
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 1, "read_failed": True}
     try:
         row = conn.execute(
             """
@@ -3877,7 +3881,9 @@ def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages:
                         _add(bucket, call)
                         parsed_tool_calls += 1
     except Exception:
-        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": parsed_messages, "parsed_tool_calls": parsed_tool_calls, "parsed_tools": 0, "parse_errors": 1}
+        # Row JSON is decoded under its own guard above; this only catches
+        # SQLite failures (locked, corrupt, schema change), a read failure.
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": parsed_messages, "parsed_tool_calls": parsed_tool_calls, "parsed_tools": 0, "parse_errors": 1, "read_failed": True}
     finally:
         conn.close()
 
@@ -4968,6 +4974,21 @@ def _schema_diff(
     }
 
 
+def _sample_read_failed(fingerprint: dict[str, Any] | None) -> bool:
+    """
+    True when the sample's store or file could not be read at all (SQLite open
+    or query failure, OS read error), as opposed to records that were read and
+    found unreadable. Fingerprinters mark it with `read_failed`, or with an
+    `error` naming a SQLite open/query failure.
+    """
+    if not isinstance(fingerprint, dict):
+        return False
+    if fingerprint.get("read_failed") is True:
+        return True
+    error = fingerprint.get("error")
+    return isinstance(error, str) and error.startswith(("sqlite_open_failed", "sqlite_query_failed"))
+
+
 def _weekly_schema_matches(schema_diff: dict[str, Any], fingerprint: dict[str, Any]) -> bool:
     """
     Weekly schema verdict: no unknown types/keys AND no unreadable records.
@@ -4976,7 +4997,17 @@ def _weekly_schema_matches(schema_diff: dict[str, Any], fingerprint: dict[str, A
     schema-clean whatever its readable keys say. Records the count in
     `schema_diff["parse_errors"]`. A fingerprint with no integer count is
     treated as zero errors, as before.
+
+    A store that could not be read at all is a monitoring failure, not a
+    format finding: it is recorded as `schema_diff["read_failed"]` (with the
+    fingerprint's `error`) instead of as parse errors, so the compatibility
+    verdict reports monitoring_broken rather than format drift.
     """
+    if _sample_read_failed(fingerprint):
+        schema_diff["parse_errors"] = 0
+        schema_diff["read_failed"] = True
+        schema_diff["read_error"] = fingerprint.get("error")
+        return False
     raw = fingerprint.get("parse_errors")
     parse_errors = raw if isinstance(raw, int) and raw >= 0 else 0
     schema_diff["parse_errors"] = parse_errors
@@ -5024,6 +5055,11 @@ def _merge_sampled_parse_errors(merged: dict[str, Any], sampled: list[dict[str, 
             per_file[str(fingerprint.get("file"))] = count
     merged["parse_errors"] = total
     merged["parse_errors_by_file"] = per_file
+    # A read failure in any sample is a read failure of the union.
+    failed = [fp for fp in sampled if _sample_read_failed(fp)]
+    if failed:
+        merged["read_failed"] = True
+        merged.setdefault("error", failed[0].get("error"))
 
 
 def _prebump_may_replace_weekly_verdict(weekly_schema_diff: dict[str, Any] | None) -> bool:
@@ -5862,7 +5898,13 @@ def _build_compatibility_assessment(
         isinstance(d, dict) and isinstance(d.get("parse_errors"), int) and d["parse_errors"] > 0
         for d in (schema_diff, weekly_schema_diff)
     )
-    if unreadable_records:
+    # A store or file that could not be read at all (locked or corrupt SQLite,
+    # OS error) says nothing about the format: it is a monitoring failure.
+    sample_read_failed = any(
+        isinstance(d, dict) and d.get("read_failed") is True
+        for d in (schema_diff, weekly_schema_diff)
+    )
+    if unreadable_records or sample_read_failed:
         fresh_schema_evidence = False
         latest_real_session_evidence = False
     if fresh_schema_required:
@@ -5882,11 +5924,13 @@ def _build_compatibility_assessment(
         blockers.append("latest_source_degraded")
     if probe_failed:
         blockers.append("probe_or_discovery_failed")
+    if sample_read_failed:
+        blockers.append("sample_read_failed")
     if unknown_schema_drift:
         blockers.append("schema_unknowns_detected")
     if unreadable_records:
         blockers.append("sample_unreadable_records")
-    if not (unknown_schema_drift or unreadable_records) and schema_matches_baseline is None:
+    if not (unknown_schema_drift or unreadable_records or sample_read_failed) and schema_matches_baseline is None:
         blockers.append("schema_baseline_not_checked")
     if sample_is_stale:
         blockers.append(str(sample_freshness.get("stale_reason") or "stale_sample"))
@@ -5920,10 +5964,15 @@ def _build_compatibility_assessment(
     elif installed:
         supports_installed = False
 
-    if monitoring_failed or probe_failed:
+    if monitoring_failed or probe_failed or sample_read_failed:
         verdict = "monitoring_broken"
         scope = "none"
-        next_action = "fix monitoring/probe/discovery failure before making support claims"
+        next_action = (
+            "fix monitoring/probe/discovery failure before making support claims"
+            if monitoring_failed or probe_failed
+            else "the session store could not be read (see weekly.local_schema.error, e.g. a locked "
+            "database); rerun weekly once it is readable"
+        )
         supports_installed = False if installed else None
         supports_latest = False if upstream else None
         confidence = "high"

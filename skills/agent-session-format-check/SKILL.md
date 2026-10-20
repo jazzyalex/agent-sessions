@@ -656,7 +656,10 @@ older sessions, which is why the app reads a v2 row only when it is newer than i
   and, for every agent, the weekly schema verdict. They are summed across all sampled sessions,
   a clean prebump cannot replace a weekly verdict whose own sample has parse errors, and the
   compatibility verdict reports them as `format_drift_detected` with the
-  `sample_unreadable_records` blocker. Qwen's glued-object lines, which the app parser
+  `sample_unreadable_records` blocker. A store that could not be read at all (SQLite open or
+  query failure such as a locked database, OS read error) is not a parse error: it is
+  `read_failed`, reported as `monitoring_broken` with the `sample_read_failed` blocker.
+  Qwen's glued-object lines, which the app parser
   recovers, count as `tolerated_glued_lines`, not parse errors (`_GLUED_OBJECT_AGENTS`).
 - Row types and `session_v2` columns the app handles but the disk has not produced yet (the
   `shell` row; fork, share, revert and workspace columns) are seeded in the fixture from the
