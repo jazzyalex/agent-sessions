@@ -2,8 +2,11 @@ import Foundation
 
 /// Which buttons the one-time notch intro dialog offers.
 enum NotchIntroVariant: Equatable {
-    /// Tracking on, the Quota Meter on the desktop or the notch hidden: Move to Notch · Keep on Desktop.
+    /// Tracking on, the Quota Meter on the desktop: Move to Notch · Keep on Desktop.
     case moveToNotch
+    /// Tracking on, placement already puts it in the notch but the notch is hidden from the
+    /// View menu: Move to Notch · Not Now. Nothing is on the desktop, so no "Keep on Desktop".
+    case unhideNotch
     /// Tracking on, the Quota Meter already in the notch and visible: Got It.
     case alreadyInNotch
     /// Tracking off for every provider the user has sessions for: Turn On · Not Now.
@@ -43,6 +46,7 @@ enum QuotaMeterNotchIntro {
         let everyProviderUntracked = (!input.hasCodex || !input.codexTracking)
             && (!input.hasClaude || !input.claudeTracking)
         if everyProviderUntracked { return .turnOnTracking }
-        return input.resolvesToNotch && !input.notchHidden ? .alreadyInNotch : .moveToNotch
+        guard input.resolvesToNotch else { return .moveToNotch }
+        return input.notchHidden ? .unhideNotch : .alreadyInNotch
     }
 }

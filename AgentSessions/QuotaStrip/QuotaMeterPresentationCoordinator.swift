@@ -96,9 +96,12 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
     }
 
     /// Puts the Quota Meter in the notch and makes it visible, also when it was hidden from
-    /// the View menu and the placement was already Notch (no placement change would follow).
+    /// the View menu. A placement that already resolves to the notch (Notch, or Automatic on
+    /// the built-in display) is kept: only the hidden flag is cleared, so Automatic stays
+    /// Automatic and still uses the desktop on external monitors.
     func moveToNotch() {
         defaults.set(false, forKey: PreferencesKey.quotaMeterStripHidden)
+        guard !resolvesToStrip() else { return }
         defaults.set(QuotaMeterPlacement.menuBar.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
     }
 

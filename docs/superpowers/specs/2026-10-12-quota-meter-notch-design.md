@@ -206,15 +206,18 @@ appearances. No intro text inside the picture.
 
 | State | Buttons |
 |---|---|
-| Tracking on, placement resolves to the desktop, or the notch is hidden from the View menu | **Move to Notch** (default) · **Keep on Desktop** |
+| Tracking on, placement resolves to the desktop | **Move to Notch** (default) · **Keep on Desktop** |
+| Tracking on, placement resolves to the notch but the notch is hidden from the View menu | **Move to Notch** (default) · **Not Now** |
 | Tracking on, placement already resolves to the notch (for example Automatic on a MacBook) | **Got It** (default) |
 | Tracking off for every provider the user has sessions for | **Turn On** (default) · **Not Now** |
 
-- **Move to Notch** sets `QuotaMeterPlacement` to `menuBar` (Notch) and clears
-  `QuotaMeterStripHidden`, so a notch hidden from the View menu shows again
-  even when the placement was already Notch; the coordinator does the switch
-  as for any placement change. A user whose notch is hidden gets Move to Notch,
-  never Got It (owner fix, 2026-10-20).
+- **Move to Notch** clears `QuotaMeterStripHidden`, so a notch hidden from the
+  View menu shows again. If the placement already resolves to the notch
+  (Notch, or Automatic on the built-in display) it is kept, so Automatic stays
+  Automatic; otherwise it sets `QuotaMeterPlacement` to `menuBar` (Notch). The
+  coordinator does the switch as for any placement change. A user whose notch
+  is hidden never gets Got It, and never "Keep on Desktop" when nothing is on
+  the desktop (owner decisions, 2026-10-20).
 - **Turn On** does what the session-list card's activation already does
   (turns usage tracking on for exactly the providers the user has sessions
   for, reusing `QuotaMeterPromoActivator`'s logic) and sets Notch the same way

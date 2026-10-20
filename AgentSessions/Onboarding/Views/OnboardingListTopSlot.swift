@@ -843,7 +843,7 @@ private struct NotchIntroActivator: View {
         switch variant {
         case .alreadyInNotch:
             coordinator.completeNotchIntro(activated: false)
-        case .moveToNotch, .turnOnTracking:
+        case .moveToNotch, .unhideNotch, .turnOnTracking:
             if variant == .turnOnTracking {
                 QuotaMeterActivation.enableTracking(for: providers)
             }

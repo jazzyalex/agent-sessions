@@ -342,8 +342,12 @@ final class QuotaMeterNotchIntroTests: XCTestCase {
         XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(quotaMeterCardOnScreen: true)))
     }
 
-    func testHiddenNotchGetsMoveToNotch() {
-        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(resolvesToNotch: true, notchHidden: true)), .moveToNotch)
+    func testHiddenNotchGetsUnhide() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(resolvesToNotch: true, notchHidden: true)), .unhideNotch)
+    }
+
+    func testHiddenNotchOnDesktopPlacementIsMoveToNotch() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(resolvesToNotch: false, notchHidden: true)), .moveToNotch)
     }
 
     func testHiddenNotchStillOffersTurnOn() {

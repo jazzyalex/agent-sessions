@@ -62,7 +62,7 @@ struct NotchIntroView: View {
             switch variant {
             case .moveToNotch:
                 secondaryButton("Keep on Desktop")
-            case .turnOnTracking:
+            case .turnOnTracking, .unhideNotch:
                 secondaryButton("Not Now")
             case .alreadyInNotch:
                 EmptyView()
@@ -76,7 +76,7 @@ struct NotchIntroView: View {
 
     private var primaryTitle: LocalizedStringKey {
         switch variant {
-        case .moveToNotch: return "Move to Notch"
+        case .moveToNotch, .unhideNotch: return "Move to Notch"
         case .alreadyInNotch: return "Got It"
         case .turnOnTracking: return "Turn On"
         }
