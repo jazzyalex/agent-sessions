@@ -71,7 +71,25 @@ struct OpenCodeSqliteReader {
             return nil
         }
         defer { sqlite3_close(db) }
-        return querySessionList(db: db, dbPath: url.path)
+        guard hasV2Store(db) else {
+            return querySessionList(db: db, dbPath: url.path)
+        }
+        guard let v2Sessions = querySessionListV2(db: db, dbPath: url.path) else { return nil }
+        // A fresh 2.0 database still has the v1 tables; a missing or unreadable
+        // v1 store must not hide the v2 sessions.
+        let v1Sessions = tableExists(db, table: "session")
+            ? (querySessionList(db: db, dbPath: url.path) ?? [])
+            : []
+        // Same precedence as v2SessionExists: the v2 row replaces its v1 row
+        // only when it is strictly newer.
+        let v1ByID = Dictionary(v1Sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let preferredV2 = v2Sessions.filter { v2 in
+            guard let v1 = v1ByID[v2.id] else { return true }
+            return (v2.endTime ?? .distantPast) > (v1.endTime ?? .distantPast)
+        }
+        let v2IDs = Set(preferredV2.map(\.id))
+        return (preferredV2 + v1Sessions.filter { !v2IDs.contains($0.id) })
+            .sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
     }
 
     // MARK: - Full session (with transcript events)
@@ -103,8 +121,9 @@ struct OpenCodeSqliteReader {
             return nil
         }
         defer { sqlite3_close(db) }
+        let table = v2SessionExists(db, sessionID: sessionID) ? "session_v2" : "session"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT time_updated FROM session WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db, "SELECT time_updated FROM \(table) WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, sessionID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
@@ -159,9 +178,24 @@ struct OpenCodeSqliteReader {
         defer { sqlite3_close(db) }
         guard beginReadTransaction(db) else { return nil }
         defer { rollbackReadTransaction(db) }
-        guard let metadata = queryTelemetrySessionMetadata(db: db, sessionID: session.id),
-              let messageScan = queryTelemetryMessages(db: db, sessionID: session.id),
-              let partScan = queryTelemetryParts(db: db, sessionID: session.id) else { return nil }
+        let isV2 = v2SessionExists(db, sessionID: session.id)
+        let metadata: OpenCodeTelemetrySessionMetadata
+        let messageScan: OpenCodeTelemetryRows<OpenCodeTelemetryMessageRow>
+        let partScan: OpenCodeTelemetryRows<OpenCodeTelemetryPartRow>
+        if isV2 {
+            guard let v2Metadata = queryTelemetrySessionMetadataV2(db: db, sessionID: session.id),
+                  let v2Scan = queryTelemetryV2(db: db, sessionID: session.id) else { return nil }
+            metadata = v2Metadata
+            messageScan = v2Scan.messages
+            partScan = v2Scan.parts
+        } else {
+            guard let v1Metadata = queryTelemetrySessionMetadata(db: db, sessionID: session.id),
+                  let v1Messages = queryTelemetryMessages(db: db, sessionID: session.id),
+                  let v1Parts = queryTelemetryParts(db: db, sessionID: session.id) else { return nil }
+            metadata = v1Metadata
+            messageScan = v1Messages
+            partScan = v1Parts
+        }
         let messages = messageScan.rows
         let parts = partScan.rows
 
@@ -199,7 +233,9 @@ struct OpenCodeSqliteReader {
                 tokens: tokens,
                 usageFamily: "opencode.step-finish.tokens"))
         }
-        let hasPartTable = tableExists(db, table: "part")
+        // v2 assistant rows carry their usage directly; the adapter turns each
+        // into a step-finish row, so v2 behaves like a database with parts.
+        let hasPartTable = isV2 || tableExists(db, table: "part")
         let rawUsageRows: [OpenCodeTelemetryUsageRow]
         var usageUnavailableReason: String?
         if messageScan.malformedPayload || partScan.malformedPayload {
@@ -807,6 +843,9 @@ struct OpenCodeSqliteReader {
     }
 
     private static func logicalRevision(db: OpaquePointer?, sessionID: String) -> String? {
+        if v2SessionExists(db, sessionID: sessionID) {
+            return logicalRevisionV2(db: db, sessionID: sessionID)
+        }
         guard tableExists(db, table: "message") else { return nil }
         let hasModel = tableHasColumn(db, table: "session", column: "model")
         let hasCreated = tableHasColumn(db, table: "session", column: "time_created")
@@ -1106,6 +1145,9 @@ struct OpenCodeSqliteReader {
     }
 
     private static func queryFullSession(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
+        if v2SessionExists(db, sessionID: sessionID) {
+            return queryFullSessionV2(db: db, sessionID: sessionID, dbPath: dbPath)
+        }
         // 1. Session metadata
         let hasParent = tableHasColumn(db, table: "session", column: "parent_id")
         let hasModel = tableHasColumn(db, table: "session", column: "model")
@@ -1136,8 +1178,6 @@ struct OpenCodeSqliteReader {
         let storedModelID = modelIndex.flatMap { index in
             sqlite3_column_type(sesStmt, index) == SQLITE_NULL ? nil : currentModelID(from: text(sesStmt, index))
         }
-        let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
-        let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
 
         // 2. Load all messages ordered by time_created
         let msgSQL = "SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created IS NULL, time_created, id;"
@@ -1170,7 +1210,36 @@ struct OpenCodeSqliteReader {
             }
 
             // 3. Load parts for this message
-            let partDicts = loadPartDicts(db: db, messageID: msgID)
+            appendMessageEvents(msgID: msgID,
+                                timestamp: ts,
+                                rawJSON: rawJSON,
+                                message: msg,
+                                partDicts: loadPartDicts(db: db, messageID: msgID),
+                                events: &events,
+                                commandCount: &commandCount)
+        }
+
+        return buildFullSession(id: id,
+                                title: title,
+                                directory: directory,
+                                timeCreated: timeCreated,
+                                timeUpdated: timeUpdated,
+                                parentID: parentID,
+                                modelID: modelID,
+                                events: events,
+                                commandCount: commandCount,
+                                dbPath: dbPath)
+    }
+
+    /// Converts one message and its parts into transcript events. Shared by the
+    /// v1 (`message` + `part`) and v2 (`session_message`) readers.
+    private static func appendMessageEvents(msgID: String,
+                                            timestamp ts: Date?,
+                                            rawJSON: String,
+                                            message msg: OpenCodeSessionParser.MessageJSON,
+                                            partDicts: [(id: String, dict: [String: Any], rawJSON: String)],
+                                            events: inout [SessionEvent],
+                                            commandCount: inout Int) {
             let hasTools = (msg.tools?.todowrite ?? false) || (msg.tools?.todoread ?? false) || (msg.tools?.task ?? false)
             if hasTools { commandCount += 1 }
 
@@ -1244,8 +1313,20 @@ struct OpenCodeSqliteReader {
             }
             events.append(contentsOf: partEvents.tool)
             events.append(contentsOf: partEvents.meta)
-        }
+    }
 
+    private static func buildFullSession(id: String,
+                                         title: String,
+                                         directory: String,
+                                         timeCreated: Int64,
+                                         timeUpdated: Int64,
+                                         parentID: String?,
+                                         modelID: String?,
+                                         events: [SessionEvent],
+                                         commandCount: Int,
+                                         dbPath: String) -> Session {
+        let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
+        let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let storedTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
         let generatedDefaultTitle = OpenCodeSessionParser.isGeneratedDefaultSessionTitle(storedTitle)
@@ -1295,6 +1376,333 @@ struct OpenCodeSqliteReader {
             results.append((id: partID, dict: obj, rawJSON: rawJSON))
         }
         return results
+    }
+
+    // MARK: - OpenCode 2.0 store (session_v2 + session_message)
+    //
+    // OpenCode 2.0 keeps the v1 `session`/`message`/`part` tables and adds
+    // `session_v2` and `session_message` in the same database. New sessions are
+    // written only to the v2 tables. A background job copies v1 sessions into
+    // them with the same IDs and the same `time_updated`, and leaves the v1 rows
+    // in place, so a session can exist in both stores.
+    //
+    // The copy is lossy: on a real 2.1.1 database it dropped every assistant
+    // step of some older sessions while their v1 rows stayed complete. So the v2
+    // row is used only when it has no v1 row or is strictly newer, which means
+    // the session was continued in OpenCode 2.x. An untouched migrated session
+    // keeps reading from its original v1 rows.
+
+    private static func hasV2Store(_ db: OpaquePointer?) -> Bool {
+        tableExists(db, table: "session_v2") && tableExists(db, table: "session_message")
+    }
+
+    /// True when this session should be read from the v2 store (see above).
+    private static func v2SessionExists(_ db: OpaquePointer?, sessionID: String) -> Bool {
+        guard hasV2Store(db),
+              let v2Updated = sessionTimeUpdated(db, table: "session_v2", sessionID: sessionID) else { return false }
+        guard tableExists(db, table: "session"),
+              let v1Updated = sessionTimeUpdated(db, table: "session", sessionID: sessionID) else { return true }
+        return v2Updated > v1Updated
+    }
+
+    private static func sessionTimeUpdated(_ db: OpaquePointer?, table: String, sessionID: String) -> Int64? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT time_updated FROM \(table) WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_int64(stmt, 0)
+    }
+
+    private struct V2Row {
+        let id: String
+        let type: String
+        let seq: Int64
+        let timeCreated: Int64
+        let timeUpdated: Int64
+        let data: String
+    }
+
+    /// Reads a session's v2 rows in `seq` order. nil means a query failure.
+    private static func v2Rows(db: OpaquePointer?, sessionID: String) -> (rows: [V2Row], cancelled: Bool)? {
+        let sql = "SELECT id, type, seq, time_created, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        var rows: [V2Row] = []
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            if Task.isCancelled { return (rows, true) }
+            rows.append(V2Row(id: text(stmt, 0),
+                              type: text(stmt, 1),
+                              seq: sqlite3_column_int64(stmt, 2),
+                              timeCreated: sqlite3_column_int64(stmt, 3),
+                              timeUpdated: sqlite3_column_int64(stmt, 4),
+                              data: text(stmt, 5)))
+            step = sqlite3_step(stmt)
+        }
+        guard step == SQLITE_DONE else { return nil }
+        return (rows, false)
+    }
+
+    private static func decodeObject(_ string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func decodeMessageJSON(_ object: [String: Any]) -> OpenCodeSessionParser.MessageJSON? {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        return try? JSONDecoder().decode(OpenCodeSessionParser.MessageJSON.self, from: data)
+    }
+
+    private static func adaptedV2Row(_ row: V2Row) -> OpenCodeV2MessageAdapter.Adapted? {
+        guard let object = decodeObject(row.data) else { return nil }
+        return OpenCodeV2MessageAdapter.adapt(rowID: row.id,
+                                             type: row.type,
+                                             timeCreatedMillis: row.timeCreated,
+                                             data: object)
+    }
+
+    private struct V2SessionRow {
+        let id: String
+        let title: String
+        let directory: String
+        let timeCreated: Int64
+        let timeUpdated: Int64
+        let parentID: String?
+        let modelID: String?
+    }
+
+    private static let v2SessionColumns = "id, title, directory, time_created, time_updated, parent_id, model"
+
+    private static func v2SessionRow(_ stmt: OpaquePointer?) -> V2SessionRow {
+        V2SessionRow(
+            id: text(stmt, 0),
+            title: text(stmt, 1),
+            directory: text(stmt, 2),
+            timeCreated: sqlite3_column_int64(stmt, 3),
+            timeUpdated: sqlite3_column_int64(stmt, 4),
+            parentID: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : stringValue(text(stmt, 5)),
+            // session_v2.model is the authoritative current model, as in v1.
+            modelID: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : currentModelID(from: text(stmt, 6)))
+    }
+
+    private static func querySessionListV2(db: OpaquePointer?, dbPath: String) -> [Session]? {
+        let sql = "SELECT \(v2SessionColumns) FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        var sessions: [Session] = []
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            let row = v2SessionRow(stmt)
+            if !row.id.isEmpty {
+                let storedTitle = OpenCodeSessionParser.normalizedSessionTitle(row.title)
+                let generatedDefaultTitle = OpenCodeSessionParser.isGeneratedDefaultSessionTitle(storedTitle)
+                let meta = v2LightweightMeta(db: db, sessionID: row.id, includeFirstUserTitle: generatedDefaultTitle)
+                sessions.append(Session(
+                    id: row.id,
+                    source: .opencode,
+                    startTime: dateFromMillis(row.timeCreated),
+                    endTime: dateFromMillis(row.timeUpdated),
+                    model: row.modelID,
+                    filePath: dbPath,
+                    fileSizeBytes: nil,
+                    eventCount: meta.count,
+                    events: [],
+                    cwd: row.directory.isEmpty ? nil : row.directory,
+                    repoName: nil,
+                    lightweightTitle: OpenCodeSessionParser.effectiveSessionTitle(
+                        storedTitle: storedTitle,
+                        firstUserText: meta.firstUserTitle),
+                    lightweightCommands: nil,
+                    parentSessionID: row.parentID,
+                    subagentType: OpenCodeSessionParser.deriveSubagentTypeFromTitle(storedTitle),
+                    customTitle: generatedDefaultTitle ? nil : storedTitle))
+            }
+            step = sqlite3_step(stmt)
+        }
+        guard step == SQLITE_DONE else { return nil }
+        return sessions
+    }
+
+    private static func v2LightweightMeta(db: OpaquePointer?,
+                                          sessionID: String,
+                                          includeFirstUserTitle: Bool) -> (count: Int, firstUserTitle: String?) {
+        var count = 0
+        let types = OpenCodeV2MessageAdapter.conversationTypes.sorted().map { "'\($0)'" }.joined(separator: ", ")
+        var countStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM session_message WHERE session_id = ? AND type IN (\(types));",
+                              -1, &countStmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(countStmt, 1, (sessionID as NSString).utf8String, -1,
+                              unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(countStmt) == SQLITE_ROW {
+                count = Int(sqlite3_column_int64(countStmt, 0))
+            }
+        }
+        sqlite3_finalize(countStmt)
+
+        guard includeFirstUserTitle else { return (count, nil) }
+        var firstUserTitle: String?
+        var stmt: OpaquePointer?
+        let sql = "SELECT data FROM session_message WHERE session_id = ? AND type = 'user' ORDER BY seq;"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                              unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            while firstUserTitle == nil, sqlite3_step(stmt) == SQLITE_ROW {
+                if let object = decodeObject(text(stmt, 0)),
+                   let userText = object["text"] as? String,
+                   !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    firstUserTitle = userText
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        return (count, firstUserTitle)
+    }
+
+    private static func queryFullSessionV2(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
+        let sql = "SELECT \(v2SessionColumns) FROM session_v2 WHERE id = ? LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let session = v2SessionRow(stmt)
+        guard let scan = v2Rows(db: db, sessionID: sessionID) else { return nil }
+
+        var events: [SessionEvent] = []
+        var commandCount = 0
+        for row in scan.rows {
+            guard let adapted = adaptedV2Row(row),
+                  let message = decodeMessageJSON(adapted.message) else { continue }
+            let partDicts = adapted.parts.map { part in
+                (id: part.id,
+                 dict: part.dict,
+                 rawJSON: OpenCodeSessionParser.cappedPartJSON(obj: part.dict, source: nil))
+            }
+            appendMessageEvents(msgID: row.id,
+                                timestamp: dateFromMillis(row.timeCreated),
+                                rawJSON: row.data,
+                                message: message,
+                                partDicts: partDicts,
+                                events: &events,
+                                commandCount: &commandCount)
+        }
+        return buildFullSession(id: session.id,
+                                title: session.title,
+                                directory: session.directory,
+                                timeCreated: session.timeCreated,
+                                timeUpdated: session.timeUpdated,
+                                parentID: session.parentID,
+                                modelID: session.modelID,
+                                events: events,
+                                commandCount: commandCount,
+                                dbPath: dbPath)
+    }
+
+    private static func queryTelemetrySessionMetadataV2(
+        db: OpaquePointer?,
+        sessionID: String
+    ) -> OpenCodeTelemetrySessionMetadata? {
+        let sql = "SELECT time_updated, model, time_created, parent_id FROM session_v2 WHERE id = ? LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let rawModel = sqlite3_column_type(stmt, 1) != SQLITE_NULL ? text(stmt, 1) : nil
+        let parentID = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? stringValue(text(stmt, 3)) : nil
+        return OpenCodeTelemetrySessionMetadata(
+            hasModelColumn: true,
+            model: rawModel.flatMap(currentModelID(from:)),
+            updatedAt: dateFromMillis(sqlite3_column_int64(stmt, 0)),
+            createdAt: dateFromMillis(sqlite3_column_int64(stmt, 2)),
+            parentID: parentID)
+    }
+
+    /// v2 rows as telemetry message rows plus the step-finish parts the adapter
+    /// derives from assistant `tokens`.
+    private static func queryTelemetryV2(
+        db: OpaquePointer?,
+        sessionID: String
+    ) -> (messages: OpenCodeTelemetryRows<OpenCodeTelemetryMessageRow>,
+          parts: OpenCodeTelemetryRows<OpenCodeTelemetryPartRow>)? {
+        guard let scan = v2Rows(db: db, sessionID: sessionID) else { return nil }
+        var messages: [OpenCodeTelemetryMessageRow] = []
+        var parts: [OpenCodeTelemetryPartRow] = []
+        for row in scan.rows {
+            let observedAt = dateFromMillis(row.timeCreated) ?? dateFromMillis(row.timeUpdated)
+            let bytes = UInt64(row.data.utf8.count)
+            guard let adapted = adaptedV2Row(row) else {
+                messages.append(OpenCodeTelemetryMessageRow(
+                    id: row.id, observedAt: observedAt, role: nil, model: nil, reasoningEffort: nil,
+                    object: [:], malformedPayload: true, bytesScanned: bytes))
+                continue
+            }
+            let object = adapted.message
+            messages.append(OpenCodeTelemetryMessageRow(
+                id: row.id,
+                observedAt: observedAt,
+                role: stringValue(object["role"]),
+                model: modelID(from: object),
+                reasoningEffort: reasoningEffort(from: object),
+                object: object,
+                malformedPayload: false,
+                bytesScanned: bytes))
+            for part in adapted.parts where (part.dict["type"] as? String) == "step-finish" {
+                parts.append(OpenCodeTelemetryPartRow(
+                    id: part.id,
+                    messageID: row.id,
+                    observedAt: observedAt,
+                    object: part.dict,
+                    malformedPayload: false,
+                    bytesScanned: 0))
+            }
+        }
+        return (OpenCodeTelemetryRows(rows: messages,
+                                      cancelled: scan.cancelled,
+                                      malformedPayload: messages.contains(where: \.malformedPayload)),
+                OpenCodeTelemetryRows(rows: parts, cancelled: scan.cancelled, malformedPayload: false))
+    }
+
+    private static func logicalRevisionV2(db: OpaquePointer?, sessionID: String) -> String? {
+        let sql = "SELECT time_updated, model, time_created, parent_id FROM session_v2 WHERE id = ? LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        var hasher = SHA256()
+        feedDigest("store", value: "session_v2", into: &hasher)
+        feedDigest("session.id", value: sessionID, into: &hasher)
+        feedDigest("session.time_updated", value: String(sqlite3_column_int64(stmt, 0)), into: &hasher)
+        feedDigest("session.model",
+                   value: sqlite3_column_type(stmt, 1) == SQLITE_NULL ? "<null>" : text(stmt, 1),
+                   into: &hasher)
+        feedDigest("session.time_created", value: String(sqlite3_column_int64(stmt, 2)), into: &hasher)
+        feedDigest("session.parent_id",
+                   value: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? "<null>" : text(stmt, 3),
+                   into: &hasher)
+        guard let scan = v2Rows(db: db, sessionID: sessionID), !scan.cancelled else { return nil }
+        for row in scan.rows {
+            feedDigest("message.id", value: row.id, into: &hasher)
+            feedDigest("message.seq", value: String(row.seq), into: &hasher)
+            feedDigest("message.time_updated", value: String(row.timeUpdated), into: &hasher)
+            feedDigest("message.data", value: row.data, into: &hasher)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - SQLite helpers

@@ -395,6 +395,7 @@
 		977E84FF654DCBD758CC6B36 /* SessionTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DDEA8A575F7D77630C0675F /* SessionTelemetry.swift */; };
 		97BBDEB0289BEC85AA32BB91 /* PiSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A4B0DBEB6CE6812D3332F8 /* PiSessionDiscovery.swift */; };
 		9810431F71F24971F84E8472 /* HermesSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC465AC4F3A51868CBF81044 /* HermesSessionParser.swift */; };
+		98F6F0F1F991EE173F342A40 /* OpenCodeV2StoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 517E5DD20185E1E190A5CA0D /* OpenCodeV2StoreTests.swift */; };
 		98F981841A99410B940D88EE /* CodexLaunchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */; };
 		9921F07DD723B6756A736C7D /* UsageAuthStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F971741FC16E09106844B759 /* UsageAuthStatusTests.swift */; };
 		99418020344D36B34E2704CD /* DeepSeekHarnessSourceDescriptorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B475B6F0275AD987378AA8B4 /* DeepSeekHarnessSourceDescriptorTests.swift */; };
@@ -617,6 +618,7 @@
 		DBSTEST00002000000000001 /* DBSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBSTEST00001000000000001 /* DBSmokeTests.swift */; };
 		DC1F5088E6C61C8FD6BF89FB /* TranscriptAutoJumpPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9434705A30D3A111B1F3235C /* TranscriptAutoJumpPolicyTests.swift */; };
 		DC4D31CDB7D4742E49A475DC /* TelemetryCostCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0883BF472571E43D3E07AD44 /* TelemetryCostCalculatorTests.swift */; };
+		DC73C86070E5D99D10F4F8F4 /* OpenCodeV2MessageAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F103258C69D4234E1EB379F /* OpenCodeV2MessageAdapter.swift */; };
 		DCFBDAB3006D85C31312FCEE /* FxSessionDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4613420E56A6D3B246AC7948 /* FxSessionDiscoveryTests.swift */; };
 		DD54C0A55C516F361F3C9A55 /* OptionalDateEquality.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C35EECDEE4FA059F107D4E7 /* OptionalDateEquality.swift */; };
 		DDA741C3B926E44BF8ECAC4A /* OpenCodeTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1DBB5ECEA47B5F12AECF2A /* OpenCodeTerminalLauncher.swift */; };
@@ -928,6 +930,7 @@
 		50425E3165018F30D0F8C847 /* AntigravityTelemetryAccumulator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Telemetry/AntigravityTelemetryAccumulator.swift; sourceTree = SOURCE_ROOT; };
 		505DF56C4E0958D194B6CD65 /* KimiSourceDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Kimi/KimiSourceDescriptor.swift; sourceTree = SOURCE_ROOT; };
 		5138EDB01FF036310A5A28AC /* ToolTextBlockNormalizerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ToolTextBlockNormalizerTests.swift; sourceTree = SOURCE_ROOT; };
+		517E5DD20185E1E190A5CA0D /* OpenCodeV2StoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/OpenCodeV2StoreTests.swift; sourceTree = SOURCE_ROOT; };
 		51D4C7236AF88FD7A139C43B /* HermesCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Hermes/HermesCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		520EA2A47376978BF4DA3B70 /* ClaudeAuthClassifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeAuthClassifier.swift; sourceTree = SOURCE_ROOT; };
 		52343E9958A54E9987227D4A /* AnalyticsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsData.swift; sourceTree = "<group>"; };
@@ -1106,6 +1109,7 @@
 		9E0F0666E60EE2819FD7BF5B /* PreferencesView+About.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+About.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+About.swift"; sourceTree = SOURCE_ROOT; };
 		9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHeatmapView.swift; sourceTree = "<group>"; };
 		9E69060A0479F7A483F8C1C0 /* PresenceEngineRegressionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PresenceEngineRegressionTests.swift; sourceTree = SOURCE_ROOT; };
+		9F103258C69D4234E1EB379F /* OpenCodeV2MessageAdapter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCode/OpenCodeV2MessageAdapter.swift; sourceTree = SOURCE_ROOT; };
 		9F13DE3D3808C990779216E4 /* TranscriptColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptColorSystem.swift; sourceTree = SOURCE_ROOT; };
 		9F2A72D676170757B57FBBE5 /* OpenCodeBase64ImageScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/OpenCodeBase64ImageScanner.swift; sourceTree = SOURCE_ROOT; };
 		9F7E0D2EDFA7284328FC929C /* DevinTelemetryReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Telemetry/DevinTelemetryReader.swift; sourceTree = SOURCE_ROOT; };
@@ -2306,6 +2310,7 @@
 				94C819F8CEF5E562618CC35C /* PriceManifestV2Tests.swift */,
 				AA2BC21B6AB6984114CA0C4F /* AntigravityIndexRepairTests.swift */,
 				9FFE0C2DD757D755DA1068BD /* CodexRolloutStorageTests.swift */,
+				517E5DD20185E1E190A5CA0D /* OpenCodeV2StoreTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2718,6 +2723,7 @@
 				27A1CB8D054EBD47772E5C0B /* OpenCodeSettings.swift */,
 				8D4509ADD90E0871F4CBC066 /* OpenCodeCLIEnvironment.swift */,
 				AAD101D941FAACBDF502142F /* OpenCodeSourceDescriptor.swift */,
+				9F103258C69D4234E1EB379F /* OpenCodeV2MessageAdapter.swift */,
 			);
 			name = OpenCode;
 			sourceTree = "<group>";
@@ -3463,6 +3469,7 @@
 				87B99F8179CB4DB027A16CF9 /* NotchGlyph.swift in Sources */,
 				205D78B828A32A95A6ABAB2C /* QuotaMeterNotchIntro.swift in Sources */,
 				C6E74800E8BA2DA002F74892 /* NotchIntroView.swift in Sources */,
+				DC73C86070E5D99D10F4F8F4 /* OpenCodeV2MessageAdapter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3672,6 +3679,7 @@
 				B97C0B0D4348758FE1DE9307 /* PriceManifestV2Tests.swift in Sources */,
 				D463B782AF19463380FF008E /* AntigravityIndexRepairTests.swift in Sources */,
 				D430652AF0F377383157A5A3 /* CodexRolloutStorageTests.swift in Sources */,
+				98F6F0F1F991EE173F342A40 /* OpenCodeV2StoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -97,7 +97,8 @@ struct OpenCodeBackendDetector {
         return .none
     }
 
-    /// Returns true if opencode.db exists and contains a `session` table.
+    /// Returns true if opencode.db exists and contains a `session` table
+    /// (OpenCode 1.2+) or a `session_v2` table (OpenCode 2.0).
     static func isSQLiteAvailable(customRoot: String?,
                                   fileProbe: any FileProbing = DefaultFileProbe(),
                                   homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
@@ -105,6 +106,7 @@ struct OpenCodeBackendDetector {
                         fileProbe: fileProbe,
                         homeDirectory: homeDirectory)
         return fileProbe.sqliteDatabase(atPath: url.path, containsTable: "session")
+            || fileProbe.sqliteDatabase(atPath: url.path, containsTable: "session_v2")
     }
 
     /// Returns true if the legacy JSON storage/session directory exists.

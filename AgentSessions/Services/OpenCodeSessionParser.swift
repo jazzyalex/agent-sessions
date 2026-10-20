@@ -38,7 +38,9 @@ final class OpenCodeSessionParser {
         struct Summary: Decodable {
             let title: String?
             let body: String?
-            let diffs: [String]?
+            // `diffs` is not decoded: OpenCode stores it as an array of
+            // {file, patch, ...} objects, and a [String] field failed the whole
+            // message, which dropped the user prompt from the transcript.
         }
         struct Model: Decodable {
             let providerID: String?
