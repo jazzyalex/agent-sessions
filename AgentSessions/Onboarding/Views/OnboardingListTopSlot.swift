@@ -74,8 +74,38 @@ struct OnboardingListTopSlot: View {
             }
         )
         .onPreferenceChange(SlotWidthKey.self) { paneWidth = $0 }
-        .onAppear { chooseTopSlotCardIfNeeded() }
-        .onChange(of: audienceReady) { _, _ in chooseTopSlotCardIfNeeded() }
+        // The intro is evaluated before the card on purpose: shown at audience-ready, it keeps
+        // the Quota Meter card out of this launch.
+        .onAppear {
+            evaluateNotchIntro()
+            chooseTopSlotCardIfNeeded()
+        }
+        .onChange(of: audienceReady) { _, _ in
+            evaluateNotchIntro()
+            chooseTopSlotCardIfNeeded()
+        }
+        // The setup window or the What's New panel closing lets a waiting intro appear.
+        .onChange(of: coordinator.presentation) { _, _ in evaluateNotchIntro() }
+        .onChange(of: coordinator.isWhatsNewPanelPresented) { _, _ in evaluateNotchIntro() }
+    }
+
+    private func evaluateNotchIntro() {
+        guard coordinator.notchIntroVariant == nil, TopSlotDebugOverride.current == nil else { return }
+        let input = NotchIntroInput(
+            alreadyShown: UserDefaults.standard.bool(forKey: QuotaMeterNotchIntro.shownKey),
+            audienceReady: audienceReady,
+            hasCodex: providers.hasCodex,
+            hasClaude: providers.hasClaude,
+            codexTracking: codexUsageEnabled,
+            claudeTracking: claudeUsageEnabled,
+            resolvesToNotch: QuotaMeterPresentationCoordinator.shared.resolvesToStrip(),
+            notchHidden: UserDefaults.standard.bool(forKey: PreferencesKey.quotaMeterStripHidden),
+            blockingSurfaceOpen: coordinator.presentation != nil || coordinator.isWhatsNewPanelPresented,
+            quotaMeterCardOnScreen: selectedCard == .quotaMeter || coordinator.quotaMeterCardShownThisLaunch
+        )
+        if let variant = QuotaMeterNotchIntro.variant(for: input) {
+            coordinator.presentNotchIntro(variant)
+        }
     }
 
     private func chooseTopSlotCardIfNeeded() {
@@ -718,6 +748,12 @@ extension View {
             )) {
                 QuotaMeterPromoActivator(coordinator: coordinator, providers: quotaMeterProviders)
             }
+            .sheet(isPresented: Binding(
+                get: { coordinator.notchIntroVariant != nil },
+                set: { if !$0 { coordinator.completeNotchIntro(activated: false) } }
+            )) {
+                NotchIntroActivator(coordinator: coordinator, providers: quotaMeterProviders)
+            }
     }
 }
 
@@ -761,18 +797,61 @@ private struct QuotaMeterPromoActivator: View {
     private func activate() {
         // Enable before opening: the Quota Meter renders "Usage tracking is off"
         // otherwise, which would make the promo deliver an empty box.
-        //
-        // Only the providers the user has sessions for, and only ever switching
-        // on — never off, so an existing preference for the other provider
-        // survives untouched.
-        if providers.hasCodex {
-            codexUsageEnabled = true
-        }
-        if providers.hasClaude {
-            claudeUsageEnabled = true
-        }
+        QuotaMeterActivation.enableTracking(for: providers)
         coordinator.recordQuotaMeterActivated()
         QuotaMeterPresentationCoordinator.shared.showQuotaMeter()
+    }
+}
+
+/// The one consented step both Quota Meter invitations share (the list card's promo and
+/// the notch intro's Turn On).
+enum QuotaMeterActivation {
+    /// Only the providers the user has sessions for, and only ever switching on — never
+    /// off, so an existing preference for the other provider survives untouched.
+    @MainActor
+    static func enableTracking(for providers: QuotaMeterProviderAvailability,
+                               defaults: UserDefaults = .standard) {
+        if providers.hasCodex {
+            defaults.set(true, forKey: PreferencesKey.codexUsageEnabled)
+        }
+        if providers.hasClaude {
+            defaults.set(true, forKey: PreferencesKey.claudeUsageEnabled)
+        }
+    }
+}
+
+/// Hosts the notch intro dialog and carries out its buttons. Kept beside
+/// `QuotaMeterPromoActivator` for the same reason: the list pane's sheet host is always
+/// mounted, and the dialog view stays presentation-only.
+private struct NotchIntroActivator: View {
+    @ObservedObject var coordinator: OnboardingCoordinator
+    let providers: QuotaMeterProviderAvailability
+    /// The variant stays drawn while the sheet animates away; `notchIntroVariant` turns nil
+    /// as soon as a button is pressed, and an empty sheet would shrink mid-dismissal.
+    @State private var shownVariant: NotchIntroVariant?
+
+    var body: some View {
+        if let variant = coordinator.notchIntroVariant ?? shownVariant {
+            NotchIntroView(variant: variant,
+                           onPrimary: { primary(variant) },
+                           onSecondary: { coordinator.completeNotchIntro(activated: false) })
+                .onAppear { shownVariant = variant }
+        }
+    }
+
+    private func primary(_ variant: NotchIntroVariant) {
+        switch variant {
+        case .alreadyInNotch:
+            coordinator.completeNotchIntro(activated: false)
+        case .moveToNotch, .turnOnTracking:
+            if variant == .turnOnTracking {
+                QuotaMeterActivation.enableTracking(for: providers)
+            }
+            QuotaMeterPresentationCoordinator.shared.moveToNotch()
+            coordinator.completeNotchIntro(activated: true)
+            // Show where it went, with the user's own data.
+            QuotaMeterPresentationCoordinator.shared.peekStrip()
+        }
     }
 }
 

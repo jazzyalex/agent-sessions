@@ -162,7 +162,7 @@ extension PreferencesView {
 
             sectionHeader("Quota Meter")
             VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Placement") {
+                labeledRow("Show Quota Meter in") {
                     Picker("", selection: Binding(
                         get: { QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) },
                         set: { quotaMeterPlacementRaw = $0.rawValue }
@@ -174,7 +174,7 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .frame(maxWidth: 320)
-                    .help("Show the Quota Meter as a floating window or as a strip at the top of the screen.")
+                    .help("Show the Quota Meter in the notch or on the desktop.")
                 }
 
                 Text(QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw).detail)
@@ -183,7 +183,7 @@ extension PreferencesView {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) != .floating {
-                    labeledRow("Strip Style") {
+                    labeledRow("Notch Style") {
                         Picker("", selection: Binding(
                             get: { QuotaMeterNotchStyle.current(raw: quotaMeterNotchStyleRaw) },
                             set: { quotaMeterNotchStyleRaw = $0.rawValue }
@@ -195,7 +195,7 @@ extension PreferencesView {
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         .frame(maxWidth: 240)
-                        .help("Choose how much of the menu bar the collapsed strip uses.")
+                        .help("Choose how much of the menu bar the collapsed notch uses.")
                     }
 
                     Text(QuotaMeterNotchStyle.current(raw: quotaMeterNotchStyleRaw).detail)
@@ -305,7 +305,7 @@ extension PreferencesView {
                 get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
                 set: { DockIconPreferenceController.setDockIconHidden($0) }
             ))
-            .help("Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar.")
+            .help("Removes Agent Sessions from the Dock while the Quota Meter in the notch, or a pinned Quota Meter on the desktop, keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the notch.")
 
             sectionHeader("Claude Archived Sessions")
             VStack(alignment: .leading, spacing: 8) {

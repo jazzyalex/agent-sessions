@@ -97,6 +97,7 @@
 		1F4EC72C420063DA50F911A5 /* CodexCredentialReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D70F11CF48AE82D03E7FA4D /* CodexCredentialReadTests.swift */; };
 		1FEAB92D167D5784F7ED0934 /* DeepSeekHarnessFixtureParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87ED16984C76B0A099E7CB1C /* DeepSeekHarnessFixtureParityTests.swift */; };
 		2033081A1EAA32576B54942B /* SessionTelemetryEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD49DFE335A9DEE0119101A /* SessionTelemetryEngineTests.swift */; };
+		205D78B828A32A95A6ABAB2C /* QuotaMeterNotchIntro.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C3648B093C42F26019342B4 /* QuotaMeterNotchIntro.swift */; };
 		209078C2EE7C8AB87C8E61A8 /* ClaudeProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27D0637DFF720558181BE5D /* ClaudeProbeConfig.swift */; };
 		20CDDCA18CFFF8DDE46DAA69 /* AntigravitySourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDCB87E09445E1E39B93FDC /* AntigravitySourceDescriptor.swift */; };
 		20E79D2FC12457C2AD5CCB0A /* UnifiedSearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C29E004E088B0110C36DAAAC /* UnifiedSearchState.swift */; };
@@ -238,6 +239,7 @@
 		5BC4A82FD5483920431BC3C0 /* FxTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74AD94E3506F8C71840782B /* FxTerminalLauncher.swift */; };
 		5C026872721AF42E29054118 /* CodexSideChatProvenanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF73958C357D1CDFCB67F5C /* CodexSideChatProvenanceTests.swift */; };
 		5C214E362AFD0C863BF310C6 /* FilteredDefaultsObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977154E97166D177FECB5E2F /* FilteredDefaultsObserver.swift */; };
+		5C9BE87F65E6955E6856471E /* QuotaMeterNotchIntro.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C3648B093C42F26019342B4 /* QuotaMeterNotchIntro.swift */; };
 		5CBE5783C098B12D6D1189AE /* DevinSqliteReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4C51601BEABAE11E3F3FC9 /* DevinSqliteReader.swift */; };
 		5D720AA416A9D7C754CFA967 /* ImageAttachmentPromptContextExtractorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B883A95D50CF8D0546B565BA /* ImageAttachmentPromptContextExtractorTests.swift */; };
 		5D837CC1F0263B6743122405 /* CommandExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C91B6EAA5FE64FC74099E249 /* CommandExecutorTests.swift */; };
@@ -347,6 +349,7 @@
 		867937185092A7641F1E1508 /* CursorTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60591BB6BB1078FB824B8C96 /* CursorTranscriptView.swift */; };
 		86DBE1CAFA09070E00C67654 /* PiSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25151786F954C6F7EDFBA7E5 /* PiSettingsTests.swift */; };
 		86F9A741D36D8D535595E093 /* ClineIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7083018A445453929FEEA24C /* ClineIntegrationTests.swift */; };
+		87B99F8179CB4DB027A16CF9 /* NotchGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B47525FB12211A67474748 /* NotchGlyph.swift */; };
 		8801AC805BE75FEACC2F4913 /* ClaudeLimitSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8881F3C132EC15B4D3283C0B /* ClaudeLimitSnapshot.swift */; };
 		880E13C9200AB2F4EAC3FC53 /* CursorResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D893A68814931258489523A /* CursorResumeCommandBuilder.swift */; };
 		88717D63E0E35F5A75DD8B5D /* codex_050_legacy.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 0AA81B3C81B142CCF423565C /* codex_050_legacy.jsonl */; };
@@ -535,6 +538,7 @@
 		C5B8763B1B1C3C2BEC117B4C /* SessionTelemetryFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2587D98A5DE555E2EB82D63C /* SessionTelemetryFixtureTests.swift */; };
 		C5F4AF2DCCED1CDFD8BF92EA /* KimiResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34158902D7267AFFC700DB9D /* KimiResumeTypes.swift */; };
 		C6CE5E7F605CB2847D0B5CB3 /* CursorResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB92E25B7671629D92D32CB /* CursorResumeTypes.swift */; };
+		C6E74800E8BA2DA002F74892 /* NotchIntroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3964BABE3E843E708423CC32 /* NotchIntroView.swift */; };
 		C75513529D32E46A100F6143 /* TranscriptCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F14DCC022A2C17748842F5 /* TranscriptCacheTests.swift */; };
 		C7D7C64D03109E814BEA8335 /* AuthStatusNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A18C0AEF6B5DB5A329FCF4 /* AuthStatusNotifier.swift */; };
 		C80DA22735C6BE58721D99A0 /* DeepSeekHarnessDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 214A650534E1FFBFC46DD834 /* DeepSeekHarnessDiscoveryTests.swift */; };
@@ -869,6 +873,7 @@
 		389079ECB645543E0ECC7212 /* ClaudeRunwayTokenActivityParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift; sourceTree = SOURCE_ROOT; };
 		38B14DC112A681AF17875BDD /* ClineSessionDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClineSessionDiscoveryTests.swift; sourceTree = SOURCE_ROOT; };
 		39375A35205563EFBB541E55 /* SubagentHierarchyBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SubagentHierarchyBuilder.swift; sourceTree = SOURCE_ROOT; };
+		3964BABE3E843E708423CC32 /* NotchIntroView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Views/NotchIntroView.swift; sourceTree = SOURCE_ROOT; };
 		3A39A36FCB3A36B34E58751E /* DroidSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		3A86FD4149A1FD0278709EB7 /* ClineSourceDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Cline/ClineSourceDescriptor.swift; sourceTree = SOURCE_ROOT; };
 		3AF3D6D5C8239DC215FC25F2 /* WeeklyQuotaCalibration.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift; sourceTree = SOURCE_ROOT; };
@@ -1051,6 +1056,7 @@
 		8AC54FCC94EC9F1A7A25BE98 /* OpenClawSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/OpenClawSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		8BEC42481B74B2B553C6D9CB /* TelemetryCapabilityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TelemetryCapabilityTests.swift; sourceTree = SOURCE_ROOT; };
 		8C35EECDEE4FA059F107D4E7 /* OptionalDateEquality.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/OptionalDateEquality.swift; sourceTree = SOURCE_ROOT; };
+		8C3648B093C42F26019342B4 /* QuotaMeterNotchIntro.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/QuotaStrip/QuotaMeterNotchIntro.swift; sourceTree = SOURCE_ROOT; };
 		8CE29EC91B53B1B1309B298C /* UsageResetTextTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/UsageResetTextTests.swift; sourceTree = SOURCE_ROOT; };
 		8D278B7DB3B81B81E14D3CDA /* KimiResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/KimiResume/KimiResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
 		8D4509ADD90E0871F4CBC066 /* OpenCodeCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeCLIEnvironment.swift; path = AgentSessions/OpenCode/OpenCodeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
@@ -1359,6 +1365,7 @@
 		F1EB311F9102AA142FFFD22B /* FxResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/FxResume/FxResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		F225C8CF6DF509A4B264E2D0 /* ClaudeWebUsageNormalizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebUsageNormalizer.swift; sourceTree = SOURCE_ROOT; };
 		F234CA8AF5ABEE316F207CC7 /* PiSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/PiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		F2B47525FB12211A67474748 /* NotchGlyph.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/QuotaStrip/NotchGlyph.swift; sourceTree = SOURCE_ROOT; };
 		F36CC0CC957442E7610B253C /* CopilotTelemetryAccumulator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift; sourceTree = SOURCE_ROOT; };
 		F3F2C00BCA8F09B6F7332AB5 /* DevinIntegrationSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/DevinIntegrationSurfaceTests.swift; sourceTree = SOURCE_ROOT; };
 		F44619A4C965B379AD2122BB /* DroidSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionParser.swift; sourceTree = SOURCE_ROOT; };
@@ -1968,6 +1975,8 @@
 				69690694924866DC8B1069C9 /* QuotaStripView.swift */,
 				BD45FDA35785F45B0723BB0C /* QuotaStripController.swift */,
 				4B1C315E4F5FD6E78EF191DA /* QuotaMeterPresentationCoordinator.swift */,
+				F2B47525FB12211A67474748 /* NotchGlyph.swift */,
+				8C3648B093C42F26019342B4 /* QuotaMeterNotchIntro.swift */,
 			);
 			name = QuotaStrip;
 			sourceTree = "<group>";
@@ -2689,6 +2698,7 @@
 				C991A99E1F383E337DD7CC0D /* FeedbackPromptView.swift */,
 				6507B796ECBCB6E9C6F27A63 /* OnboardingListTopSlot.swift */,
 				6212964440775629893C2DE5 /* QuotaMeterPromoView.swift */,
+				3964BABE3E843E708423CC32 /* NotchIntroView.swift */,
 			);
 			name = Views;
 			sourceTree = "<group>";
@@ -3450,6 +3460,9 @@
 				C9DE3C93D06FFB5D96CCF1EF /* QuotaStripView.swift in Sources */,
 				142D72DB533FA6CFC267ABB4 /* QuotaStripController.swift in Sources */,
 				D06638A17C8DA58EB6A4619A /* QuotaMeterPresentationCoordinator.swift in Sources */,
+				87B99F8179CB4DB027A16CF9 /* NotchGlyph.swift in Sources */,
+				205D78B828A32A95A6ABAB2C /* QuotaMeterNotchIntro.swift in Sources */,
+				C6E74800E8BA2DA002F74892 /* NotchIntroView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3698,6 +3711,7 @@
 				CBB1B9302B7EE120AEEADF41 /* QuotaMeterPlacementResolver.swift in Sources */,
 				AA8057C4E4CCBB75BF17D2AF /* QuotaStripCell.swift in Sources */,
 				43BEB303DD28EA8B6328809D /* QuotaStripCoreTests.swift in Sources */,
+				5C9BE87F65E6955E6856471E /* QuotaMeterNotchIntro.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

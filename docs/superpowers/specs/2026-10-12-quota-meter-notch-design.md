@@ -65,6 +65,15 @@ This spec produces two plans, in order:
 
 One new preference, `QuotaMeterPlacement`:
 
+**Naming (owner decision, 2026-10-19, revised the same day).** "Quota Meter"
+is the one product name for both presentations; the setting only says where it
+shows. User-facing names: **Notch** (`menuBar`), **Desktop** (`floating`),
+**Automatic**. Never "menu bar", "floating window" or "strip" for this feature
+in UI copy: "menu bar" is the old menu bar item, which showed limits only.
+"Notch" is used on every screen, including external monitors where the app
+draws the notch. "Strip" stays an internal name. Stored raw values do not
+change.
+
 | Value | Behaviour |
 |---|---|
 | `floating` | Floating window always. Today's behaviour. |
@@ -76,7 +85,7 @@ One new preference, `QuotaMeterPlacement`:
 - Fresh installs: `automatic`, written once at first launch.
 - Existing installs (any install that ran an earlier version): an absent key
   resolves to `floating`, so nobody's Quota Meter moves after the update.
-  They get the one-time hint (see "Discoverability").
+  They get the one-time notch intro (see "Discoverability").
 - Users who had the old menu bar item on (`MenuBarEnabled == true`) get
   `menuBar` on the update, because the strip replaces what they chose.
 - The resolver treats an unknown value as `floating`.
@@ -132,27 +141,127 @@ allowed during a handoff (see "Handoff").
 
 ## Discoverability
 
-The choice has four entry points:
+Revised 2026-10-19 (owner decisions). The choice has four entry points:
 
-1. **Settings → Quota Meter → Placement** (Floating window / Menu bar /
-   Automatic). This is the canonical path.
-2. **View menu → Quota Meter Placement** submenu with the same three choices.
+1. **Settings → Quota Meter → Show Quota Meter in** (Notch / Desktop /
+   Automatic, in that order). This is the canonical path. Automatic's help:
+   "In the notch on the MacBook display, on the desktop on external monitors."
+   The style row is "Notch Style" (Wings / Minimal).
+2. **View menu → Show Quota Meter in** submenu with the same three choices.
    Keyboard-reachable; it also covers the strip's lack of keyboard focus.
 3. **Toolbar and menu shortcuts:**
-   - Floating window toolbar: "Move to menu bar". Sets `QuotaMeterPlacement`
-     to `menuBar`.
-   - Strip click menu and expanded-panel toolbar: "Move to floating window".
-     Sets `QuotaMeterPlacement` to `floating`.
-4. **One-time hint for existing installs:** "Try the menu bar strip" in the
-   floating toolbar, with "Try it" (sets `menuBar`) and a close button. It
-   shows the first time the toolbar is revealed after the update and never
-   again once acted on or closed.
-
-The floating toolbar is hidden by default (`QuotaMeterChrome` is on-demand),
-so most existing users may never see the hint; the owner accepted that
-trade-off for safety. Release notes get one line pointing at Settings.
+   - Desktop toolbar: "Move Quota Meter to Notch", with the notch glyph
+     below. Sets `QuotaMeterPlacement` to `menuBar`.
+   - Notch click menu and expanded-panel toolbar: "Move Quota Meter to
+     Desktop". Sets `QuotaMeterPlacement` to `floating`.
+   - The runway drawer button is gone from the toolbar; when the drawer shows
+     is a Settings choice only (Session Runway: Auto by default).
+4. **The notch intro** (below), once per user. It replaces the old one-time
+   toolbar hint ("Try Quota Meter in the menu bar"), which is removed, so no
+   user is asked twice. `QuotaMeterStripHintDismissed` is no longer read.
 
 All routes change only the preference; the coordinator does the switch.
+
+### Notch glyph
+
+No SF Symbol means "notch" (`menubar.rectangle` and
+`menubar.arrow.up.rectangle` were both rejected by the owner). The "Move
+Quota Meter to Notch" button uses a custom glyph, option C from the owner
+review (2026-10-19): a thin horizontal line for the top edge of the screen,
+a filled notch silhouette hanging from its middle, and a small up arrow
+below the notch pointing into it. About 15 × 11 pt, drawn as a SwiftUI
+`Shape`/`Path` (not a bitmap) in the toolbar button's foreground colour, so
+it follows the button states like the SF Symbols beside it. Accessibility
+label: "Move Quota Meter to Notch".
+
+### Notch intro (one-time launch dialog)
+
+**Why.** The update's headline is the Quota Meter in the notch, and its value
+is unique: live burn rate and when each quota will run out, always in view.
+Existing desktop Quota Meter users and people with Codex or Claude sessions
+who never opened the Quota Meter would otherwise find it only in Settings.
+The pitch is never "limits" (the old menu bar item showed limits).
+
+**Form (owner decision, 2026-10-19).** A modal dialog with a picture of the
+notch, shown once when the app opens. Not a live drop-down from the notch.
+This deliberately overrides the onboarding rule that updates never present a
+modal (`OnboardingPresentation`): the owner wants this one shown to updating
+users too.
+
+**The picture.** A drawn illustration of the open notch, matching the owner-
+reviewed mockup: a slice of the menu bar, the black notch panel open below
+it, and inside it a Codex row and a Claude row in the real Quota Meter
+styling (monospaced, green percents, bold orange run-out such as "▸2h 5m",
+the "|" separator, reset times) plus one runway row with its burn rate and
+orange load bar. Sample values, not the user's data. Drawn in SwiftUI so it
+stays sharp and matches the product; the notch panel is black in both
+appearances. No intro text inside the picture.
+
+**Text.**
+- Title: "Quota Meter in the notch"
+- Body: "See your live burn rate and when your quota runs out, at the top of
+  the screen. Hover to open it; click for the menu."
+
+**Buttons, by state:**
+
+| State | Buttons |
+|---|---|
+| Tracking on, placement resolves to the desktop, or the notch is hidden from the View menu | **Move to Notch** (default) · **Keep on Desktop** |
+| Tracking on, placement already resolves to the notch (for example Automatic on a MacBook) | **Got It** (default) |
+| Tracking off for every provider the user has sessions for | **Turn On** (default) · **Not Now** |
+
+- **Move to Notch** sets `QuotaMeterPlacement` to `menuBar` (Notch) and clears
+  `QuotaMeterStripHidden`, so a notch hidden from the View menu shows again
+  even when the placement was already Notch; the coordinator does the switch
+  as for any placement change. A user whose notch is hidden gets Move to Notch,
+  never Got It (owner fix, 2026-10-20).
+- **Turn On** does what the session-list card's activation already does
+  (turns usage tracking on for exactly the providers the user has sessions
+  for, reusing `QuotaMeterPromoActivator`'s logic) and sets Notch the same way
+  as Move to Notch (including showing a hidden notch). The
+  button is the user's consent; the dialog never turns tracking on by
+  itself.
+- **After Move to Notch or Turn On** (owner decision, 2026-10-19): once the
+  dialog has closed and the strip is presented, the real notch panel opens
+  for about 3 s with the user's own data, then closes as after a hover. A
+  pointer inside the panel keeps it open as usual. If the strip is not
+  presented within 2 s (for example no screen can take it),
+  skip this step.
+- **Keep on Desktop**, **Not Now**, **Got It**, Escape and the close button
+  change nothing.
+
+**Who sees it.** Every user, on the first launch of the build that ships it
+(fresh installs included), when all hold:
+
+1. They have Codex or Claude sessions (`QuotaMeterProviderAvailability.hasAny`
+   from the session index, after `audienceReady`). This includes users with
+   usage tracking off (owner decision, 2026-10-19).
+2. The fresh-install setup window and the What's New panel are not on screen.
+   The dialog waits for them to close (the What's New *card* in the list does
+   not block it).
+
+**When.** As soon as both hold after launch: the moment the app opens for an
+update, right after the setup window closes for a fresh install.
+
+**Once.** A new key, `QuotaMeterNotchIntroShown`, is set the moment the
+dialog appears, so quitting or ignoring it never brings it back. No version
+gating: once shown, never again in any later release. A placement change the
+user makes in this build before the dialog appears (Settings, View menu,
+toolbar or click menu) also sets the key: they have already chosen.
+
+**Session-list Quota Meter card.** The dialog and the card never show in the
+same launch: once the dialog has appeared, the card is not selected for the
+rest of that launch. Move to Notch and Turn On also record the card's ask as
+activated (`onboardingQuotaMeterAskState = .activated`) and mark the Quota
+Meter as opened; the other buttons leave the card's state alone.
+
+**How (builder's choice).** Reuse the onboarding presentation machinery (the
+modal onboarding window or the list pane's sheet host, whichever fits) rather
+than a new window type. The decision logic (eligibility, state, which buttons)
+is pure and unit-tested in the hostless logic target, like
+`QuotaMeterPlacementResolver`.
+
+**Copy (zh-Hans needed).** Title, body and the six button labels above.
 
 ## Old menu bar item
 

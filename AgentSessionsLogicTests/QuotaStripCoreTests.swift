@@ -272,3 +272,85 @@ final class QuotaStripCoreTests: XCTestCase {
         XCTAssertEqual(cell.tone, .healthy)
     }
 }
+
+final class QuotaMeterNotchIntroTests: XCTestCase {
+
+    /// Defaults: not shown yet, audience ready, Codex sessions with tracking on, the Quota
+    /// Meter on the desktop, nothing else on screen.
+    private func input(alreadyShown: Bool = false,
+                       audienceReady: Bool = true,
+                       hasCodex: Bool = true,
+                       hasClaude: Bool = false,
+                       codexTracking: Bool = true,
+                       claudeTracking: Bool = false,
+                       resolvesToNotch: Bool = false,
+                       notchHidden: Bool = false,
+                       blockingSurfaceOpen: Bool = false,
+                       quotaMeterCardOnScreen: Bool = false) -> NotchIntroInput {
+        NotchIntroInput(alreadyShown: alreadyShown, audienceReady: audienceReady,
+                        hasCodex: hasCodex, hasClaude: hasClaude,
+                        codexTracking: codexTracking, claudeTracking: claudeTracking,
+                        resolvesToNotch: resolvesToNotch, notchHidden: notchHidden,
+                        blockingSurfaceOpen: blockingSurfaceOpen,
+                        quotaMeterCardOnScreen: quotaMeterCardOnScreen)
+    }
+
+    func testDesktopUserGetsMoveToNotch() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input()), .moveToNotch)
+    }
+
+    func testNotchUserGetsGotIt() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(resolvesToNotch: true)), .alreadyInNotch)
+    }
+
+    func testTrackingOffGetsTurnOn() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(codexTracking: false)), .turnOnTracking)
+    }
+
+    func testTrackingOffWinsOverNotch() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(codexTracking: false, resolvesToNotch: true)),
+                       .turnOnTracking)
+    }
+
+    func testPartialTrackingIsTrackingOn() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(hasClaude: true, claudeTracking: false)), .moveToNotch)
+    }
+
+    func testUntrackedProviderUserLacksIsIgnored() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(hasCodex: false, hasClaude: true,
+                                                               codexTracking: false, claudeTracking: true)),
+                       .moveToNotch)
+    }
+
+    func testNoSessionsNeverShows() {
+        XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(hasCodex: false)))
+    }
+
+    func testAlreadyShownNeverShows() {
+        XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(alreadyShown: true)))
+    }
+
+    func testAudienceNotReadyDefers() {
+        XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(audienceReady: false)))
+    }
+
+    func testBlockingSurfaceDefers() {
+        XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(blockingSurfaceOpen: true)))
+    }
+
+    func testQuotaMeterCardOnScreenDefers() {
+        XCTAssertNil(QuotaMeterNotchIntro.variant(for: input(quotaMeterCardOnScreen: true)))
+    }
+
+    func testHiddenNotchGetsMoveToNotch() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(resolvesToNotch: true, notchHidden: true)), .moveToNotch)
+    }
+
+    func testHiddenNotchStillOffersTurnOn() {
+        XCTAssertEqual(QuotaMeterNotchIntro.variant(for: input(codexTracking: false, notchHidden: true)), .turnOnTracking)
+    }
+
+    func testShownKeyIsStable() {
+        XCTAssertEqual(QuotaMeterNotchIntro.shownKey, "QuotaMeterNotchIntroShown")
+    }
+}

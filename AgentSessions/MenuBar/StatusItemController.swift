@@ -163,7 +163,7 @@ final class StatusItemController: NSObject {
 
         // Always present: the strip's way back to the floating window, whatever is enabled.
         menu.addItem(makeActionItem(
-            title: String(localized: "Move to Floating Window", comment: "Menu command that switches the Quota Meter from the menu bar strip to the floating window."),
+            title: String(localized: "Move Quota Meter to Desktop", comment: "Command that moves the Quota Meter from the menu bar to the desktop."),
             action: #selector(moveToFloatingWindow)
         ))
         menu.addItem(makeActionItem(title: String(localized: "Open Settings…", comment: "Menu command that opens Settings."), action: #selector(openQuotaMeterPreferences)))

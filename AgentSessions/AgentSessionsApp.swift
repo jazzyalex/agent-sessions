@@ -616,7 +616,7 @@ private struct AgentCockpitMenu: View {
                 : "Enable live session detection (Beta) in Settings → Quota Meter."
         )
 
-        Picker("Quota Meter Placement", selection: Binding(
+        Picker("Show Quota Meter in", selection: Binding(
             get: { QuotaMeterPlacement.current(raw: placementRaw) },
             set: { placementRaw = $0.rawValue }
         )) {
@@ -1478,8 +1478,8 @@ private extension OnboardingWindowPresenter {
 
 extension AgentSessionsApp {
     /// Runs once per launch, before Sparkle starts (Sparkle writes `SUHasLaunchedBefore`).
-    /// Fresh installs get `automatic` and never see the "Try the menu bar strip" hint;
-    /// old menu bar item users get `menuBar`; other existing installs keep `floating`.
+    /// Fresh installs get `automatic`; old menu bar item users get `menuBar`; other existing
+    /// installs keep `floating`.
     static func applyQuotaMeterPlacementDefaults(defaults: UserDefaults = .standard) {
         let isFreshInstall = defaults.object(forKey: "SUHasLaunchedBefore") == nil
             && defaults.object(forKey: "OnboardingFirstLaunchDate") == nil
@@ -1489,8 +1489,5 @@ extension AgentSessionsApp {
             isFreshInstall: isFreshInstall
         ) else { return }
         defaults.set(value.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
-        if isFreshInstall {
-            defaults.set(true, forKey: PreferencesKey.quotaMeterStripHintDismissed)
-        }
     }
 }

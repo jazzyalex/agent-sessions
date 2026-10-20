@@ -1,0 +1,48 @@
+import Foundation
+
+/// Which buttons the one-time notch intro dialog offers.
+enum NotchIntroVariant: Equatable {
+    /// Tracking on, the Quota Meter on the desktop or the notch hidden: Move to Notch · Keep on Desktop.
+    case moveToNotch
+    /// Tracking on, the Quota Meter already in the notch and visible: Got It.
+    case alreadyInNotch
+    /// Tracking off for every provider the user has sessions for: Turn On · Not Now.
+    case turnOnTracking
+}
+
+/// Everything the intro decision reads. Gathered by the session-list pane, which owns the
+/// session audience; kept as plain values so the rule is testable without the app.
+struct NotchIntroInput: Equatable {
+    var alreadyShown: Bool
+    var audienceReady: Bool
+    var hasCodex: Bool
+    var hasClaude: Bool
+    var codexTracking: Bool
+    var claudeTracking: Bool
+    var resolvesToNotch: Bool
+    /// The notch is hidden from the View menu, so "already in the notch" would point at
+    /// nothing; Move to Notch shows it again.
+    var notchHidden: Bool
+    /// The fresh-install setup window or the What's New panel is on screen.
+    var blockingSurfaceOpen: Bool
+    /// The session-list Quota Meter card was chosen this launch.
+    var quotaMeterCardOnScreen: Bool
+}
+
+/// The one-time notch intro: who sees it and with which buttons. Spec:
+/// docs/superpowers/specs/2026-10-12-quota-meter-notch-design.md, "Notch intro".
+enum QuotaMeterNotchIntro {
+    /// Set the moment the dialog appears, and by any user placement change before it.
+    static let shownKey = "QuotaMeterNotchIntroShown"
+
+    /// nil means "not now": either never (already shown, no Codex or Claude sessions) or not
+    /// yet (audience unknown, another surface on screen, the Quota Meter card holds the launch).
+    static func variant(for input: NotchIntroInput) -> NotchIntroVariant? {
+        guard !input.alreadyShown, input.audienceReady, !input.blockingSurfaceOpen,
+              !input.quotaMeterCardOnScreen, input.hasCodex || input.hasClaude else { return nil }
+        let everyProviderUntracked = (!input.hasCodex || !input.codexTracking)
+            && (!input.hasClaude || !input.claudeTracking)
+        if everyProviderUntracked { return .turnOnTracking }
+        return input.resolvesToNotch && !input.notchHidden ? .alreadyInNotch : .moveToNotch
+    }
+}

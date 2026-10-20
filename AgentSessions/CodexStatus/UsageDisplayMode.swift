@@ -261,8 +261,10 @@ enum QuotaMeterChrome: String, CaseIterable, Identifiable {
 /// Fresh installs get `.automatic`, existing installs keep `.floating`
 /// (see `QuotaMeterPlacementDefaults`).
 enum QuotaMeterPlacement: String, CaseIterable, Identifiable {
-    case floating
+    // Case order is the picker order. Raw values are stored, so they never change:
+    // `floating` is the case users see as "Desktop".
     case menuBar
+    case floating
     case automatic
 
     static let storageKey = PreferencesKey.quotaMeterPlacement
@@ -271,20 +273,20 @@ enum QuotaMeterPlacement: String, CaseIterable, Identifiable {
 
     var title: LocalizedStringResource {
         switch self {
-        case .floating: return "Floating Window"
-        case .menuBar: return "Menu Bar"
+        case .menuBar: return "Notch"
+        case .floating: return "Desktop"
         case .automatic: return "Automatic"
         }
     }
 
     var detail: LocalizedStringResource {
         switch self {
-        case .floating:
-            return "The Quota Meter is a floating window you can place anywhere."
         case .menuBar:
-            return "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu."
+            return "The Quota Meter sits in the notch at the top of the screen. Hover to expand it; click for the menu."
+        case .floating:
+            return "Quota Meter stays on the desktop, where you can place it anywhere."
         case .automatic:
-            return "Menu bar on the MacBook display, floating window on external monitors."
+            return "In the notch on the MacBook display, on the desktop on external monitors."
         }
     }
 
@@ -350,30 +352,6 @@ enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
             return "Always On"
         case .alwaysOff:
             return "Always Off"
-        }
-    }
-
-    /// Compact label for the toolbar pill and segmented control.
-    var shortLabel: String {
-        switch self {
-        case .automatic:
-            return "Auto"
-        case .alwaysOn:
-            return "On"
-        case .alwaysOff:
-            return "Off"
-        }
-    }
-
-    /// One-line explanation shown under the selector for the active option.
-    var detail: LocalizedStringResource {
-        switch self {
-        case .automatic:
-            return "Shows the session runway only when it’s running low."
-        case .alwaysOn:
-            return "Always shows the session runway drawer."
-        case .alwaysOff:
-            return "Hides the session runway drawer."
         }
     }
 

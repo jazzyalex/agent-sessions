@@ -2106,6 +2106,33 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## QM / Runway
 
+### Menu bar strip cannot tell "waiting on a permission prompt" from "finished its turn"
+> **open** · sev: med · urg: low · verified 2026-10-19
+
+- **What:** the menu bar strip's wing shows one agent-level mark: a dim dot while a
+  session works, a blue ring when a session stopped working within the last 10 minutes
+  ("your turn"). A session blocked on a tool-approval or permission prompt needs the user
+  *now*, but it looks the same as one that simply finished, and after 10 minutes it shows
+  nothing at all. The owner asked for this signal on 2026-10-19.
+- **Where:** [QuotaStripView.swift](../AgentSessions/QuotaStrip/QuotaStripView.swift)
+  `sessionActivity` (derives working/finished from presence state over time);
+  [QuotaStripCell.swift](../AgentSessions/QuotaStrip/QuotaStripCell.swift)
+  `StripCell.Activity`; [CodexActiveSessionsModel.swift](../AgentSessions/Services/CodexActiveSessionsModel.swift)
+  `CodexLiveState` has only `activeWorking` and `openIdle`.
+- **Fix shape:** add an "awaiting approval" live state per agent from approval-specific
+  records, not from timing: for Claude, a pending tool call whose permission prompt is
+  open (see *Claude reports thinking time and permission decisions* for the
+  `permissionDecision` records written after a decision); for Codex, the rollout's
+  approval request events without a matching response (exact event names to confirm with
+  the format-check skill). Then a distinct, stronger mark in the wing that wins over the
+  ring and dot, and a label on the session row in the panel.
+- **Why deferred:** needs per-agent format research; the strip shipped with the
+  timing-based ring (`9fb13f95`).
+- **Risk if wrong:** a false "needs you" is worse than none. A long-running tool call
+  also has no result yet, so a missing result alone must never count as a prompt.
+- **To close:** a session sitting at an approval prompt shows the new mark within one
+  presence poll, for Claude and Codex, and a long tool run does not.
+
 ### Headless Codex and OpenCode CLI sessions disappear from live presence discovery
 > **done** 2026-10-02 (`b7893c77`)
 

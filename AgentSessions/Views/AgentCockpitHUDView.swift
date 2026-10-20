@@ -186,14 +186,6 @@ private enum AgentCockpitHUDTheme {
     static let toolbarGroupSpacing: CGFloat = 10
 }
 
-/// Where a toolbar button sits inside a fused segmented pair. `.leading` and
-/// `.trailing` square off the inner corners so two buttons separated by a 1pt
-/// gap read as one control with a seam instead of two capsules.
-private enum HUDToolbarSegment {
-    case standalone
-    case leading
-    case trailing
-}
 
 
 
@@ -782,17 +774,14 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabledForLimits: Bool = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
-    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @AppStorage(PreferencesKey.quotaMeterHiddenProviders) private var quotaMeterHiddenProvidersRaw = QuotaMeterProviderVisibility.defaultRawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
     @AppStorage(PreferencesKey.quotaMeterPlacement) private var quotaMeterPlacementRaw = QuotaMeterPlacement.floating.rawValue
-    @AppStorage(PreferencesKey.quotaMeterStripHintDismissed) private var quotaMeterStripHintDismissed = false
     /// Set only inside the menu bar strip.
     @Environment(\.quotaStripExpanded) private var stripExpanded
     @Environment(\.quotaStripPopoverReporter) private var reportStripPopover
-    @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
     @State private var showProviderVisibilityPopover = false
     @State private var showChromePopover = false
@@ -1071,13 +1060,6 @@ struct AgentCockpitHUDView: View {
                     .fill(Color.primary.opacity(0.10))
                     .frame(height: 0.5)
                     .transition(.opacity)
-                if surface == .window && showsMenuBarStripHint {
-                    menuBarStripHint
-                        .transition(.opacity)
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.08))
-                        .frame(height: 0.5)
-                }
             }
 
             if !activeEnabled {
@@ -1121,7 +1103,7 @@ struct AgentCockpitHUDView: View {
     /// the HUD. Collapsing then would yank the chrome out from under the popover
     /// still anchored to it.
     private var isToolbarPopoverOpen: Bool {
-        showRunwayPopover || showRunwayPresentationPopover || showProviderVisibilityPopover || showChromePopover || showProbePopover
+        showRunwayPresentationPopover || showProviderVisibilityPopover || showChromePopover || showProbePopover
     }
 
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
@@ -1333,58 +1315,26 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    private var cockpitRunwayButton: some View {
-        let visibility = QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
-        let isForced = visibility != .automatic
-        return Button {
-            showRunwayPopover.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.swap")
-                    .font(.system(size: 9.5, weight: .semibold))
-                Text(visibility.shortLabel)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .opacity(0.6)
-            }
-        }
-        .buttonStyle(HUDIconButtonStyle(isOn: isForced, tint: nil, segment: .leading))
-        .help("Runway drawer: choose when the session runway appears.")
-        .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
-            HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
-        }
-    }
-
-    /// Trailing half of the fused runway pair. Carries no icon of its own — the
-    /// `⇅` on the visibility half labels the whole pair, and a second gauge here
-    /// would just restate the Quota Meter's own identity.
+    /// The runway rate selector. When the drawer appears (Automatic by default) is a
+    /// Settings choice only, so the toolbar keeps room for the Menu Bar button.
     private var runwayPresentationButton: some View {
         let presentation = RunwayPresentation.current(raw: runwayPresentationRaw)
         return Button {
             showRunwayPresentationPopover.toggle()
         } label: {
             HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.swap")
+                    .font(.system(size: 9.5, weight: .semibold))
                 Text(presentation.shortLabel)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .opacity(0.6)
             }
         }
-        .buttonStyle(HUDIconButtonStyle(isOn: presentation != .fiveHour, tint: nil, segment: .trailing))
+        .buttonStyle(HUDIconButtonStyle(isOn: presentation != .fiveHour, tint: nil))
         .help("Session runway rate: 5-hour, tokens, dollars, or weekly.")
         .popover(isPresented: $showRunwayPresentationPopover, arrowEdge: .bottom) {
             HUDRunwayPresentationPopover(runwayPresentationRaw: $runwayPresentationRaw)
-        }
-    }
-
-    /// Fused runway group: 1pt gap lets the HUD background show through as the
-    /// seam between the two squared-off inner edges.
-    private func runwayGroup(showPresentation: Bool) -> some View {
-        HStack(spacing: 1) {
-            cockpitRunwayButton
-            if showPresentation {
-                runwayPresentationButton
-            }
         }
     }
 
@@ -1471,7 +1421,7 @@ struct AgentCockpitHUDView: View {
                                       showProbe: Bool) -> some View {
         HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
             if showRunway {
-                runwayGroup(showPresentation: true)
+                runwayPresentationButton
             }
             // This selector never sheds: it is the in-window route for restoring
             // a provider after the user hides its section.
@@ -1495,17 +1445,16 @@ struct AgentCockpitHUDView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    /// Switches the Quota Meter to the menu bar strip (placement `menuBar`).
+    /// Switches the Quota Meter to the notch (placement `menuBar`).
     private var cockpitMoveToMenuBarButton: some View {
         Button {
-            quotaMeterStripHintDismissed = true
             quotaMeterPlacementRaw = QuotaMeterPlacement.menuBar.rawValue
         } label: {
-            Image(systemName: "menubar.rectangle")
-                .font(.system(size: 11, weight: .semibold))
+            NotchGlyph()
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
-        .help("Move to menu bar")
+        .help("Move Quota Meter to Notch")
+        .accessibilityLabel("Move Quota Meter to Notch")
     }
 
     /// Switches the Quota Meter back to the floating window (placement `floating`).
@@ -1517,39 +1466,7 @@ struct AgentCockpitHUDView: View {
                 .font(.system(size: 11, weight: .semibold))
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
-        .help("Move to floating window")
-    }
-
-    /// One-time hint for installs that predate the strip (fresh installs mark it dismissed).
-    private var showsMenuBarStripHint: Bool {
-        !quotaMeterStripHintDismissed
-            && QuotaMeterPlacement.current(raw: quotaMeterPlacementRaw) == .floating
-    }
-
-    private var menuBarStripHint: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "menubar.rectangle")
-                .foregroundStyle(.secondary)
-            Text("Try the menu bar strip")
-                .font(.system(size: 11, weight: .medium))
-            Spacer(minLength: 8)
-            Button("Try It") {
-                quotaMeterStripHintDismissed = true
-                quotaMeterPlacementRaw = QuotaMeterPlacement.menuBar.rawValue
-            }
-            .controlSize(.small)
-            Button {
-                quotaMeterStripHintDismissed = true
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Dismiss")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .help("Move Quota Meter to Desktop")
     }
 
     /// The Quota Meter's chrome strips `.titled` and disables the standard
@@ -4278,6 +4195,7 @@ private struct HUDLimitsRowsPanel: View {
                     onlyBottleneck: false,
                     showProjection: true,
                     alignColumns: entries.count > 1,
+                    weeklyGrid: entries.contains { $0.weeklyHeader != nil },
                     reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
                     enlarged: quotaMeterEnlarged,
                     now: clockNow
@@ -4471,48 +4389,6 @@ private struct HUDChromeVisibilityPopover: View {
             )) {
                 ForEach(QuotaMeterChrome.allCases) { chrome in
                     Text(chrome.title).tag(chrome.rawValue)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                Text(selection.detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(12)
-        .frame(width: 236)
-    }
-}
-
-private struct HUDRunwayVisibilityPopover: View {
-    @Binding var runwayVisibilityRaw: String
-
-    private var selection: QuotaMeterRunwayVisibility {
-        QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Runway drawer")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .kerning(0.4)
-
-            Picker("", selection: Binding(
-                get: { runwayVisibilityRaw },
-                set: { runwayVisibilityRaw = $0 }
-            )) {
-                ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
-                    Text(visibility.shortLabel).tag(visibility.rawValue)
                 }
             }
             .labelsHidden()
@@ -5586,6 +5462,10 @@ private struct HUDLimitsProviderText: View {
     var onlyBottleneck: Bool = false
     var showProjection: Bool = true
     var alignColumns: Bool = false
+    /// Another row in the panel draws the weekly header. A row without its own
+    /// weekly header (a Codex local estimate) then uses the weekly columns too, so
+    /// "|" and "Wk" line up across rows instead of sitting ~130 pt apart.
+    var weeklyGrid: Bool = false
     var reserveProjectionSlot: Bool = false
     var enlarged: Bool = false
     var now: Date = Date()
@@ -5742,8 +5622,9 @@ private struct HUDLimitsProviderText: View {
                 HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true, onTrack: fiveHourOnTrack)
                     .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale, alignment: .leading)
 
-                if showResets, let r = fiveHourResetLabel() {
-                    Text(r)
+                if showResets {
+                    // Kept even without a label, so "|" and "Wk" never shift left.
+                    Text(fiveHourResetLabel() ?? "")
                         .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
                 }
             }
@@ -5760,10 +5641,17 @@ private struct HUDLimitsProviderText: View {
             .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth * scale, alignment: .leading)
 
             if showResets, let r = weekResetLabel() {
-                Text(r)
-                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth * scale, alignment: .leading)
+                weekResetColumn(r, width: HUDLimitsColumnLayout.compactWeekResetWidth * scale)
             }
         }
+    }
+
+    /// The last column ends on the row's right inset, the same edge the runway
+    /// bars below end on: it takes any spare row width and right-aligns its text.
+    /// Its ideal width stays `width`, so the content-hugging window never grows.
+    private func weekResetColumn(_ text: String, width: CGFloat) -> some View {
+        Text(text)
+            .frame(minWidth: width, maxWidth: .infinity, alignment: .trailing)
     }
 
     /// The adaptive weekly header: `5h:89%` — or `5h:∞` when the provider dropped
@@ -5797,7 +5685,11 @@ private struct HUDLimitsProviderText: View {
         }
     }
 
-    private func weeklyLensContent(_ status: QuotaMeterWeeklyHeaderStatus) -> some View {
+    /// `status` is nil for a row that has no weekly header of its own but shares
+    /// the panel with one (see `weeklyGrid`). The rate and run-out columns then
+    /// stay empty, or carry the burn chip when the 5h window is dropped, exactly
+    /// as the row's 5h layout would.
+    private func weeklyLensContent(_ status: QuotaMeterWeeklyHeaderStatus?) -> some View {
         let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
         return HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
             if fiveAbsent {
@@ -5832,6 +5724,18 @@ private struct HUDLimitsProviderText: View {
             .frame(width: HUDLimitsColumnLayout.WeeklyLens.weekPercentWidth * scale, alignment: .leading)
 
             switch status {
+            case nil:
+                Group {
+                    if fiveAbsent, let chip = fiveHourBurnChip {
+                        Text(chip).foregroundStyle(hudProjectionColor(colorScheme))
+                    } else {
+                        Color.clear.frame(height: 1)
+                    }
+                }
+                .frame(width: (HUDLimitsColumnLayout.WeeklyLens.aggregateWidth
+                               + HUDLimitsColumnLayout.compactSpacing
+                               + HUDLimitsColumnLayout.WeeklyLens.runoutWidth) * scale,
+                       alignment: .leading)
             case .estimate(let header):
                 // The drawer's own total, in the same unit, so the header answers
                 // "how fast is the week going" with one number instead of four rows.
@@ -5880,11 +5784,10 @@ private struct HUDLimitsProviderText: View {
             }
 
             if showResets, let r = weekResetLabel() {
-                Text(r)
-                    .frame(width: HUDLimitsColumnLayout.WeeklyLens.weekResetWidth * scale, alignment: .leading)
+                weekResetColumn(r, width: HUDLimitsColumnLayout.WeeklyLens.weekResetWidth * scale)
             }
         }
-        .help(weeklyStatusHelp(status))
+        .help(status.map(weeklyStatusHelp) ?? "")
     }
 
     var body: some View {
@@ -5909,8 +5812,9 @@ private struct HUDLimitsProviderText: View {
                 HUDLimitsLoadingSpinner()
                     .transition(.opacity)
             } else {
-                if let weeklyHeader = entry.weeklyHeader {
-                    weeklyLensContent(weeklyHeader)
+                if entry.weeklyHeader != nil
+                    || (weeklyGrid && alignColumns && !onlyBottleneck) {
+                    weeklyLensContent(entry.weeklyHeader)
                         .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                         .foregroundStyle(Color.primary)
                         .transition(.opacity)
@@ -6001,13 +5905,12 @@ private let hudWeeklyResetFormatter: DateFormatter = {
 // MARK: - HUD button style
 
 /// Toolbar button chrome. Highlight invariant: `isOn` means "this control is
-/// off its default" (runway forced, non-5h rate, enlarged text) — never merely
+/// off its default" (non-5h rate, enlarged text) — never merely
 /// "this control exists". Pin is the one exception, tinting orange to report
 /// window state rather than a setting.
 private struct HUDIconButtonStyle: ButtonStyle {
     let isOn: Bool
     let tint: Color?
-    var segment: HUDToolbarSegment = .standalone
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -6022,14 +5925,7 @@ private struct HUDIconButtonStyle: ButtonStyle {
 
     private var shape: UnevenRoundedRectangle {
         let r = AgentCockpitHUDTheme.toolbarButtonCornerRadius
-        switch segment {
-        case .standalone:
-            return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
-        case .leading:
-            return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: 0, topTrailingRadius: 0, style: .continuous)
-        case .trailing:
-            return UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
-        }
+        return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
     }
 
     private var foreground: Color {

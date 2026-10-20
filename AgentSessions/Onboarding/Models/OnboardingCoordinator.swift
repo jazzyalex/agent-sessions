@@ -207,6 +207,14 @@ final class OnboardingCoordinator: ObservableObject {
     /// Hides the Quota Meter card for the rest of this launch.
     @Published var quotaMeterCardSuppressedThisLaunch: Bool = false
 
+    /// The one-time notch intro dialog on screen, with its buttons. nil when not shown.
+    @Published var notchIntroVariant: NotchIntroVariant?
+
+    /// The Quota Meter card appeared this launch. Kept here, not in the top slot's view
+    /// state, because the list pane remounts (layout and transcript toggles) and would
+    /// forget it, letting the notch intro show in the same launch as the card.
+    @Published private(set) var quotaMeterCardShownThisLaunch: Bool = false
+
     /// Hides the star card for the rest of this launch. In-memory only; the
     /// persistent decision lives in `UserDefaults.onboardingStarAskState`.
     @Published var starCardSuppressedThisLaunch: Bool = false
@@ -595,6 +603,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// Caps an ignored Quota Meter invitation to three launches per release.
     /// Its second release-round ends the campaign permanently.
     func noteQuotaMeterCardShown() {
+        quotaMeterCardShownThisLaunch = true
         guard !didCountQuotaMeterImpressionThisLaunch else { return }
         guard let current = currentMajorMinorProvider() else { return }
         didCountQuotaMeterImpressionThisLaunch = true
@@ -620,6 +629,25 @@ final class OnboardingCoordinator: ObservableObject {
         didConsumeTopSlotAskThisLaunch = true
         defaults.onboardingQuotaMeterAskState = .dismissedForever
         isQuotaMeterPromoPresented = false
+    }
+
+    /// Shows the notch intro. It counts as shown from this moment, so quitting or ignoring
+    /// it never brings it back, and the Quota Meter card stays away for this launch.
+    func presentNotchIntro(_ variant: NotchIntroVariant) {
+        defaults.set(true, forKey: QuotaMeterNotchIntro.shownKey)
+        quotaMeterCardSuppressedThisLaunch = true
+        notchIntroVariant = variant
+    }
+
+    /// Closes the notch intro. `activated` (Move to Notch, Turn On) also retires the Quota
+    /// Meter card's ask and marks the Quota Meter as opened. Unlike
+    /// `recordQuotaMeterActivated()`, it does not consume this launch's top-slot card.
+    func completeNotchIntro(activated: Bool) {
+        if activated {
+            defaults.onboardingQuotaMeterAskState = .activated
+            noteCockpitOpened()
+        }
+        notchIntroVariant = nil
     }
 
     /// The user opened the Quota Meter — never ask again. Also spends the

@@ -135,18 +135,18 @@
         }
       }
     },
-    "Choose how much of the menu bar the collapsed strip uses.": {
+    "Choose how much of the menu bar the collapsed notch uses.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choose how much of the menu bar the collapsed strip uses."
+            "value": "Choose how much of the menu bar the collapsed notch uses."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择收起的横条占用多少菜单栏空间。"
+            "value": "选择收起的刘海占用多少菜单栏空间。"
           }
         }
       }
@@ -3925,22 +3925,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "始终开启"
-          }
-        }
-      }
-    },
-    "Always shows the session runway drawer.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Always shows the session runway drawer."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "始终显示会话续航抽屉。"
           }
         }
       }
@@ -10049,18 +10033,18 @@
         }
       }
     },
-    "Floating Window": {
+    "Desktop": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Floating Window"
+            "value": "Desktop"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "浮动窗口"
+            "value": "桌面"
           }
         }
       }
@@ -10924,22 +10908,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在额度监视器中隐藏此提供商。跟踪仍会继续。"
-          }
-        }
-      }
-    },
-    "Hides the session runway drawer.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hides the session runway drawer."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隐藏会话续航抽屉。"
           }
         }
       }
@@ -12813,6 +12781,22 @@
         }
       }
     },
+    "Notch": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notch"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刘海"
+          }
+        }
+      }
+    },
     "Menu Bar": {
       "localizations": {
         "en": {
@@ -12829,18 +12813,18 @@
         }
       }
     },
-    "Menu bar on the MacBook display, floating window on external monitors.": {
+    "In the notch on the MacBook display, on the desktop on external monitors.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Menu bar on the MacBook display, floating window on external monitors."
+            "value": "In the notch on the MacBook display, on the desktop on external monitors."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 MacBook 显示屏上显示于菜单栏，在外接显示器上显示为浮动窗口。"
+            "value": "在 MacBook 显示屏上显示于刘海，在外接显示器上显示于桌面。"
           }
         }
       }
@@ -13107,50 +13091,34 @@
         }
       }
     },
-    "Move to Floating Window": {
+    "Move Quota Meter to Desktop": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Move to Floating Window"
+            "value": "Move Quota Meter to Desktop"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移至浮动窗口"
+            "value": "将额度监视器移至桌面"
           }
         }
       }
     },
-    "Move to floating window": {
+    "Move Quota Meter to Notch": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Move to floating window"
+            "value": "Move Quota Meter to Notch"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "移至浮动窗口"
-          }
-        }
-      }
-    },
-    "Move to menu bar": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move to menu bar"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移至菜单栏"
+            "value": "将额度监视器移至刘海"
           }
         }
       }
@@ -15210,18 +15178,18 @@
         }
       }
     },
-    "Placement": {
+    "Show Quota Meter in": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Placement"
+            "value": "Show Quota Meter in"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "位置"
+            "value": "额度监视器显示位置"
           }
         }
       }
@@ -16152,18 +16120,114 @@
         }
       }
     },
-    "Quota Meter Placement": {
+    "Quota Meter in the notch": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quota Meter Placement"
+            "value": "Quota Meter in the notch"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "额度监视器位置"
+            "value": "刘海中的额度监视器"
+          }
+        }
+      }
+    },
+    "See your live burn rate and when your quota runs out, at the top of the screen. Hover to open it; click for the menu.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "See your live burn rate and when your quota runs out, at the top of the screen. Hover to open it; click for the menu."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在屏幕顶部查看实时消耗速度以及额度何时用完。悬停可展开；点击可打开菜单。"
+          }
+        }
+      }
+    },
+    "Move to Notch": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Notch"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移至刘海"
+          }
+        }
+      }
+    },
+    "Keep on Desktop": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep on Desktop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "留在桌面"
+          }
+        }
+      }
+    },
+    "Got It": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Got It"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "知道了"
+          }
+        }
+      }
+    },
+    "Turn On": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn On"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启"
+          }
+        }
+      }
+    },
+    "Not Now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以后再说"
           }
         }
       }
@@ -16832,18 +16896,18 @@
         }
       }
     },
-    "Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar.": {
+    "Removes Agent Sessions from the Dock while the Quota Meter in the notch, or a pinned Quota Meter on the desktop, keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the notch.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Removes Agent Sessions from the Dock while the menu bar strip or a pinned Quota Meter keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the menu bar."
+            "value": "Removes Agent Sessions from the Dock while the Quota Meter in the notch, or a pinned Quota Meter on the desktop, keeps the app reachable. Hiding the Dock icon without either moves the Quota Meter to the notch."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当可通过菜单栏横条或固定的额度监视器访问 Agent Sessions 时，从程序坞中隐藏它。如果两者都不可用，隐藏程序坞图标会将额度监视器移至菜单栏。"
+            "value": "当可通过刘海中的额度监视器或固定在桌面上的额度监视器访问 Agent Sessions 时，从程序坞中隐藏它。如果两者都不可用，隐藏程序坞图标会将额度监视器移至刘海。"
           }
         }
       }
@@ -17744,38 +17808,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在专用工作文件夹中运行轻量级终端探测，以刷新用量限额。探测会话是自动生成的 /usage 检查，存储在单独的 Claude 项目中。清理操作只会移除经过验证的探测会话，绝不会影响你的正常会话。"
-          }
-        }
-      }
-    },
-    "Runway drawer": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Runway drawer"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "续航抽屉"
-          }
-        }
-      }
-    },
-    "Runway drawer: choose when the session runway appears.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Runway drawer: choose when the session runway appears."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "续航抽屉：选择何时显示会话续航。"
           }
         }
       }
@@ -20336,18 +20368,18 @@
         }
       }
     },
-    "Show the Quota Meter as a floating window or as a strip at the top of the screen.": {
+    "Show the Quota Meter in the notch or on the desktop.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show the Quota Meter as a floating window or as a strip at the top of the screen."
+            "value": "Show the Quota Meter in the notch or on the desktop."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将额度监视器显示为浮动窗口，或显示为屏幕顶部的横条。"
+            "value": "在刘海或桌面上显示额度监视器。"
           }
         }
       }
@@ -20445,22 +20477,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作期间，如果按当前进度不会超出 5 小时时段，则显示笑脸。"
-          }
-        }
-      }
-    },
-    "Shows the session runway only when it’s running low.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Shows the session runway only when it’s running low."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅在会话续航不足时显示。"
           }
         }
       }
@@ -21026,18 +21042,18 @@
         }
       }
     },
-    "Strip Style": {
+    "Notch Style": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Strip Style"
+            "value": "Notch Style"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "横条样式"
+            "value": "刘海样式"
           }
         }
       }
@@ -21547,34 +21563,34 @@
         }
       }
     },
-    "The Quota Meter is a floating window you can place anywhere.": {
+    "Quota Meter stays on the desktop, where you can place it anywhere.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The Quota Meter is a floating window you can place anywhere."
+            "value": "Quota Meter stays on the desktop, where you can place it anywhere."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "额度监视器是一个可放在任意位置的浮动窗口。"
+            "value": "额度监视器停留在桌面上，可放在任意位置。"
           }
         }
       }
     },
-    "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu.": {
+    "The Quota Meter sits in the notch at the top of the screen. Hover to expand it; click for the menu.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The Quota Meter sits at the top of the screen, beside the notch. Hover to expand it; click for the menu."
+            "value": "The Quota Meter sits in the notch at the top of the screen. Hover to expand it; click for the menu."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "额度监视器位于屏幕顶部的刘海旁。悬停可展开；点击可打开菜单。"
+            "value": "额度监视器位于屏幕顶部的刘海中。悬停可展开；点击可打开菜单。"
           }
         }
       }
@@ -21709,22 +21725,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "对话记录中的思考"
-          }
-        }
-      }
-    },
-    "Try It": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Try It"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "试试看"
           }
         }
       }
@@ -22468,22 +22468,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "了解翻译流程"
-          }
-        }
-      }
-    },
-    "Try the menu bar strip": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Try the menu bar strip"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "试试菜单栏横条"
           }
         }
       }

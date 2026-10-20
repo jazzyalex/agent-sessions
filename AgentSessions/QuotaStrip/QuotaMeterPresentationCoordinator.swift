@@ -95,6 +95,30 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
         }
     }
 
+    /// Puts the Quota Meter in the notch and makes it visible, also when it was hidden from
+    /// the View menu and the placement was already Notch (no placement change would follow).
+    func moveToNotch() {
+        defaults.set(false, forKey: PreferencesKey.quotaMeterStripHidden)
+        defaults.set(QuotaMeterPlacement.menuBar.rawValue, forKey: PreferencesKey.quotaMeterPlacement)
+    }
+
+    /// Opens the notch panel briefly once the strip is on screen. A placement change presents
+    /// the strip asynchronously, so this waits up to `presentTimeout` and then gives up
+    /// silently (for example when no screen can take the strip).
+    func peekStrip(duration: TimeInterval = 3, presentTimeout: TimeInterval = 2) {
+        guard let strip else { return }
+        if strip.isPresented {
+            strip.peek(duration: duration)
+            return
+        }
+        guard presentTimeout > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.peekStrip(duration: duration, presentTimeout: presentTimeout - 0.1)
+            }
+        }
+    }
+
     // MARK: - Resolution
 
     /// Placement does not depend on usage tracking (the wings observe it themselves), so only
@@ -108,6 +132,8 @@ final class QuotaMeterPresentationCoordinator: ObservableObject {
             // hidden from the View menu earlier, and forgets any pending lid-reopen return.
             returnToBuiltinWhenBack = false
             if hidden { defaults.set(false, forKey: PreferencesKey.quotaMeterStripHidden) }
+            // The user has chosen where the Quota Meter goes; the notch intro would only ask again.
+            defaults.set(true, forKey: QuotaMeterNotchIntro.shownKey)
         }
         lastPlacementRaw = raw
         lastStripHidden = defaults.bool(forKey: PreferencesKey.quotaMeterStripHidden)

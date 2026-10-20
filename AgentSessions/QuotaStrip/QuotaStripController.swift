@@ -302,6 +302,20 @@ final class QuotaStripController {
         hoverTimer = timer
     }
 
+    /// Opens the panel for `duration` seconds, then closes it as a hover-out would, unless
+    /// the pointer is inside by then (hover handling then owns it). Used after the notch
+    /// intro moves the Quota Meter here, so the user sees where it went.
+    func peek(duration: TimeInterval) {
+        guard isPresented, let model, !model.expanded else { return }
+        // The close timer must exist before the panel opens: `updatePointer` otherwise sees
+        // an open panel with no timer and the pointer outside, and closes it at once.
+        scheduleHover(after: duration) { [weak self] in
+            guard let self, !self.pointerInside, !self.isPopoverOpen else { return }
+            self.setExpanded(false)
+        }
+        setExpanded(true)
+    }
+
     private func setExpanded(_ expanded: Bool) {
         guard let model, model.expanded != expanded else { return }
         withAnimation(expanded ? Self.openSpring : Self.closeSpring) { model.expanded = expanded }
@@ -315,7 +329,19 @@ final class QuotaStripController {
         let inNotchRow = point.y <= model.notchHeight
         guard !model.expanded || inNotchRow, let menu = menuProvider?() else { return false }
         hoverTimer?.invalidate()
-        let anchor = NSPoint(x: model.hitRect.minX + 10, y: model.shapeSize.height + 4)
+        // Drop the menu the way a status item does: flush under the menu bar, from the
+        // panel's collapsed shape, never from the bottom of an open panel.
+        setExpanded(false)
+        let shape = model.hitRect
+        let x: CGFloat
+        if point.x < shape.midX - model.notchWidth / 2 {
+            x = shape.minX                                  // left wing: left edges meet
+        } else if point.x > shape.midX + model.notchWidth / 2 {
+            x = shape.maxX - menu.size.width                // right wing: right edges meet
+        } else {
+            x = shape.midX - menu.size.width / 2            // the notch: centred under it
+        }
+        let anchor = NSPoint(x: x, y: model.notchHeight)
         menu.popUp(positioning: nil, at: host.isFlipped ? anchor : NSPoint(x: anchor.x, y: host.bounds.height - anchor.y),
                    in: host)
         // The menu cancelled the hover timer; start the hover state over so it re-arms.
