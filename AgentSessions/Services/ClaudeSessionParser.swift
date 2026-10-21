@@ -314,6 +314,15 @@ final class ClaudeSessionParser {
         return line - 1
     }
 
+    /// A harness-written `user` record that tells the model its previous reply was
+    /// stopped by a safety classifier. Keyed on a non-empty `refusedMessageId`, not on
+    /// the notice wording, so a typed prompt with the same words stays a prompt.
+    static func isClassifierStopNotice(_ obj: [String: Any]) -> Bool {
+        guard (obj["type"] as? String)?.lowercased() == "user",
+              let refused = obj["refusedMessageId"] as? String else { return false }
+        return !refused.isEmpty
+    }
+
     private static func parseLine(_ obj: [String: Any], eventID: String) -> SessionEvent {
         let derived = parseLineEvents(obj, baseEventID: eventID)
         if let preferred = derived.first(where: { $0.kind == .user || $0.kind == .assistant }) {
@@ -344,6 +353,33 @@ final class ClaudeSessionParser {
         let rawJSON = rawJSONBase64(sanitizeLargeStrings(in: obj))
         let messageID = obj["uuid"] as? String
         let parentID = obj["parentUuid"] as? String
+
+        // Claude Code 2.1.304+: after a safety-classifier stop the harness writes a
+        // `type:"user"` notice to the model (`isMeta`, `turnCompanion`) whose
+        // `refusedMessageId` is the `message.id` of the stopped assistant reply. Nobody
+        // typed it, so it is a system notice: not a prompt, title, counted message or
+        // turn start. The id link stays in rawJSON (Claude events carry the record uuid,
+        // not the API message id).
+        if isClassifierStopNotice(obj) {
+            let text = (obj["message"] as? [String: Any]).flatMap(extractContent(from:))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return [
+                SessionEvent(
+                    id: baseEventID,
+                    timestamp: timestamp,
+                    kind: .meta,
+                    role: "system",
+                    text: (text?.isEmpty == false) ? text : nil,
+                    toolName: nil,
+                    toolInput: nil,
+                    toolOutput: nil,
+                    messageID: messageID,
+                    parentID: parentID,
+                    isDelta: false,
+                    rawJSON: rawJSON
+                )
+            ]
+        }
 
         // Handle explicit top-level tool events (rare but supported).
         if let t = (obj["type"] as? String)?.lowercased() {
@@ -903,6 +939,7 @@ final class ClaudeSessionParser {
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return
                 }
+                if isRequestLogRecord(obj) { return }
 
                 // Extract metadata
                 if sessionID == nil, let sid = obj["sessionId"] as? String, !sid.isEmpty {
@@ -933,7 +970,6 @@ final class ClaudeSessionParser {
                     if tmin == nil || ts < tmin! { tmin = ts }
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
-                if isRequestLogRecord(obj) { return }
 
                 // Extract row titles. custom-title from /rename always wins;
                 // ai-title is a generated fallback; agent-name is weakest.

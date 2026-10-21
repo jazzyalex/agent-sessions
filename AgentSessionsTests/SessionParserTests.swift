@@ -3115,6 +3115,74 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(preview.listTitle, "Fix the login bug")
     }
 
+    // Claude Code 2.1.304+ writes a harness-injected `type:"user"` record after a
+    // safety-classifier stop: `isMeta:true`, `turnCompanion:true` and
+    // `refusedMessageId` = the `message.id` of the assistant reply that was cut off
+    // (that reply ends with `stop_reason:"refusal"`). It is a notice to the model,
+    // not something the user typed, so it must not become a user prompt, a title,
+    // a counted message, or a new turn.
+    func testClaudeClassifierStopNoticeIsMetaNotUserPrompt() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeRefusal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_refusal_notice.jsonl")
+        let sid = "ses_refusal"
+        let notice = "REFUSAL_NOTICE Your response above was stopped by a safety classifier."
+        // The first prompt is image-only (no text), so the old parser fell through
+        // to the next user-kind event for the title: the classifier notice.
+        let lines = [
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]},"uuid":"u1","timestamp":"2026-10-21T05:44:40.000Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sid)","version":"2.1.306","message":{"id":"msg_refused_1","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"uuid":"a1","parentUuid":"u1","timestamp":"2026-10-21T05:44:45.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.306","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file1"}]},"uuid":"u2","parentUuid":"a1","timestamp":"2026-10-21T05:44:46.000Z"}"#,
+            #"{"type":"system","subtype":"informational","sessionId":"\#(sid)","version":"2.1.306","content":"Safeguards stopped the response above","isMeta":false,"level":"notice","uuid":"s1","parentUuid":"u2","timestamp":"2026-10-21T05:44:47.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.306","promptId":"p1","message":{"role":"user","content":"\#(notice)"},"isMeta":true,"turnCompanion":true,"refusedMessageId":"msg_refused_1","uuid":"u3","parentUuid":"s1","timestamp":"2026-10-21T05:44:47.500Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sid)","version":"2.1.306","message":{"id":"msg_2","role":"assistant","model":"claude-opus-5-5","stop_reason":"end_turn","content":[{"type":"text","text":"Continuing."}]},"uuid":"a2","parentUuid":"u3","timestamp":"2026-10-21T05:44:50.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+
+        let noticeEvents = full.events.filter { $0.text?.contains("REFUSAL_NOTICE") == true }
+        XCTAssertEqual(noticeEvents.count, 1, "the notice should stay in the transcript once")
+        XCTAssertEqual(noticeEvents.first?.kind, .meta, "a classifier-stop notice is not a user prompt")
+        XCTAssertEqual(noticeEvents.first?.role, "system")
+        XCTAssertEqual(noticeEvents.first?.messageID, "u3")
+        let noticeRaw = noticeEvents.first.flatMap { Data(base64Encoded: $0.rawJSON) }.flatMap { String(data: $0, encoding: .utf8) }
+        XCTAssertTrue(noticeRaw?.contains("\"refusedMessageId\":\"msg_refused_1\"") == true,
+                      "the link to the stopped assistant message must survive in rawJSON")
+
+        XCTAssertFalse(full.events.contains { $0.kind == .user && $0.text?.contains("REFUSAL_NOTICE") == true })
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1, "only the real (image) prompt is a user message")
+        XCTAssertEqual(full.eventCount, 4, "user + tool_call + tool_result + assistant; the notice is not counted")
+        XCTAssertFalse(full.title.contains("REFUSAL_NOTICE"), "the notice must not title the session: \(full.title)")
+        XCTAssertFalse(full.listTitle.contains("REFUSAL_NOTICE"))
+
+        let preview = try XCTUnwrap(ClaudeSessionParser.parseFile(at: url))
+        XCTAssertFalse(preview.listTitle.contains("REFUSAL_NOTICE"), "lightweight title: \(preview.listTitle)")
+    }
+
+    // A real user prompt that happens to share the notice's wording stays a prompt:
+    // the rule keys on `refusedMessageId`, not on text.
+    func testClaudeUserPromptWithoutRefusedMessageIdStaysUserPrompt() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeRefusalText-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_refusal_text.jsonl")
+        let lines = [
+            #"{"type":"user","sessionId":"ses_text","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":"Your response above was stopped by a safety classifier — why?"},"isMeta":false,"uuid":"u1","timestamp":"2026-10-21T05:44:40.000Z"}"#,
+            #"{"type":"user","sessionId":"ses_text","version":"2.1.306","message":{"role":"user","content":"Second prompt"},"refusedMessageId":"","uuid":"u2","timestamp":"2026-10-21T05:44:41.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.compactMap(\.text),
+                       ["Your response above was stopped by a safety classifier — why?", "Second prompt"])
+    }
+
     // Codex 0.163.0 writes `response_item.payload:additional_tools` (role
     // `developer`, a `tools` definition list) and adds `status`, `annotations`
     // and `logprobs` to message/function_call payloads. The tool list must stay

@@ -100,6 +100,24 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(leaked.isEmpty, "request-log records became \(leaked.count) events")
     }
 
+    // Claude 2.1.304+ classifier-stop notice (`refusedMessageId`) in the baseline
+    // fixture must parse as metadata, never as a user prompt.
+    func testClaudeClassifierStopNoticeInBaselineIsMeta() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(fixture.contains("\"refusedMessageId\""), "fixture should cover the classifier-stop notice")
+
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        let notices = full.events.filter { event in
+            guard let data = Data(base64Encoded: event.rawJSON),
+                  let raw = String(data: data, encoding: .utf8) else { return false }
+            return raw.contains("\"refusedMessageId\"")
+        }
+        XCTAssertEqual(notices.count, 1)
+        XCTAssertEqual(notices.first?.kind, .meta)
+        XCTAssertEqual(notices.first?.role, "system")
+    }
+
     func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else {

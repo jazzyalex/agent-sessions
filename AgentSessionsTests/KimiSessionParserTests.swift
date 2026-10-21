@@ -103,9 +103,12 @@ final class KimiSessionParserTests: XCTestCase {
     func testNonMessageOpFamiliesSurviveAsMeta() throws {
         let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
 
+        // `changeNotifier.snapshot` (2.3.0): durable change-detection state
+        // (AGENTS.md / skills hashes, subagent names, subagent model pool) that the
+        // harness replays to decide whether to remind the model of changes.
         for family in ["metadata", "tools.set_active_tools", "llm.request",
                        "llm.tools_snapshot", "turn.steer", "turn.cancel",
-                       "permission.set_mode"] {
+                       "permission.set_mode", "changeNotifier.snapshot"] {
             let matches = session.events.filter { $0.rawJSON.contains("\"type\":\"\(family)\"") }
             XCTAssertFalse(matches.isEmpty, "fixture should contain \(family)")
             XCTAssertTrue(matches.allSatisfy { $0.kind == .meta }, "\(family) must resolve to .meta")
