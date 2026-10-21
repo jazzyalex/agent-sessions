@@ -11,6 +11,64 @@
 entries:
   - agent_sessions_version: "6.0.1-unreleased"
     as_of_date_utc: "2026-10-21"
+    as_of_commit: "94d7b502+working-tree"
+    note: "Evening CLI updates. Fresh tool-bearing prebump sessions matched baseline (scripts/probe_scan_output/agent_watch/20261021-190037-696723Z-p39038-prebump/report.json) and advanced Copilot 1.0.101 -> 1.0.102 (146 baseline types, tool.execution_start/complete present) and Hermes 0.22.2 -> 0.22.4 (7 baseline types, terminal tool_call and tool message present). Antigravity 1.4.4 matched baseline too but has only 4 events, so it stays held at 1.1.27 (blocked_thin_sample)."
+    verified:
+      copilot:
+        sessions:
+          max_verified_version: "1.0.102"
+          scope: "latest; installed and upstream both 1.0.102"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-190037-696723Z-p39038-prebump/report.json"]
+          notes: "Fresh 1.0.102 session (copilotVersion 1.0.102) has tool execution start/complete, 0 unknown types or keys, 0 parse errors."
+      hermes:
+        sessions:
+          max_verified_version: "0.22.4"
+          scope: "latest; installed and upstream both 0.22.4"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-190037-696723Z-p39038-prebump/report.json"]
+          notes: "Fresh real-home one-shot session has a terminal tool_call and a tool message and matches baseline; 0 unknown types or keys."
+    not_verified:
+      antigravity: {sessions: {held_at_version: "1.1.27", installed_version: "1.4.4", upstream_version: "1.4.4", reason: "Prebump matched baseline (14 baseline types) but the fresh session has only 4 events in 4 types; weekly stays blocked_thin_sample."}}
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "94d7b502+working-tree"
+    note: "Desktop-surface check from one fresh tool-using session per desktop app (list a scratch dir, read a.txt). Antigravity desktop 2.25.0 writes the CLI transcript layout under ~/.gemini/antigravity/brain and was not discovered; discovery, parsing (GENERIC/GREP_SEARCH tool results were meta) and weekly sampling now cover both brain roots. Cline Desktop 0.0.48 parsed and discovered; its display-only error message now renders as an error. OpenCode desktop 1.19.3 writes v1 rows and reads correctly beside 2.x sessions. Tracker run_id=desktop-surfaces-2026-10-21."
+    verified:
+      cline:
+        sessions:
+          desktop_max_verified_version: "0.0.48"
+          scope: "Cline Desktop 0.0.48 (CLI stays 3.0.73)"
+          evidence: ["~/.cline/data/sessions/session_1792607722905_poep2/ (manifest + messages, not committed)", "Resources/Fixtures/stage0/agents/cline/desktop_tool/session_1792607722905_fixt1.json", "./scripts/steward_check.py cline (all good, 5 sessions sampled)"]
+          notes: "Native desktop session (source=desktop, sessionHistoryOrigin.version 0.0.48) with run_commands and read_files calls and results. Directories are named session_<epochms>_<id>; discovery is name-agnostic. New key message.assistant.metadata {displayOnly, displayRole} on a failed-request message, now rendered as an error and fingerprinted."
+    not_verified:
+      antigravity: {sessions: {held_at_version: "1.1.27", installed_version: "1.4.3", upstream_version: "1.4.3", reason: "Desktop app 2.25.0 transcript schema matches the 1.1.27 baseline, but the weekly union across both brain roots is still 22 events (coverage 0.29), so blocked_thin_sample stays. Desktop is a surface note, not a ceiling. Later the same day the CLI updated to 1.4.4: its prebump (20261021-190037-696723Z-p39038-prebump) matched the baseline but observed only 4 events in 4 types, so the ceiling stays 1.1.27."}}
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "94d7b502+working-tree"
+    note: "fx schema 4 support built from upstream source at v0.0.14 (1a070af); awaiting steward session. fx 0.0.8 (2026-09-07) replaced checkpoint.json with session.json schema_version 4 plus a conversation events.jsonl ({schema_version 1-3, seq, timestamp_ms, event: {<kind>: payload}}; kinds user, assistant, tool_call, tool_result, steering, turn_completed, interrupted, context_checkpoint; union unchanged v0.0.8 -> v0.0.14), full tool output in tool-results/<artifact_ref>, and an uncommitted turn in recovery.json. The app and steward_check.py fx found no sessions on a schema-4 machine (#83). Discovery, parser, weekly selection/fingerprint/contract and steward_check now read both layouts; synthetic fixture schema4/ follows the upstream writers. Devin gained an upstream source (stable changelog, url_regex_semver_max)."
+    not_verified:
+      fx:
+        sessions:
+          held_at_version: "0.0.7"
+          installed_version: "unknown"
+          upstream_version: "0.0.14"
+          scope: "schema-4 reader built from upstream v0.0.14 source; no 0.0.8+ session read"
+          evidence: ["https://github.com/vercel-labs/fx/blob/v0.0.14/src/core/session/session_event.zig", "https://github.com/vercel-labs/fx/blob/v0.0.14/src/core/session/session_codec.zig", "Resources/Fixtures/stage0/agents/fx/schema4/events.jsonl", "AgentSessionsTests/FxSessionParserTests.swift", "scripts/tests/test_fx_schema4_monitoring.py"]
+          reason: "Steward-verified agent, not installed here (SKILL 1g). The ceiling moves only after ./scripts/steward_check.py fx passes on a native 0.0.8+ session."
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "94d7b502+working-tree"
+    note: "Qwen Code source review 0.22.3 -> 0.25.3 (no real session can be produced: the OAuth free tier ended 2026-04-15 and there is no paid plan). Diffed chatRecordingService.ts, transcript-records.ts, sessionService.ts and session-transcript-reader.ts between the v0.22.3 and v0.25.3 tags of QwenLM/qwen-code and checked the installed 0.25.3 bundle. Storage, filename pattern, archive dir and top-level types are unchanged. Four reader rules changed and the parser mishandled each: session_sources_snapshot and managed_session_header/event/commit_v1 are excluded from leaf selection (a trailing one became our leaf, and could select a rewound branch for the transcript and for telemetry usage); agent_mention/agent_message are type user but never a prompt or title; code_mode_tool_result is an internal nested tool result; generated @attachment:/// tokens are stripped from display text. All four now mirror upstream, with failing-first tests and a SYNTHETIC fixture (019f0000-0000-7000-8000-000000000007.jsonl, not in evidence_fixtures). Tracker run_id=qwen-0.25-source-review-2026-10-21."
+    not_verified:
+      qwen:
+        sessions:
+          held_at_version: "0.14.3"
+          installed_version: "0.25.3"
+          upstream_version: "0.25.3"
+          scope: "source-reviewed through 0.25.3 on 2026-10-21; no real session"
+          evidence: ["https://github.com/QwenLM/qwen-code/compare/v0.22.3...v0.25.3", "/opt/homebrew/lib/node_modules/@qwen-code/qwen-code", "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000007.jsonl", "AgentSessionsTests/QwenIntegrationTests.swift", "AgentSessionsTests/ExpandedTelemetryProviderTests.swift"]
+          reason: "No 0.25.3 transcript exists; reading the writer is not capturing a session (section 1b). The ceiling stays 0.14.3."
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
     as_of_commit: "79e9f272+working-tree"
     note: "Follow-up weekly (scripts/probe_scan_output/agent_watch/20261021-060018-769980Z-p10393/report.json) flagged Claude user.refusedMessageId and Kimi 2.3.0 changeNotifier.snapshot. Claude: since 2.1.304 a safety-classifier stop writes a harness type:user notice (isMeta, turnCompanion, refusedMessageId = the stopped assistant reply's message.id; that reply has stop_reason refusal). It parsed as a user prompt: a user row, a counted message, a turn start, and the title when the real first prompt has no text. ClaudeSessionParser now emits it as a system .meta event keyed on a non-empty refusedMessageId (failing-first tests SessionParserTests.testClaudeClassifierStopNoticeIsMetaNotUserPrompt, testClaudeUserPromptWithoutRefusedMessageIdStaysUserPrompt, Stage0GoldenFixturesTests.testClaudeClassifierStopNoticeInBaselineIsMeta). Value pass: candidate (records a state transition the UI hides) -> backlog 'Claude safety-classifier stops are hidden in the transcript'. General isMeta handling measured (696 of 102,789 user records, 298 of 2,033 files, never the first user record) and left as backlog 'Claude isMeta user records still render as user prompts'. Final weekly: scripts/probe_scan_output/agent_watch/20261021-060948-140119Z-p13897/report.json (claude and kimi supports_latest, zero unknown schema)."
     verified:

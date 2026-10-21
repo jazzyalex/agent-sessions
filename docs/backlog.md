@@ -789,8 +789,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   yet. Check how the empty system row renders once real sessions exist.
 - **Pi 1.1.0 assistant `durationMs`** (2026-10-13) — source-reported time per assistant
   message. It joins the Kimi duration entry if per-turn timing gets a UI.
-- **Antigravity `GENERIC.error`** — one record in the 2026-10-11 prebump session;
-  promote if it carries a user-visible failure reason.
+- **Antigravity `GENERIC.error`** — settled 2026-10-21 as noise: 2 records on disk, both
+  `status: ERROR` permission denials whose `content` already carries the same text, and
+  `content` now renders as the tool result (GENERIC was meta before 2026-10-21).
 - **Claude `thinkingDisplay`** (2026-10-13 scan) — 1 record in 32 sessions from three
   days, on 2.1.296 with `claude-sonnet-5`: value `omitted`, with an empty `thinking`
   block and `thinkingDurationMs` 15906. It marks a turn whose reasoning text was not
@@ -808,6 +809,63 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   cache_read_tokens}` — read by `AntigravityTelemetryAccumulator`.
 - **To close:** each line is either promoted to its own entry on a second sighting, or
   deleted as settled noise.
+
+### Watch list from the 2026-10-21 Qwen 0.25.3 source review
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+Read from the v0.25.3 writer only; no 0.25.x transcript exists here, so nothing below
+could be measured (§1e "measure before promoting"). Each line is a candidate the day a
+real session shows it.
+
+- **`session_approval_mode`** (system, `{mode, prePlanMode?, planExecutionMode?}`) — a
+  mode change the UI hides. Renders as a meta row today.
+- **User `executionContext`** (`{modelId, authType?, approvalMode}`) on every prompt —
+  per-turn model and approval mode. The session model still comes from assistant records.
+- **`omni_recall`** — the memory-recall payload given to the model for a turn.
+- **`agent_message.systemPayload.totalTokens` and `author`** — tokens and identity of a
+  session agent's run (daemon multi-agent only). The records render as meta rows now.
+- **`/goal` title fallback** — upstream names a session whose only prompt was `/goal`
+  with the goal objective (`extractGoalObjectiveFromRecords`); we show the raw prompt.
+- **Managed sessions** (`qwen serve --experimental-paired-engines`) — history is in
+  `managed_session_*_v1` journal records and is not projected; such a session shows
+  meta rows only. Revisit if Managed leaves experimental.
+- **Pre-existing, not a 0.25 change:** upstream titles a session only from subtype-less
+  user records; we also accept `mid_turn_user_message` and `realtime_message`.
+- **To close:** promote a line on a real sighting, or delete it as settled.
+
+### fx schema 4: value pass from the 2026-10-21 source build
+> **open** · sev: med · urg: med · verified 2026-10-21
+
+Built from the vercel-labs/fx v0.0.14 writers (`session_event.zig`, `session_codec.zig`,
+`session_log.zig`); no real 0.0.8+ session has been read here, so nothing below is
+measured (§1e). **Handled** (reader + `FxSessionParserTests` schema-4 tests): frame text,
+tool calls/results keyed by `call_id`, `preview` + `tool-results/<artifact_ref>`,
+`completeness`, `created_at_ms`, frame `timestamp_ms`, `turn_summary.started_at_ms` (prompt
+time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`/`effort`,
+`recovery.json`. **Noise:** `argument_integrity`, `final_identity`, `provenance`,
+`provisional_id`, `provider_result`, `provider_replay.parts_json`, `permission_feedback`,
+`review_feedback`, `command_replay_*`, `work_id`, `fast_mode`, `conversation_language`.
+
+- **Candidate — token totals regressed for schema 4.** `FxTelemetryReader` reads the
+  schema-3 manifest's `total_input_tokens`/`total_output_tokens`; the schema-4 manifest has
+  neither, so 0.0.8+ sessions show no tokens. Every `turn_completed`/`interrupted` carries
+  `turn_summary.token_progress {input_tokens, output_tokens, input_exact, output_exact}`
+  plus `turn_duration_ms` and `thinking_duration_ms`: a per-turn token and duration
+  source. `usage-v2.json` is unaudited. **Fix shape:** sum `token_progress` per turn in a
+  schema-4 telemetry path; keep the exact flags. **To close:** measure on a steward session.
+- **Watch — `subagent_child: true`** manifests: child sessions list as top-level rows; the
+  parent's `children.json` names them. Matches the existing "subagent hierarchy"
+  unsupported surface.
+- **Watch — `committed_file_presentation`** (per-edit diff lines, `content_handle` into
+  `tool-results/diff-*.json`), `command_process_presentation` (exit code),
+  `turn_completed.files[]` (file evidence per turn), `tool_image_handle`.
+- **Watch — sessions v2.** fx 0.0.14 has an opt-in `--sessions-v2` store under
+  `~/.fx/sessions/v2/` (skipped by discovery). fx `main` after v0.0.14 removes the
+  schema-4 store and converts sessions into v2 (PR vercel-labs/fx#1328, 2026-10-19), so
+  the next fx release likely needs a new reader. **Why deferred:** unreleased.
+- **Preferences copy** (`PreferencesView+Fx.swift`) still says sessions hold
+  `checkpoint.json`. Changing it changes a String Catalog key, which needs a reviewed
+  update of the `validate_localization_catalogs.py` key baseline.
 
 ### Codex retained-context completeness is not visible
 > **open** · sev: low · urg: low · verified 2026-09-29
@@ -875,6 +933,51 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   that the original task can no longer accept.
 - **To close:** a current example establishes lifecycle semantics, and the app either
   renders a clearly historical question or safely links to the live task state.
+
+### Antigravity sidecars carry the working directory and a generated title; nothing reads them
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **What:** Antigravity transcripts carry no cwd, so every Antigravity session has a nil
+  working directory and a title cut from the first prompt line. Both brain roots keep
+  sidecars that have them, keyed by the conversation id:
+  `<root>/conversation_summaries.db` table `conversation_summaries` (`title`, `preview`,
+  `step_count`, `workspace_uris` as a JSON array of `file://` URIs, `source`
+  `CORTEX_TRAJECTORY_SOURCE_CLI` or empty for the desktop app), and
+  `<root>/annotations/<id>.pbtxt` (protobuf text, `title:"..."`). Here `<root>` is
+  `~/.gemini/antigravity-cli` or `~/.gemini/antigravity`.
+- **Measured 2026-10-21:** CLI summaries 58 rows, 41 with `workspace_uris`, 24 with a
+  title; 24 of 54 CLI conversations have an annotation title; the desktop 2.25.0 session
+  has both a title ("List and Read Scratchpad Files") and an empty `workspace_uris`. The
+  desktop summaries DB also lists CLI conversations.
+- **Fix shape:** read the annotation title (plain file, one regex) as the preferred
+  title; read `workspace_uris[0]` from a copied or read-only summaries DB as the cwd.
+- **Why deferred:** the DB is a WAL SQLite file the agent writes live, so it needs the
+  same read-only and copy care as the other SQLite readers; the gain is cosmetic.
+- **Risk if wrong:** a stale or wrong `workspace_uris` would mis-group sessions by project.
+- **To close:** Antigravity sessions show the generated title and a cwd when the
+  sidecars carry them, pinned by a fixture test.
+
+### Watch list from the 2026-10-21 desktop-surface check (Cline, OpenCode)
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **Cline source-reported cost** — assistant `metrics.cost` and manifest
+  `metadata.totalCost`/`usage.totalCost` are dollars Cline computed. Measured: 1 of 21
+  local sessions non-zero (the paid Desktop 0.0.48 route); free routes write 0.
+  `ClineTelemetryReader` sets `costEstimate: nil`, and the price lookup cannot key
+  `~anthropic/claude-fable-latest` (a `~` "latest" alias). Promote if paid sessions
+  become common: prefer the source cost over an estimate.
+- **Cline workspace-less desktop sessions** record `cwd: "/"`, so the repo label reads
+  "/". One session; promote if it recurs.
+- **Cline `<user_input mode="...">` wrapper** — every CLI and Desktop prompt since
+  3.0.62 is wrapped; the transcript shows the tag. Pre-existing, not a 0.0.48 change; the
+  CLI fixture carries unwrapped text, so no test sees it.
+- **OpenCode one-store weekly sample** — `_opencode_sqlite_latest_session_schema_fingerprint`
+  samples only the store holding the newest session. Desktop 1.19.3 still writes v1
+  while CLI 2.x writes v2, so each surface is checked only in weeks it was used last,
+  and a lone short desktop session can trip `blocked_thin_sample`. Fix shape if it bites:
+  union the newest v2-preferred session with the newest v1 session that has no
+  `session_v2` row (a live 1.x writer).
+- **To close:** promote a line on a second sighting, or delete it as settled.
 
 ### Grok session sidecars are neither watched nor read
 > **open** · sev: low · urg: low · verified 2026-08-17
@@ -1597,6 +1700,9 @@ the latter is tracked separately above until its lifecycle semantics are known.
 > **partial** · sev: low · urg: low · verified 2026-10-01
 - **Review 2026-10-01:** The monitor still unions five newest sessions, but v5.2 changed thin, stale, or inconclusive checks to cannot-check rather than a clean verdict or version bump. Older informative Antigravity sessions can still be excluded by the newest-five window. Recommendation: keep partial at low priority; consider adaptive sampling only when this blocks a real format-verification decision.
 - **Evidence:** scripts/agent_watch.py:653-657; docs/CHANGELOG.md:131.
+- **2026-10-21:** weekly now samples both Antigravity brain roots (CLI and desktop app).
+  The newest five are still one 6-line desktop session and four 4-line prebumps: 22
+  events, coverage 0.29, so `blocked_thin_sample` stays. A second root does not fix it.
 
 - **What:** `_LOCAL_SCHEMA_SAMPLE_COUNT = 5`
   ([agent_watch.py:657](../scripts/agent_watch.py:657)) is a global constant, and the

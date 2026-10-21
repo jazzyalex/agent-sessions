@@ -80,12 +80,16 @@ agents:
   antigravity:
     max_verified_version: "1.1.27"
     version_field: "not_logged"
+    notes:
+      - "2026-10-21: CLI 1.4.4 prebump (scripts/probe_scan_output/agent_watch/20261021-190037-696723Z-p39038-prebump/report.json) matched the baseline (14 baseline types) but observed only 4 events in 4 types, so the weekly stays blocked_thin_sample. max_verified_version stays 1.1.27."
+      - "2026-10-21 desktop surface note: the Antigravity desktop app 2.25.0 (IDE 2.5.5 also installed) writes the CLI transcript layout into the desktop brain root, ~/.gemini/antigravity/brain/<conversation-id>/.system_generated/logs/transcript.jsonl, with no *.md artifact beside it. The record schema is identical to agy 1.1.27 (no new types or keys). Discovery now reads transcripts from both brain roots; a conversation with a transcript lists once, replacing its markdown artifacts, and the same id in both roots keeps the newer file. Weekly local_schema and the discovery contract cover both roots. max_verified_version stays the CLI's; the desktop version is a surface note."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
+      - "Resources/Fixtures/stage0/agents/antigravity/desktop_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.101"
+    max_verified_version: "1.0.102"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -95,6 +99,9 @@ agents:
   opencode:
     max_verified_version: "2.1.2"
     version_field: "session.version"
+    notes:
+      - "2026-10-21 desktop surface note: OpenCode desktop 1.19.3 still writes the v1 session/message/part tables (session.version 1.19.3), not session_v2, while CLI 2.1.2 writes session_v2. A fresh desktop session with bash and read tool calls (no session_v2 row) fingerprints clean against the v1 baseline. The app lists it from the v1 store because it has no v2 row, and loads its transcript from v1 rows. max_verified_version stays the CLI's. The weekly sampler reads one store per run (the one with the newest session), so desktop v1 writes are sampled only when the desktop session is the newest. In that case the sample is the single desktop session; a short one can trip blocked_thin_sample."
+      - "2026-10-21: CLI 2.1.2 compaction rows now carry model, cost and tokens (2 of 5 compaction rows on disk). OpenCodeV2MessageAdapter already turns compaction tokens into a step-finish part for telemetry (testAdapterTurnsCompactionUsageIntoStepFinish); the sqlite_v2 compaction fixture now carries the three keys, so the weekly no longer reports them as drift."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json"
@@ -122,9 +129,10 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/shell.json"
   hermes:
-    max_verified_version: "0.22.2"
+    max_verified_version: "0.22.4"
     version_field: "not_logged"
     notes:
+      - "2026-10-21: verified 0.22.4 from a fresh real-home one-shot session with a terminal tool call and result (scripts/probe_scan_output/agent_watch/20261021-190037-696723Z-p39038-prebump/report.json: ok, fresh_matches_baseline, 7 baseline types)."
       - "2026-10-21: verified 0.22.2 from a fresh real-home one-shot session with a tool call (scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json). The owner's Hermes default model is now openai-codex gpt-6-luna (copilot fallback claude-haiku-5.5) because the Codex ChatGPT plan rejects gpt-5.5."
       - "History: on 2026-09-29 the post-0.21.5 one-shot stopped before session creation because the migrated configuration selected provider `copilot` without `COPILOT_GITHUB_TOKEN` (scripts/probe_scan_output/agent_watch/20260929-192532-724083Z-p88348-prebump/report.json)."
     evidence_fixtures:
@@ -249,9 +257,11 @@ agents:
       - "subagent hierarchy"
       - "automatic QWEN_RUNTIME_DIR discovery (choose that runtime directory's projects folder in Settings)"
       - "resume from an arbitrarily renamed copied projects root (those transcripts remain browseable and searchable)"
-      - "fresh authenticated 0.22.3 transcript and live resume validation"
+      - "fresh authenticated 0.25.3 transcript and live resume validation"
       - "prebump real-session validation (no agent_watch prebump driver yet; weekly monitoring is configured)"
+      - "Managed sessions (qwen serve --experimental-paired-engines): their history lives in managed_session_*_v1 journal records, which are not projected back into a conversation, so such a session shows metadata only"
     notes:
+      - "SOURCE-REVIEWED THROUGH 0.25.3 ON 2026-10-21; NO REAL SESSION. max_verified_version stays 0.14.3. Installed and upstream are both 0.25.3. The writer was diffed v0.22.3..v0.25.3 at the QwenLM/qwen-code tags (chatRecordingService.ts, transcript-records.ts, sessionService.ts, session-transcript-reader.ts) and checked in the installed bundle. Storage, filename pattern, archive dir and the four top-level types are unchanged. Four reader rules changed and the app now mirrors them: session_sources_snapshot and managed_session_header/event/commit_v1 cannot be the active leaf (parser and QwenTelemetryReader); agent_mention/agent_message (type user) are metadata and never a title; code_mode_tool_result is metadata, not a tool result; generated @attachment:/// tokens are stripped from display text. The parser exercise is the SYNTHETIC fixture 019f0000-0000-7000-8000-000000000007.jsonl, deliberately absent from evidence_fixtures. Tracker run_id=qwen-0.25-source-review-2026-10-21."
       - "The installed Qwen Code CLI is 0.22.3 (corrected 2026-08-31; this note previously said 0.21.13, and the version had moved without anyone re-reading it). Re-verified against the 0.22.3 package source, all unchanged from the 0.21.13 reading: the writer still uses projects/<project>/chats/<session-id>.jsonl and chats/archive (getChatsDir + \"archive\"); SESSION_FILE_PATTERN is still /^[0-9a-fA-F-]{32,36}\\.jsonl$/; --help still advertises -r/--resume <id> and -c/--continue, and its loader still resolves active chats only, so archived histories are deliberately not offered resume. The user/assistant/tool_result record families are represented by synthetic fixtures. Model execution remains authentication-blocked, so no fresh transcript or end-to-end resume is claimed at any version."
       - "DO NOT BUMP max_verified_version ON THE 0.22.3 SOURCE READ (2026-08-31). The installed package is 0.22.3 and its writer was read directly, which resolved every open subtype question and shipped a real fix (74243333) - but reading a writer is NOT capturing a transcript, and this field means transcript. The free tier is still discontinued, so no 0.22.x session can be produced on this machine and none exists on disk; every Qwen transcript here is still 0.14.3. The fixture added for that work (019f0000-0000-7000-8000-000000000006.jsonl) is SYNTHETIC, labelled so in the file and in its test names, and is deliberately absent from evidence_fixtures for exactly this reason - it exercises the parser and is not evidence about the format. This is the same trap as the 5.0 incident, where synthetic fixtures were mistaken for coverage of a real surface. A sweep that sees '0.22.3 source verified' and moves this number is asserting something nobody checked."
       - "0.22.3 findings are recorded in the format tracker under run_id=qwen-0.22-source-read-2026-08-31 (10 records: 4 action_applied, 5 triaged, 1 corrected), and narratively in docs/agent-json-tracking.md under the 2026-08-31 sixth pass. Load-bearing ones: QWEN_HOME now falls back to ~/.qwen when $QWEN_HOME/projects is absent (it had three consumers, not two - resume eligibility was passing QWEN_HOME as customRoot); records with an unrecognized top-level type were being dropped without trace and are now censused; realtime_message and mid_turn_user_message are real conversation, not metadata, so classifying them as meta would have hidden messages; subagent transcripts live in a separate store (subagents/<sessionId>/agent-<agentId>.jsonl) that discovery never reaches, so subagent hierarchy stays an unsupported surface rather than a drift risk."
@@ -259,9 +269,9 @@ agents:
       - "First weekly agent_watch run (2026-08-17) reported format_drift_detected, and it was an incomplete baseline rather than upstream movement: the five synthetic fixtures never modelled the systemPayload telemetry surface real transcripts carry (outputHistoryItems/systemInfo from /about, uiEvent, phase, rawCommand) or the assistant contextWindowSize and envelope gitBranch keys. Closed by sweeping both on-disk sessions with rebuild_stage0_baseline.py into system_telemetry.jsonl. uiEvent.function_args is registered opaque in _NESTED_OPAQUE_KEYS: it is the telemetry echo of a tool's own parameter object, so walking it would make every new tool parameter read as Qwen drift. Qwen was also missing from rebuild_stage0_baseline.py's MATRIX_KEY map (its section is qwen_code:), the same trap grok hit on 2026-08-13, which would have reported the entire schema missing and then failed --emit."
       - "The retained local transcript has 32 records and logs version 0.14.3. It was inspected only for keys, types, counts, and non-sensitive metadata; no production prompt, output, account identifier, project path, URL, credential, or record was copied."
       - "QWEN_HOME is honored automatically by both discovery and availability. QWEN_RUNTIME_DIR can relocate session output but is intentionally not read from the app process environment because it may be scoped only to the launched CLI; users must select its literal projects folder as the custom storage root. Copy and launch commands then carry the shell-quoted runtime parent through QWEN_RUNTIME_DIR; default-root commands remain unchanged. Arbitrarily renamed copied roots are browse-only."
-      - "Current-writer systemPayload.displayText takes precedence over hook context appended to message.parts. For retained payload-less records, the current reader's exact final-part wrapper validation removes only a well-formed qwen:user-prompt-submit-context block; malformed or nested lookalikes remain visible. goal_runtime, cron, and notification user-role envelopes remain metadata rather than inflating user-turn counts or titles."
+      - "Current-writer systemPayload.displayText takes precedence over hook context appended to message.parts. For retained payload-less records, the current reader's exact final-part wrapper validation removes only a well-formed qwen:user-prompt-submit-context block; malformed or nested lookalikes remain visible. goal_runtime, cron, notification, agent_mention, and agent_message user-role envelopes remain metadata rather than inflating user-turn counts or titles. Generated @attachment:/// tokens for resource attachment references are stripped from displayText (0.25.x stripGeneratedAttachmentTokens)."
       - "Discovery and resume share an exact root-relative location invariant: only projectsRoot/<project>/chats/<id>.jsonl is active and projectsRoot/<project>/chats/archive/<id>.jsonl is archived. Nested chats lookalikes and Agent Sessions archive fallback copies are never offered resume."
-      - "Current-reader compatibility reconstructs the last non-artifact parent chain, aggregates repeated-UUID fragments in physical order, recovers multiple complete JSON objects glued on one physical line, and derives the latest active-chain cwd and custom_title. Dead rewind branches and trailing artifacts do not enter the transcript, title, counts, search metadata, or resume directory."
+      - "Current-reader compatibility reconstructs the parent chain from the last conversation record (not an artifact, session_sources_snapshot, or managed_session_*_v1 record), aggregates repeated-UUID fragments in physical order, recovers multiple complete JSON objects glued on one physical line, and derives the latest active-chain cwd and custom_title. Dead rewind branches and trailing artifacts do not enter the transcript, title, counts, search metadata, or resume directory."
     evidence_captures:
       - "one retained local 0.14.3 transcript (schema-only inspection; 32 records)"
     evidence_fixtures:
@@ -306,6 +316,7 @@ agents:
       - "live/active status"
       - "image extraction (records reference image files under the session directory via user.images[].snapshot_path; transcripts render [image] markers)"
       - "subagent hierarchy (has_managed_children sessions and the subagent/ relationship index are not surfaced)"
+      - "fx sessions-v2 store (opt-in --sessions-v2 / FX_SESSIONS_V2=1 in 0.0.14, under ~/.fx/sessions/v2/; upstream main after v0.0.14 removes the schema-4 store and converts sessions into it, so the next fx release likely needs a new reader)"
       - "pre-v3 legacy layout (session.json snapshot without checkpoint.json) is invisible to discovery until fx itself migrates the session on next open"
     notes:
       - "The installed fx CLI is 0.0.5 (df7e624). Storage is one directory per session under ~/.fx/sessions/<sessionId>/ holding checkpoint.json (the materialized conversation), session.json (identity/workspace/model/timestamps sidecar), display.json (title/preview), usage-v2.json, and an append-only events.jsonl infrastructure log that the reader never opens (45 MB against a 2.4 MB checkpoint in the largest session measured). state.history[] entries are whole turns keyed by kind, and all four are rendered: assistant turns carry user prompt + execution.tool_steps + final reply; background_command turns share that body plus a log_path/url marker; compacted_summary turns render the summary that replaced the removed history (with removed_turn_count/compaction_count and any root_user_messages); interrupted turns render the completed execution steps, any partial reply, the dangling tool_call and the terminal_reason."
@@ -317,17 +328,20 @@ agents:
       - "2026-08-23 review round (upstream shipped 0.0.5 on 2026-08-22): every durable-bytes read now decodes the {\"encoding\": \"base64\", \"data\": …} object form writeDurableBytes emits for non-UTF-8 bytes (previously one non-UTF-8 byte silently dropped that field), and the image wording was corrected — user.images[] are {id, path, media_type, snapshot_path, snapshot_sha256} records pointing at files under the session directory (snapshot_path resolves to images/<basename>), not inline payloads. max_verified_version bumped 0.0.4 -> 0.0.5 from source inspection of session_codec.zig/session.zig at tag v0.0.5: same four history kinds, arguments_json still a JSON string via durable bytes, tool_results still keyed by tool_call_id with created_at_ms, interrupted gains optional cancelled_command (ignored additively). Installed CLI remains 0.0.4; resume stays end-to-end untested."
       - "2026-09-02: source inspection at upstream tag v0.0.7 confirms session.json remains strict schema_version 3 / event_log_v1 and adds eight required manifest fields: log_generation, last_event_seq, event_log_bytes, event_log_stat_fingerprint, generation_base_seq, generation_base_bytes, checkpoint_seq and checkpoint_sha256. The same four history kinds remain. The committed schema fixture covers those additive keys, but max_verified_version stays at 0.0.5 until a 0.0.7-native session clears the freshness gate; issue #66's six sampled sessions were all created by 0.0.5."
       - "2026-09-07: bumped 0.0.5 -> 0.0.7 on steward evidence in issue #66. A 0.0.7-native session created by @thedavidweng cleared the freshness gate (stale=false, upstream=0.0.7 current_fetch, 19 events over 6 of 9 types). Drift is additive only: tool_result gains output_handle, permission_feedback, preview and provider_native; turn.assistant gains assistant. preview was already read as the fallback when output is empty, and assistant is the final reply text already read via durableString, so no render path changes. Still four history kinds. The committed schema fixture does not yet carry the five new keys, so steward_check keeps reporting them as unknown_keys until the baseline is refreshed."
+      - "2026-10-21: schema 4 support built from upstream source at v0.0.14 (1a070af); awaiting a steward session. fx 0.0.8 replaced checkpoint.json with session.json schema_version 4 plus a conversation events.jsonl (one {schema_version 1-3, seq, timestamp_ms, event: {<kind>: payload}} frame per line; kinds user, assistant, tool_call, tool_result, steering, turn_completed, interrupted, context_checkpoint; union unchanged v0.0.8 -> v0.0.14). Full tool output lives in tool-results/<artifact_ref>; an uncommitted turn lives in recovery.json while its conversation_seq equals the log's last seq. Discovery, parser, monitoring (_fx_session_unit / _fx_events_schema_fingerprint, events.jsonl contract + session.json companion) and steward_check now read both layouts. Resume stays fx --resume <id> (directory name; migration keeps it). max_verified_version stays 0.0.7: no session written by a real 0.0.8+ build has been checked against this reader (issues #66, #83)."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json (+ session.json, display.json)"
       - "Resources/Fixtures/stage0/agents/fx/unsupported/checkpoint.json (malformed; sidecar facts must survive)"
+      - "Resources/Fixtures/stage0/agents/fx/schema4/events.jsonl (+ session.json, recovery.json, tool-results/; synthetic, built from upstream v0.0.14 writers)"
     evidence_tests:
       - "AgentSessionsTests/FxSessionParserTests.swift"
       - "AgentSessionsTests/FxSessionDiscoveryTests.swift"
       - "AgentSessionsTests/FxIntegrationSurfaceTests.swift"
+      - "scripts/tests/test_fx_schema4_monitoring.py"
   cline:
     max_verified_version: "3.0.73"
-    desktop_max_verified_version: "0.0.28"
-    version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.28 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
+    desktop_max_verified_version: "0.0.48"
+    version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.48 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
     support_scope: "tier-2 shared local manifest/messages transcript discovery for Cline CLI and Desktop, browsing, search, Preferences controls, colors, saved-session backfill, and analytics source filtering"
     unsupported_surfaces:
       - "resume/copy-resume (the CLI's --id semantics were not proven as a safe existing-session resume contract)"
@@ -340,6 +354,7 @@ agents:
       - "A schema-only survey covered 13 local sessions: 12 source=cli and 1 source=desktop. The Desktop session was a continued imported conversation; the CLI fixture covers text, thinking, tool_use, tool_result, model, workspace, title, and millisecond event timestamps."
       - "Preview and full-parse limits, displayed size, focused-session invalidation, search freshness, and saved-session archives cover the manifest/messages pair, so transcript growth is not hidden behind an unchanged manifest and archived transcripts remain readable."
       - "Weekly release/version comparison currently covers Cline CLI. Desktop has no automated upstream version channel; its verified bundle version is recorded separately, while shared-format drift is monitored from recent CLI and Desktop session pairs."
+      - "2026-10-21: Desktop 0.0.48 verified from a fresh native tool-using session (manifest source=desktop, metadata.sessionHistoryOrigin.version=0.0.48; run_commands + read_files calls and results). It names session directories session_<epochms>_<id> (the CLI uses <epochms>_<id>); discovery is name-agnostic, so it is listed. The v1 manifest/messages contract is unchanged. One new key: a failed model request is an assistant message with metadata {displayOnly: true, displayRole: \"error\"}; it now renders as an error, not an assistant reply, and the weekly fingerprint watches message.<role>.metadata. A workspace-less desktop session records cwd \"/\"."
     evidence_docs:
       - "https://docs.cline.bot/cli/cli-reference"
       - "https://docs.cline.bot/getting-started/config"
@@ -349,6 +364,7 @@ agents:
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.json (+ adjacent .messages.json)"
       - "Resources/Fixtures/stage0/agents/cline/desktop_continued/cline-desktop-continued.json (+ adjacent .messages.json)"
+      - "Resources/Fixtures/stage0/agents/cline/desktop_tool/session_1792607722905_fixt1.json (+ adjacent .messages.json)"
     evidence_tests:
       - "AgentSessionsTests/ClineSessionParserTests.swift"
       - "AgentSessionsTests/ClineSessionDiscoveryTests.swift"
