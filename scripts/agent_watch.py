@@ -714,6 +714,87 @@ def _newest_file(roots: list[str], glob: str, exclude_globs: list[str] | None = 
 # that a rich session two files back plainly shows.
 _LOCAL_SCHEMA_SAMPLE_COUNT = 5
 
+# How deep the weekly looks past prebump sessions for real ones (sessions, not files read:
+# classification stops as soon as the sample is full).
+_PREBUMP_CANDIDATE_POOL = _LOCAL_SCHEMA_SAMPLE_COUNT * 10
+
+# Signals that a real-home prebump run wrote a session. Drivers put a fresh
+# `AGENT_WATCH_PREBUMP_<uuid hex>` marker in the prompt (antigravity, copilot, hermes,
+# openclaw), or run the CLI in a `make_sandbox()` directory named
+# `agent-watch-prebump-<agent>-XXXXXXXX` (cline, cursor, deepseek_harness), which some
+# stores also encode into the session's directory name. claude_print has neither: its
+# configured prompt is the first queued record, so `_prebump_prompt_needles` covers it.
+_PREBUMP_MARKER_RE = re.compile(r"AGENT_WATCH_PREBUMP_[0-9a-f]{32}")
+_PREBUMP_SANDBOX_RE = re.compile(r"agent-watch-prebump-[a-z][a-z0-9_]*-")
+_PREBUMP_SANDBOX_CWD_RE = re.compile(r'"cwd"\s*:\s*"[^"]*agent-watch-prebump-[a-z][a-z0-9_]*-')
+# Only the head of a session is searched: the prompt and cwd come first, and a real
+# session that later quotes prebump output must stay a real session.
+_PREBUMP_HEAD_LINES = 8
+_PREBUMP_HEAD_CHARS = 64 * 1024
+_PREBUMP_MIN_PROMPT_CHARS = 12
+
+
+def _prebump_prompt_needles(agent_cfg: dict[str, Any] | None) -> tuple[str, ...]:
+    """The agent's configured prebump prompt, raw and JSON-escaped, as head needles."""
+    prebump = (agent_cfg or {}).get("prebump") if isinstance(agent_cfg, dict) else None
+    prompt = prebump.get("prompt") if isinstance(prebump, dict) else None
+    if not isinstance(prompt, str) or len(prompt.strip()) < _PREBUMP_MIN_PROMPT_CHARS:
+        return ()
+    prompt = prompt.strip()
+    escaped = json.dumps(prompt)[1:-1]
+    return (prompt,) if escaped == prompt else (prompt, escaped)
+
+
+def _text_has_prebump_signal(text: str, prompt_needles: tuple[str, ...] | list[str] = ()) -> bool:
+    if _PREBUMP_MARKER_RE.search(text) or _PREBUMP_SANDBOX_CWD_RE.search(text):
+        return True
+    return any(needle and needle in text for needle in prompt_needles)
+
+
+def _is_prebump_session_file(
+    path: Path,
+    prompt_needles: tuple[str, ...] | list[str] = (),
+    *,
+    read_head: bool = True,
+) -> bool:
+    """True when a real-home prebump run wrote this session (see `_PREBUMP_MARKER_RE`)."""
+    if _PREBUMP_SANDBOX_RE.search(str(path)):
+        return True
+    if not read_head:
+        return False
+    try:
+        with _open_session_text(path) as handle:
+            head = handle.read(_PREBUMP_HEAD_CHARS)
+    except _SESSION_READ_ERRORS:
+        return False
+    if ".jsonl" in path.name:
+        head = "\n".join(head.splitlines()[:_PREBUMP_HEAD_LINES])
+    return _text_has_prebump_signal(head, prompt_needles)
+
+
+def _prefer_real_sessions(
+    candidates: list[Any], count: int, is_prebump: Any
+) -> tuple[list[Any], dict[str, int]]:
+    """The newest `count` real sessions from newest-first `candidates`.
+
+    Prebump sessions fill the sample only when fewer than `count` real sessions exist,
+    newest first; the result keeps the candidates' newest-first order. On a machine with
+    little real use they are still the freshest evidence, so they are counted, not
+    hidden: `sampled_prebump_sessions` in the sample, `skipped_prebump_sessions` left out.
+    """
+    real: list[int] = []
+    prebump: list[int] = []
+    for index, candidate in enumerate(candidates):
+        if len(real) >= count:
+            break
+        (prebump if is_prebump(candidate) else real).append(index)
+    topped_up = prebump[: max(0, count - len(real))]
+    picked = [candidates[i] for i in sorted(real + topped_up)]
+    return picked, {
+        "sampled_prebump_sessions": len(topped_up),
+        "skipped_prebump_sessions": len(prebump) - len(topped_up),
+    }
+
 
 # agent_watch's agent name -> its section name in agent-support-matrix.yml.
 #
@@ -3170,7 +3251,12 @@ def _dsh_weekly_scan(config: dict[str, Any], sample_count: int, max_lines: int) 
     candidates.sort(
         key=lambda entry: (-int(entry[4]["createdAt"]), str(entry[0]))
     )
-    sample_candidates = candidates[: max(1, sample_count)]
+    # A real-home prebump run's project key encodes its sandbox cwd.
+    sample_candidates, prebump_stats = _prefer_real_sessions(
+        candidates,
+        max(1, sample_count),
+        lambda entry: _is_prebump_session_file(entry[0], read_head=False),
+    )
     fingerprints: list[dict[str, Any]] = []
     newest_error: str | None = None
     for index, (path, generation, compressed, _mtime, discovered_header) in enumerate(sample_candidates):
@@ -3210,6 +3296,8 @@ def _dsh_weekly_scan(config: dict[str, Any], sample_count: int, max_lines: int) 
             "parsed_lines": 0,
             "parse_errors": 1,
         }
+    if local_schema is not None:
+        local_schema.update(prebump_stats)
 
     all_issues = bool(issues)
     contract = {
@@ -3219,6 +3307,7 @@ def _dsh_weekly_scan(config: dict[str, Any], sample_count: int, max_lines: int) 
         "encoding": "zstd" if encodings == {True} else "plain" if encodings == {False} else None,
         "candidate_sessions": len(candidates),
         "sampled_sessions": len(fingerprints),
+        **prebump_stats,
         "header_scan_bytes": header_scan_bytes,
         "header_scan_bytes_limit": _DSH_MAX_HEADER_SCAN_BYTES,
         "issue_counts": issues,
@@ -3658,11 +3747,26 @@ def _cursor_recent_schema_fingerprint(
     *,
     max_lines: int,
     exclude_globs: list[str] | None = None,
+    exclude_prebump: bool = False,
+    prompt_needles: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
-    """Union the five newest Cursor transcripts so a short newest chat cannot hide drift."""
-    paths = _newest_files(
-        roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
-    )
+    """Union the five newest Cursor transcripts so a short newest chat cannot hide drift.
+
+    With `exclude_prebump`, transcripts a real-home prebump run wrote (their project
+    directory encodes the `agent-watch-prebump-cursor-*` sandbox cwd) are skipped while
+    enough real ones exist.
+    """
+    prebump_stats: dict[str, int] = {}
+    if exclude_prebump:
+        paths, prebump_stats = _prefer_real_sessions(
+            _newest_files(roots, glob, _PREBUMP_CANDIDATE_POOL, exclude_globs=exclude_globs),
+            _LOCAL_SCHEMA_SAMPLE_COUNT,
+            lambda p: _is_prebump_session_file(p, prompt_needles),
+        )
+    else:
+        paths = _newest_files(
+            roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
+        )
     if not paths:
         return None
 
@@ -3685,6 +3789,7 @@ def _cursor_recent_schema_fingerprint(
     merged["sampled_total_parsed_lines"] = sum(
         int(fingerprint.get("parsed_lines") or 0) for fingerprint in fingerprints
     )
+    merged.update(prebump_stats)
     return merged
 
 
@@ -3821,7 +3926,19 @@ def _hermes_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
     }
 
 
-def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
+def _hermes_state_db_latest_session_schema_fingerprint(
+    path: Path,
+    max_messages: int,
+    *,
+    exclude_prebump: bool = False,
+    prompt_needles: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Fingerprint the newest Hermes session in `state.db`.
+
+    The prebump fresh-session diff wants exactly that session. The weekly passes
+    `exclude_prebump`: a real-home prebump run's session (marker in its first user
+    message) is skipped for the newest real one, and used only when no real one exists.
+    """
     type_keys: dict[str, set[str]] = {}
     type_counts: dict[str, int] = {}
     parsed_messages = 0
@@ -3840,14 +3957,30 @@ def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages:
     except Exception:
         return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 1, "read_failed": True}
     try:
-        row = conn.execute(
-            """
+        prebump_stats: dict[str, int] = {}
+        rows = conn.execute(
+            f"""
             SELECT id, source, model, model_config, system_prompt, started_at, ended_at, message_count
             FROM sessions
             ORDER BY started_at DESC
-            LIMIT 1;
+            LIMIT {_PREBUMP_CANDIDATE_POOL if exclude_prebump else 1};
             """
-        ).fetchone()
+        ).fetchall()
+        if exclude_prebump and rows:
+
+            def _hermes_is_prebump(candidate: sqlite3.Row) -> bool:
+                first_user = conn.execute(
+                    "SELECT content FROM messages WHERE session_id = ? AND role = 'user' "
+                    "ORDER BY timestamp, id LIMIT 1;",
+                    (candidate["id"],),
+                ).fetchone()
+                text = first_user[0] if first_user is not None else None
+                return isinstance(text, str) and _text_has_prebump_signal(
+                    text[:_PREBUMP_HEAD_CHARS], prompt_needles
+                )
+
+            rows, prebump_stats = _prefer_real_sessions(rows, 1, _hermes_is_prebump)
+        row = rows[0] if rows else None
         if row is None:
             return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 0}
         root = {
@@ -3917,6 +4050,8 @@ def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages:
         "parsed_tool_calls": parsed_tool_calls,
         "parsed_tools": 0,
         "parse_errors": 0,
+        "session_id": str(row["id"]),
+        **prebump_stats,
     }
 
 
@@ -5037,6 +5172,7 @@ def _openclaw_sqlite_schema_fingerprint(
     sample_count: int = _LOCAL_SCHEMA_SAMPLE_COUNT,
     max_events: int = 5000,
     sql_script: str | None = None,
+    exclude_prebump: bool = False,
 ) -> dict[str, Any]:
     """Fingerprint OpenClaw's per-agent SQLite store (2026.9+, required 2026.10.5).
 
@@ -5046,7 +5182,8 @@ def _openclaw_sqlite_schema_fingerprint(
     `sqlite.<table>` buckets. Samples the given `session_ids`, else the newest
     `sample_count` sessions by transcript time (`sample_count <= 0` = every
     session, used for the baseline). `sql_script` builds an in-memory store from
-    a committed `.sql` fixture instead of opening `db_path`.
+    a committed `.sql` fixture instead of opening `db_path`. `exclude_prebump`
+    (weekly) applies `_prefer_real_sessions` to the newest sessions.
     """
     opaque = frozenset(_NESTED_OPAQUE_KEYS.get("openclaw", ()))
     shallow = frozenset(_NESTED_SHALLOW_KEYS.get("openclaw", ()))
@@ -5112,10 +5249,23 @@ def _openclaw_sqlite_schema_fingerprint(
         payload_select = "event_json, " + (
             "event_zstd, event_utf8_bytes" if {"event_zstd", "event_utf8_bytes"} <= event_columns else "NULL, NULL"
         )
+        window_columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("session_windows");')}
+        prebump_ids: set[str] = set()
+        if "session_key" in window_columns:
+            # The prebump driver passes `--session-key agent:<id>:prebump-<uuid>`.
+            prebump_ids = {
+                str(r[0])
+                for r in conn.execute(
+                    "SELECT session_id FROM session_windows WHERE session_key LIKE '%:prebump-%';"
+                )
+            }
+        prebump_stats: dict[str, int] = {}
         if session_ids:
             selected = [str(s) for s in session_ids]
         else:
-            limit_clause = "" if sample_count <= 0 else f" LIMIT {int(sample_count)}"
+            limit_clause = "" if sample_count <= 0 else (
+                f" LIMIT {int(sample_count) + (len(prebump_ids) if exclude_prebump else 0)}"
+            )
             selected = [
                 str(r[0])
                 for r in conn.execute(
@@ -5123,6 +5273,10 @@ def _openclaw_sqlite_schema_fingerprint(
                     f"GROUP BY session_id ORDER BY t DESC, session_id{limit_clause};"
                 )
             ]
+            if exclude_prebump and sample_count > 0:
+                selected, prebump_stats = _prefer_real_sessions(
+                    selected, int(sample_count), lambda sid: sid in prebump_ids
+                )
         newest_ms: int | None = None
         for session_id in selected:
             rows = conn.execute(
@@ -5154,17 +5308,13 @@ def _openclaw_sqlite_schema_fingerprint(
                     event_type, obj, type_keys, 0, _NESTED_FINGERPRINT_MAX_DEPTH, opaque, typed, shallow
                 )
         result["sampled_sessions"] = len(selected)
-        window_columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("session_windows");')}
-        if "session_key" in window_columns and selected:
-            # Real-home prebump runs land in this store and are the newest sessions,
-            # so they can fill the weekly sample. Reported, not filtered: on a machine
-            # where they are the only recent sessions they are the freshest evidence.
-            marks = ",".join("?" for _ in selected)
-            result["sampled_prebump_sessions"] = conn.execute(
-                f"SELECT COUNT(*) FROM session_windows WHERE session_id IN ({marks}) "
-                "AND session_key LIKE '%:prebump-%';",
-                selected,
-            ).fetchone()[0]
+        result["sampled_session_ids"] = list(selected)
+        if "session_key" in window_columns:
+            # Real-home prebump runs land in this store as the newest sessions. The
+            # weekly (`exclude_prebump`) skips them while enough real sessions exist;
+            # the count says how many still had to fill the sample.
+            result["sampled_prebump_sessions"] = sum(1 for sid in selected if sid in prebump_ids)
+            result["skipped_prebump_sessions"] = prebump_stats.get("skipped_prebump_sessions", 0)
         if newest_ms is not None:
             # The database file's mtime moves on any write (memory index, auth
             # state), so freshness uses the newest sampled transcript event.
@@ -5219,7 +5369,8 @@ def _openclaw_weekly_sqlite_fingerprint(local_schema_cfg: dict[str, Any]) -> dic
         return None
     max_events = int(local_schema_cfg.get("max_events") or 5000)
     fingerprints = [
-        _openclaw_sqlite_schema_fingerprint(db, max_events=max_events) for db in databases
+        _openclaw_sqlite_schema_fingerprint(db, max_events=max_events, exclude_prebump=True)
+        for db in databases
     ]
     readable = [fp for fp in fingerprints if not fp.get("read_failed")]
     if not readable:
@@ -5233,6 +5384,8 @@ def _openclaw_weekly_sqlite_fingerprint(local_schema_cfg: dict[str, Any]) -> dic
                 merged_counts[t] = merged_counts.get(t, 0) + int(n)
         lead["type_counts"] = dict(sorted(merged_counts.items()))
         lead["parsed_lines"] = sum(int(fp.get("parsed_lines") or 0) for fp in readable)
+        for key in ("sampled_prebump_sessions", "skipped_prebump_sessions"):
+            lead[key] = sum(int(fp.get(key) or 0) for fp in readable)
         _merge_sampled_parse_errors(lead, readable)
         newest = [fp.get("logical_mtime_epoch") for fp in readable if isinstance(fp.get("logical_mtime_epoch"), float)]
         if newest:
@@ -5482,6 +5635,18 @@ def _required_schema_buckets_for(prebump_cfg: dict[str, Any], fingerprint: dict[
         # the gate reports it as missing and the prebump fails.
         return [f"<unmapped store: {store}>"]
     return prebump_cfg.get("required_schema_buckets")
+
+
+def _set_sampled_total_parsed_lines(merged: dict[str, Any], sampled: list[dict[str, Any]]) -> None:
+    """Record the union's record count for `_observed_event_count`.
+
+    The union starts from the lead fingerprint, whose `parsed_lines` counts one
+    session; the thin-sample gate read that, so a five-session union of 16-event
+    sessions scored as 16 events.
+    """
+    counts = [fp.get("parsed_lines") for fp in sampled]
+    if counts and all(isinstance(n, int) for n in counts):
+        merged["sampled_total_parsed_lines"] = sum(counts)
 
 
 def _merge_sampled_parse_errors(merged: dict[str, Any], sampled: list[dict[str, Any]]) -> None:
@@ -7438,36 +7603,39 @@ def main(argv: list[str]) -> int:
                     required_types = list(local_schema_cfg.get("required_types") or [])
                     exclude_globs_cfg = local_schema_cfg.get("exclude_globs")
                     exclude_globs = [g for g in exclude_globs_cfg if isinstance(g, str)] if isinstance(exclude_globs_cfg, list) else None
+                    # Union the newest few sessions into one fingerprint so one thin
+                    # session cannot decide the verdict on its own, and skip the ones a
+                    # real-home prebump run wrote while enough real sessions exist.
                     if required_types:
-                        newest = _newest_file_with_types(
-                            roots, glob, required_types, max_lines=400, exclude_globs=exclude_globs
+                        pool = _newest_files_with_types(
+                            roots, glob, required_types, _PREBUMP_CANDIDATE_POOL,
+                            max_lines=400, exclude_globs=exclude_globs,
                         )
                     else:
-                        newest = _newest_file(roots, glob, exclude_globs=exclude_globs)
+                        pool = _newest_files(
+                            roots, glob, _PREBUMP_CANDIDATE_POOL, exclude_globs=exclude_globs
+                        )
+                    prompt_needles = _prebump_prompt_needles(agent_cfg)
+                    recent, prebump_stats = _prefer_real_sessions(
+                        pool,
+                        _LOCAL_SCHEMA_SAMPLE_COUNT,
+                        lambda p: _is_prebump_session_file(p, prompt_needles),
+                    )
+                    newest = recent[0] if recent else None
                     if newest:
                         def _fp(p: Path) -> dict[str, Any]:
                             if kind == "kimi_wire_newest":
                                 return _kimi_wire_schema_fingerprint(p, max_lines=max_lines)
                             return _schema_fingerprint_for_agent(agent_name, p, max_lines=max_lines)
 
-                        # Union the next few recent sessions into the same fingerprint so
-                        # one thin session cannot decide the verdict on its own.
-                        if required_types:
-                            recent = _newest_files_with_types(
-                                roots, glob, required_types, _LOCAL_SCHEMA_SAMPLE_COUNT,
-                                max_lines=400, exclude_globs=exclude_globs,
-                            )
-                        else:
-                            recent = _newest_files(
-                                roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
-                            )
                         # A sample that fails to read (a truncated or corrupt `.jsonl.zst`
                         # can pass the head-only type check above) is skipped; the next
                         # readable one leads the fingerprint.
-                        sampled_fps = _readable_fingerprints(
-                            [newest] + [p for p in recent if p != newest], _fp
-                        )
+                        sampled_fps = _readable_fingerprints(recent, _fp)
                         local_fp = sampled_fps[0] if sampled_fps else None
+                        if local_fp is not None:
+                            local_fp.update(prebump_stats)
+                            _set_sampled_total_parsed_lines(local_fp, sampled_fps)
                         if len(sampled_fps) > 1:
                             local_fp["type_keys"] = _merge_type_keys(sampled_fps)
                             merged_counts: dict[str, int] = {}
@@ -7495,7 +7663,12 @@ def main(argv: list[str]) -> int:
                     for db_path in db_roots:
                         if db_path.exists():
                             newest = db_path
-                            local_fp = _hermes_state_db_latest_session_schema_fingerprint(db_path, max_messages=max_messages)
+                            local_fp = _hermes_state_db_latest_session_schema_fingerprint(
+                                db_path,
+                                max_messages=max_messages,
+                                exclude_prebump=True,
+                                prompt_needles=_prebump_prompt_needles(agent_cfg),
+                            )
                             break
                     if local_fp is None:
                         newest = _newest_file(roots, glob)
@@ -7558,13 +7731,20 @@ def main(argv: list[str]) -> int:
                     roots = _cline_effective_roots(roots)
                     exclude_cfg = local_schema_cfg.get("exclude_globs")
                     exclude_globs = [g for g in exclude_cfg if isinstance(g, str)] if isinstance(exclude_cfg, list) else None
-                    recent = _newest_cline_files(
-                        roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
+                    # The manifest records the prebump sandbox as its `cwd`.
+                    prompt_needles = _prebump_prompt_needles(agent_cfg)
+                    recent, prebump_stats = _prefer_real_sessions(
+                        _newest_cline_files(
+                            roots, glob, _PREBUMP_CANDIDATE_POOL, exclude_globs=exclude_globs
+                        ),
+                        _LOCAL_SCHEMA_SAMPLE_COUNT,
+                        lambda p: _is_prebump_session_file(p, prompt_needles),
                     )
                     if recent:
                         newest = recent[0]
                         sampled_fps = [_cline_session_schema_fingerprint(path) for path in recent]
                         local_fp = sampled_fps[0]
+                        local_fp.update(prebump_stats)
                         local_fp["type_keys"] = _merge_type_keys(sampled_fps)
                         merged_counts: dict[str, int] = {}
                         for fingerprint in sampled_fps:
@@ -7592,6 +7772,8 @@ def main(argv: list[str]) -> int:
                         glob,
                         max_lines=max_lines,
                         exclude_globs=exclude_globs,
+                        exclude_prebump=True,
+                        prompt_needles=_prebump_prompt_needles(agent_cfg),
                     )
                     if isinstance(local_fp, dict) and isinstance(local_fp.get("file"), str):
                         newest = Path(local_fp["file"])

@@ -157,10 +157,14 @@ gate used to score only that: on 2026-08-13 codex reported `blocked_thin_sample`
 the verdict worse. `_sample_is_thin()` is now applied to *every* available sample and only
 blocks when all of them are thin (pinned by `test_thin_prebump_does_not_override_rich_weekly_union`).
 
-**Give `real_home_session` agents a tool-using prompt.** Their prebump session lands in the
-real store and enters the newest-`_LOCAL_SCHEMA_SAMPLE_COUNT` window, so a "Say hello"
-prompt actively degrades the next weekly sample — two such runs pushed antigravity's union
-down to 24 events and a genuine `blocked_thin_sample`. Claude's `"Say hi, then use the Bash
+**Real-home prebump sessions do not enter the weekly sample while real sessions exist.**
+A `real_home_session` prebump writes its session into the real store, where it is the
+newest one. The weekly recognises these sessions and skips them, and uses them only to top
+up a sample that has fewer than `_LOCAL_SCHEMA_SAMPLE_COUNT` real sessions (§5). Before
+this rule, same-day prebump runs filled copilot's newest-5 union on 2026-10-21 and the
+weekly reported `blocked_thin_sample` at a version its morning weekly had cleared with
+122 baseline types. Still give these agents a tool-using prompt: on a machine with little
+real use, the prebump sessions *are* the weekly sample. Claude's `"Say hi, then use the Bash
 tool to run pwd."` is the pattern; verify any prompt change with a real run, since a
 tool-using prompt can hang or return nothing on CLIs whose one-shot mode does not complete
 a tool turn.
@@ -168,10 +172,9 @@ a tool turn.
 **A passing prebump is a floor, not a ceiling.** Drivers use one-line prompts, so a fresh
 session may contain only the four most basic event types and still report
 `fresh_matches_baseline=True` — it proves the CLI still writes parseable output, not that
-rich event families are unchanged. For `real_home_session: true` agents that session also
-lands in the real store and becomes the newest sample; §5's multi-session union is what
-stops it from masking drift. Check the fresh session's type count before treating a pass as
-broad evidence.
+rich event families are unchanged. The weekly union of real sessions is the broad evidence,
+but those sessions can predate the installed build. Check the fresh session's type count
+and the weekly's `sampled_prebump_sessions` before treating a pass as broad evidence.
 
 Configured real-session drivers today are `codex`, `claude`, `antigravity`,
 `copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, and
@@ -291,9 +294,16 @@ Non-obvious requirements, each learned from a real failure:
   only auth path — never build env from `os.environ` inside a driver. Some agents have no
   key env var at all (grok's only documented one is `GROK_SANDBOX`), so the credential
   copy is their sole route and the 0600 hygiene gate always applies.
-- **Give it a tool-using prompt**, and for `real_home_session: true` agents especially —
-  their session lands in the real store and enters the newest-5 weekly window, so a
-  "Say hello" prompt degrades next week's sample (§1a).
+- **Give it a tool-using prompt.** A one-line session proves little (§1a), and for
+  `real_home_session: true` agents it is also the weekly's fallback evidence on a machine
+  with few real sessions (§5).
+- **A `real_home_session: true` driver must leave a prebump signal in its session**, or
+  the weekly cannot tell its session from a real one (§5): put an
+  `AGENT_WATCH_PREBUMP_<uuid hex>` marker in the prompt, or run the CLI with its cwd in
+  the sandbox (`make_sandbox()` names it `agent-watch-prebump-<agent>-…`), or give a
+  SQLite store a recognisable key (OpenClaw's `:prebump-` session key). `claude_print`
+  has none of these and is recognised by its configured prompt alone, so changing that
+  prompt makes its older prebump sessions look real until they age out of the window.
 - **If a session is a directory, verify the sidecars before returning ok.** Grok's
   `summary.json` is a discovery precondition; returning a transcript whose sidecar never
   landed hands the fingerprinter half a session and reports the gap as schema drift.
@@ -696,11 +706,10 @@ and moved the originals to `session-sqlite-import-archive/`.
   (the app reads `exitCode`/`status`), its nested objects are not.
 - The prebump driver finds its session by `--session-key` and needs the marker in an
   assistant or tool-result record (the prompt alone carries it).
-- **Sampling limitation:** real-home prebump runs land in the store and are the newest
-  sessions, so they can fill the weekly sample (`sampled_prebump_sessions` counts them).
-  On a machine with little real OpenClaw use, a clean weekly then says little beyond
-  what the prebump already proved. Check that count before reading a clean weekly as
-  broad evidence.
+- **Prebump sessions:** real-home prebump runs land in the store as the newest sessions.
+  The weekly recognises them by their `:prebump-` session key and skips them while enough
+  real sessions exist (§5). When `sampled_prebump_sessions` is non-zero, the store has too
+  few real sessions, and a clean weekly says little beyond what the prebump already proved.
 
 ---
 
@@ -895,6 +904,30 @@ drift still sitting in a 92KB session two files back. When `required_types` is c
 sibling sampling **must** honour it (`_newest_files_with_types`): OpenClaw's `**/*.jsonl`
 glob otherwise sweeps in audit logs and an embedded codex-home and reports codex's event
 types as OpenClaw drift.
+
+**Prebump-written sessions are skipped.** `_prefer_real_sessions` takes the newest
+`_LOCAL_SCHEMA_SAMPLE_COUNT` *real* sessions and adds prebump sessions, newest first, only
+when fewer real ones exist. `_is_prebump_session_file` decides per session, from signals
+already in the session:
+- an `AGENT_WATCH_PREBUMP_<32 hex>` marker in the session head (antigravity, copilot;
+  hermes reads it from the first user message in `state.db`);
+- a `"cwd"` in the head inside an `agent-watch-prebump-<agent>-…` sandbox (cline's manifest);
+- that sandbox name in the session's own path, where the store encodes the cwd into a
+  directory name (cursor project dirs, deepseek_harness project keys);
+- the agent's configured `prebump.prompt` in the head (claude, whose driver has no marker
+  and runs in the repo, not a sandbox);
+- an OpenClaw `session_windows.session_key` containing `:prebump-`.
+
+Only the head is read (first 8 JSONL lines, at most 64 KiB), so a real session that
+quotes prebump output later does not count as a prebump session. Every weekly sample that
+does this reports `sampled_prebump_sessions` (prebump sessions in the sample) and
+`skipped_prebump_sessions` (prebump sessions left out) in `local_schema`. Hermes samples one
+session, so its counts are 0 or 1. A non-zero `sampled_prebump_sessions` means the store
+has too few real sessions, and the union is mostly what the prebump already proved.
+
+The union's `observed_event_count` is the sum over all sampled sessions
+(`sampled_total_parsed_lines`). Before 2026-10-21 the JSONL union reported the lead
+session's line count, so five 16-event sessions scored as 16 events.
 
 **`blocked_thin_sample`** fires only when a sample is *both* narrow (<50% of baseline types)
 and tiny (<25 events). Coverage alone is not enough: baselines deliberately contain rare
