@@ -510,7 +510,12 @@ final class OpenClawSessionDiscovery: SessionDiscovery, @unchecked Sendable {
             return CollectedSessionFiles(files: [], hadEnumerationError: true)
         }
         for case let url as URL in enumerator {
-                guard url.lastPathComponent == "sessions" else { continue }
+                // Transcripts live only at agents/<id>/sessions/. Do not walk any
+                // deeper: agents/<id>/agent/codex-home/ is OpenClaw's embedded Codex
+                // harness, whose `sessions/` holds Codex rollouts, not OpenClaw
+                // transcripts, and walking it costs a full tree scan per refresh.
+                if enumerator.level >= 2 { enumerator.skipDescendants() }
+                guard enumerator.level == 2, url.lastPathComponent == "sessions" else { continue }
 
                 switch Self.directoryProbe(at: url) {
                 case .absent:

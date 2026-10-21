@@ -61,6 +61,7 @@
 		10F76F4C666E52749382E30E /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81FC6AB61B5AC58394D5B9D /* OnboardingComponents.swift */; };
 		11A72DAF8F6CAA11F11E8C54 /* CodexResetCreditsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 694A007FEA984B02D86FCCA8 /* CodexResetCreditsTests.swift */; };
 		12E6EA229B18D60067C07A81 /* ColumnVisibilityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */; };
+		12EEFC9A05CC7366E65F0A9B /* OpenClawSqliteStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEAAA4060766244ECF2CA55C /* OpenClawSqliteStoreTests.swift */; };
 		13574D236FE1ADB0F66B41FE /* TranscriptFindNavigatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62BA353985CBAE67C0AD09F8 /* TranscriptFindNavigatorTests.swift */; };
 		13B56F1BC8788AB9530AD015 /* OnboardingSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E401FF3CCED67F77E3FD9521 /* OnboardingSheetView.swift */; };
 		142D72DB533FA6CFC267ABB4 /* QuotaStripController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD45FDA35785F45B0723BB0C /* QuotaStripController.swift */; };
@@ -1230,6 +1231,7 @@
 		BD21A67716B8A7D96D3FB15F /* CodexSideChatLogReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CodexSideChatLogReader.swift; sourceTree = SOURCE_ROOT; };
 		BD45FDA35785F45B0723BB0C /* QuotaStripController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/QuotaStrip/QuotaStripController.swift; sourceTree = SOURCE_ROOT; };
 		BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionArchiveManager.swift; sourceTree = SOURCE_ROOT; };
+		BEAAA4060766244ECF2CA55C /* OpenClawSqliteStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/OpenClawSqliteStoreTests.swift; sourceTree = SOURCE_ROOT; };
 		BECB52B3C69270F6EAFBF440 /* AnimatedGIFView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Components/AnimatedGIFView.swift; sourceTree = SOURCE_ROOT; };
 		BF95537FFA9C315BC4A621E3 /* GrokTelemetryAccumulator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Telemetry/GrokTelemetryAccumulator.swift; sourceTree = SOURCE_ROOT; };
 		BFD60DEFDDA67C706A0CA131 /* SessionTerminalDiffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionTerminalDiffTests.swift; sourceTree = SOURCE_ROOT; };
@@ -2311,6 +2313,7 @@
 				AA2BC21B6AB6984114CA0C4F /* AntigravityIndexRepairTests.swift */,
 				9FFE0C2DD757D755DA1068BD /* CodexRolloutStorageTests.swift */,
 				517E5DD20185E1E190A5CA0D /* OpenCodeV2StoreTests.swift */,
+				BEAAA4060766244ECF2CA55C /* OpenClawSqliteStoreTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -3680,6 +3683,7 @@
 				D463B782AF19463380FF008E /* AntigravityIndexRepairTests.swift in Sources */,
 				D430652AF0F377383157A5A3 /* CodexRolloutStorageTests.swift in Sources */,
 				98F6F0F1F991EE173F342A40 /* OpenCodeV2StoreTests.swift in Sources */,
+				12EEFC9A05CC7366E65F0A9B /* OpenClawSqliteStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -164,7 +164,7 @@ def test_openclaw_driver_runs_and_returns_session_jsonl(tmp_path):
         sess.mkdir(parents=True)
         (sess / "ignored.trajectory.jsonl").write_text('{"type":"session"}\n')
         out = sess / "prebump.jsonl"
-        out.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","role":"assistant","text":"{marker}"}}\n')
+        out.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","message":{{"role":"assistant","content":[{{"type":"text","text":"{marker}"}}]}}}}\n')
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
@@ -188,7 +188,7 @@ def test_openclaw_driver_discovers_real_home_session(tmp_path):
         sess = real_home / ".openclaw" / "agents" / "main" / "sessions"
         sess.mkdir(parents=True)
         out = sess / "real-prebump.jsonl"
-        out.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","role":"assistant","text":"{marker}"}}\n')
+        out.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","message":{{"role":"assistant","content":[{{"type":"text","text":"{marker}"}}]}}}}\n')
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
@@ -231,7 +231,7 @@ def test_openclaw_driver_selects_marker_session_over_newer_unrelated_file(tmp_pa
         sess.mkdir(parents=True)
         wanted = sess / "wanted.jsonl"
         unrelated = sess / "unrelated.jsonl"
-        wanted.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","text":"{marker}"}}\n')
+        wanted.write_text(f'{{"type":"session","id":"s1"}}\n{{"type":"message","message":{{"role":"assistant","content":"{marker}"}}}}\n')
         unrelated.write_text('{"type":"session","id":"s2"}\n{"type":"message","text":"hello"}\n')
         import os
         os.utime(wanted, (2000, 2000))

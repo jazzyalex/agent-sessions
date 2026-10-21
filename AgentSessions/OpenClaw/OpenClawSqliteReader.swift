@@ -1,17 +1,28 @@
 import Foundation
 import SQLite3
 import CryptoKit
+import libzstd
 
 /// Read-only access to OpenClaw's current per-agent SQLite session store.
 ///
 /// OpenClaw 2026.9 stores session metadata in `session_windows` and transcript
-/// records in `transcript_events`. Legacy JSONL files remain a separate backend;
-/// this reader exists so the registry can cover the current store without making
-/// the telemetry engine know about OpenClaw's schema.
+/// records in `transcript_events`. 2026.10.5 imports the legacy
+/// `agents/<id>/sessions/*.jsonl` transcripts into the same table under the same
+/// session ids and moves the originals to `session-sqlite-import-archive/`.
+/// Each `event_json` row holds one record in the JSONL shape, or, when OpenClaw
+/// chose to compress it, `event_zstd` holds one zstd frame of those bytes and
+/// `event_utf8_bytes` their decoded length. Legacy JSONL files remain a separate
+/// backend; this reader exists so the registry can cover the current store
+/// without making the telemetry engine know about OpenClaw's schema.
 struct OpenClawSqliteReader {
     private static let databaseName = "openclaw-agent.sqlite"
     private static let usageFamily = "openclaw.message.usage"
     private static let speed = "standard-normalized"
+    /// OpenClaw's own bound for both the stored frame and the decoded event
+    /// (`transcript-payload` and the `transcript_events` CHECK constraint).
+    private static let maximumPayloadBytes = 4_194_304
+    /// Events read per session to build the list preview (title, cwd, model).
+    private static let previewEventLimit = 200
 
     private struct SessionRow {
         let id: String
@@ -22,6 +33,14 @@ struct OpenClawSqliteReader {
         let model: String?
         let displayName: String?
         let eventCount: Int
+        /// MAX(seq) of the session's `transcript_events`; nil when it has none.
+        let lastSequence: Int64?
+        /// `session_windows.transcript_updated_at` (2026.10.x); nil on older stores.
+        let transcriptUpdatedAt: Date?
+
+        /// Newest transcript activity: OpenClaw bumps `updated_at` for metadata
+        /// writes too, so the transcript time is preferred when recorded.
+        var activityEnd: Date? { transcriptUpdatedAt ?? endedAt ?? updatedAt ?? startedAt ?? createdAt }
     }
 
     private struct EventRow {
@@ -36,9 +55,22 @@ struct OpenClawSqliteReader {
     private struct EventQuery {
         let rows: [EventRow]
         let bytesScanned: UInt64
-        let hasCompressedPayload: Bool
+        /// A compressed row whose frame did not decode to exactly its recorded
+        /// UTF-8 size, or decoded to something that is not a JSON object.
+        let hasUndecodablePayload: Bool
         let coldArchive: ColdArchive?
         let cancelled: Bool
+    }
+
+    /// Transcript fields the list shows before a session is opened, taken from
+    /// the first records through the same parser as a legacy JSONL preview.
+    private struct Preview {
+        let cwd: String?
+        let repoName: String?
+        let title: String?
+        let model: String?
+        let commands: Int?
+        let isHousekeeping: Bool
     }
 
     struct SessionListResult {
@@ -118,6 +150,8 @@ struct OpenClawSqliteReader {
 
     private static let revisionCacheLock = NSLock()
     private static var revisionStates: [String: RevisionState] = [:]
+    private static let previewCacheLock = NSLock()
+    private static var previewCache: [String: (signature: String, preview: Preview?)] = [:]
     private static var listSessionsBeforeMaterializationHookForTesting: (() -> Void)?
     private static var cacheHitBeforeBoundaryProbeHookForTesting: (() -> Void)?
 
@@ -132,17 +166,23 @@ struct OpenClawSqliteReader {
     /// Lists the sessions in one current OpenClaw agent database.
     /// nil means the path is not a readable OpenClaw database; an empty array
     /// is a valid readable database with no session rows.
-    static func listSessions(databaseURL: URL, agentID requestedAgentID: String? = nil) -> [Session]? {
+    static func listSessions(databaseURL: URL,
+                             agentID requestedAgentID: String? = nil,
+                             priorSessions: [Session] = []) -> [Session]? {
         listSessionsWithStorageIdentity(databaseURL: databaseURL,
-                                        agentID: requestedAgentID)?.sessions
+                                        agentID: requestedAgentID,
+                                        priorSessions: priorSessions)?.sessions
     }
 
     /// Lists sessions while returning the exact physical database path used for
     /// the read. Callers that reconcile shared-store identities must carry this
     /// value forward instead of resolving the lexical alias again.
+    /// `priorSessions` are indexed rows for this store; an unchanged one supplies
+    /// its list preview instead of a transcript read.
     static func listSessionsWithStorageIdentity(
         databaseURL: URL,
-        agentID requestedAgentID: String? = nil
+        agentID requestedAgentID: String? = nil,
+        priorSessions: [Session] = []
     ) -> SessionListResult? {
         let storageIdentity = canonicalDatabasePath(databaseURL.path)
         guard let startingFingerprint = databaseFingerprint(path: storageIdentity) else { return nil }
@@ -159,12 +199,17 @@ struct OpenClawSqliteReader {
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: storageIdentity)[.size] as? NSNumber)?.intValue
         let resolvedAgentID = requestedAgentID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? agentID(from: databaseURL)
+        let previewContext = PreviewContext(db: db, storageIdentity: storageIdentity, prior: priorSessions)
         let sessions = rows.map {
             var session = makeSession(from: $0,
                                       databaseURL: databaseURL,
                                       storageIdentity: storageIdentity,
                                       resolvedAgentID: resolvedAgentID,
-                                      fileSize: fileSize)
+                                      fileSize: fileSize,
+                                      preview: preview(db: db,
+                                                       context: previewContext,
+                                                       row: $0,
+                                                       sessionID: sessionID(agentID: resolvedAgentID, rawID: $0.id)))
             session.sourceStorageDatabaseVersion = databaseVersionToken(fingerprint: startingFingerprint)
             return session
         }
@@ -228,6 +273,10 @@ struct OpenClawSqliteReader {
             rollbackReadTransaction(db)
             return nil
         }
+        let rowPreview = preview(db: db,
+                                 context: PreviewContext(db: db, storageIdentity: storageIdentity, prior: []),
+                                 row: row,
+                                 sessionID: sessionID)
         rollbackReadTransaction(db)
         guard let endingDataVersion = sqliteDataVersion(db),
               endingDataVersion == startingDataVersion,
@@ -241,7 +290,8 @@ struct OpenClawSqliteReader {
                                   databaseURL: databaseURL,
                                   storageIdentity: storageIdentity,
                                   resolvedAgentID: resolvedAgentID,
-                                  fileSize: fileSize)
+                                  fileSize: fileSize,
+                                  preview: rowPreview)
         session.sourceStorageIdentity = storageIdentity
         session.sourceStorageRevision = sessionRevisionKey(revision)
         return (session,
@@ -477,9 +527,9 @@ struct OpenClawSqliteReader {
         return .logical(digest)
     }
 
-    /// Scans one selected SQLite session. Compressed transcript payloads are
-    /// detected and reported as unavailable rather than silently dropping them;
-    /// the legacy JSONL provider remains available for uncompressed archives.
+    /// Scans one selected SQLite session. Compressed rows are decoded; a row
+    /// that does not decode is reported as unavailable rather than silently
+    /// dropped, and so is a transcript in cold storage.
     static func loadTelemetry(for session: Session) -> SessionTelemetryProviderScan? {
         guard session.source == .openclaw,
               isSupportedDatabasePath(session.filePath),
@@ -504,11 +554,11 @@ struct OpenClawSqliteReader {
                 bytesScanned: events.bytesScanned)
         }
 
-        if events.hasCompressedPayload {
+        if events.hasUndecodablePayload {
             return unavailableScan(
                 session: session,
                 sessionRow: sessionRow,
-                reason: "OpenClaw telemetry is unavailable because the selected transcript contains compressed events that this build cannot decode.",
+                reason: "OpenClaw telemetry is unavailable because a compressed transcript event in the selected session could not be decoded.",
                 bytesScanned: events.bytesScanned)
         }
 
@@ -552,8 +602,6 @@ struct OpenClawSqliteReader {
               let events = queryEvents(db: db, sessionID: rawID),
               !events.cancelled,
               events.coldArchive == nil,
-              !events.hasCompressedPayload,
-              events.rows.allSatisfy({ $0.line != nil }),
               let storageRevision = makeRevision(rawID: rawID,
                                                  sessionRow: sessionRow,
                                                  events: events) else { return nil }
@@ -562,7 +610,11 @@ struct OpenClawSqliteReader {
         let temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentSessions-OpenClaw-\(UUID().uuidString).jsonl")
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
-        let data = events.rows.compactMap(\.line).joined(separator: "\n").data(using: .utf8)
+        // A row that does not decode becomes a visible notice in its place, so one
+        // bad row does not make the whole session unopenable. Telemetry still
+        // fails closed for it (`loadTelemetry`).
+        let data = events.rows.map { $0.line ?? undecodablePlaceholderLine(for: $0) }
+            .joined(separator: "\n").data(using: .utf8)
         guard let data else { return nil }
         do {
             try data.write(to: temporaryURL, options: .atomic)
@@ -577,7 +629,7 @@ struct OpenClawSqliteReader {
             id: sessionID,
             source: .openclaw,
             startTime: parsed.startTime ?? sessionRow.startedAt ?? sessionRow.createdAt,
-            endTime: parsed.endTime ?? sessionRow.endedAt ?? sessionRow.updatedAt ?? sessionRow.startedAt ?? sessionRow.createdAt,
+            endTime: parsed.endTime ?? sessionRow.activityEnd,
             // The SQLite row is authoritative when it contains a value, and a
             // SQL NULL must not resurrect model metadata from the stale caller
             // snapshot. The transcript parser remains the only fallback because
@@ -629,21 +681,27 @@ struct OpenClawSqliteReader {
                                     databaseURL: URL,
                                     storageIdentity: String,
                                     resolvedAgentID: String,
-                                    fileSize: Int?) -> Session {
+                                    fileSize: Int?,
+                                    preview: Preview?) -> Session {
+        // Sessions imported from JSONL carry NULL display_name and model, so the
+        // transcript preview (same read snapshot) supplies them. The title rule
+        // matches `loadFullSession` and the JSONL list: the first prompt, then
+        // OpenClaw's display_name, which is that prompt truncated with "…".
         var session = Session(
             id: sessionID(agentID: resolvedAgentID, rawID: row.id),
             source: .openclaw,
             startTime: row.startedAt ?? row.createdAt,
-            endTime: row.endedAt ?? row.updatedAt ?? row.startedAt ?? row.createdAt,
-            model: row.model,
+            endTime: row.activityEnd,
+            model: row.model ?? preview?.model,
             filePath: databaseURL.path,
             fileSizeBytes: fileSize,
             eventCount: row.eventCount,
             events: [],
-            cwd: nil,
-            repoName: "system",
-            lightweightTitle: row.displayName,
-            lightweightCommands: nil
+            cwd: preview?.cwd,
+            repoName: preview?.repoName ?? "system",
+            lightweightTitle: preview?.title ?? row.displayName,
+            lightweightCommands: preview?.commands,
+            isHousekeeping: preview?.isHousekeeping ?? false
         )
         // Keep the physical target captured by discovery so later MainActor
         // publication guards can compare values without resolving symlinks.
@@ -651,58 +709,92 @@ struct OpenClawSqliteReader {
         return session
     }
 
-    private static func querySessionRows(db: OpaquePointer?) -> [SessionRow]? {
-        let sql = """
-            SELECT session_id, created_at, updated_at, started_at, ended_at, model, display_name
+    private struct TranscriptStats {
+        let count: Int
+        let lastSequence: Int64?
+    }
+
+    private static func sessionWindowSelect(_ db: OpaquePointer?) -> String? {
+        guard let columns = tableColumns(db, name: "session_windows") else { return nil }
+        let transcriptUpdated = columns.contains("transcript_updated_at") ? "transcript_updated_at" : "NULL"
+        return """
+            SELECT session_id, created_at, updated_at, started_at, ended_at, model, display_name,
+                   \(transcriptUpdated)
             FROM session_windows
-            ORDER BY updated_at DESC, session_id;
             """
+    }
+
+    /// Count and last sequence for every session in one indexed pass, instead
+    /// of one query per session while the read transaction holds the WAL.
+    private static func transcriptStatsBySession(db: OpaquePointer?, sessionID: String? = nil) -> [String: TranscriptStats]? {
+        switch tablePresence(db, name: "transcript_events") {
+        case .absent: return [:]
+        case .malformed: return nil
+        case .present: break
+        }
+        let filter = sessionID == nil ? "" : "WHERE session_id = ? "
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db,
+                                 "SELECT session_id, COUNT(*), MAX(seq) FROM transcript_events \(filter)GROUP BY session_id;",
+                                 -1,
+                                 &statement,
+                                 nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
-        var rows: [SessionRow] = []
+        if let sessionID { bind(statement, index: 1, value: sessionID) }
+        var stats: [String: TranscriptStats] = [:]
         var stepResult = sqlite3_step(statement)
         while stepResult == SQLITE_ROW {
-            guard let id = text(statement, index: 0),
-                  let createdAt = dateOrNull(statement, index: 1),
-                  let updatedAt = dateOrNull(statement, index: 2),
-                  let startedAt = dateOrNull(statement, index: 3),
-                  let endedAt = dateOrNull(statement, index: 4),
-                  let model = nullableText(statement, index: 5),
-                  let displayName = nullableText(statement, index: 6),
-                  let eventCount = eventCount(db: db, sessionID: id) else { return nil }
-            rows.append(SessionRow(id: id,
-                                   createdAt: createdAt,
-                                   updatedAt: updatedAt,
-                                   startedAt: startedAt,
-                                   endedAt: endedAt,
-                                   model: model,
-                                   displayName: displayName,
-                                   eventCount: eventCount))
+            guard let id = text(statement, index: 0) else { return nil }
+            let count = sqlite3_column_int64(statement, 1)
+            guard count >= 0, let countValue = Int(exactly: count) else { return nil }
+            let last = sqlite3_column_type(statement, 2) == SQLITE_INTEGER ? sqlite3_column_int64(statement, 2) : nil
+            stats[id] = TranscriptStats(count: countValue, lastSequence: last)
             stepResult = sqlite3_step(statement)
         }
         guard stepResult == SQLITE_DONE else { return nil }
-        return rows
+        return stats
     }
 
-    private static func querySessionRow(db: OpaquePointer?, sessionID: String) -> SessionRow? {
-        let sql = """
-            SELECT session_id, created_at, updated_at, started_at, ended_at, model, display_name
-            FROM session_windows WHERE session_id = ? LIMIT 1;
-            """
+    /// Session ids with a cold-archive row; nil when the table is unreadable.
+    private static func coldArchivedSessionIDs(db: OpaquePointer?) -> Set<String>? {
+        switch tablePresence(db, name: "session_transcript_cold_archives") {
+        case .absent: return []
+        case .malformed: return nil
+        case .present: break
+        }
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db, "SELECT session_id FROM session_transcript_cold_archives;",
+                                 -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
-        bind(statement, index: 1, value: sessionID)
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              let id = text(statement, index: 0),
+        var ids = Set<String>()
+        var stepResult = sqlite3_step(statement)
+        while stepResult == SQLITE_ROW {
+            if let id = text(statement, index: 0) { ids.insert(id) }
+            stepResult = sqlite3_step(statement)
+        }
+        return stepResult == SQLITE_DONE ? ids : nil
+    }
+
+    private static func sessionRow(_ statement: OpaquePointer?,
+                                   db: OpaquePointer?,
+                                   stats: [String: TranscriptStats],
+                                   coldIDs: Set<String>) -> SessionRow? {
+        guard let id = text(statement, index: 0),
               let createdAt = dateOrNull(statement, index: 1),
               let updatedAt = dateOrNull(statement, index: 2),
               let startedAt = dateOrNull(statement, index: 3),
               let endedAt = dateOrNull(statement, index: 4),
               let model = nullableText(statement, index: 5),
               let displayName = nullableText(statement, index: 6),
-              let eventCount = eventCount(db: db, sessionID: id) else { return nil }
+              let transcriptUpdatedAt = dateOrNull(statement, index: 7) else { return nil }
+        var eventCount = stats[id]?.count ?? 0
+        if coldIDs.contains(id) {
+            switch coldArchiveLookup(db: db, sessionID: id) {
+            case .present(let archive): eventCount = archive.eventCount
+            case .malformed: return nil
+            case .absent: break
+            }
+        }
         return SessionRow(id: id,
                           createdAt: createdAt,
                           updatedAt: updatedAt,
@@ -710,30 +802,42 @@ struct OpenClawSqliteReader {
                           endedAt: endedAt,
                           model: model,
                           displayName: displayName,
-                          eventCount: eventCount)
+                          eventCount: eventCount,
+                          lastSequence: stats[id]?.lastSequence,
+                          transcriptUpdatedAt: transcriptUpdatedAt)
     }
 
-    private static func eventCount(db: OpaquePointer?, sessionID: String) -> Int? {
-        switch coldArchiveLookup(db: db, sessionID: sessionID) {
-        case .present(let archive):
-            return archive.eventCount
-        case .malformed:
-            return nil
-        case .absent:
-            break
-        }
-
+    private static func querySessionRows(db: OpaquePointer?) -> [SessionRow]? {
+        guard let select = sessionWindowSelect(db),
+              let stats = transcriptStatsBySession(db: db),
+              let coldIDs = coldArchivedSessionIDs(db: db) else { return nil }
+        let sql = select + " ORDER BY updated_at DESC, session_id;"
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db,
-                                 "SELECT COUNT(*) FROM transcript_events WHERE session_id = ?;",
-                                 -1,
-                                 &statement,
-                                 nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        var rows: [SessionRow] = []
+        var stepResult = sqlite3_step(statement)
+        while stepResult == SQLITE_ROW {
+            guard let row = sessionRow(statement, db: db, stats: stats, coldIDs: coldIDs) else { return nil }
+            rows.append(row)
+            stepResult = sqlite3_step(statement)
+        }
+        guard stepResult == SQLITE_DONE else { return nil }
+        return rows
+    }
+
+    private static func querySessionRow(db: OpaquePointer?, sessionID: String) -> SessionRow? {
+        guard let select = sessionWindowSelect(db),
+              let stats = transcriptStatsBySession(db: db, sessionID: sessionID),
+              let coldIDs = coldArchivedSessionIDs(db: db) else { return nil }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, select + " WHERE session_id = ? LIMIT 1;", -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
         defer { sqlite3_finalize(statement) }
         bind(statement, index: 1, value: sessionID)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-        let value = sqlite3_column_int64(statement, 0)
-        return value >= 0 ? Int(exactly: value) : nil
+        return sessionRow(statement, db: db, stats: stats, coldIDs: coldIDs)
     }
 
     private static func coldArchiveLookup(db: OpaquePointer?, sessionID: String) -> ColdArchiveLookup {
@@ -804,7 +908,7 @@ struct OpenClawSqliteReader {
         return value >= 0 ? value : nil
     }
 
-    private static func queryEvents(db: OpaquePointer?, sessionID: String) -> EventQuery? {
+    private static func queryEvents(db: OpaquePointer?, sessionID: String, limit: Int? = nil) -> EventQuery? {
         let coldArchive: ColdArchive?
         switch coldArchiveLookup(db: db, sessionID: sessionID) {
         case .present(let archive):
@@ -818,7 +922,7 @@ struct OpenClawSqliteReader {
         switch tablePresence(db, name: "transcript_events") {
         case .absent:
             return coldArchive.map {
-                EventQuery(rows: [], bytesScanned: 0, hasCompressedPayload: false, coldArchive: $0, cancelled: false)
+                EventQuery(rows: [], bytesScanned: 0, hasUndecodablePayload: false, coldArchive: $0, cancelled: false)
             }
         case .malformed:
             return nil
@@ -848,7 +952,7 @@ struct OpenClawSqliteReader {
             FROM transcript_events AS event
             \(identityJoin)
             WHERE event.session_id = ?
-            ORDER BY event.seq;
+            ORDER BY event.seq\(limit.map { " LIMIT \(max(0, $0))" } ?? "");
             """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
@@ -869,7 +973,7 @@ struct OpenClawSqliteReader {
 
         var rows: [EventRow] = []
         var bytesScanned: UInt64 = 0
-        var hasCompressedPayload = false
+        var hasUndecodablePayload = false
         var stepResult: Int32 = SQLITE_ROW
         while stepResult == SQLITE_ROW {
             stepResult = sqlite3_step(statement)
@@ -888,17 +992,19 @@ struct OpenClawSqliteReader {
             if Task.isCancelled {
                 return EventQuery(rows: rows,
                                   bytesScanned: bytesScanned,
-                                  hasCompressedPayload: hasCompressedPayload,
+                                  hasUndecodablePayload: hasUndecodablePayload,
                                   coldArchive: coldArchive,
                                   cancelled: true)
             }
 
+            var recordedUTF8Bytes: Int64?
             if let utf8BytesIndex {
                 let type = sqlite3_column_type(statement, utf8BytesIndex)
                 guard type == SQLITE_NULL || type == SQLITE_INTEGER else { return nil }
                 if type == SQLITE_INTEGER {
                     let value = sqlite3_column_int64(statement, utf8BytesIndex)
                     guard value >= 0, UInt64(value) == jsonBytes || jsonType == SQLITE_NULL else { return nil }
+                    recordedUTF8Bytes = value
                 }
             }
 
@@ -907,21 +1013,28 @@ struct OpenClawSqliteReader {
                 guard let compressedIndex,
                       sqlite3_column_type(statement, compressedIndex) == SQLITE_BLOB,
                       compressedBytes > 0 else { return nil }
-                hasCompressedPayload = true
+                // OpenClaw stores an event as one zstd frame (level 1, checksum)
+                // only when that saves space, and records the decoded UTF-8 size.
+                // A row that does not decode to exactly that size stays nil, so
+                // full loads and telemetry fail closed instead of dropping it.
+                let line = recordedUTF8Bytes
+                    .flatMap { decodeCompressedPayload(statement, index: compressedIndex, decodedBytes: $0) }
+                    .flatMap { normalizedEventLine(line: $0, eventID: eventID, createdAt: createdAt) }
+                if line == nil { hasUndecodablePayload = true }
                 rows.append(EventRow(sequence: sequence,
-                                     line: nil,
+                                     line: line,
                                      eventID: eventID,
                                      createdAt: createdAt,
                                      bytes: compressedBytes,
                                      compressed: true))
                 continue
             }
-            guard jsonType == SQLITE_TEXT,
-                  let raw = textData(statement, index: eventJSONIndex),
-                  !raw.contains(0),
-                  let line = String(data: raw, encoding: .utf8) else { return nil }
-            let normalized = normalizedEventLine(line: line, eventID: eventID, createdAt: createdAt)
-            guard let normalized else { return nil }
+            guard jsonType == SQLITE_TEXT else { return nil }
+            // A text row that is not a UTF-8 JSON object stays nil: listing still
+            // works, the full load shows a notice for it, telemetry fails closed.
+            let normalized = textData(statement, index: eventJSONIndex)
+                .flatMap { $0.contains(0) ? nil : String(data: $0, encoding: .utf8) }
+                .flatMap { normalizedEventLine(line: $0, eventID: eventID, createdAt: createdAt) }
             rows.append(EventRow(sequence: sequence,
                                  line: normalized,
                                  eventID: eventID,
@@ -931,9 +1044,157 @@ struct OpenClawSqliteReader {
         }
         return EventQuery(rows: rows,
                           bytesScanned: bytesScanned,
-                          hasCompressedPayload: hasCompressedPayload,
+                          hasUndecodablePayload: hasUndecodablePayload,
                           coldArchive: coldArchive,
                           cancelled: false)
+    }
+
+    /// Decodes one `event_zstd` frame. nil unless it decodes, checksum included,
+    /// to exactly `decodedBytes` of NUL-free UTF-8 within OpenClaw's 4 MiB bound.
+    private static func decodeCompressedPayload(_ statement: OpaquePointer?,
+                                                index: Int32,
+                                                decodedBytes: Int64) -> String? {
+        guard decodedBytes >= 1, decodedBytes <= Int64(maximumPayloadBytes),
+              let pointer = sqlite3_column_blob(statement, index) else { return nil }
+        let compressedCount = Int(sqlite3_column_bytes(statement, index))
+        guard compressedCount > 0, compressedCount <= maximumPayloadBytes else { return nil }
+        let capacity = Int(decodedBytes)
+        var output = Data(count: capacity)
+        let result = output.withUnsafeMutableBytes { buffer in
+            ZSTD_decompress(buffer.baseAddress, capacity, pointer, compressedCount)
+        }
+        guard ZSTD_isError(result) == 0, result == capacity, !output.contains(0) else { return nil }
+        return String(data: output, encoding: .utf8)
+    }
+
+    static let undecodablePlaceholderText = "This OpenClaw event could not be read from the session database."
+
+    /// A meta record the transcript parser renders as a notice (role `meta`).
+    private static func undecodablePlaceholderLine(for row: EventRow) -> String {
+        var object: [String: Any] = [
+            "type": "message",
+            "id": row.eventID ?? "agent-sessions-undecodable-\(row.sequence)",
+            "message": [
+                "role": "meta",
+                "content": [["type": "text", "text": undecodablePlaceholderText]]
+            ]
+        ]
+        if let createdAt = row.createdAt {
+            object["timestamp"] = ISO8601DateFormatter().string(from: createdAt)
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let line = String(data: data, encoding: .utf8) else {
+            return #"{"type":"message","message":{"role":"meta","content":[]}}"#
+        }
+        return line
+    }
+
+    /// Per-listing inputs for `preview`, resolved once instead of per session.
+    private struct PreviewContext {
+        let storageIdentity: String
+        /// Changes when the store is replaced at the same path, so a replacement
+        /// whose counts happen to match never reuses an old preview.
+        let fileNumber: UInt64
+        /// SELECT of the preview payload columns; nil when the table is absent.
+        let eventSQL: String?
+        /// Hydrated rows from the index, by session id. One whose event count and
+        /// end time still match the store supplies the preview after a relaunch.
+        let priorByID: [String: Session]
+
+        init(db: OpaquePointer?, storageIdentity: String, prior: [Session]) {
+            self.storageIdentity = storageIdentity
+            fileNumber = (try? FileManager.default.attributesOfItem(atPath: storageIdentity)[.systemFileNumber]
+                          as? NSNumber)?.uint64Value ?? 0
+            if let columns = OpenClawSqliteReader.tableColumns(db, name: "transcript_events") {
+                let payload = columns.isSuperset(of: ["event_zstd", "event_utf8_bytes"])
+                    ? "event_json, event_zstd, event_utf8_bytes"
+                    : "event_json, NULL, NULL"
+                eventSQL = "SELECT \(payload) FROM transcript_events WHERE session_id = ? ORDER BY seq LIMIT \(OpenClawSqliteReader.previewEventLimit);"
+            } else {
+                eventSQL = nil
+            }
+            var byID: [String: Session] = [:]
+            for session in prior where session.source == .openclaw {
+                byID[session.id] = session
+            }
+            priorByID = byID
+        }
+    }
+
+    /// Same-snapshot list preview. Cached in memory per session until its event
+    /// count, last sequence or transcript time changes; after a relaunch an
+    /// indexed row with the same count and end time is reused instead of a read.
+    private static func preview(db: OpaquePointer?, context: PreviewContext, row: SessionRow, sessionID: String) -> Preview? {
+        guard row.eventCount > 0, let lastSequence = row.lastSequence else { return nil }
+        let key = context.storageIdentity + "\u{0}" + row.id
+        let signature = "\(context.fileNumber):\(row.eventCount):\(lastSequence):\(revisionDate(row.activityEnd))"
+        previewCacheLock.lock()
+        if let cached = previewCache[key], cached.signature == signature {
+            previewCacheLock.unlock()
+            return cached.preview
+        }
+        previewCacheLock.unlock()
+
+        var result: Preview?
+        if let prior = context.priorByID[sessionID],
+           isSupportedDatabasePath(prior.filePath),
+           prior.eventCount == row.eventCount,
+           let priorEnd = prior.endTime, let rowEnd = row.activityEnd,
+           Int64(priorEnd.timeIntervalSince1970) == Int64(rowEnd.timeIntervalSince1970),
+           prior.lightweightTitle != nil || prior.lightweightCwd != nil {
+            result = Preview(cwd: prior.lightweightCwd,
+                             repoName: prior.lightweightRepoName,
+                             title: prior.lightweightTitle,
+                             model: prior.model,
+                             commands: prior.lightweightCommands,
+                             isHousekeeping: prior.isHousekeeping)
+        } else {
+            result = scanPreview(db: db, sql: context.eventSQL, sessionID: row.id)
+        }
+        previewCacheLock.lock()
+        previewCache[key] = (signature, result)
+        previewCacheLock.unlock()
+        return result
+    }
+
+    /// Feeds the first records straight into the JSONL preview scan: no temp
+    /// file and no re-serialization. Rows that do not decode are skipped, as the
+    /// JSONL preview skips lines it cannot parse.
+    private static func scanPreview(db: OpaquePointer?, sql: String?, sessionID: String) -> Preview? {
+        guard let sql else { return nil }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, index: 1, value: sessionID)
+        var scan = OpenClawSessionParser.LightweightScan()
+        var sawRecord = false
+        var stepResult = sqlite3_step(statement)
+        while stepResult == SQLITE_ROW {
+            defer { stepResult = sqlite3_step(statement) }
+            let data: Data?
+            switch sqlite3_column_type(statement, 0) {
+            case SQLITE_TEXT:
+                data = textData(statement, index: 0)
+            case SQLITE_NULL where sqlite3_column_type(statement, 1) == SQLITE_BLOB
+                && sqlite3_column_type(statement, 2) == SQLITE_INTEGER:
+                data = decodeCompressedPayload(statement, index: 1,
+                                               decodedBytes: sqlite3_column_int64(statement, 2))
+                    .map { Data($0.utf8) }
+            default:
+                data = nil
+            }
+            guard let data,
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            scan.consume(object: object)
+            sawRecord = true
+        }
+        guard stepResult == SQLITE_DONE, sawRecord else { return nil }
+        return Preview(cwd: scan.cwd,
+                       repoName: scan.repoName,
+                       title: scan.title,
+                       model: scan.model,
+                       commands: scan.estimatedCommands,
+                       isHousekeeping: scan.isHousekeeping)
     }
 
     private static func normalizedEventLine(line: String,
@@ -1072,6 +1333,9 @@ struct OpenClawSqliteReader {
             sqlite3_close(db)
             return nil
         }
+        // OpenClaw holds short write locks (checkpoints, migrations). Wait a
+        // little instead of failing the whole refresh on SQLITE_BUSY.
+        sqlite3_busy_timeout(db, 250)
         return db
     }
 
@@ -1079,18 +1343,21 @@ struct OpenClawSqliteReader {
         let databaseURL = URL(fileURLWithPath: path)
         let walURL = URL(fileURLWithPath: path + "-wal")
 
-        func filePart(_ url: URL) -> String {
+        func filePart(_ url: URL, emptyIsAbsent: Bool = false) -> String {
             guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
                 return "missing"
             }
-            let number = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
             let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+            // A missing WAL and a truncated (0-byte) one hold the same content:
+            // nothing. Opening or checkpointing flips between them without a write.
+            if emptyIsAbsent, size == 0 { return "missing" }
+            let number = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
             let modified = ((attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0).bitPattern
             return "\(number):\(size):\(modified)"
         }
 
         guard FileManager.default.fileExists(atPath: databaseURL.path) else { return nil }
-        return "db=\(filePart(databaseURL));wal=\(filePart(walURL))"
+        return "db=\(filePart(databaseURL));wal=\(filePart(walURL, emptyIsAbsent: true))"
     }
 
     private static func sqliteDataVersion(_ db: OpaquePointer?) -> String? {
@@ -1198,11 +1465,14 @@ struct OpenClawSqliteReader {
     private static func dateOrNull(_ statement: OpaquePointer?, index: Int32) -> Date?? {
         let type = sqlite3_column_type(statement, index)
         guard type == SQLITE_NULL || type == SQLITE_INTEGER || type == SQLITE_FLOAT else { return nil }
-        guard type != SQLITE_NULL else { return Optional(nil) }
+        // `.some(nil)`, spelled out: `Optional(nil)` here type-checks as the outer
+        // nil, which made every NULL `started_at`/`ended_at` read as an invalid
+        // column and dropped the whole store from the session list.
+        guard type != SQLITE_NULL else { return .some(nil) }
         let value = sqlite3_column_double(statement, index)
         guard value.isFinite, value >= 0 else { return nil }
         let seconds = value > 1e11 ? value / 1000 : value
-        return Optional(Date(timeIntervalSince1970: seconds))
+        return .some(Date(timeIntervalSince1970: seconds))
     }
 
     private static func payloadBytes(_ statement: OpaquePointer?, index: Int32) -> UInt64 {

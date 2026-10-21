@@ -73,101 +73,10 @@ final class OpenClawSessionParser {
         defer { try? fileHandle.close() }
         let reader = JSONLReader(url: url)
 
-        var sessionID: String? = nil
-        var cwd: String? = nil
-        var model: String? = nil
-        var origin: String? = nil
-        var tmin: Date? = nil
-        var tmax: Date? = nil
-        var title: String? = nil
-        var firstToolName: String? = nil
-        var estimatedEvents = 0
-        var estimatedCommands = 0
-        var idx = 0
-
-        // Housekeeping heuristics
-        var sawNonHousekeepingUser = false
-        var sawHeartbeatPrompt = false
-
+        var scan = LightweightScan()
         do {
             try reader.forEachLineWhile(using: fileHandle) { rawLine in
-                idx += 1
-                guard idx <= previewScanLimit else { return false }
-                guard let obj = decodeObject(rawLine) else { return true }
-                let type = normalizedType(obj["type"])
-                if type.isEmpty { return true }
-
-                if let ts = parseTimestamp(obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"]) {
-                    if tmin == nil || ts < tmin! { tmin = ts }
-                    if tmax == nil || ts > tmax! { tmax = ts }
-                }
-
-                switch type {
-                case "session":
-                    if sessionID == nil, let id = obj["id"] as? String, !id.isEmpty { sessionID = id }
-                    if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
-
-                case "modelchange":
-                    if let m = obj["modelId"] as? String, !m.isEmpty { model = m }
-
-                case "message":
-                    guard let msg = obj["message"] as? [String: Any] else { return true }
-                    let role = normalizedRole(msg["role"])
-                    if role == "user" {
-                        if let userText = extractText(fromContent: msg["content"]) {
-                            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if isHeartbeatPrompt(trimmed) {
-                                sawHeartbeatPrompt = true
-                                return true
-                            }
-                            if isNewSessionScaffold(trimmed) {
-                                return true
-                            }
-                            sawNonHousekeepingUser = true
-                            if origin == nil {
-                                origin = deriveOrigin(fromUserText: trimmed)
-                            }
-                            if title == nil {
-                                title = deriveTitle(fromUserText: trimmed)
-                            }
-                        }
-                        estimatedEvents += 1
-                    } else if role == "assistant" {
-                        // Count assistant text and toolCalls as events (approx).
-                        if let content = msg["content"] as? [Any] {
-                            for block in content {
-                                guard let b = block as? [String: Any], let btype = b["type"] as? String else { continue }
-                                switch canonicalBlockType(btype) {
-                                case "toolcall":
-                                    estimatedEvents += 1
-                                    estimatedCommands += 1
-                                    if firstToolName == nil {
-                                        firstToolName = stringValue(from: b, keys: ["name", "tool_name"])
-                                    }
-                                case "text":
-                                    if let t = b["text"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        estimatedEvents += 1
-                                    }
-                                default:
-                                    break
-                                }
-                            }
-                        }
-                        if model == nil, let m = msg["model"] as? String, !m.isEmpty { model = m }
-                    } else if role == "toolresult" {
-                        estimatedEvents += 1
-                        estimatedCommands += 1
-                        if firstToolName == nil {
-                            firstToolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
-                        }
-                    } else {
-                        // Other roles -> meta; ignore for preview counts.
-                    }
-
-                default:
-                    break
-                }
-                return true
+                scan.consume(rawLine)
             }
         } catch {
             return nil
@@ -183,40 +92,152 @@ final class OpenClawSessionParser {
         let agentID = agentIDFromPath(url)
         let pathBaseID = meta.baseName
         let baseID = forcedID
-            ?? sessionID
+            ?? scan.sessionID
             ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
         let id: String = {
             if let forcedID, forcedID.hasPrefix("openclaw:") { return forcedID }
             return "openclaw:\(agentID):\(baseID)"
         }()
 
-        // Title fallback: first tool call name if no useful user prompt exists.
-        if title == nil, let firstToolName, !firstToolName.isEmpty {
-            title = firstToolName
-        }
-
-        // If we only saw housekeeping scaffolding, mark as housekeeping so default filters hide it.
-        let isHousekeeping = !sawNonHousekeepingUser && sawHeartbeatPrompt
-
         var session = Session(
             id: id,
             source: .openclaw,
-            startTime: tmin ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
-            endTime: tmax ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
-            model: model,
+            startTime: scan.tmin ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
+            endTime: scan.tmax ?? Date(timeIntervalSince1970: Double(parseStartStat.mtime) / 1_000_000_000),
+            model: scan.model,
             filePath: url.path,
             fileSizeBytes: Int(clamping: parseStartStat.size),
-            eventCount: max(0, estimatedEvents),
+            eventCount: max(0, scan.estimatedEvents),
             events: [],
-            cwd: cwd,
-            repoName: origin ?? systemOriginLabel,
-            lightweightTitle: title,
-            lightweightCommands: estimatedCommands,
-            isHousekeeping: isHousekeeping,
+            cwd: scan.cwd,
+            repoName: scan.repoName,
+            lightweightTitle: scan.title,
+            lightweightCommands: scan.estimatedCommands,
+            isHousekeeping: scan.isHousekeeping,
             deletedAt: meta.deletedAt
         )
         session.sourceFileStat = parseStartStat
         return session
+    }
+
+    /// The list-preview scan over a transcript's first `previewScanLimit` records.
+    /// The JSONL lightweight parse feeds it file lines; the SQLite reader feeds it
+    /// `transcript_events` rows in memory, so both stores title, count and classify
+    /// a session the same way.
+    struct LightweightScan {
+        private(set) var sessionID: String?
+        private(set) var cwd: String?
+        private(set) var model: String?
+        private(set) var origin: String?
+        private(set) var tmin: Date?
+        private(set) var tmax: Date?
+        private var promptTitle: String?
+        private var firstToolName: String?
+        private(set) var estimatedEvents = 0
+        private(set) var estimatedCommands = 0
+        private var index = 0
+        // Housekeeping heuristics
+        private var sawNonHousekeepingUser = false
+        private var sawHeartbeatPrompt = false
+
+        /// Title fallback: first tool call name if no useful user prompt exists.
+        var title: String? {
+            if let promptTitle { return promptTitle }
+            if let firstToolName, !firstToolName.isEmpty { return firstToolName }
+            return nil
+        }
+
+        var repoName: String { origin ?? OpenClawSessionParser.systemOriginLabel }
+
+        /// If we only saw housekeeping scaffolding, mark as housekeeping so default filters hide it.
+        var isHousekeeping: Bool { !sawNonHousekeepingUser && sawHeartbeatPrompt }
+
+        /// Consumes one record. false means the preview limit is reached.
+        @discardableResult
+        mutating func consume(_ rawLine: String) -> Bool {
+            index += 1
+            guard index <= OpenClawSessionParser.previewScanLimit else { return false }
+            guard let obj = OpenClawSessionParser.decodeObject(rawLine) else { return true }
+            consume(object: obj)
+            return true
+        }
+
+        mutating func consume(object obj: [String: Any]) {
+            let type = OpenClawSessionParser.normalizedType(obj["type"])
+            if type.isEmpty { return }
+
+            if let ts = OpenClawSessionParser.parseTimestamp(
+                obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"]) {
+                if tmin == nil || ts < tmin! { tmin = ts }
+                if tmax == nil || ts > tmax! { tmax = ts }
+            }
+
+            switch type {
+            case "session":
+                if sessionID == nil, let id = obj["id"] as? String, !id.isEmpty { sessionID = id }
+                if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
+
+            case "modelchange":
+                if let m = obj["modelId"] as? String, !m.isEmpty { model = m }
+
+            case "message":
+                guard let msg = obj["message"] as? [String: Any] else { return }
+                let role = OpenClawSessionParser.normalizedRole(msg["role"])
+                if role == "user" {
+                    if let userText = OpenClawSessionParser.extractText(fromContent: msg["content"]) {
+                        let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if OpenClawSessionParser.isHeartbeatPrompt(trimmed) {
+                            sawHeartbeatPrompt = true
+                            return
+                        }
+                        if OpenClawSessionParser.isNewSessionScaffold(trimmed) {
+                            return
+                        }
+                        sawNonHousekeepingUser = true
+                        if origin == nil {
+                            origin = OpenClawSessionParser.deriveOrigin(fromUserText: trimmed)
+                        }
+                        if promptTitle == nil {
+                            promptTitle = OpenClawSessionParser.deriveTitle(fromUserText: trimmed)
+                        }
+                    }
+                    estimatedEvents += 1
+                } else if role == "assistant" {
+                    // Count assistant text and toolCalls as events (approx).
+                    if let content = msg["content"] as? [Any] {
+                        for block in content {
+                            guard let b = block as? [String: Any], let btype = b["type"] as? String else { continue }
+                            switch OpenClawSessionParser.canonicalBlockType(btype) {
+                            case "toolcall":
+                                estimatedEvents += 1
+                                estimatedCommands += 1
+                                if firstToolName == nil {
+                                    firstToolName = OpenClawSessionParser.stringValue(from: b, keys: ["name", "tool_name"])
+                                }
+                            case "text":
+                                if let t = b["text"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    estimatedEvents += 1
+                                }
+                            default:
+                                break
+                            }
+                        }
+                    }
+                    if model == nil, let m = msg["model"] as? String, !m.isEmpty { model = m }
+                } else if role == "toolresult" {
+                    estimatedEvents += 1
+                    estimatedCommands += 1
+                    if firstToolName == nil {
+                        firstToolName = OpenClawSessionParser.stringValue(from: msg, keys: ["toolName", "tool_name"])
+                    }
+                } else {
+                    // Other roles -> meta; ignore for preview counts.
+                }
+
+            default:
+                break
+            }
+        }
     }
 
     static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {

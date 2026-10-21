@@ -359,18 +359,21 @@
         { "kind": "npm_latest", "package": "openclaw" }
       ],
       "risk_keywords": {
-        "schema": ["session", "jsonl", "transcript", "storage", "format", "schema", "model", "tool"],
+        "schema": ["session", "jsonl", "transcript", "storage", "format", "schema", "model", "tool", "sqlite", "database", "migration"],
         "usage": ["usage", "token", "tokens", "quota", "limit"]
       },
       "weekly": {
         "local_schema": {
-          "kind": "jsonl_newest",
+          "kind": "openclaw_latest_session",
+          "note": "2026.10.5+ keeps transcripts in agents/<id>/agent/openclaw-agent.sqlite (transcript_events, zstd rows decoded). Without a store, falls back to the legacy JSONL glob below. Never glob deeper than agents/<id>/sessions: agents/<id>/agent/codex-home/sessions holds the embedded Codex harness's rollouts.",
           "roots": [
             "$OPENCLAW_STATE_DIR",
             "~/.openclaw",
             "~/.clawdbot"
           ],
-          "glob": "**/*.jsonl",
+          "db_globs": ["agents/*/agent/openclaw-agent.sqlite"],
+          "max_events": 5000,
+          "glob": "agents/*/sessions/*.jsonl",
           "required_types": ["session", "message"],
           "max_lines": 2500,
           "exclude_globs": [
@@ -384,8 +387,11 @@
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "OpenClaw sessions should resolve to agents/<id>/sessions/*.jsonl.",
-          "patterns": ["/agents/[^/]+/sessions/(?![^/]+\\.trajectory\\.jsonl$)[^/]+\\.jsonl$"]
+          "description": "OpenClaw sessions should resolve to agents/<id>/agent/openclaw-agent.sqlite (2026.10.5+) or legacy agents/<id>/sessions/*.jsonl.",
+          "patterns": [
+            "/agents/[^/]+/agent/openclaw-agent\\.sqlite$",
+            "/agents/[^/]+/sessions/(?![^/]+\\.trajectory\\.jsonl$)[^/]+\\.jsonl$"
+          ]
         },
         "probes": [
           {
@@ -410,10 +416,11 @@
           "OPENROUTER_API_KEY"
         ],
         "credential_files": [],
+        "required_schema_buckets": ["session", "message", "message.message.content:toolCall"],
         "discover_session": {
-          "kind": "jsonl_newest",
+          "kind": "openclaw_latest_session",
           "roots": [".openclaw"],
-          "globs": ["agents/*/sessions/*.jsonl"],
+          "globs": ["agents/*/agent/openclaw-agent.sqlite", "agents/*/sessions/*.jsonl"],
           "required_types": ["session", "message"]
         }
       }

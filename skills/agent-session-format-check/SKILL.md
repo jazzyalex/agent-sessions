@@ -676,6 +676,27 @@ older sessions, which is why the app reads a v2 row only when it is newer than i
 
 ---
 
+## 3b  OpenClaw SQLite Store (2026.10.5+)
+
+Transcripts live in `agents/<id>/agent/openclaw-agent.sqlite`. `transcript_events` rows
+keep the JSONL record shapes, as `event_json` or one zstd frame (`event_zstd`, decoded
+size in `event_utf8_bytes`). The startup import copied legacy JSONL under the same ids
+and moved the originals to `session-sqlite-import-archive/`.
+- `openclaw_latest_session` fingerprints the newest 5 sessions with the same nested
+  alphabet as JSONL, plus `sqlite.<table>` column buckets; the baseline includes
+  `Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql`.
+- `details` is shallow (`_NESTED_SHALLOW_KEYS`): its first-level keys are watched
+  (the app reads `exitCode`/`status`), its nested objects are not.
+- The prebump driver finds its session by `--session-key` and needs the marker in an
+  assistant or tool-result record (the prompt alone carries it).
+- **Sampling limitation:** real-home prebump runs land in the store and are the newest
+  sessions, so they can fill the weekly sample (`sampled_prebump_sessions` counts them).
+  On a machine with little real OpenClaw use, a clean weekly then says little beyond
+  what the prebump already proved. Check that count before reading a clean weekly as
+  broad evidence.
+
+---
+
 ## 3a  Cursor Storage
 
 Cursor uses two storage backends:
@@ -730,7 +751,7 @@ Key contracts (simplified from regexes in
 | Hermes   | `~/.hermes/state.db` or legacy `~/.hermes/sessions/session_*.json` |
 | Antigravity | `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` |
 | Copilot  | `~/.copilot/session-state/*.jsonl` or `*/events.jsonl` |
-| OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
+| OpenClaw | `*/agents/<id>/agent/openclaw-agent.sqlite` (2026.10.5+, zstd rows decoded) or legacy `*/agents/<id>/sessions/*.jsonl`; never `agent/codex-home/` (embedded Codex harness) |
 | Cursor   | `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` |
 | Pi       | `~/.pi/agent/sessions/**/*.jsonl` |
 | Kimi     | `~/.kimi-code/sessions/wd_*/session_*/agents/main/wire.jsonl` |

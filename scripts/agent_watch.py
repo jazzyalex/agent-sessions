@@ -1207,6 +1207,15 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     "qwen": {"args", "response", "toolCallResult", "usageMetadata", "function_args"},
 }
 
+# Keys whose own key set matters but whose children are free-form. The walk records
+# the child's keys and stops there. OpenClaw `details` is a tool's structured result
+# (toolResult) or an extension payload (custom_message): ToolTextBlockNormalizer reads
+# its exit code and status, so a renamed first-level key must still show as drift,
+# while the `message` tool's nested messageDelivery/sourceReply objects must not.
+_NESTED_SHALLOW_KEYS: dict[str, set[str]] = {
+    "openclaw": {"details"},
+}
+
 
 def _nested_bucket_walk(
     bucket: str,
@@ -1216,13 +1225,15 @@ def _nested_bucket_walk(
     max_depth: int,
     opaque_keys: frozenset[str] = frozenset(),
     typed_list_keys: frozenset[str] = frozenset(),
+    shallow_keys: frozenset[str] = frozenset(),
 ) -> None:
     """Record `obj`'s keys under `bucket`, then recurse into dict-valued children.
 
     Child buckets are `<bucket>.<key>`, with `:<type>` appended when the child carries
     its own string `type` (codex's `event_msg`/`response_item` wrappers put the real
     event name there). Keeping the key in the name means two different wrappers can
-    never collapse into one bucket.
+    never collapse into one bucket. A `shallow_keys` child records its own keys but
+    is never descended into.
     """
     ks = out.setdefault(bucket, set())
     for k in obj.keys():
@@ -1231,6 +1242,10 @@ def _nested_bucket_walk(
         return
     for k, v in obj.items():
         if k in opaque_keys:
+            continue
+        if k in shallow_keys:
+            if isinstance(v, dict):
+                out.setdefault(f"{bucket}.{k}", set()).update(v.keys())
             continue
         # Union EVERY dict in a list, not just the first. Lists here are heterogeneous
         # — Claude's message.content mixes text/thinking/tool_use blocks — so taking the
@@ -1253,7 +1268,7 @@ def _nested_bucket_walk(
                 if isinstance(child_type, str) and child_type:
                     sub = f"{sub}:{child_type}"
             _nested_bucket_walk(
-                sub, child, out, depth + 1, max_depth, opaque_keys, typed_list_keys
+                sub, child, out, depth + 1, max_depth, opaque_keys, typed_list_keys, shallow_keys
             )
 
 
@@ -1299,6 +1314,7 @@ def _nested_jsonl_schema_fingerprint(
     opaque_keys: frozenset[str] = frozenset(),
     typed_list_keys: frozenset[str] = frozenset(),
     glued_objects: bool = False,
+    shallow_keys: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Like `_jsonl_schema_fingerprint`, but walks into nested payload wrappers.
 
@@ -1333,7 +1349,7 @@ def _nested_jsonl_schema_fingerprint(
             event_type = t if isinstance(t, str) and t else "<missing-type>"
             type_counts[event_type] = type_counts.get(event_type, 0) + 1
             _nested_bucket_walk(
-                event_type, obj, type_keys, 0, max_depth, opaque_keys, typed_list_keys
+                event_type, obj, type_keys, 0, max_depth, opaque_keys, typed_list_keys, shallow_keys
             )
 
     return {
@@ -3373,6 +3389,7 @@ def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -
             opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get(agent_name, ())),
             typed_list_keys=frozenset(_NESTED_TYPED_LIST_KEYS.get(agent_name, ())),
             glued_objects=agent_name in _GLUED_OBJECT_AGENTS,
+            shallow_keys=frozenset(_NESTED_SHALLOW_KEYS.get(agent_name, ())),
         )
     return _jsonl_schema_fingerprint(path, max_lines=max_lines)
 
@@ -4804,6 +4821,273 @@ def _opencode_sqlite_latest_session_schema_fingerprint(
     }
 
 
+_OPENCLAW_SQLITE_DB_NAME = "openclaw-agent.sqlite"
+# OpenClaw's own bound for a stored frame and for its decoded event
+# (`transcript-payload` and the `transcript_events` CHECK constraint).
+_OPENCLAW_MAX_PAYLOAD_BYTES = 4_194_304
+# Columns AgentSessions/OpenClaw/OpenClawSqliteReader.swift selects. A store
+# missing one cannot be listed or opened, so it counts as unreadable.
+_OPENCLAW_REQUIRED_COLUMNS: dict[str, frozenset[str]] = {
+    "session_windows": frozenset(
+        {"session_id", "created_at", "updated_at", "started_at", "ended_at", "model", "display_name"}
+    ),
+    "transcript_events": frozenset({"session_id", "seq", "event_json", "created_at"}),
+}
+# Store tables whose columns are fingerprinted as `sqlite.<table>` buckets, so a
+# new or renamed column reads as storage drift even when no record changed.
+_OPENCLAW_STORE_TABLES = (
+    "session_windows",
+    "transcript_events",
+    "transcript_event_identities",
+    "session_transcript_archives",
+    "session_transcript_cold_archives",
+)
+
+
+def _openclaw_decode_event_payload(event_json: Any, event_zstd: Any, utf8_bytes: Any) -> str:
+    """Return one `transcript_events` record as text, decoding a zstd row.
+
+    OpenClaw 2026.10.5 stores a record either as `event_json` TEXT or, when that
+    saves space, as one zstd frame (level 1, checksum) in `event_zstd` with the
+    decoded size in `event_utf8_bytes`. Raises ValueError for any row the app
+    reader would also refuse.
+    """
+    if event_json is not None:
+        if not isinstance(event_json, str):
+            raise ValueError("event_json is not text")
+        return event_json
+    if not isinstance(event_zstd, (bytes, bytearray)) or not event_zstd:
+        raise ValueError("row has neither event_json nor event_zstd")
+    if not isinstance(utf8_bytes, int) or not 1 <= utf8_bytes <= _OPENCLAW_MAX_PAYLOAD_BYTES:
+        raise ValueError("compressed row has no valid event_utf8_bytes")
+    if len(event_zstd) > _OPENCLAW_MAX_PAYLOAD_BYTES:
+        raise ValueError("compressed row exceeds the payload bound")
+    try:
+        from compression import zstd as _zstd  # Python 3.14+
+    except ImportError as exc:
+        raise ValueError("decoding event_zstd needs Python 3.14+ (compression.zstd)") from exc
+    try:
+        decoded = _zstd.decompress(bytes(event_zstd))
+    except Exception as exc:  # ZstdError, EOFError
+        raise ValueError(f"event_zstd does not decode: {exc}") from exc
+    if len(decoded) != utf8_bytes:
+        raise ValueError("decoded size does not match event_utf8_bytes")
+    if b"\x00" in decoded:
+        raise ValueError("decoded event contains NUL")
+    return decoded.decode("utf-8")
+
+
+def _openclaw_sqlite_schema_fingerprint(
+    db_path: Path,
+    *,
+    session_ids: list[str] | None = None,
+    sample_count: int = _LOCAL_SCHEMA_SAMPLE_COUNT,
+    max_events: int = 5000,
+    sql_script: str | None = None,
+) -> dict[str, Any]:
+    """Fingerprint OpenClaw's per-agent SQLite store (2026.9+, required 2026.10.5).
+
+    Records in `transcript_events` keep the legacy JSONL shapes, so each decoded
+    record goes through the same nested walk as `_schema_fingerprint_for_agent`
+    and diffs against the same alphabet as the JSONL fixtures. Store columns add
+    `sqlite.<table>` buckets. Samples the given `session_ids`, else the newest
+    `sample_count` sessions by transcript time (`sample_count <= 0` = every
+    session, used for the baseline). `sql_script` builds an in-memory store from
+    a committed `.sql` fixture instead of opening `db_path`.
+    """
+    opaque = frozenset(_NESTED_OPAQUE_KEYS.get("openclaw", ()))
+    shallow = frozenset(_NESTED_SHALLOW_KEYS.get("openclaw", ()))
+    typed = frozenset(_NESTED_TYPED_LIST_KEYS.get("openclaw", ()))
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    required_field_violations: dict[str, int] = {}
+    parse_errors = 0
+    parsed_lines = 0
+    compressed_events = 0
+    result: dict[str, Any] = {"file": str(db_path), "store": "sqlite"}
+
+    def _failed(error: str) -> dict[str, Any]:
+        result.update({
+            "type_counts": {}, "type_keys": {}, "parsed_lines": 0,
+            "parse_errors": 0, "read_failed": True, "error": error,
+        })
+        return result
+
+    try:
+        if sql_script is not None:
+            conn = sqlite3.connect(":memory:")
+            conn.executescript(sql_script)
+        else:
+            conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+    except Exception as exc:
+        return _failed(f"sqlite_open_failed: {exc}")
+    try:
+        tables = {
+            str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table';")
+        }
+        for table in _OPENCLAW_STORE_TABLES:
+            if table not in tables:
+                continue
+            columns = {str(r[1]) for r in conn.execute(f'PRAGMA table_info("{table}");')}
+            type_keys.setdefault(f"sqlite.{table}", set()).update(columns)
+            for column in sorted(_OPENCLAW_REQUIRED_COLUMNS.get(table, frozenset()) - columns):
+                problem = f"{table}.{column}:missing"
+                required_field_violations[problem] = required_field_violations.get(problem, 0) + 1
+        for table in _OPENCLAW_REQUIRED_COLUMNS:
+            if table not in tables:
+                required_field_violations[f"{table}:missing"] = 1
+        if "schema_meta" in tables:
+            meta = conn.execute(
+                "SELECT schema_version, app_version FROM schema_meta WHERE meta_key = 'primary';"
+            ).fetchone()
+            if meta is not None:
+                result["schema_version"] = meta[0]
+                result["app_version"] = meta[1]
+        if required_field_violations:
+            # The app cannot read this store at all; report it as unreadable
+            # records so the verdict is format drift, not a clean empty sample.
+            result.update({
+                "type_counts": {},
+                "type_keys": {k: sorted(v) for k, v in sorted(type_keys.items())},
+                "parsed_lines": 0,
+                "parse_errors": 1,
+                "required_field_violations": dict(sorted(required_field_violations.items())),
+            })
+            return result
+
+        event_columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("transcript_events");')}
+        payload_select = "event_json, " + (
+            "event_zstd, event_utf8_bytes" if {"event_zstd", "event_utf8_bytes"} <= event_columns else "NULL, NULL"
+        )
+        if session_ids:
+            selected = [str(s) for s in session_ids]
+        else:
+            limit_clause = "" if sample_count <= 0 else f" LIMIT {int(sample_count)}"
+            selected = [
+                str(r[0])
+                for r in conn.execute(
+                    "SELECT session_id, MAX(created_at) AS t FROM transcript_events "
+                    f"GROUP BY session_id ORDER BY t DESC, session_id{limit_clause};"
+                )
+            ]
+        newest_ms: int | None = None
+        for session_id in selected:
+            rows = conn.execute(
+                f"SELECT {payload_select}, created_at FROM transcript_events "
+                "WHERE session_id = ? ORDER BY seq LIMIT ?;",
+                (session_id, max(0, int(max_events))),
+            ).fetchall()
+            for event_json, event_zstd, utf8_bytes, created_at in rows:
+                parsed_lines += 1
+                if isinstance(created_at, int) and (newest_ms is None or created_at > newest_ms):
+                    newest_ms = created_at
+                if event_json is None:
+                    compressed_events += 1
+                    type_keys.setdefault("sqlite.transcript_events.payload", set()).add("event_zstd")
+                else:
+                    type_keys.setdefault("sqlite.transcript_events.payload", set()).add("event_json")
+                try:
+                    obj = json.loads(_openclaw_decode_event_payload(event_json, event_zstd, utf8_bytes))
+                except (ValueError, UnicodeDecodeError):
+                    parse_errors += 1
+                    continue
+                if not isinstance(obj, dict):
+                    parse_errors += 1
+                    continue
+                t = obj.get("type")
+                event_type = t if isinstance(t, str) and t else "<missing-type>"
+                type_counts[event_type] = type_counts.get(event_type, 0) + 1
+                _nested_bucket_walk(
+                    event_type, obj, type_keys, 0, _NESTED_FINGERPRINT_MAX_DEPTH, opaque, typed, shallow
+                )
+        result["sampled_sessions"] = len(selected)
+        window_columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("session_windows");')}
+        if "session_key" in window_columns and selected:
+            # Real-home prebump runs land in this store and are the newest sessions,
+            # so they can fill the weekly sample. Reported, not filtered: on a machine
+            # where they are the only recent sessions they are the freshest evidence.
+            marks = ",".join("?" for _ in selected)
+            result["sampled_prebump_sessions"] = conn.execute(
+                f"SELECT COUNT(*) FROM session_windows WHERE session_id IN ({marks}) "
+                "AND session_key LIKE '%:prebump-%';",
+                selected,
+            ).fetchone()[0]
+        if newest_ms is not None:
+            # The database file's mtime moves on any write (memory index, auth
+            # state), so freshness uses the newest sampled transcript event.
+            result["logical_mtime_epoch"] = newest_ms / 1000.0
+    except sqlite3.Error as exc:
+        conn.close()
+        return _failed(f"sqlite_query_failed: {exc}")
+    conn.close()
+    result.update({
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(v) for k, v in sorted(type_keys.items())},
+        "parsed_lines": parsed_lines,
+        "parse_errors": parse_errors,
+        "compressed_events": compressed_events,
+        "required_field_violations": {},
+        "nested_depth": _NESTED_FINGERPRINT_MAX_DEPTH,
+    })
+    return result
+
+
+def _openclaw_sqlite_databases(roots: list[str], db_globs: list[str]) -> list[Path]:
+    """Every per-agent OpenClaw store under the configured state roots, newest first."""
+    found: dict[str, Path] = {}
+    for root in roots:
+        base = _expand_path(root)
+        if not str(root).strip() or "$" in str(base) or not base.is_dir():
+            continue
+        for pattern in db_globs:
+            for candidate in base.glob(pattern):
+                if candidate.name == _OPENCLAW_SQLITE_DB_NAME and candidate.is_file():
+                    # First root wins: ~/.clawdbot is often a symlink to ~/.openclaw.
+                    found.setdefault(str(candidate.resolve()), candidate)
+
+    def _mtime(p: Path) -> float:
+        newest = 0.0
+        for sibling in (p, p.with_name(p.name + "-wal")):
+            try:
+                newest = max(newest, sibling.stat().st_mtime)
+            except OSError:
+                pass
+        return newest
+
+    return sorted(found.values(), key=_mtime, reverse=True)
+
+
+def _openclaw_weekly_sqlite_fingerprint(local_schema_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """Weekly OpenClaw sample from the SQLite store; None when no store exists (legacy JSONL)."""
+    roots = [str(r) for r in (local_schema_cfg.get("roots") or []) if isinstance(r, str)]
+    db_globs = [str(g) for g in (local_schema_cfg.get("db_globs") or []) if isinstance(g, str)]
+    databases = _openclaw_sqlite_databases(roots, db_globs)
+    if not databases:
+        return None
+    max_events = int(local_schema_cfg.get("max_events") or 5000)
+    fingerprints = [
+        _openclaw_sqlite_schema_fingerprint(db, max_events=max_events) for db in databases
+    ]
+    readable = [fp for fp in fingerprints if not fp.get("read_failed")]
+    if not readable:
+        return fingerprints[0]
+    lead = dict(readable[0])
+    if len(readable) > 1:
+        lead["type_keys"] = _merge_type_keys(readable)
+        merged_counts: dict[str, int] = {}
+        for fp in readable:
+            for t, n in (fp.get("type_counts") or {}).items():
+                merged_counts[t] = merged_counts.get(t, 0) + int(n)
+        lead["type_counts"] = dict(sorted(merged_counts.items()))
+        lead["parsed_lines"] = sum(int(fp.get("parsed_lines") or 0) for fp in readable)
+        _merge_sampled_parse_errors(lead, readable)
+        newest = [fp.get("logical_mtime_epoch") for fp in readable if isinstance(fp.get("logical_mtime_epoch"), float)]
+        if newest:
+            lead["logical_mtime_epoch"] = max(newest)
+    lead["sampled_files"] = [str(fp.get("file")) for fp in readable]
+    return lead
+
+
 def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) -> dict[str, list[str]]:
     # Baseline should represent the current "normal" format; ignore schema_drift fixtures.
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
@@ -4888,11 +5172,16 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
                 fps.append(_opencode_fixture_file_schema_fingerprint(bp))
     elif agent_name == "openclaw":
         for p in filtered:
-            if not p.endswith(".jsonl"):
-                continue
             bp = Path(p)
-            if bp.exists():
+            if not bp.exists():
+                continue
+            if p.endswith(".jsonl"):
                 fps.append(_schema_fingerprint_for_agent(agent_name, bp, max_lines=5000))
+            elif p.endswith(".sql"):
+                # The 2026.10.5 SQLite store, committed as a reviewable SQL script and
+                # built in memory. Its records share the JSONL alphabet above.
+                fps.append(_openclaw_sqlite_schema_fingerprint(
+                    bp, sample_count=0, sql_script=bp.read_text(encoding="utf-8")))
     elif agent_name == "cursor":
         for p in filtered:
             if not p.endswith(".jsonl"):
@@ -6219,7 +6508,9 @@ def _session_path_matches_glob(session_path: Path, root: Path, pattern: str) -> 
     return len(relative_parts) in positions
 
 
-def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Path) -> None:
+def _validate_session_discovery(
+    session_path: Path, contract: dict, sandbox: Path, *, session_id: str | None = None
+) -> None:
     """F4: validate session_path against the agent's discover_session contract.
 
     Checks (each failure raises _DiscoveryViolation):
@@ -6229,7 +6520,8 @@ def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Pat
          (root, glob) pairs — see _session_path_matches_glob.
       3. The file parses as JSONL and contains at least one line per
          type in contract['required_types'] (matched on the per-line
-         'type' field).
+         'type' field). For OpenClaw's shared SQLite store the check runs
+         on the records of `session_id`, the session the driver named.
 
     Discovery violations are mapped to exit 3 (driver-failed) by the
     caller — the driver produced the wrong artifact.
@@ -6289,7 +6581,21 @@ def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Pat
     required_types = list(contract.get("required_types") or [])
     if required_types:
         seen: set[str] = set()
-        if session_path.name.endswith(".jsonl.zstd"):
+        if session_path.name == _OPENCLAW_SQLITE_DB_NAME:
+            # A shared per-agent store: the required types must be in the one
+            # session the driver named, not anywhere in the database.
+            if not session_id:
+                raise _DiscoveryViolation(
+                    f"session {session_path} is a shared OpenClaw store but the driver named no session"
+                )
+            fingerprint = _openclaw_sqlite_schema_fingerprint(session_path, session_ids=[session_id])
+            if fingerprint.get("read_failed") or fingerprint.get("required_field_violations"):
+                raise _DiscoveryViolation(
+                    f"session {session_path} is not a readable OpenClaw store: "
+                    f"{fingerprint.get('error') or fingerprint.get('required_field_violations')}"
+                )
+            seen.update((fingerprint.get("type_counts") or {}).keys())
+        elif session_path.name.endswith(".jsonl.zstd"):
             fingerprint = _deepseek_harness_schema_fingerprint(
                 session_path, max_lines=5000
             )
@@ -6641,6 +6947,7 @@ def _run_prebump(
                     result.session_path,
                     pb.get("discover_session") or {},
                     Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox))),
+                    session_id=getattr(result, "session_id", None),
                 )
             except _DiscoveryViolation as exc:
                 entries.append({
@@ -6680,6 +6987,13 @@ def _run_prebump(
                     )
             elif agent_name == "cursor":
                 fp = _cursor_transcript_schema_fingerprint(result.session_path, max_lines=5000)
+            elif agent_name == "openclaw" and result.session_path.name == _OPENCLAW_SQLITE_DB_NAME:
+                # The store is shared by every session; fingerprint only the one
+                # this run wrote. No id means the driver could not name it: fail.
+                session_id = getattr(result, "session_id", None)
+                fp = _openclaw_sqlite_schema_fingerprint(
+                    result.session_path, session_ids=[session_id] if session_id else ["<unknown>"]
+                )
             else:
                 fp = _schema_fingerprint_for_agent(agent_name, result.session_path, max_lines=5000)
             schema_diff, fresh_matches = _prebump_schema_check(
@@ -6940,6 +7254,16 @@ def main(argv: list[str]) -> int:
                 local_fp: dict[str, Any] | None = None
                 newest: Path | None = None
                 dsh_integrity_contract: dict[str, Any] | None = None
+
+                # OpenClaw 2026.10.5 keeps transcripts in agents/<id>/agent/
+                # openclaw-agent.sqlite. Sample that store when one exists; an install
+                # that never migrated still has only JSONL, sampled as before.
+                if kind == "openclaw_latest_session":
+                    local_fp = _openclaw_weekly_sqlite_fingerprint(local_schema_cfg)
+                    if local_fp is None:
+                        kind = "jsonl_newest"
+                    else:
+                        newest = Path(str(local_fp.get("file")))
 
                 # `kimi_wire_newest` selects the same way as `jsonl_newest` but
                 # fingerprints the nested loop-event structure as well.

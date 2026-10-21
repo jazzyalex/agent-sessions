@@ -34,6 +34,9 @@ class DriverResult:
     stderr_file: Path
     exit_code: int
     error: str | None
+    # Set when `session_path` is a store shared by many sessions (OpenClaw's
+    # per-agent SQLite database), naming the one session this run wrote.
+    session_id: str | None = None
 
 
 @runtime_checkable
@@ -798,14 +801,21 @@ class OpenClawLocalAgentDriver:
         stdout_file, stderr_file = _write_completed_output(sandbox, "openclaw", proc)
         agents_root = state_dir / "agents"
         newest: Path | None = None
-        if agents_root.exists():
+        session_id: str | None = None
+        # 2026.10.5+ writes the transcript to the per-agent SQLite store, keyed by
+        # the --session-key this run passed.
+        found = _openclaw_sqlite_session_for_key(agents_root, session_key, marker)
+        if found is not None:
+            newest, session_id = found
+        elif agents_root.exists():
+            # Legacy JSONL store: only agents/<id>/sessions/*.jsonl. Never search
+            # deeper — agents/<id>/agent/codex-home/sessions/ holds the embedded
+            # Codex harness's rollouts, which carry the same prompt and marker.
             candidates: list[tuple[float, Path]] = []
-            for p in agents_root.rglob("*.jsonl"):
+            for p in agents_root.glob("*/sessions/*.jsonl"):
                 if p.name.endswith(".jsonl.lock") or p.name.endswith(".trajectory.jsonl"):
                     continue
                 if ".jsonl.deleted." in p.name or ".jsonl.reset." in p.name:
-                    continue
-                if "sessions" not in p.parts:
                     continue
                 try:
                     m = p.stat().st_mtime
@@ -815,14 +825,90 @@ class OpenClawLocalAgentDriver:
                     continue
                 candidates.append((m, p))
             for _, p in sorted(candidates, key=lambda item: item[0], reverse=True):
-                if _file_contains(p, marker):
+                if _openclaw_marker_in_reply(_openclaw_jsonl_lines(p), marker):
                     newest = p
                     break
         if proc.returncode != 0:
-            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"openclaw_local_agent_failed rc={proc.returncode}")
+            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"openclaw_local_agent_failed rc={proc.returncode}", session_id)
         if newest is None:
             return DriverResult(False, None, stdout_file, stderr_file, proc.returncode, "openclaw_marker_missing")
-        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None)
+        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None, session_id)
+
+
+def _openclaw_marker_in_reply(record_texts, marker: str) -> bool:
+    """True when the marker is in an assistant or tool-result record.
+
+    The prompt itself carries the marker, so finding it in the user record only
+    proves the prompt was stored, not that the agent ran a turn.
+    """
+    for text in record_texts:
+        if marker not in text:
+            continue
+        try:
+            obj = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        message = obj.get("message") if isinstance(obj, dict) else None
+        role = message.get("role") if isinstance(message, dict) else None
+        if isinstance(role, str) and role.lower() in ("assistant", "toolresult", "tool_result", "tool"):
+            return True
+    return False
+
+
+def _openclaw_jsonl_lines(path: Path):
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                yield line
+    except OSError:
+        return
+
+
+def _openclaw_event_text(event_json: object, event_zstd: object) -> str:
+    """One transcript_events record as text; a zstd row is decoded, a bad one is ''."""
+    if isinstance(event_json, str):
+        return event_json
+    if isinstance(event_zstd, (bytes, bytearray)) and event_zstd:
+        try:
+            from compression import zstd as _zstd  # Python 3.14+
+
+            return _zstd.decompress(bytes(event_zstd)).decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+    return ""
+
+
+def _openclaw_sqlite_session_for_key(
+    agents_root: Path, session_key: str, marker: str
+) -> tuple[Path, str] | None:
+    """The (store, session_id) a `--session-key` run wrote, if its transcript has the marker."""
+    if not agents_root.is_dir():
+        return None
+    for db in sorted(agents_root.glob("*/agent/openclaw-agent.sqlite")):
+        try:
+            conn = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+        except sqlite3.Error:
+            continue
+        try:
+            rows = conn.execute(
+                "SELECT session_id FROM session_windows WHERE session_key = ? "
+                "ORDER BY updated_at DESC;",
+                (session_key,),
+            ).fetchall()
+            columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("transcript_events");')}
+            payload = "event_json, event_zstd" if "event_zstd" in columns else "event_json, NULL"
+            for (session_id,) in rows:
+                events = conn.execute(
+                    f"SELECT {payload} FROM transcript_events WHERE session_id = ? ORDER BY seq;",
+                    (session_id,),
+                )
+                if _openclaw_marker_in_reply((_openclaw_event_text(ej, ez) for ej, ez in events), marker):
+                    return db, str(session_id)
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+    return None
 
 
 DRIVERS["openclaw_local_agent"] = OpenClawLocalAgentDriver()

@@ -9770,8 +9770,14 @@ final class SessionParserTests: XCTestCase {
         try fm.createDirectory(at: replacement.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: database)
         try createOpenClawSQLiteFixture(at: replacement)
-        try executeSQLite(
-            "UPDATE session_windows SET display_name = 'replacement database' WHERE session_id = 'sqlite-demo';",
+        // The list titles a session from its first prompt (display_name is only the
+        // fallback), so the replacement differs in both.
+        try executeSQLite("""
+            UPDATE session_windows SET display_name = 'replacement database' WHERE session_id = 'sqlite-demo';
+            UPDATE transcript_events
+            SET event_json = replace(event_json, 'OpenClaw SQLite fixture', 'replacement database')
+            WHERE session_id = 'sqlite-demo';
+            """,
             at: replacement)
 
         let replacementLock = NSLock()
@@ -9828,8 +9834,10 @@ final class SessionParserTests: XCTestCase {
         try executeSQLite("UPDATE session_windows SET model = NULL, display_name = NULL WHERE session_id = 'sqlite-demo';", at: dbURL)
 
         let session = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: dbURL)?.first)
-        XCTAssertNil(session.model)
-        XCTAssertNil(session.lightweightTitle)
+        // NULL columns fall back only to the transcript read in the same snapshot
+        // (sessions imported from JSONL by 2026.10.5 have both columns NULL).
+        XCTAssertEqual(session.model, "record-model")
+        XCTAssertEqual(session.lightweightTitle, "OpenClaw SQLite fixture")
         XCTAssertEqual(session.eventCount, 4)
         let scan = try XCTUnwrap(OpenClawSqliteReader.loadTelemetry(for: session))
         XCTAssertEqual(scan.result.telemetry.currentConfiguration?.model, "record-model")

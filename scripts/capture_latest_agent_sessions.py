@@ -6,7 +6,8 @@ This is intended for "auto mode" evidence collection when upstream session forma
 - Antigravity: copy the newest markdown artifact from `~/.gemini/antigravity/brain/<conversation-id>/*.md`.
 - OpenCode: copy the newest `ses_*.json` plus the referenced message/part trees from
   `~/.local/share/opencode/storage/**`.
-- OpenClaw: copy the newest `*.jsonl` under OpenClaw/clawdbot session roots:
+- OpenClaw: export the newest session in `agents/*/agent/openclaw-agent.sqlite`
+  (2026.10.5+) as JSONL, else copy the newest legacy `*.jsonl` under
   `$OPENCLAW_STATE_DIR/agents/*/sessions/` (or `~/.openclaw` / `~/.clawdbot`).
 
 It does not modify or delete any source files.
@@ -316,7 +317,51 @@ def _iter_openclaw_session_files() -> list[Path]:
     return sorted(out, key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
 
 
+def _export_latest_openclaw_sqlite_session(db_path: Path, dst: Path) -> bool:
+    """Write the newest session in an OpenClaw 2026.10.5+ store as JSONL.
+
+    `transcript_events` rows keep the legacy JSONL record shapes; a row stored as
+    `event_zstd` is decoded (Python 3.14+ `compression.zstd`). Read-only.
+    """
+    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            "SELECT session_id FROM transcript_events GROUP BY session_id "
+            "ORDER BY MAX(created_at) DESC LIMIT 1;"
+        ).fetchone()
+        if row is None:
+            return False
+        columns = {str(r[1]) for r in conn.execute('PRAGMA table_info("transcript_events");')}
+        payload = "event_json, event_zstd" if "event_zstd" in columns else "event_json, NULL"
+        lines: list[str] = []
+        for event_json, event_zstd in conn.execute(
+            f"SELECT {payload} FROM transcript_events WHERE session_id = ? ORDER BY seq;", (row[0],)
+        ):
+            if event_json is None and event_zstd is not None:
+                from compression import zstd as _zstd  # Python 3.14+
+
+                event_json = _zstd.decompress(bytes(event_zstd)).decode("utf-8", errors="replace")
+            if isinstance(event_json, str):
+                lines.append(event_json)
+    finally:
+        conn.close()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
+
+
 def capture_openclaw(dest_root: Path) -> list[CaptureResult]:
+    databases: list[Path] = []
+    for candidate in _openclaw_root_candidates():
+        if (candidate / "agents").is_dir():
+            databases.extend(p for p in (candidate / "agents").glob("*/agent/openclaw-agent.sqlite") if p.is_file())
+    if databases:
+        db = max(databases, key=lambda p: p.stat().st_mtime)
+        agent_id = db.parent.parent.name
+        dst = dest_root / "openclaw" / "agents" / agent_id / "sqlite-latest-session.jsonl"
+        if _export_latest_openclaw_sqlite_session(db, dst):
+            return [CaptureResult(agent="openclaw", source=db, destination=dst)]
+
     candidates = _iter_openclaw_session_files()
     if not candidates:
         return []

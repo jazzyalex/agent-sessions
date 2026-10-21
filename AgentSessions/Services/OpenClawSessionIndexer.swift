@@ -494,6 +494,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             var readableDatabasePaths = Set<String>()
             var capturedDatabaseVersionsByPath: [String: String] = [:]
             var currentDatabaseSessionIDsByPath: [String: Set<String>] = [:]
+            let priorSQLiteSessions = existingSessions.filter(Self.isSQLiteSession)
             if databaseDiscovery.isAuthoritative {
                 for databaseURL in discoveredDatabaseURLs {
                     guard !databaseDiscovery.isOwnershipAmbiguous(forDatabaseURL: databaseURL) else {
@@ -502,9 +503,12 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                         // becomes unambiguous instead of minting an arbitrary ID.
                         continue
                     }
+                    // Hydrated rows let an unchanged session skip its transcript
+                    // preview read after a relaunch (the reader checks count and time).
                     guard let listResult = OpenClawSqliteReader.listSessionsWithStorageIdentity(
                         databaseURL: databaseURL,
-                        agentID: databaseDiscovery.agentID(forDatabaseURL: databaseURL)) else { continue }
+                        agentID: databaseDiscovery.agentID(forDatabaseURL: databaseURL),
+                        priorSessions: priorSQLiteSessions) else { continue }
                     let sessions = listResult.sessions
                     let databasePath = listResult.storageIdentity
                     readableDatabasePaths.insert(databasePath)
@@ -625,7 +629,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             // SQLite hydration is retained whenever discovery is incomplete.
             // A lexical path can be a broken alias or an unavailable mount;
             // only the authoritative, complete snapshot above may retire it.
-            let merged = Array(mergedByKey.values)
+            let merged = Self.preferringCurrentStore(Array(mergedByKey.values))
             let sortedSessions = merged.sorted { $0.modifiedAt > $1.modifiedAt }
             // Single archive fallback merge on the complete, deduplicated list.
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(
@@ -2128,6 +2132,56 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
 
     private static func mergeKey(for session: Session) -> String {
         isSQLiteSession(session) ? "sqlite:\(session.id)" : "file:\(session.filePath)"
+    }
+
+    /// Collapses a JSONL transcript and its SQLite copy into one row. OpenClaw
+    /// imports a JSONL transcript into the agent database under the same session
+    /// id; until the original moves to `session-sqlite-import-archive/` (or when a
+    /// deferred plugin import leaves it in `sessions/`), both are discovered.
+    ///
+    /// Only JSONL↔SQLite pairs collapse; rows of one store are never merged here.
+    /// Pairs match on the raw session id, so a configured agent id that differs
+    /// from its directory name still pairs. The SQLite row is the current store
+    /// and wins ties; live JSONL copies win only with strictly newer activity, and
+    /// a deleted JSONL copy never beats it. Output order is deterministic.
+    static func preferringCurrentStore(_ sessions: [Session]) -> [Session] {
+        func rawID(_ session: Session) -> String {
+            let parts = session.id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            return parts.count == 3 && parts[0] == "openclaw" ? String(parts[2]) : session.id
+        }
+        var sqliteByRawID: [String: [Session]] = [:]
+        var jsonlByRawID: [String: [Session]] = [:]
+        for session in sessions {
+            if isSQLiteSession(session) {
+                sqliteByRawID[rawID(session), default: []].append(session)
+            } else {
+                jsonlByRawID[rawID(session), default: []].append(session)
+            }
+        }
+        var result: [Session] = []
+        result.reserveCapacity(sessions.count)
+        var pairedJSONLKeys = Set<String>()
+        for (key, sqliteCopies) in sqliteByRawID {
+            // Two stores claiming one raw id is ambiguous: keep every row.
+            guard sqliteCopies.count == 1, let sqliteCopy = sqliteCopies.first,
+                  let copies = jsonlByRawID[key] else {
+                result.append(contentsOf: sqliteCopies)
+                continue
+            }
+            pairedJSONLKeys.insert(key)
+            let newerLive = copies.filter { !$0.isDeleted && $0.modifiedAt > sqliteCopy.modifiedAt }
+            if newerLive.isEmpty {
+                result.append(sqliteCopy)
+            } else {
+                result.append(contentsOf: newerLive)
+            }
+        }
+        for (key, copies) in jsonlByRawID where !pairedJSONLKeys.contains(key) {
+            result.append(contentsOf: copies)
+        }
+        // SQLite rows that lost to JSONL are dropped; rows with distinct ids in
+        // one store are all kept, so the input order only matters for ties.
+        return result.sorted { ($0.id, $0.filePath) < ($1.id, $1.filePath) }
     }
 
     private static func needsOriginProjectReparse(_ session: Session) -> Bool {
