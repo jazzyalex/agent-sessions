@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.7</title>
-            <pubDate>Thu, 15 Oct 2026 09:23:57 -0700</pubDate>
+            <title>6.0</title>
+            <pubDate>Tue, 20 Oct 2026 17:39:56 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,25 +27,33 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.7</h2>
+<h2>What&#x27;s New in 6.0</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Compressed Codex sessions stay in the list.</strong> The Codex desktop app now packs sessions idle for 7 days into <code>.jsonl.zst</code> files and deletes the originals. Agent Sessions reads them as before: same transcript, search, Session Info, images, stars and pins, and it never changes the files.</li>
-<li><strong>API-equivalent cost for eight more agents.</strong> Session Info prices OpenCode, OpenClaw, Hermes, Kimi, Cline, Qwen, Antigravity and DeepSeek Harness sessions from first-party list prices. A session without enough evidence says why instead of guessing.</li>
+<li><strong>Quota Meter in the notch.</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back.</li>
+<li><strong>OpenCode 2.x sessions.</strong> OpenCode 2.0 keeps new sessions in a new store, so they never reached the list. They do now, and sessions carried over from 1.x keep their full history.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>Notch, Desktop or Automatic.</strong> Pick where the Quota Meter lives in Settings, the View menu or its toolbar. Automatic uses the notch on the MacBook display and the desktop window on external monitors.</li>
+<li><strong>Wings or Minimal.</strong> Wings shows both agents beside the notch; Minimal draws two thin bars under it and leaves the menu bar free. Right-click the open notch for its toolbar.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li><strong>The notch takes over the menu bar limits item.</strong> If you used it, the Quota Meter moves to the notch, and a click on the notch opens the same menu. Desktop setups stay as they are, with a one-time offer to try the notch.</li>
+<li><strong>Free models read as Free.</strong> A session that ran only on free models with no published API price, such as OpenCode&#x27;s Big Pickle or a <code>-free</code> route, shows Free in Session Info instead of a dash.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Codex usage refresh no longer stalls on the update prompt.</strong> A newer Codex CLI opened an update menu, and the usage probe waited on it until the meter stopped refreshing.</li>
-<li><strong>Correct Claude 5.5 prices.</strong> Sonnet 5.5 cache reads are $0.10 per million tokens, and Haiku 5.5 now has a price.</li>
-<li><strong>Copilot costs count cache tokens once.</strong> Session Info billed Copilot cache tokens twice.</li>
+<li><strong>OpenCode prompts no longer go missing.</strong> A message that recorded file changes failed to load, which hid its prompt from the transcript.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.7">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.7</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0</a></p>
 </div>
             ]]></description>
-            <sparkle:version>81</sparkle:version>
-            <sparkle:shortVersionString>5.7</sparkle:shortVersionString>
+            <sparkle:version>82</sparkle:version>
+            <sparkle:shortVersionString>6.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.7/AgentSessions-5.7.dmg" length="29184057" type="application/octet-stream" sparkle:edSignature="72EsZJJavQxt8stLuR8XU8WeksKzM7CHuprPJAPvGDx48cS+N0/ZEhKpPg2x38MqAsdyFuVTN7O+T+Lsz//zCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg" length="29541270" type="application/octet-stream" sparkle:edSignature="qvC4ERNHOf1dCWcS2wVZG4bokgRcPB9gwCBFVBrLtKBoocZIKydU7o1vx8CidGsWn9VcfZR5AxMrKWCu/4N2BA=="/>
         </item>
     </channel>
 </rss>
