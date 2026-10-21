@@ -15,10 +15,23 @@ That is the whole job. One agent, your own installation, your own sessions.
 - If the format changed, reports the differences and attaches a generated redacted
   sample when one is available.
 
+## What we'd prefer, if you're up for it
+
+Two habits make the biggest difference. Both are preferred, not required.
+
+- **Check monthly without waiting for a ping.** Run `steward_check.py` about once a month,
+  and after a big release of your agent. Post the result, even "all good", on your
+  agent's steward issue.
+- **Send the fix as a PR.** When your agent's format or storage changes, a pull request
+  that updates its reader is the fastest path to support. You know the agent best.
+
+You can opt out of PRs and only report format checks. Say so once on your steward issue,
+and the maintainer will build the fixes from your reports.
+
 ## What a steward does not do
 
 - No commit rights. No review duty.
-- No code. You never have to open Xcode or write Swift.
+- No required code. Unless you choose to send PRs, you never have to open Xcode or write Swift.
 - No support rota, no response deadline. If you're busy, say so or say nothing — the agent
   moves to best-effort and that's fine.
 - No sharing of real transcripts. The check tool redacts before anything leaves your Mac,
