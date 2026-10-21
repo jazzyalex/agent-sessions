@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-10-21
+
 ### Highlights
 
 - **Every agent's latest format, checked.** Fresh sessions from Codex 0.163, Claude Code 2.1.306, OpenCode 2.1.2, Copilot 1.0.102, Cursor 2026.10.19, Hermes 0.22.4, OpenClaw 2026.10.5, Kimi 2.3, Pi 1.3, Grok 1.0.62, Cline 3.0.73 and DeepSeek Harness 0.2.1 all read cleanly.
