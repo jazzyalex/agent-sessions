@@ -27,12 +27,13 @@ final class TelemetryCostCalculatorTests: XCTestCase {
     private func event(_ model: String, input: Int, context: Int?,
                        speed: String = "standard",
                        ownership: TelemetryUsageOwnership = .session,
-                       cacheWrite5m: Int = 0, output: Int = 0) -> TelemetryUsageEvent {
+                       cacheRead: Int = 0, cacheWrite5m: Int = 0, cacheWrite1h: Int = 0,
+                       output: Int = 0) -> TelemetryUsageEvent {
         TelemetryUsageEvent(recordID: UUID().uuidString, observedAt: Date(), anchorLine: 0,
                             usageFamily: "token_count", ownership: ownership,
                             model: model, reasoningEffort: "high", speed: speed,
-                            freshInputTokens: input, cacheReadTokens: 0,
-                            cacheWrite5mTokens: cacheWrite5m, cacheWrite1hTokens: 0,
+                            freshInputTokens: input, cacheReadTokens: cacheRead,
+                            cacheWrite5mTokens: cacheWrite5m, cacheWrite1hTokens: cacheWrite1h,
                             outputTokens: output, contextInputTokens: context)
     }
 
@@ -122,11 +123,112 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         XCTAssertEqual(result.events.compactMap(\.apiEquivalentUSD).reduce(0, +), 3.2, accuracy: 0.000001)
     }
 
-    func testLongContextModelWithUnknownContextIsUnpriceable() {
+    // MARK: - Rollups and long-context tiers
+    //
+    // An event with no request context (`contextInputTokens == nil`) may sum many
+    // requests. Every request's prompt is inside the event's input total, so when
+    // that total is at or below the threshold no request in it crossed the threshold.
+
+    /// gpt-6-luna base: $0.10 input, $0.01 cached input, $0.50 output per MTok.
+    func testRollupBelowLongContextThresholdIsPricedAtBaseRate() throws {
         let result = TelemetryCostCalculator.price(
-            events: [event("gpt-5.6-sol", input: 100_000, context: nil)],
+            events: [event("gpt-6-luna", input: 200_000, context: nil,
+                           cacheRead: 50_000, output: 10_000)],
+            fallbackSlices: [], priceTable: table())
+        // 200k × $0.10 + 50k × $0.01 + 10k × $0.50 = $0.0255 (the long rate would be $0.0475).
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 0.0255, accuracy: 1e-12)
+        XCTAssertEqual(result.estimate.missingPriceComponents, [])
+        XCTAssertEqual(try XCTUnwrap(result.events.first?.apiEquivalentUSD), 0.0255, accuracy: 1e-12)
+    }
+
+    func testRollupAboveLongContextThresholdIsRefusedWithReason() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-6-luna", input: 200_000, context: nil,
+                           cacheRead: 72_001, output: 10_000)],
             fallbackSlices: [], priceTable: table())
         XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.missingPriceComponents, ["gpt-6-luna:contextInputTokens"])
+        XCTAssertNil(result.events.first?.apiEquivalentUSD)
+    }
+
+    /// The tier applies strictly above `thresholdInputTokens`, the same comparison
+    /// `RunwayModelPrice.rates(for:contextInputTokens:)` uses for one request.
+    func testRollupExactlyAtLongContextThresholdIsPricedAtBaseRate() throws {
+        let atThreshold = TelemetryCostCalculator.price(
+            events: [event("gpt-6-luna", input: 272_000, context: nil)],
+            fallbackSlices: [], priceTable: table())
+        // 272k × $0.10 = $0.0272.
+        XCTAssertEqual(try XCTUnwrap(atThreshold.estimate.apiEquivalentUSD), 0.0272, accuracy: 1e-12)
+
+        let oneOver = TelemetryCostCalculator.price(
+            events: [event("gpt-6-luna", input: 272_001, context: nil)],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertNil(oneOver.estimate.apiEquivalentUSD)
+        XCTAssertEqual(oneOver.estimate.missingPriceComponents, ["gpt-6-luna:contextInputTokens"])
+    }
+
+    /// grok-4.6's tier starts when the prompt REACHES 200k, so the row stores the
+    /// exclusive threshold 199,999. A 199,999-token rollup is base; 200,000 is not.
+    func testRollupHonorsExclusiveThresholdEncoding() throws {
+        let below = TelemetryCostCalculator.price(
+            events: [event("grok-4.6", input: 199_999, context: nil)],
+            fallbackSlices: [], priceTable: table())
+        // 199,999 × $2.00 per MTok.
+        XCTAssertEqual(try XCTUnwrap(below.estimate.apiEquivalentUSD), 0.399998, accuracy: 1e-12)
+
+        let reaches = TelemetryCostCalculator.price(
+            events: [event("grok-4.6", input: 200_000, context: nil)],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertNil(reaches.estimate.apiEquivalentUSD)
+        XCTAssertEqual(reaches.estimate.missingPriceComponents, ["grok-4.6:contextInputTokens"])
+    }
+
+    /// Cache reads and both cache-write kinds count toward the threshold.
+    func testRollupThresholdCountsCacheReadsAndWrites() {
+        for overflowing in [
+            event("gpt-6-luna", input: 270_000, context: nil, cacheRead: 2_001),
+            event("gpt-6-luna", input: 270_000, context: nil, cacheWrite5m: 2_001),
+            event("gpt-6-luna", input: 270_000, context: nil, cacheWrite1h: 2_001)
+        ] {
+            let result = TelemetryCostCalculator.price(events: [overflowing], fallbackSlices: [],
+                                                       priceTable: table())
+            XCTAssertNil(result.estimate.apiEquivalentUSD)
+            XCTAssertEqual(result.estimate.missingPriceComponents, ["gpt-6-luna:contextInputTokens"])
+        }
+    }
+
+    /// A negative component cannot bound anything; refuse instead of trusting it.
+    func testRollupWithNegativeComponentIsRefused() {
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-6-luna", input: 300_000, context: nil, cacheRead: -100_000)],
+            fallbackSlices: [], priceTable: table())
+        XCTAssertNil(result.estimate.apiEquivalentUSD)
+        XCTAssertEqual(result.estimate.missingPriceComponents, ["gpt-6-luna:contextInputTokens"])
+    }
+
+    /// A recorded request context still selects the tier, even when the event's own
+    /// token counts are small: the rollup bound never replaces real evidence.
+    func testPerRequestContextAboveThresholdStillUsesLongRate() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [event("gpt-6-luna", input: 100_000, context: 300_000)],
+            fallbackSlices: [], priceTable: table())
+        // 100k × $0.20 (2x long-context input) = $0.02.
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 0.02, accuracy: 1e-12)
+    }
+
+    /// Slices are per-model sums, so the same bound applies on the fallback path.
+    func testSliceRollupBelowThresholdIsPricedAndAboveIsRefused() throws {
+        let below = TelemetryCostCalculator.estimate(
+            slices: [slice("gpt-6-luna", fresh: 200_000, cacheRead: 72_000, output: 10_000)],
+            priceTable: table())
+        // 200k × $0.10 + 72k × $0.01 + 10k × $0.50 = $0.02572.
+        XCTAssertEqual(try XCTUnwrap(below.apiEquivalentUSD), 0.02572, accuracy: 1e-12)
+
+        let above = TelemetryCostCalculator.estimate(
+            slices: [slice("gpt-6-luna", fresh: 200_000, cacheRead: 72_001, output: 10_000)],
+            priceTable: table())
+        XCTAssertNil(above.apiEquivalentUSD)
+        XCTAssertEqual(above.missingPriceComponents, ["gpt-6-luna:contextInputTokens"])
     }
 
     func testCodexStyleAsymmetricComponentsDoNotDoubleCountInput() throws {

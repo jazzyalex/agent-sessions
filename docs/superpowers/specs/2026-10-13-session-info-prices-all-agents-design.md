@@ -53,7 +53,7 @@ is not a route-equivalent price. The help text already says "published rates".
 | Agent | Change |
 |---|---|
 | OpenCode, OpenClaw, Cline, DeepSeek Harness | `cost: .partial(reason)` after the reader audit in §6 |
-| Hermes | `cost: .partial(reason)`; models with a long-context tier stay unpriced (§6.1) |
+| Hermes | `cost: .partial(reason)`; a rollup above its model's long-context threshold stays unpriced (§6.1) |
 | Kimi | `cost: .partial(reason)`; priced from turn records only (§6.3) |
 | Qwen | `cost: .partial(reason)`; the opaque `coder-model` alias stays unpriced |
 | Antigravity | Model capture, per-event model, index repair (§8), then `cost: .partial(reason)` |
@@ -269,7 +269,7 @@ defaults, or borrows a value to produce a figure.
 | Evidence | Required when | Must come from | If absent |
 |---|---|---|---|
 | Model | Always | The usage record itself, or a model-selection record earlier in the same ordered stream | Unpriced: `(unknown)`. Never session metadata or "current model" |
-| `contextInputTokens` | The row has a `longContext` tier | One request. Never a sum over requests | Unpriced: `<model>:contextInputTokens` |
+| `contextInputTokens` | The row has a `longContext` tier and the event's input total is above its threshold (§6.1) | One request. Never a sum over requests | Unpriced: `<model>:contextInputTokens` |
 | Cache-write TTL | The event has cache-write tokens and the row prices 5-minute and 1-hour writes differently | A TTL field on the record, or a source whose TTL is proven (`cacheWriteTTLVerified`) | Unpriced: `<model>:cacheWriteTTL` |
 | Speed tier | The row has a `fast` rate set | An observed tier, or the explicit `standard-normalized` declaration that this source is priced at the standard list rate by definition | Unpriced: `<model>:<tier>`. `unknown` never maps to standard |
 
@@ -280,11 +280,41 @@ the confirmed violations are below.
 
 **6.1 Hermes.** `session_model_usage` is a per-model rollup, emitted as one
 event. Two 150K requests become one 300K "event" and would be billed at the
-long-context tier. Rollup events set `contextInputTokens: nil`. The calculator
-then refuses any model that has a `longContext` tier (`gpt-5.4`, `gpt-5.5`) and
-still prices models without one (`gpt-5.4-mini`, Claude Sonnet). Whether
-auxiliary rows such as `task = "vision"` are session-owned stays as it is
-today; the plan checks the upstream schema before the descriptor flips.
+long-context tier. Rollup events set `contextInputTokens: nil`. Models without a
+`longContext` tier (`gpt-5.4-mini`, Claude Sonnet) price as before.
+
+For a model with a `longContext` tier (`gpt-6-luna`, `gpt-5.5`, `grok-4.6`),
+the calculator bounds the rollup instead of refusing it outright:
+
+- **Bound.** Input total = fresh input + cache reads + 5-minute writes + 1-hour
+  writes. Every request in the rollup added its whole prompt to these sums, so
+  no single request can be larger than the total. The sum takes every input-side
+  kind, so whichever of them a vendor counts toward its threshold, that count is
+  no larger than the total. It is also the measure the per-request readers use
+  (Claude, Pi, Kimi, Cline) and the one weekly calibration already uses for
+  events without a context. Hermes itself defines
+  `prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens`, with
+  `input_tokens` already net of cache (`agent/usage_pricing.py`).
+- **At or below the threshold:** no request in the rollup reached the tier, so
+  the rollup prices at base rates. "At or below" uses the same comparison as one
+  request: the tier applies strictly above `thresholdInputTokens`. A row that
+  means "reaches N" stores N − 1 (`grok-4.6` stores 199,999), so a rollup of
+  exactly N is refused.
+- **Above the threshold:** refused, `<model>:contextInputTokens`. The rollup
+  may hold one long request or many short ones; no figure is right for both.
+- A negative component or an overflowing sum proves nothing and is refused.
+
+The rule is in `TelemetryCostCalculator` and applies to every event with
+`contextInputTokens: nil` and to every slice (slices are per-model sums). The
+current nil sources all satisfy the bound's premise, because each carries every
+input-side token of the requests it covers: Hermes rollups and the legacy
+`sessions` aggregate, Copilot `session.shutdown` model metrics and token
+details, Cline run totals, OpenClaw CLI-backend turns, and Qwen's overflow case.
+A reader that sets nil because its input count may omit part of the prompt
+must not rely on this rule. It refuses through another component instead.
+
+Whether auxiliary rows such as `task = "vision"` are session-owned stays as it
+is today; the plan checks the upstream schema before the descriptor flips.
 
 **6.2 OpenCode.** The reader stamps `row.model ?? metadataModel` on the usage
 event. Session metadata holds the current model, so an older row without its
@@ -367,7 +397,8 @@ Regressions. Each must fail on the pre-change code:
 - A v1-style bare-prefix lookup prices `kimi-k2.7-code-v2` from a
   `kimi-k2.7-code` row; the new matcher refuses it.
 - Hermes: two short requests rolled up above the threshold yield no figure,
-  never a long-tier figure.
+  never a long-tier figure. A rollup at or below the threshold prices at base
+  rates; one token over it yields no figure; cache reads and writes count.
 - OpenCode: after a model change, an older usage row with no model is unpriced.
 - Kimi: the session-summary fallback yields no figure and a stated reason.
 - Antigravity: capture stops at the sentence end; a mid-session switch splits

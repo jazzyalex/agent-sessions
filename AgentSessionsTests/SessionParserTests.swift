@@ -10936,11 +10936,31 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(telemetry.usageEvents.first?.reasoningOutputTokens, 2)
         XCTAssertEqual(telemetry.usageSlices.first?.model, "qwen3.5-9b")
         XCTAssertEqual(SessionSourceRegistry.descriptor(for: .hermes).telemetry.cost,
-                       .partial("models without a published first-party price are not estimated; per-model usage rollups cannot price models with a long-context tier"))
+                       .partial("models without a published first-party price are not estimated; a per-model usage rollup above its model's long-context threshold is not estimated"))
     }
 
-    /// gpt-5.4-mini, not gpt-5.4: Hermes rollups carry no request context size, so a
-    /// model with a long-context tier is refused by design.
+    /// Hermes on the Codex route runs gpt-6-luna, whose row has a 272K long-context
+    /// tier. A rollup whose whole input total is under the threshold cannot contain a
+    /// long-context request, so it prices at the base rate end to end.
+    func testHermesRollupBelowLongContextThresholdIsPricedThroughTheEngine() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Luna-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL, model: "gpt-6-luna")
+        let session = try XCTUnwrap(HermesStateDBReader.listSessions(dbURL: dbURL).first)
+        let telemetry = try await priceThroughEngine(session: session)
+
+        XCTAssertEqual(telemetry.usageEvents.map(\.model), ["gpt-6-luna"])
+        XCTAssertTrue(telemetry.usageEvents.allSatisfy { $0.contextInputTokens == nil },
+                      "the rollup still claims no request context size")
+        // gpt-6-luna base: 10 fresh × $0.10 + 20 output × $0.50, per MTok.
+        XCTAssertEqual(try XCTUnwrap(telemetry.costEstimate?.apiEquivalentUSD), 0.000011, accuracy: 1e-12)
+        XCTAssertEqual(telemetry.costEstimate?.unpricedModels, [])
+        XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, [])
+    }
+
     func testHermesModelUsageIsPricedThroughTheEngine() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Priced-\(UUID().uuidString)", isDirectory: true)
@@ -10961,7 +10981,8 @@ final class SessionParserTests: XCTestCase {
     }
 
     /// `session_model_usage` sums several requests into one row. Two 150K requests
-    /// must never be billed as one 300K long-context request.
+    /// must never be billed as one 300K long-context request, and a 300K rollup cannot
+    /// prove that no request crossed 272K, so it gets no figure at all.
     func testHermesRollupNeverSelectsALongContextTier() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-LongCtx-\(UUID().uuidString)", isDirectory: true)

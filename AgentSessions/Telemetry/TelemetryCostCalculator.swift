@@ -109,7 +109,15 @@ enum TelemetryCostCalculator {
                 appendOnce("\(slug):\(slice.speed)", to: &missingComponents)
                 continue
             }
-            if price.longContext != nil {
+            // A slice sums every request for its model, so it has no request
+            // context. It is priced only when its input total proves no request
+            // inside it reached the long-context tier; base rates then apply.
+            if let longContext = price.longContext,
+               !rollupStaysAtBaseRate(longContext,
+                                      fresh: slice.freshInputTokens,
+                                      cacheRead: slice.cacheReadTokens,
+                                      cacheWrite5m: slice.cacheWrite5mTokens,
+                                      cacheWrite1h: slice.cacheWrite1hTokens) {
                 appendOnce("\(slug):contextInputTokens", to: &missingComponents)
                 continue
             }
@@ -189,7 +197,15 @@ enum TelemetryCostCalculator {
             appendOnce("\(slug):\(event.speed)", to: &missingComponents)
             return nil
         }
-        if price.longContext != nil, event.contextInputTokens == nil {
+        // nil context means the event may sum several requests (a rollup or run
+        // total). It is priced only when its input total proves no request inside
+        // it reached the long-context tier; with no context passed, base rates apply.
+        if let longContext = price.longContext, event.contextInputTokens == nil,
+           !rollupStaysAtBaseRate(longContext,
+                                  fresh: event.freshInputTokens,
+                                  cacheRead: event.cacheReadTokens,
+                                  cacheWrite5m: event.cacheWrite5mTokens,
+                                  cacheWrite1h: event.cacheWrite1hTokens) {
             appendOnce("\(slug):contextInputTokens", to: &missingComponents)
             return nil
         }
@@ -227,6 +243,29 @@ enum TelemetryCostCalculator {
                              output: Double(event.outputTokens),
                              cacheWrite5m: Double(event.cacheWrite5mTokens),
                              cacheWrite1h: Double(event.cacheWrite1hTokens))
+    }
+
+    /// True when usage with no request context provably stayed at the base rate.
+    ///
+    /// Every request inside a rollup contributed its whole prompt (fresh input,
+    /// cache reads, and cache writes) to these sums. Whatever subset of these a
+    /// vendor counts toward its threshold, no single request's count can be larger
+    /// than their total. When the total is at or below the threshold, no request
+    /// crossed it. The comparison
+    /// matches `RunwayModelPrice.rates(for:contextInputTokens:inferenceGeo:)`: the
+    /// tier applies strictly above `thresholdInputTokens` (grok-4.6 stores 199,999
+    /// for "reaches 200k"). A negative component or an overflowing sum proves nothing.
+    private static func rollupStaysAtBaseRate(_ longContext: RunwayLongContextPrice,
+                                              fresh: Int, cacheRead: Int,
+                                              cacheWrite5m: Int, cacheWrite1h: Int) -> Bool {
+        var total = 0
+        for component in [fresh, cacheRead, cacheWrite5m, cacheWrite1h] {
+            guard component >= 0 else { return false }
+            let (sum, overflow) = total.addingReportingOverflow(component)
+            guard !overflow else { return false }
+            total = sum
+        }
+        return Double(total) <= longContext.thresholdInputTokens
     }
 
     /// A source without a cache-write count may carry writes inside its input count.

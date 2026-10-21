@@ -319,9 +319,11 @@ struct HermesTelemetryReader {
             outputTokens: row.output,
             reasoningOutputTokens: row.reasoning,
             // A `session_model_usage` row is a per-model rollup of many requests, so
-            // it has no request-level context size. nil makes the calculator refuse
-            // any model with a long-context tier instead of billing short requests
-            // at the long rate. The legacy `sessions` aggregate is the same shape.
+            // it has no request-level context size. With nil, the calculator prices a
+            // long-context model at base rates only while the row's whole input total
+            // (Hermes `prompt_tokens` = input + cache read + cache write) is at or below
+            // the threshold, and refuses above it. The legacy `sessions` aggregate is
+            // the same shape.
             contextInputTokens: nil))
 
         var slice = slices[row.model] ?? TelemetryUsageSlice(model: model,

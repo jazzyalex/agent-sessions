@@ -11,14 +11,16 @@ extension SessionSourceDescriptor {
         return SessionSourceDescriptor(
             source: .hermes,
             // `session_model_usage` rows are per-model rollups, so their events carry no
-            // request context size. Auxiliary tasks are parent-owned per the
+            // request context size. A rollup prices at base rates only while its whole
+            // input total is at or below the long-context threshold (spec §6.1).
+            // Auxiliary tasks are parent-owned per the
             // session_model_usage schema: rows are keyed by the owning session id
             // (HermesTelemetryReader queries `WHERE session_id = ?`), so they keep
             // `.session` ownership.
             telemetry: TelemetryCapabilities(
                 configuration: .supported,
                 tokens: .supported,
-                cost: .partial("models without a published first-party price are not estimated; per-model usage rollups cannot price models with a long-context tier"),
+                cost: .partial("models without a published first-party price are not estimated; a per-model usage rollup above its model's long-context threshold is not estimated"),
                 weeklyQuota: .unavailable("Hermes does not expose a compatible account quota feed"),
                 // One generic cache-write count with no TTL; see spec §6.5.
                 cacheWriteTTLVerified: false

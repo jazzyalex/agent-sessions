@@ -237,7 +237,12 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     public let outputTokens: Int
     public let reasoningOutputTokens: Int
     /// Total input presented to this request, including cached input when the
-    /// provider reports it. nil means the transcript cannot establish the value.
+    /// provider reports it. nil means the transcript cannot establish the value,
+    /// typically because the event sums several requests. A nil event must still
+    /// carry every input-side token (fresh, cache read, cache writes) of the requests
+    /// it covers: for a long-context row the calculator treats that sum as an upper
+    /// bound on any one request and prices at base rates when it is at or below the
+    /// threshold (spec §6.1).
     public let contextInputTokens: Int?
     /// API-equivalent cost under the stamped price-table identity.
     /// nil means unpriced or not yet priced; consult the session cost reasons.

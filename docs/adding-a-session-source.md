@@ -333,9 +333,16 @@ authority.
 | Evidence | Required when | Must come from | If absent |
 |---|---|---|---|
 | Model | Always | The usage record itself, or a model-selection record earlier in the same ordered stream | Unpriced: `(unknown)`. Never session metadata or "current model" |
-| `contextInputTokens` | The row has a `longContext` tier | One request. Never a sum over requests | Unpriced: `<model>:contextInputTokens` |
+| `contextInputTokens` | The row has a `longContext` tier and the event's input total (fresh + cache read + cache writes) is above its threshold | One request. Never a sum over requests | Unpriced: `<model>:contextInputTokens` |
 | Cache-write TTL | The event has cache-write tokens and the row prices 5-minute and 1-hour writes differently | A TTL field on the record, or a source whose TTL is proven (`cacheWriteTTLVerified`) | Unpriced: `<model>:cacheWriteTTL` |
 | Speed tier | The row has a `fast` rate set | An observed tier, or the explicit `standard-normalized` declaration that this source is priced at the standard list rate by definition | Unpriced: `<model>:<tier>`. `unknown` never maps to standard |
+
+Set `contextInputTokens: nil` when an event may sum several requests (a rollup or a run
+total). The calculator then treats the event's input total as an upper bound on any one
+request: at or below the threshold it prices at base rates, above it gives no figure
+(spec §6.1). This is safe only when the event carries every input-side token of the
+requests it covers. If your format's input count can omit part of the prompt, do not
+rely on this rule; refuse through another component instead.
 
 Two flags on `TelemetryCapabilities` (in `SessionSourceDescriptor.swift`) control the
 cache-write rules. The code default is `true` for both, because Claude and Codex keep it.
