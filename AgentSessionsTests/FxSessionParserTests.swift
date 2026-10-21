@@ -637,4 +637,97 @@ extension FxSessionParserTests {
         XCTAssertFalse(FxTelemetryReader.isSupported(session))
         XCTAssertNil(FxTelemetryReader.loadTelemetry(for: session))
     }
+
+    // MARK: - I/O failure and long logs
+
+    private func shortConversationFrames() -> [[String: Any]] {
+        [
+            frame(1, "user", ["text": "hello", "images": [], "work_id": NSNull()]),
+            frame(2, "assistant", ["text": "hi", "provider_replay": NSNull(), "standalone_response": false]),
+            frame(3, "turn_completed", ["files": [], "turn_summary": NSNull()]),
+            frame(4, "user", ["text": "again", "images": [], "work_id": NSNull()]),
+            frame(5, "assistant", ["text": "sure", "provider_replay": NSNull(), "standalone_response": false]),
+            frame(6, "turn_completed", ["files": [], "turn_summary": NSNull()])
+        ]
+    }
+
+    /// An `events.jsonl` that cannot be opened is a failed parse, not an empty
+    /// session: nil lets the caller keep the last good representation.
+    func testSchema4UnreadableEventLogFailsTheParse() throws {
+        let url = try stageSchema4(frames: shortConversationFrames())
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        }
+        // Positive control: the log really cannot be opened (not true as root).
+        XCTAssertThrowsError(try FileHandle(forReadingFrom: url))
+
+        XCTAssertNil(FxSessionParser.parseFileFull(at: url, allowLargeFile: true))
+        XCTAssertNil(FxSessionParser.parseFile(at: url))
+    }
+
+    /// A read error after the first frames ends the scan with an error, and
+    /// the parse fails rather than publishing the frames read so far.
+    func testSchema4ReadErrorMidLogFailsTheParse() throws {
+        let url = try stageSchema4(frames: shortConversationFrames())
+        let body = try Data(contentsOf: url)
+        // The first two complete lines (prompt + reply), then an I/O error.
+        let newlines = body.indices.filter { body[$0] == 0x0A }
+        let prefixBytes = newlines[1] + 1
+
+        func failingReader() -> (FileHandle, Int) throws -> Data {
+            var calls = 0
+            return { handle, count in
+                calls += 1
+                guard calls == 1 else { throw NSError(domain: "FxSessionParserTests", code: 5) }
+                return try handle.read(upToCount: min(count, prefixBytes)) ?? Data()
+            }
+        }
+
+        // Positive control: the same seam without the error reads the whole log.
+        let intact = try XCTUnwrap(FxSessionParser.parseFileForTesting(at: url, includeEvents: true) { handle, count in
+            try handle.read(upToCount: count) ?? Data()
+        })
+        XCTAssertEqual(intact.nonMetaCount, 4)
+
+        XCTAssertNil(FxSessionParser.parseFileForTesting(at: url, includeEvents: true, readChunk: failingReader()))
+        XCTAssertNil(FxSessionParser.parseFileForTesting(at: url, includeEvents: false, readChunk: failingReader()))
+    }
+
+    /// The lightweight pass builds events only for the head of the log, but
+    /// its count covers the whole log: it equals the full parse's count well
+    /// past the preview window.
+    func testSchema4LightweightCountCoversTheWholeLog() throws {
+        var frames: [[String: Any]] = []
+        var seq = 0
+        func next(_ kind: String, _ payload: [String: Any]) {
+            seq += 1
+            frames.append(frame(seq, kind, payload))
+        }
+        let turns = 120
+        for turn in 0..<turns {
+            next("user", ["text": "prompt \(turn)", "images": [], "work_id": NSNull()])
+            next("tool_call", ["call_id": "c\(turn)", "tool_name": "shell", "arguments_json": "{}"])
+            next("tool_result", toolResultPayload(callID: "c\(turn)", preview: "ok",
+                                                  artifactRef: "result-shell-\(turn).txt", storedBytes: 2))
+            next("assistant", ["text": "done \(turn)", "provider_replay": NSNull(), "standalone_response": false])
+            // An empty reply renders nothing and must not be counted by either pass.
+            next("assistant", ["text": "", "provider_replay": NSNull(), "standalone_response": false])
+            next("turn_completed", ["files": [], "turn_summary": NSNull()])
+            if turn % 40 == 39 {
+                next("context_checkpoint", ["covers_through_seq": seq, "summary": "so far"])
+            }
+        }
+        next("interrupted", ["reason": "cancelled", "partial_text": "half"])
+        XCTAssertGreaterThan(frames.count, 200 * 3, "fixture must run well past the preview window")
+        let url = try stageSchema4(frames: frames)
+
+        let full = try XCTUnwrap(FxSessionParser.parseFileFull(at: url, allowLargeFile: true))
+        let light = try XCTUnwrap(FxSessionParser.parseFile(at: url))
+
+        XCTAssertEqual(full.nonMetaCount, turns * 4 + 1)
+        XCTAssertEqual(light.eventCount, full.nonMetaCount)
+        XCTAssertEqual(light.events.count, 0)
+        XCTAssertEqual(light.lightweightTitle, "prompt 0")
+    }
 }
