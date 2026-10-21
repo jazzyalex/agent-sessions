@@ -10,9 +10,6 @@ enum QwenTelemetryReader {
     private static let speed = "standard-normalized"
     private static let usageFamily = "qwen.assistant.usageMetadata"
     private static let validTypes: Set<String> = ["user", "assistant", "tool_result", "system"]
-    private static let artifactSubtypes: Set<String> = [
-        "session_artifact_event", "session_artifact_snapshot"
-    ]
 
     private struct UsageComponents {
         let freshInput: Int
@@ -57,9 +54,11 @@ enum QwenTelemetryReader {
         let inheritedFromFork: Bool
         let anchorLine: Int
 
-        var isArtifact: Bool {
+        /// Same leaf-exclusion set as the transcript parser, so usage totals and the
+        /// rendered transcript always follow the same active chain.
+        var isNonConversation: Bool {
             type == "system"
-                && subtype.map { QwenTelemetryReader.artifactSubtypes.contains($0) } == true
+                && subtype.map { QwenSessionParser.nonConversationSystemSubtypes.contains($0) } == true
         }
     }
 
@@ -426,7 +425,7 @@ enum QwenTelemetryReader {
             } else {
                 firstIdentityRecordByUUID[record.uuid] = record
             }
-            if validTypes.contains(record.type), !record.isArtifact {
+            if validTypes.contains(record.type), !record.isNonConversation {
                 conversationRecords.append(record)
             }
         }

@@ -45,6 +45,15 @@ final class QwenIntegrationTests: XCTestCase {
         fixtureRoot.appendingPathComponent("\(syntheticUnknownSessionID).jsonl")
     }
 
+    private let synthetic0253SessionID = "019f0000-0000-7000-8000-000000000007"
+
+    /// SYNTHETIC, not a captured transcript. Modelled from the Qwen Code v0.25.3
+    /// source (chatRecordingService.ts write sites); exercises the parser and is not
+    /// evidence about the format.
+    private var synthetic0253Fixture: URL {
+        fixtureRoot.appendingPathComponent("\(synthetic0253SessionID).jsonl")
+    }
+
     private func makeTemporaryRoot() throws -> URL {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("qwen-integration-\(UUID().uuidString)", isDirectory: true)
@@ -951,6 +960,149 @@ final class QwenIntegrationTests: XCTestCase {
         let forked = try XCTUnwrap(session.events.first { $0.kind == .user })
         XCTAssertTrue(forked.rawJSON.contains("\"forkedFrom\""), forked.rawJSON)
         XCTAssertTrue(forked.rawJSON.contains("019f0000-0000-7000-8000-000000000001"), forked.rawJSON)
+    }
+
+    // MARK: - 0.25.x record shapes (synthetic, from the v0.25.3 source)
+
+    func testSynthetic0253RecordsMatchUpstreamDisplayRules() throws {
+        let census = try XCTUnwrap(QwenSessionParser.unrecognizedRecordCensus(at: synthetic0253Fixture))
+        XCTAssertEqual(census, [:], "every subtype in the fixture is in 0.25.3's KNOWN_RECORD_SUBTYPES")
+
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: synthetic0253Fixture))
+        XCTAssertTrue(session.events.allSatisfy { $0.role != QwenSessionParser.unrecognizedNoticeRole })
+        XCTAssertEqual(session.events.map(\.kind),
+                       [.meta, .meta, .user, .meta, .tool_call, .tool_result, .meta, .assistant,
+                        .meta, .meta, .meta, .meta])
+        XCTAssertEqual(session.events.compactMap(\.role).filter { $0.contains("_") }, [
+            "session_execution_engine", "session_approval_mode", "turn_attempt",
+            "code_mode_tool_result", "agent_mention", "agent_message",
+            "background_task_completed", "goal_turn_end"
+        ])
+        // user + tool_call + tool_result + assistant. The nested code-mode result and
+        // the two session multi-agent records are not conversation turns upstream.
+        XCTAssertEqual(session.eventCount, 4)
+        XCTAssertEqual(session.lightweightCommands, 1)
+
+        // Generated attachment tokens are stripped from the display text and title.
+        XCTAssertEqual(session.events.first { $0.kind == .user }?.text, "Summarize the synthetic notes.")
+        XCTAssertEqual(session.title, "Summarize the synthetic notes.")
+
+        // Agent records keep their UI text visible as metadata.
+        XCTAssertEqual(session.events.first { $0.role == "agent_message" }?.text,
+                       "Reviewer: the summary looks fine.")
+        XCTAssertEqual(session.events.first { $0.role == "agent_mention" }?.text,
+                       "@reviewer check the summary")
+
+        // The trailing session_sources_snapshot is not conversation: it is not the
+        // leaf, not rendered, and does not move the end time or the cwd.
+        XCTAssertFalse(session.events.contains { $0.role == "session_sources_snapshot" })
+        XCTAssertFalse(session.events.contains { $0.rawJSON.contains("session_sources_snapshot") })
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        XCTAssertEqual(session.endTime, try XCTUnwrap(formatter.date(from: "2026-10-21T10:00:11.000Z")))
+        XCTAssertEqual(session.cwd, "/tmp/synthetic")
+    }
+
+    func testNonConversationSubtypesCannotBecomeTheLeaf() throws {
+        // 0.25.3 isTranscriptConversationRecord excludes session_sources_snapshot and
+        // the three managed_session_*_v1 subtypes, exactly as it excludes the artifact
+        // subtypes. Here each one is written last with a parent on the dead branch; if
+        // it became the leaf, the dead answer would be the rendered transcript.
+        for (index, subtype) in ["session_sources_snapshot", "managed_session_header_v1",
+                                 "managed_session_event_v1", "managed_session_commit_v1"].enumerated() {
+            let root = try makeTemporaryRoot()
+            let id = "019f0000-0000-7000-8000-00000000003\(index)"
+            let url = root.appendingPathComponent("\(id).jsonl")
+            try writeJSONLines([
+                record(uuid: "nc-root", parentUUID: nil, sessionID: id, type: "user",
+                       timestamp: "2026-10-21T11:00:00.000Z", cwd: "/tmp/active",
+                       messageText: "Prompt."),
+                record(uuid: "nc-dead", parentUUID: "nc-root", sessionID: id, type: "assistant",
+                       timestamp: "2026-10-21T11:00:01.000Z", cwd: "/tmp/dead",
+                       messageText: "Dead answer."),
+                record(uuid: "nc-active", parentUUID: "nc-root", sessionID: id, type: "assistant",
+                       timestamp: "2026-10-21T11:00:02.000Z", cwd: "/tmp/active",
+                       messageText: "Active answer."),
+                record(uuid: "nc-side", parentUUID: "nc-dead", sessionID: id, type: "system",
+                       timestamp: "2026-10-21T11:00:03.000Z", cwd: "/tmp/dead", messageText: nil,
+                       subtype: subtype)
+            ], to: url)
+
+            let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url), subtype)
+            XCTAssertEqual(session.events.filter { $0.kind != .meta }.compactMap(\.text),
+                           ["Prompt.", "Active answer."], subtype)
+            XCTAssertFalse(session.events.contains { $0.role == subtype }, subtype)
+            XCTAssertEqual(session.cwd, "/tmp/active", subtype)
+            XCTAssertEqual(try XCTUnwrap(QwenSessionParser.unrecognizedRecordCensus(at: url)), [:], subtype)
+        }
+    }
+
+    func testSessionAgentRecordsAreNeverTheSessionTitle() throws {
+        // v0.25.3 recordExternalAgentRecordStrict: agent_mention / agent_message are
+        // type "user" but "never feed the auto title (only subtype-less user records do)".
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000040"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        try writeJSONLines([
+            record(uuid: "agent-first", parentUUID: nil, sessionID: id, type: "user",
+                   timestamp: "2026-10-21T12:00:00.000Z", cwd: "/tmp/agents",
+                   messageText: "Agent reply that arrived first.", subtype: "agent_message"),
+            record(uuid: "mention", parentUUID: "agent-first", sessionID: id, type: "user",
+                   timestamp: "2026-10-21T12:00:01.000Z", cwd: "/tmp/agents",
+                   messageText: "@helper please look", subtype: "agent_mention"),
+            record(uuid: "prompt", parentUUID: "mention", sessionID: id, type: "user",
+                   timestamp: "2026-10-21T12:00:02.000Z", cwd: "/tmp/agents",
+                   messageText: "The real prompt.")
+        ], to: url)
+
+        let full = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.title, "The real prompt.")
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.compactMap(\.text), ["The real prompt."])
+        XCTAssertEqual(full.events.filter { $0.kind == .meta }.compactMap(\.role),
+                       ["agent_message", "agent_mention"])
+        XCTAssertEqual(full.eventCount, 1)
+        let lightweight = try XCTUnwrap(QwenSessionParser.parseFile(at: url))
+        XCTAssertEqual(lightweight.title, "The real prompt.")
+    }
+
+    func testOnlyGeneratedResourceAttachmentTokensAreStripped() throws {
+        // Mirrors v0.25.3 stripGeneratedAttachmentTokens: only `resource` references
+        // generate a token, only an exact trailing "\n\n<tokens>" suffix (or the whole
+        // text) is removed, and the attachment id is encodeURIComponent-escaped.
+        let root = try makeTemporaryRoot()
+        let id = "019f0000-0000-7000-8000-000000000041"
+        let url = root.appendingPathComponent("\(id).jsonl")
+        func prompt(_ uuid: String, parent: String?, second: Int, display: String,
+                    references: [[String: Any]]) -> [String: Any] {
+            var object = record(uuid: uuid, parentUUID: parent, sessionID: id, type: "user",
+                                timestamp: "2026-10-21T13:00:0\(second).000Z", cwd: "/tmp/att",
+                                messageText: display)
+            object["systemPayload"] = ["displayText": display, "attachmentReferences": references]
+            return object
+        }
+        let resource: [String: Any] = ["type": "resource", "attachmentId": "a b/ü(1).md"]
+        let image: [String: Any] = ["type": "image", "attachmentId": "pic.png"]
+        try writeJSONLines([
+            prompt("p1", parent: nil, second: 0,
+                   display: "@attachment:///a%20b%2F%C3%BC(1).md", references: [resource]),
+            prompt("p2", parent: "p1", second: 1,
+                   display: "Two files.\n\n@attachment:///a%20b%2F%C3%BC(1).md\n@attachment:///x",
+                   references: [resource, ["type": "resource", "attachmentId": "x"]]),
+            prompt("p3", parent: "p2", second: 2,
+                   display: "Image only.\n\n@attachment:///pic.png", references: [image]),
+            prompt("p4", parent: "p3", second: 3,
+                   display: "Not a suffix @attachment:///x", references: [["type": "resource", "attachmentId": "x"]])
+        ], to: url)
+
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(session.events.filter { $0.kind == .user }.map { $0.text ?? "<nil>" }, [
+            "",
+            "Two files.",
+            "Image only.\n\n@attachment:///pic.png",
+            "Not a suffix @attachment:///x"
+        ])
+        // An all-token prompt has no title text, so the next prompt names the session.
+        XCTAssertEqual(session.title, "Two files.")
     }
 
     func testArchiveBackfillCollapsesDuplicateSessionIDsWithoutTrapping() throws {

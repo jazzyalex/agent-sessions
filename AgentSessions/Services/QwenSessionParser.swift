@@ -89,33 +89,54 @@ enum QwenSessionParser {
     private static let validRecordTypes: Set<String> = [
         "user", "assistant", "tool_result", "system"
     ]
-    private static let artifactSubtypes: Set<String> = [
-        "session_artifact_event", "session_artifact_snapshot"
-    ]
-    private static let runtimeUserSubtypes: Set<String> = [
-        "goal_runtime", "cron", "notification"
+    /// System subtypes that are never conversation records: they cannot be the active
+    /// leaf, never join the chain walk, and never render. Mirrors
+    /// `isTranscriptConversationRecord` in Qwen Code v0.25.3
+    /// (`packages/core/src/utils/transcript-records.ts`): the two artifact subtypes
+    /// (0.22.x) plus `NON_CONVERSATION_RECORD_SUBTYPES` (new in 0.25.x). Upstream writes
+    /// all of them with `updateActiveTail: false`, so a trailing one would otherwise
+    /// become the leaf. `QwenTelemetryReader` uses the same set for its chain.
+    static let nonConversationSystemSubtypes: Set<String> = [
+        "session_artifact_event", "session_artifact_snapshot",
+        "session_sources_snapshot",
+        "managed_session_header_v1", "managed_session_event_v1", "managed_session_commit_v1"
     ]
 
-    /// `KNOWN_RECORD_SUBTYPES` as shipped in 0.22.3
-    /// (`packages/core/src/utils/transcript-records.ts`, read from the installed
-    /// `@qwen-code/qwen-code@0.22.3` package). Used only to decide whether a record is
-    /// *novel*; it deliberately does not change how any of these render. Everything here
-    /// is written with `createBaseRecord("system")` except `goal_runtime` and
-    /// `mid_turn_user_message` (`"user"`) and `realtime_message` (the entry's own role),
-    /// so the system-typed ones already reach the transcript as meta.
-    ///
-    /// `user_text_elements` is included because 0.22.3 writes it, even though upstream
-    /// omitted it from its own known set — without it every such record would read as
-    /// novelty on the first real transcript.
+    /// User-typed records that are not user prompts: they render as metadata and never
+    /// name the session. `agent_mention` / `agent_message` (session multi-agent, new in
+    /// 0.25.x) are written by `recordExternalAgentRecordStrict` as `type: "user"`, and
+    /// upstream says they "never feed the auto title" and never start a turn
+    /// (`REPLAY_MID_TURN_USER_SUBTYPES` in v0.25.3 `session-transcript-reader.ts`).
+    private static let runtimeUserSubtypes: Set<String> = [
+        "goal_runtime", "cron", "notification", "agent_mention", "agent_message"
+    ]
+
+    /// Nested tool results from code mode (v0.25.3 `codeModeToolResultStamp`). They
+    /// have no matching `functionCall` in an assistant record, and upstream replay and
+    /// file stats skip them (`isInternalCodeModeToolResult`), so they render as meta.
+    private static let codeModeToolResultSubtype = "code_mode_tool_result"
+
+    /// `KNOWN_RECORD_SUBTYPES` as shipped in Qwen Code v0.25.3
+    /// (`packages/core/src/utils/transcript-records.ts`, read at the v0.25.3 tag and in
+    /// the installed `@qwen-code/qwen-code@0.25.3` bundle). Used only to decide whether
+    /// a record is *novel*; it does not change how any of these render. 0.25.x added
+    /// `background_task_completed`, `agent_session_ready`, `omni_recall`,
+    /// `session_execution_engine`, `session_sources_snapshot`, `session_approval_mode`,
+    /// `goal_turn_end`, `code_mode_tool_result`, `turn_attempt`, `agent_mention`,
+    /// `agent_message`, and the three `managed_session_*_v1` subtypes; it also added
+    /// `user_text_elements`, which 0.22.3 wrote but omitted from its own set.
     private static let knownRecordSubtypes: Set<String> = [
         "chat_compression", "slash_command", "ui_telemetry", "at_command",
-        "attribution_snapshot", "notification", "cron", "mid_turn_user_message",
-        "realtime_message", "custom_title", "parent_session", "rewind",
-        "agent_bootstrap", "agent_launch_prompt", "agent_retry",
-        "file_history_snapshot", "session_source", "session_model",
-        "branch_checkpoint", "goal_state", "goal_runtime", "turn_result",
-        "user_text_elements",
-        "session_artifact_event", "session_artifact_snapshot"
+        "attribution_snapshot", "notification", "background_task_completed", "cron",
+        "mid_turn_user_message", "realtime_message", "custom_title", "parent_session",
+        "rewind", "agent_bootstrap", "agent_launch_prompt", "agent_retry",
+        "agent_session_ready", "file_history_snapshot", "session_source", "session_model",
+        "omni_recall", "session_execution_engine", "session_sources_snapshot",
+        "session_approval_mode", "branch_checkpoint", "goal_state", "goal_runtime",
+        "goal_turn_end", "code_mode_tool_result", "turn_result", "turn_attempt",
+        "user_text_elements", "agent_mention", "agent_message",
+        "session_artifact_event", "session_artifact_snapshot",
+        "managed_session_header_v1", "managed_session_event_v1", "managed_session_commit_v1"
     ]
 
     /// Counts records this parser does not recognise, keyed by the unknown top-level
@@ -162,8 +183,8 @@ enum QwenSessionParser {
         let subtype: String?
         let physicalIndex: Int
 
-        var isArtifact: Bool {
-            type == "system" && subtype.map(artifactSubtypes.contains) == true
+        var isNonConversation: Bool {
+            type == "system" && subtype.map(nonConversationSystemSubtypes.contains) == true
         }
     }
 
@@ -213,7 +234,7 @@ enum QwenSessionParser {
             }
         }
 
-        let conversationRecords = allRecords.filter { !$0.isArtifact }
+        let conversationRecords = allRecords.filter { !$0.isNonConversation }
         guard let leafUUID = conversationRecords.last?.uuid else { return nil }
 
         var fragmentsByUUID: [String: [Record]] = [:]
@@ -581,6 +602,16 @@ enum QwenSessionParser {
             return output
 
         case "tool_result":
+            if record.subtype == codeModeToolResultSubtype {
+                let response = parts.lazy
+                    .compactMap { ($0 as? [String: Any])?["functionResponse"] as? [String: Any] }
+                    .first
+                return [event(id: "\(record.uuid)-m", timestamp: timestamp, kind: .meta,
+                              role: record.subtype, text: toolResponseText(response?["response"]),
+                              toolName: response?["name"] as? String,
+                              messageID: response?["id"] as? String,
+                              rawJSON: rawJSON, parentID: record.parentUUID)]
+            }
             var output: [SessionEvent] = []
             for (partIndex, value) in parts.enumerated() {
                 guard let part = value as? [String: Any],
@@ -632,14 +663,14 @@ enum QwenSessionParser {
     }
 
     private static func userDisplayText(from object: [String: Any]) -> String? {
-        if let payload = object["systemPayload"] as? [String: Any],
-           let displayText = payload["displayText"] as? String {
-            return displayText
+        let payload = object["systemPayload"] as? [String: Any]
+        if let displayText = payload?["displayText"] as? String {
+            return strippingGeneratedAttachmentTokens(displayText, payload: payload)
         }
 
         guard let message = object["message"] as? [String: Any],
               var parts = message["parts"] as? [Any] else { return nil }
-        if !(object["systemPayload"] is [String: Any]),
+        if payload == nil,
            parts.count > 1,
            isUserPromptSubmitContextPart(parts[parts.count - 1]) {
             parts.removeLast()
@@ -650,11 +681,47 @@ enum QwenSessionParser {
     private static func systemText(from object: [String: Any]) -> String? {
         if let payload = object["systemPayload"] as? [String: Any] {
             for key in ["customTitle", "displayText", "text", "message", "content"] {
-                if let value = payload[key] as? String, !value.isEmpty { return value }
+                if let value = payload[key] as? String, !value.isEmpty {
+                    return key == "displayText"
+                        ? strippingGeneratedAttachmentTokens(value, payload: payload)
+                        : value
+                }
             }
         }
         return messageText(from: object)
     }
+
+    /// Mirrors `stripGeneratedAttachmentTokens` from Qwen Code v0.25.3
+    /// (`packages/core/src/utils/transcript-records.ts`). The daemon appends one
+    /// `@attachment:///<encodeURIComponent(id)>` token per `resource` attachment
+    /// reference to the display text; upstream removes exactly that trailing
+    /// `"\n\n<tokens>"` block, or the whole text when it is only the tokens. Image
+    /// references generate no token. Comparison is on UTF-16 code units, like JS.
+    static func strippingGeneratedAttachmentTokens(_ text: String, payload: [String: Any]?) -> String {
+        guard let references = payload?["attachmentReferences"] as? [Any] else { return text }
+        let tokens = references.compactMap { value -> String? in
+            guard let reference = value as? [String: Any],
+                  reference["type"] as? String == "resource",
+                  let attachmentID = reference["attachmentId"] as? String,
+                  let encoded = attachmentID.addingPercentEncoding(
+                      withAllowedCharacters: encodeURIComponentAllowed) else { return nil }
+            return "@attachment:///\(encoded)"
+        }
+        guard !tokens.isEmpty else { return text }
+        let tokenText = tokens.joined(separator: "\n")
+        if text == tokenText { return "" }
+        let units = Array(text.utf16)
+        let suffix = Array("\n\n\(tokenText)".utf16)
+        guard units.count >= suffix.count, units.suffix(suffix.count).elementsEqual(suffix) else {
+            return text
+        }
+        return String(decoding: units.dropLast(suffix.count), as: UTF16.self)
+    }
+
+    /// The characters JavaScript's `encodeURIComponent` leaves unescaped.
+    private static let encodeURIComponentAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+    )
 
     private static func messageText(from object: [String: Any]) -> String? {
         guard let message = object["message"] as? [String: Any],

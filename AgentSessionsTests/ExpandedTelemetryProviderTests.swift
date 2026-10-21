@@ -337,6 +337,31 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         XCTAssertEqual(telemetry.costEstimate?.missingPriceComponents, ["claude-sonnet-5:cacheWrite"])
     }
 
+    /// Qwen Code 0.25.3 `isTranscriptConversationRecord` excludes
+    /// session_sources_snapshot and the managed_session_*_v1 journal records from
+    /// leaf selection. One written last with a dead-branch parent must not pull the
+    /// dead branch's usage into the session total.
+    func testQwenNonConversationRecordWrittenLastDoesNotSelectTheDeadBranch() throws {
+        let sessionID = "12345678-1234-1234-1234-123456789016"
+        let session = try makeQwenSession(id: sessionID, records: [
+            qwenRecord(id: "nc-root", parent: nil, sessionID: sessionID, type: "user",
+                       timestamp: "2026-10-21T20:00:00.000Z"),
+            qwenRecord(id: "nc-dead", parent: "nc-root", sessionID: sessionID, type: "assistant",
+                       timestamp: "2026-10-21T20:00:01.000Z", model: "dead-branch",
+                       usage: qwenUsage(prompt: 900, cached: 100, output: 90, thoughts: 5)),
+            qwenRecord(id: "nc-active", parent: "nc-root", sessionID: sessionID, type: "assistant",
+                       timestamp: "2026-10-21T20:00:02.000Z", model: "qwen-active",
+                       usage: qwenUsage(prompt: 20, cached: 5, output: 6, thoughts: 2)),
+            qwenRecord(id: "nc-snapshot", parent: "nc-dead", sessionID: sessionID, type: "system",
+                       timestamp: "2026-10-21T20:00:03.000Z", subtype: "session_sources_snapshot",
+                       systemPayload: ["version": 1, "revision": 1, "sources": []])
+        ])
+
+        let telemetry = try XCTUnwrap(QwenTelemetryReader.loadTelemetry(for: session)?.result.telemetry)
+        XCTAssertEqual(telemetry.usageSummary?.topLineTokens, 26)
+        XCTAssertFalse(telemetry.usageSlices.contains { $0.model == "dead-branch" })
+    }
+
     func testQwenFailsClosedWhenAssistantUsageIsMalformed() throws {
         let sessionID = "12345678-1234-1234-1234-123456789013"
         let session = try makeQwenSession(id: sessionID, records: [

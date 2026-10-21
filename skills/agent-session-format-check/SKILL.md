@@ -255,7 +255,13 @@ because it decides whether there is engineering work to do:
   OpenRouter, Fireworks AI, or another provider," and `qwen auth` is itself "(removed)"
   in 0.21.x. No driver, re-login, or fixture can produce a session. Record the verdict
   honestly as `blocked_stale_sample`, say why in the matrix, and stop — it is a billing
-  decision for the maintainer, not a task.
+  decision for the maintainer, not a task. What you *can* still do is a source review:
+  diff the writer and reader between the last reviewed tag and the installed one
+  (QwenLM/qwen-code `chatRecordingService.ts`, `transcript-records.ts`,
+  `sessionService.ts`, `session-transcript-reader.ts`) and mirror changed reader rules
+  with synthetic fixtures kept out of `evidence_fixtures`. The 2026-10-21 review of
+  0.22.3 → 0.25.3 found four such rules. Record it as "source-reviewed through X", never
+  as a ceiling bump.
 
 Do not let category three masquerade as category one. A missing driver looks like
 engineering work right up until you try to authenticate.
