@@ -64,7 +64,7 @@ extension SessionSourceDescriptor {
                     let custom = defaults.string(forKey: FxPreferencesKey.sessionsRootOverride)
                     let discovery = FxSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
                     for url in discovery.discoverSessionFiles() {
-                        if let id = FxSessionDiscovery.sessionID(forCheckpoint: url) {
+                        if let id = FxSessionDiscovery.sessionID(forSessionFile: url) {
                             map[id] = url
                         }
                     }

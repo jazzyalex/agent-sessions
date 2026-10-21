@@ -3382,6 +3382,8 @@ def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -
         return _kimi_wire_schema_fingerprint(path, max_lines=max_lines)
     if agent_name == "grok":
         return _grok_session_schema_fingerprint(path, max_lines=max_lines)
+    if agent_name == "fx":
+        return _fx_session_schema_fingerprint(path, max_lines=max_lines)
     if agent_name in _NESTED_PAYLOAD_AGENTS:
         return _nested_jsonl_schema_fingerprint(
             path,
@@ -4256,6 +4258,155 @@ def _fx_checkpoint_schema_fingerprint(path: Path) -> dict[str, Any]:
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "parse_errors": 0,
     }
+
+
+# Nested records inside a schema-4 frame payload that carry user-visible facts.
+# Each is bucketed as `event.<kind>.<name>`; list-valued ones are unioned.
+_FX_EVENT_NESTED: dict[str, tuple[tuple[str, str], ...]] = {
+    "user": (("images", "image"),),
+    "assistant": (("provider_replay", "provider_replay"),),
+    "tool_result": (("committed_file_presentation", "committed_file_presentation"),),
+    "turn_completed": (("files", "file"), ("turn_summary", "turn_summary")),
+    "interrupted": (("files", "file"), ("turn_summary", "turn_summary")),
+}
+
+
+def _fx_events_schema_fingerprint(path: Path, max_lines: int = 5000) -> dict[str, Any]:
+    """
+    Fingerprint one fx schema-4 session: `events.jsonl` plus its sidecars.
+
+    fx 0.0.8+ (verified at upstream v0.0.14) writes one conversation frame per
+    line: `{schema_version, seq, timestamp_ms, event: {<kind>: payload}}`
+    (`session_event.zig` `ConversationEnvelope`). The kind is the payload's single
+    key, so frames bucket as `event.<kind>`; the envelope itself is `event`.
+    The nested records in `_FX_EVENT_NESTED` get their own buckets. A line
+    without an `event` object (a schema-3 `kind`/`payload` infrastructure record)
+    lands in `<not-a-frame>` so it cannot pass as a frame.
+
+    Unlike the schema-3 checkpoint walker, null-valued keys count: fx writes
+    every optional field explicitly (`emit_null_optional_fields` defaults on), so
+    a null key is schema, not absence.
+
+    Sidecars beside the log: `session.json` buckets as `session` (shared with the
+    schema-3 manifest so steward_check's session.json export keeps working) and
+    `recovery.json`, when present, as `recovery` / `recovery.checkpoint`. A probe
+    file with no siblings fingerprints its frames alone, which is what
+    steward_check's per-record drift harvest relies on.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors = 0
+    parsed_lines = 0
+
+    def _add(bucket: str, obj: dict[str, Any]) -> None:
+        type_counts[bucket] = type_counts.get(bucket, 0) + 1
+        type_keys.setdefault(bucket, set()).update(obj.keys())
+
+    try:
+        lines = _tail_lines(path, max_lines)
+    except _SESSION_READ_ERRORS:
+        lines = []
+    for raw in lines:
+        parsed_lines += 1
+        try:
+            frame = json.loads(raw)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if not isinstance(frame, dict):
+            continue
+        envelope = frame.get("event")
+        if not isinstance(envelope, dict) or len(envelope) != 1:
+            _add("<not-a-frame>", frame)
+            continue
+        _add("event", frame)
+        kind, payload = next(iter(envelope.items()))
+        bucket = f"event.{kind}"
+        if not isinstance(payload, dict):
+            _add(f"{bucket}.<non-object>", {})
+            continue
+        _add(bucket, payload)
+        for key, name in _FX_EVENT_NESTED.get(kind, ()):
+            value = payload.get(key)
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if isinstance(item, dict):
+                    _add(f"{bucket}.{name}", item)
+
+    for sidecar_name, bucket in (("session.json", "session"), ("recovery.json", "recovery")):
+        sidecar = path.parent / sidecar_name
+        if not sidecar.is_file():
+            continue
+        obj, _err = _read_json_object(sidecar)
+        if not isinstance(obj, dict):
+            continue
+        _add(bucket, obj)
+        checkpoint = obj.get("checkpoint") if bucket == "recovery" else None
+        if isinstance(checkpoint, dict):
+            _add("recovery.checkpoint", checkpoint)
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(type_keys[k]) for k in sorted(type_keys)},
+        "parsed_lines": parsed_lines,
+        "parse_errors": parse_errors,
+    }
+
+
+def _fx_session_schema_fingerprint(path: Path, max_lines: int = 5000) -> dict[str, Any]:
+    """Route an fx session file to its layout's fingerprint (see `_fx_session_unit`)."""
+    if path.name.endswith(".jsonl"):
+        return _fx_events_schema_fingerprint(path, max_lines=max_lines)
+    return _fx_checkpoint_schema_fingerprint(path)
+
+
+_FX_RESERVED_DIR_NAMES = frozenset({"latest", "v2"})
+
+
+def _fx_session_unit(directory: Path) -> Path | None:
+    """The file that stands for one fx session directory, mirroring FxSessionDiscovery.
+
+    Schema 3 (fx <= 0.0.7): `checkpoint.json`. Schema 4 (fx 0.0.8+):
+    `events.jsonl`, only when there is no checkpoint and no `authority.json` --
+    a schema-3 directory whose checkpoint never materialized keeps its authority
+    file, and its `events.jsonl` is write-ahead infrastructure, not a transcript.
+    Both layouts require the `session.json` sidecar.
+    """
+    if not (directory / "session.json").is_file():
+        return None
+    checkpoint = directory / "checkpoint.json"
+    if checkpoint.is_file():
+        return checkpoint
+    if (directory / "authority.json").exists():
+        return None
+    events = directory / "events.jsonl"
+    return events if events.is_file() else None
+
+
+def _fx_newest_session_files(roots: list[str], count: int) -> list[Path]:
+    """The `count` newest fx sessions across both layouts, newest first.
+
+    `latest/` (the CLI's pointer) and `v2/` (the opt-in sessions-v2 root that
+    fx 0.0.14 reserves inside the sessions folder) are never sessions.
+    """
+    scored: list[tuple[float, Path]] = []
+    for r in roots:
+        root = _expand_path(r)
+        if not root.is_dir():
+            continue
+        for directory in root.iterdir():
+            if not directory.is_dir() or directory.name.lower() in _FX_RESERVED_DIR_NAMES:
+                continue
+            unit = _fx_session_unit(directory)
+            if unit is None:
+                continue
+            try:
+                scored.append((unit.stat().st_mtime, unit))
+            except OSError:
+                continue
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [p for _, p in scored[:count]]
 
 
 def _cline_session_schema_fingerprint(path: Path) -> dict[str, Any]:
@@ -5143,16 +5294,18 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
                 fps.append(_devin_fixture_file_schema_fingerprint(bp))
     elif agent_name == "fx":
         # fx's live store is JSON in the same shape as the fixture, so baseline
-        # and live share one fingerprint — no projection to keep in step.
+        # and live share one fingerprint — no projection to keep in step. The
+        # baseline unions both layouts: schema-3 `checkpoint.json` fixtures and
+        # schema-4 `events.jsonl` fixtures (whose sidecars sit beside them).
         for p in filtered:
-            # Matrix records the fixture as "…/checkpoint.json (+ session.json, display.json)"
+            # Matrix records fixtures as "…/checkpoint.json (+ session.json, display.json)"
             # so the sidecar note must be stripped before the path check.
             base = p.split(" (")[0].strip()
-            if not base.endswith("checkpoint.json"):
+            if not (base.endswith("checkpoint.json") or base.endswith("events.jsonl")):
                 continue
             bp = Path(base)
             if bp.exists():
-                fps.append(_fx_checkpoint_schema_fingerprint(bp))
+                fps.append(_fx_session_schema_fingerprint(bp))
     elif agent_name == "cline":
         # The matrix lists both files in each fixture pair. The manifest is the
         # canonical session file; its fingerprinter opens the adjacent transcript.
@@ -7380,9 +7533,25 @@ def main(argv: list[str]) -> int:
                         newest = max(db_candidates, key=lambda x: x.stat().st_mtime)
                         local_fp = _devin_sqlite_latest_session_schema_fingerprint(newest, max_nodes=max_nodes)
                 elif kind == "fx_latest_session":
-                    newest = _newest_file(roots, glob)
-                    if newest:
-                        local_fp = _fx_checkpoint_schema_fingerprint(newest)
+                    # Per-directory selection, not the glob: a store can mix
+                    # schema-3 checkpoints and schema-4 event logs, and a
+                    # schema-3 directory also has an events.jsonl that is not a
+                    # transcript. Union the newest few, as for other agents.
+                    recent = _fx_newest_session_files(roots, _LOCAL_SCHEMA_SAMPLE_COUNT)
+                    if recent:
+                        newest = recent[0]
+                        sampled_fps = [_fx_session_schema_fingerprint(path) for path in recent]
+                        local_fp = sampled_fps[0]
+                        local_fp["type_keys"] = _merge_type_keys(sampled_fps)
+                        merged_counts: dict[str, int] = {}
+                        for fingerprint in sampled_fps:
+                            for event_type, count in (fingerprint.get("type_counts") or {}).items():
+                                merged_counts[event_type] = merged_counts.get(event_type, 0) + int(count)
+                        local_fp["type_counts"] = dict(sorted(merged_counts.items()))
+                        local_fp["parse_errors"] = sum(
+                            int(fingerprint.get("parse_errors") or 0) for fingerprint in sampled_fps
+                        )
+                        local_fp["sampled_files"] = [str(path) for path in recent]
                 elif kind == "cline_latest_session":
                     roots = _cline_effective_roots(roots)
                     exclude_cfg = local_schema_cfg.get("exclude_globs")

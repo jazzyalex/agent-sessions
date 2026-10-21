@@ -118,6 +118,10 @@ def _all_sessions(agent: str, cfg: dict, limit: int | None) -> list[Path]:
     excludes = ls.get("exclude_globs")
     required = ls.get("required_types") or []
     huge = limit or 100000
+    if agent == "fx":
+        # One file per session directory across both fx layouts; the glob
+        # cannot tell a schema-4 transcript from a schema-3 infrastructure log.
+        return agent_watch._fx_newest_session_files(roots, huge)
     if required:
         return agent_watch._newest_files_with_types(
             roots, glob, required, huge, max_lines=400, exclude_globs=excludes)

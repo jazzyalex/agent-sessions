@@ -702,7 +702,14 @@
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["devin", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.devin_cli.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://docs.devin.ai/cli/changelog/stable.md",
+          "pattern": "(?m)^\\*\\*v(\\d+\\.\\d+\\.\\d+)\\*\\*\\s*$",
+          "note": "Devin CLI stable-channel changelog (markdown). Each release is a bold heading line such as **v3000.11.92**; the anchored pattern skips versions quoted in release-note prose. The page also lists early calendar versions (v2026.8.18), which the 3000.x builds outrank, so the max is the current stable build. The matrix records the steward's build with its commit, 3000.6.7 (260a97c8); version comparison reads only the numeric triple. Devin is STEWARD-VERIFIED and normally not installed here (SKILL 1g): this source is the ping trigger, not a bump signal."
+        }
+      ],
       "risk_keywords": {
         "schema": ["session", "sessions.db", "sqlite", "schema", "migration", "format", "storage", "message_nodes", "main_chain", "transcript", "database", "db"],
         "usage": []
@@ -744,12 +751,23 @@
         "local_schema": {
           "kind": "fx_latest_session",
           "roots": ["~/.fx/sessions"],
-          "glob": "*/checkpoint.json"
+          "glob": "*/{checkpoint.json,events.jsonl}",
+          "note": "fx_latest_session ignores the glob for selection (it is only echoed in a no_files_found report). agent_watch._fx_session_unit picks one file per session directory the way FxSessionDiscovery does: checkpoint.json for schema 3 (fx <= 0.0.7); events.jsonl for schema 4 (fx 0.0.8+) only when there is no checkpoint.json and no authority.json; latest/ and the opt-in sessions-v2 root v2/ are skipped. The newest five are unioned."
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "fx keeps one directory per session under ~/.fx/sessions; checkpoint.json is the transcript and session.json the sidecar. The sibling events.jsonl is write-ahead infrastructure and is never read.",
-          "patterns": ["/\\.fx/sessions/[^/]+/checkpoint\\.json$"]
+          "description": "fx keeps one directory per session under ~/.fx/sessions. Schema 3 (fx <= 0.0.7): checkpoint.json is the transcript, and the sibling events.jsonl is write-ahead infrastructure that is never read. Schema 4 (fx 0.0.8+, built from upstream v0.0.14 source): no checkpoint.json; events.jsonl holds one conversation frame per line. session.json is the sidecar in both.",
+          "patterns": [
+            "/\\.fx/sessions/[^/]+/checkpoint\\.json$",
+            "/\\.fx/sessions/[^/]+/events\\.jsonl$"
+          ],
+          "required_companion_files": [
+            {
+              "path": "session.json",
+              "must_parse": "json_object",
+              "note": "FxSessionDiscovery skips a session directory without session.json in both layouts, and FxSessionParser refuses a schema-4 event log unless session.json reads schema_version >= 4. A missing or unreadable manifest is therefore a discovery outage the schema fingerprint cannot report."
+            }
+          ]
         }
       }
     },

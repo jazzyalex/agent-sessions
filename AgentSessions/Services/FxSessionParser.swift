@@ -43,6 +43,40 @@ import Foundation
 ///   records whose bytes live in files under the session directory
 ///   (`snapshot_path` resolves to `images/<basename>`); rendered as
 ///   `[image]` markers and never opened.
+///
+/// **Schema 4 (fx 0.0.8 → 0.0.14)** has no checkpoint. Built from upstream
+/// source at tag v0.0.14 (`session_codec.zig` `SessionMetadata`,
+/// `session_event.zig` `ConversationEnvelope`/`ConversationEvent`,
+/// `session_log.zig`, `result_store.zig`); the frame union is unchanged from
+/// v0.0.8 and readers accept frame `schema_version` 1–3.
+///
+/// - `session.json` — compact `{schema_version: 4, id, origin_workspace_root,
+///   workspace_root, created_at_ms, updated_at_ms, conversation_language,
+///   provider, model, effort, fast_mode, ultrafast_mode?, title?,
+///   subagent_child}`. `provider` is a name string, or `{name, binding}` for a
+///   configured provider. `title` appears once fx names the session.
+/// - `events.jsonl` — one frame per line: `{schema_version, seq,
+///   timestamp_ms, event: {<kind>: payload}}`, the kind being the payload's
+///   single key: `user {text, images, work_id}`, `assistant {text,
+///   provider_replay, standalone_response}`, `tool_call {call_id, tool_name,
+///   arguments_json, …}`, `tool_result {call_id, tool_name, status,
+///   artifact_ref, output_bytes, stored_bytes, completeness, preview,
+///   created_at_ms, …}`, `steering {text}`, `turn_completed {files,
+///   turn_summary}`, `interrupted {reason, partial_text, …}` and
+///   `context_checkpoint {covers_through_seq, summary}`. Text is plain UTF-8
+///   JSON (no durable base64 form here). Every frame of a committed turn
+///   carries the commit time, so a prompt takes its turn's
+///   `turn_summary.started_at_ms` when one is recorded. Compaction appends a
+///   `context_checkpoint`; earlier frames stay in the log.
+/// - `tool_result.preview` holds at most the first 4 KiB of the output; the
+///   stored text lives in `tool-results/<artifact_ref>` (`result-*.txt`).
+///   `completeness: "partial"` means the stored text itself was cut.
+/// - `recovery.json` — `{conversation_seq, checkpoint}`: the turn fx was
+///   running when it last saved, in the schema-3 history-turn shape
+///   (`user`, `assistant_source`, `execution.tool_steps[]`). fx honors it only
+///   while `conversation_seq` equals the log's last `seq`; so does this
+///   parser, and it renders the turn's content only when the log has no open
+///   turn (otherwise the log already holds its start).
 enum FxSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
 
@@ -58,6 +92,8 @@ enum FxSessionParser {
         let model: String?
         let effort: String?
         let historyLen: Int?
+        /// Schema 4 only; schema 3 kept the title in `display.json`.
+        let title: String?
 
         init(object: [String: Any]) {
             schemaVersion = FxSessionParser.int(object["schema_version"])
@@ -69,19 +105,34 @@ enum FxSessionParser {
                 model = preferences["model"] as? String
                 effort = preferences["effort"] as? String
             } else {
-                model = nil
-                effort = nil
+                // Schema 4 lifted the preferences to the top level.
+                model = object["model"] as? String
+                effort = object["effort"] as? String
             }
             historyLen = FxSessionParser.int(object["history_len"])
+            title = object["title"] as? String
         }
+
+        /// Schema 4 is the first manifest whose sibling `events.jsonl` is the
+        /// conversation rather than write-ahead infrastructure.
+        var isEventLogSchema: Bool { (schemaVersion ?? 0) >= 4 }
     }
+
+    /// The head of the log the lightweight pass reads: enough for the title
+    /// and the zero/low-message filters without walking a long session.
+    private static let previewFrameLimit = 200
+    /// Ceiling for one `tool-results/` artifact read during a full parse;
+    /// fx itself caps stored text at 8 MiB.
+    private static let maxArtifactReadBytes = 2 * 1024 * 1024
 
     // MARK: - Entry points
 
-    /// Lightweight list pass: sidecars only, never the checkpoint. `eventCount`
-    /// is fx's own `history_len` — whole turns, not rendered events — which is
-    /// exact enough for the zero/low-message visibility filters; the full parse
-    /// replaces it with the real non-meta count.
+    /// Lightweight list pass. Schema 3: sidecars only, never the checkpoint;
+    /// `eventCount` is fx's own `history_len` — whole turns, not rendered
+    /// events — which is exact enough for the zero/low-message visibility
+    /// filters. Schema 4 has no `history_len`, so the pass reads the first
+    /// `previewFrameLimit` frames of `events.jsonl` and counts their non-meta
+    /// events. The full parse replaces either count with the real one.
     static func parseFile(at url: URL) -> Session? {
         build(url: url, includeEvents: false)
     }
@@ -93,7 +144,14 @@ enum FxSessionParser {
     }
 
     private static func build(url: URL, includeEvents: Bool) -> Session? {
-        guard let id = FxSessionDiscovery.sessionID(forCheckpoint: url) else { return nil }
+        switch FxSessionDiscovery.layout(forSessionFile: url) {
+        case .checkpoint: return buildFromCheckpoint(url: url, includeEvents: includeEvents)
+        case .eventLog: return buildFromEventLog(url: url, includeEvents: includeEvents)
+        }
+    }
+
+    private static func buildFromCheckpoint(url: URL, includeEvents: Bool) -> Session? {
+        guard let id = FxSessionDiscovery.sessionID(forSessionFile: url) else { return nil }
 
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let sidecar = readSidecar(for: url)
@@ -142,6 +200,241 @@ enum FxSessionParser {
                        reasoningEffort: sidecar?.effort)
     }
 
+    // MARK: - Schema 4 event log
+
+    /// What one pass over `events.jsonl` produced.
+    private struct EventLogScan {
+        var events: [SessionEvent] = []
+        var firstPromptText: String?
+        /// The `seq` of the last frame read; recovery is tied to it.
+        var lastSeq: Int64 = 0
+        /// A `user` frame opened a turn that no `turn_completed`/`interrupted`
+        /// has closed yet.
+        var turnOpen = false
+    }
+
+    private static func buildFromEventLog(url: URL, includeEvents: Bool) -> Session? {
+        guard let id = FxSessionDiscovery.sessionID(forSessionFile: url),
+              let sidecar = readSidecar(for: url),
+              sidecar.isEventLogSchema else { return nil }
+
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        var scan = scanEventLog(at: url,
+                                frameLimit: includeEvents ? nil : previewFrameLimit,
+                                readArtifacts: includeEvents)
+        if includeEvents {
+            let recovered = recoveryEvents(for: url, after: scan)
+            scan.events.append(contentsOf: recovered)
+        }
+
+        let nonMetaCount = scan.events.filter { $0.kind != .meta }.count
+        let commandCount = scan.events.filter { $0.kind == .tool_call }.count
+        let cwd = sidecar.workspaceRoot
+        let title = firstNonEmpty(sidecar.title, scan.firstPromptText)
+
+        return Session(id: id,
+                       source: .fx,
+                       startTime: sidecar.createdAtMS.flatMap(msDate),
+                       endTime: sidecar.updatedAtMS.flatMap(msDate),
+                       model: sidecar.model,
+                       filePath: url.path,
+                       fileSizeBytes: size,
+                       eventCount: nonMetaCount,
+                       events: includeEvents ? scan.events : [],
+                       cwd: cwd,
+                       repoName: cwd.map { URL(fileURLWithPath: $0).lastPathComponent },
+                       lightweightTitle: title,
+                       // nil in the lightweight pass: it reads only the head of the log.
+                       lightweightCommands: includeEvents && commandCount > 0 ? commandCount : nil,
+                       parentSessionID: nil,
+                       subagentType: nil,
+                       surface: .cli,
+                       reasoningEffort: sidecar.effort)
+    }
+
+    /// Reads conversation frames in log order. Lines that are not frames — a
+    /// torn last line, or a schema-3 `kind`/`payload` record — are skipped.
+    private static func scanEventLog(at url: URL, frameLimit: Int?, readArtifacts: Bool) -> EventLogScan {
+        var scan = EventLogScan()
+        var framesRead = 0
+        var turnUserIndex: Int?
+        let reader = JSONLReader(url: url)
+        _ = try? reader.forEachLineWhile { line in
+            if let frameLimit, framesRead >= frameLimit { return false }
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let envelope = object["event"] as? [String: Any],
+                  envelope.count == 1,
+                  let entry = envelope.first else { return true }
+            framesRead += 1
+            let kind = entry.key
+            let seq = int64(object["seq"]) ?? Int64(framesRead)
+            scan.lastSeq = seq
+            let time = int64(object["timestamp_ms"]).flatMap(msDate)
+            let payload = entry.value as? [String: Any] ?? [:]
+            let prefix = String(seq)
+
+            switch kind {
+            case "user":
+                scan.turnOpen = true
+                if let user = userEvents(from: payload, idPrefix: prefix, time: time).first {
+                    turnUserIndex = scan.events.count
+                    scan.events.append(user)
+                    if scan.firstPromptText == nil, let text = durableString(payload["text"]), !text.isEmpty {
+                        scan.firstPromptText = text
+                    }
+                } else {
+                    turnUserIndex = nil
+                }
+
+            case "steering":
+                // Typed by the user while the turn ran; a user message, never the title.
+                if let text = durableString(payload["text"]), !text.isEmpty {
+                    scan.events.append(event(idPrefix: prefix, suffix: "s", kind: .user, role: "user", text: text,
+                                             messageID: nil, time: time, raw: line))
+                }
+
+            case "assistant":
+                if let text = durableString(payload["text"]), !text.isEmpty {
+                    scan.events.append(event(idPrefix: prefix, suffix: "a", kind: .assistant, role: "assistant",
+                                             text: text, messageID: nil, time: time, raw: line))
+                }
+
+            case "tool_call":
+                scan.events.append(event(idPrefix: prefix, suffix: "t", kind: .tool_call, role: "assistant", text: nil,
+                                         toolName: durableString(payload["tool_name"]),
+                                         // `arguments_json` is already a JSON string on the wire.
+                                         toolInput: durableString(payload["arguments_json"]),
+                                         messageID: durableString(payload["call_id"]),
+                                         time: time, raw: line))
+
+            case "tool_result":
+                let created = int64(payload["created_at_ms"]).flatMap(msDate)
+                scan.events.append(event(idPrefix: prefix, suffix: "r", kind: .tool_result, role: "tool", text: nil,
+                                         toolName: durableString(payload["tool_name"]),
+                                         toolOutput: eventLogToolOutput(payload, sessionFile: url,
+                                                                        readArtifact: readArtifacts),
+                                         messageID: durableString(payload["call_id"]),
+                                         time: created ?? time, raw: line))
+
+            case "turn_completed", "interrupted":
+                scan.turnOpen = false
+                if let index = turnUserIndex,
+                   let summary = payload["turn_summary"] as? [String: Any],
+                   let started = int64(summary["started_at_ms"]).flatMap(msDate) {
+                    scan.events[index] = retimed(scan.events[index], to: started)
+                }
+                turnUserIndex = nil
+                if kind == "interrupted" {
+                    if let partial = durableString(payload["partial_text"]), !partial.isEmpty {
+                        scan.events.append(event(idPrefix: prefix, suffix: "p", kind: .assistant, role: "assistant",
+                                                 text: partial, messageID: nil, time: time, raw: line))
+                    }
+                    var reason = payload["reason"] as? String ?? "interrupted"
+                    if (payload["cancellation_origin"] as? String) == "compaction" { reason += " during compaction" }
+                    scan.events.append(event(idPrefix: prefix, suffix: "i", kind: .meta, role: "system",
+                                             text: "[interrupted: \(reason)]", messageID: nil, time: time, raw: line))
+                }
+
+            case "context_checkpoint":
+                var lines: [String] = []
+                if let through = int64(payload["covers_through_seq"]) {
+                    lines.append("[context compacted through event \(through)]")
+                } else {
+                    lines.append("[context compacted]")
+                }
+                if let summary = durableString(payload["summary"]), !summary.isEmpty { lines.append(summary) }
+                scan.events.append(event(idPrefix: prefix, suffix: "c", kind: .meta, role: "system",
+                                         text: lines.joined(separator: "\n"), messageID: nil, time: time, raw: line))
+
+            default:
+                // A kind newer than this reader: keep it visible as metadata.
+                scan.events.append(event(idPrefix: prefix, suffix: "m", kind: .meta, role: kind,
+                                         text: nil, messageID: nil, time: time, raw: line))
+            }
+            return true
+        }
+        return scan
+    }
+
+    /// The output of one schema-4 tool result. `preview` is the first 4 KiB;
+    /// when the stored text is longer, the full parse reads it from
+    /// `tool-results/<artifact_ref>`. A missing artifact leaves the preview
+    /// with a truncation marker, as does a result fx stored only in part.
+    private static func eventLogToolOutput(_ payload: [String: Any], sessionFile: URL, readArtifact: Bool) -> String? {
+        var output = durableString(payload["preview"])
+        let previewBytes = output?.utf8.count ?? 0
+        let storedBytes = int(payload["stored_bytes"]) ?? previewBytes
+        var cut = (payload["completeness"] as? String).map { $0 != "complete" } ?? false
+        if storedBytes > previewBytes {
+            if readArtifact, let full = readToolResultArtifact(payload["artifact_ref"], sessionFile: sessionFile) {
+                output = full
+            } else {
+                cut = true
+            }
+        }
+        if cut, output != nil { output! += "\n[truncated]" }
+        return output
+    }
+
+    /// Reads `tool-results/<ref>` for a stored-text handle (`result-*.txt`).
+    /// Other refs (command replay, compactor records) are framed or live
+    /// elsewhere and are not opened; neither is anything that could leave the
+    /// directory.
+    private static func readToolResultArtifact(_ value: Any?, sessionFile: URL) -> String? {
+        guard let ref = value as? String,
+              ref.hasPrefix("result-"), ref.hasSuffix(".txt"),
+              !ref.contains("/"), !ref.contains("\\"), !ref.contains("..") else { return nil }
+        let url = sessionFile.deletingLastPathComponent()
+            .appendingPathComponent("tool-results", isDirectory: true)
+            .appendingPathComponent(ref, isDirectory: false)
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maxArtifactReadBytes) else { return nil }
+        var text = String(decoding: data, as: UTF8.self)
+        if data.count >= maxArtifactReadBytes, (try? handle.read(upToCount: 1))?.isEmpty == false {
+            text += "\n[truncated]"
+        }
+        return text
+    }
+
+    /// The uncommitted turn in `recovery.json`, rendered after the log.
+    /// Valid only while its `conversation_seq` equals the log's last `seq`
+    /// (fx's own rule in `loadConversationRecoveryCheckpoint`). When the log
+    /// already opened that turn, only the marker is added.
+    private static func recoveryEvents(for sessionFile: URL, after scan: EventLogScan) -> [SessionEvent] {
+        let url = sessionFile.deletingLastPathComponent().appendingPathComponent("recovery.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let conversationSeq = int64(object["conversation_seq"]),
+              conversationSeq == scan.lastSeq,
+              let checkpoint = object["checkpoint"] as? [String: Any] else { return [] }
+
+        let raw = String(decoding: data, as: UTF8.self)
+        var out: [SessionEvent] = []
+        if !scan.turnOpen {
+            var turn: [String: Any] = [:]
+            turn["user"] = checkpoint["user"]
+            turn["execution"] = checkpoint["execution"]
+            turn["assistant"] = checkpoint["assistant_source"]
+            if let user = checkpoint["user"] as? [String: Any] {
+                out.append(contentsOf: userEvents(from: user, idPrefix: "recovery"))
+            }
+            out.append(contentsOf: responseEvents(from: turn, idPrefix: "recovery"))
+        }
+        let cause = checkpoint["cause"] as? String ?? "unknown"
+        out.append(event(idPrefix: "recovery", suffix: "x", kind: .meta, role: "system",
+                         text: "[unsaved turn: \(cause)]", messageID: nil, raw: raw))
+        return out
+    }
+
+    private static func retimed(_ event: SessionEvent, to time: Date) -> SessionEvent {
+        SessionEvent(id: event.id, timestamp: time, kind: event.kind, role: event.role, text: event.text,
+                     toolName: event.toolName, toolInput: event.toolInput, toolOutput: event.toolOutput,
+                     messageID: event.messageID, parentID: event.parentID, isDelta: event.isDelta,
+                     rawJSON: event.rawJSON)
+    }
+
     // MARK: - Turn rendering
 
     /// One history entry becomes one user event plus whatever the response
@@ -150,15 +443,16 @@ enum FxSessionParser {
     /// Internal so tests can exercise a single turn without a file on disk.
     static func events(forTurn turn: [String: Any], turnIndex: Int) -> [SessionEvent] {
         let kind = turn["kind"] as? String ?? "unknown"
+        let idPrefix = String(turnIndex)
         var out: [SessionEvent] = []
 
         if let user = turn["user"] as? [String: Any] {
-            out.append(contentsOf: userEvents(from: user, turnIndex: turnIndex))
+            out.append(contentsOf: userEvents(from: user, idPrefix: idPrefix))
         }
 
         switch kind {
         case "assistant":
-            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
+            out.append(contentsOf: responseEvents(from: turn, idPrefix: idPrefix))
 
         case "background_command":
             // A command the runtime moved to the background: the same body as
@@ -169,9 +463,9 @@ enum FxSessionParser {
             if let url = durableString(turn["url"]), !url.isEmpty { detail.append(url) }
             let note = detail.isEmpty ? "[background command]"
                                       : "[background command — \(detail.joined(separator: " · "))]"
-            out.append(event(turnIndex: turnIndex, suffix: "b", kind: .meta, role: "system",
+            out.append(event(idPrefix: idPrefix, suffix: "b", kind: .meta, role: "system",
                              text: note, messageID: nil, raw: jsonEncode(turn)))
-            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
+            out.append(contentsOf: responseEvents(from: turn, idPrefix: idPrefix))
 
         case "compacted_summary":
             // The turn that replaces the history auto-compaction removed.
@@ -188,16 +482,16 @@ enum FxSessionParser {
                 lines.append("Original prompt(s):")
                 lines.append(contentsOf: roots.map { "- \($0)" })
             }
-            out.append(event(turnIndex: turnIndex, suffix: "c", kind: .meta, role: "system",
+            out.append(event(idPrefix: idPrefix, suffix: "c", kind: .meta, role: "system",
                              text: lines.joined(separator: "\n"), messageID: nil, raw: jsonEncode(turn)))
 
         case "interrupted":
             // A cancelled or failed turn. fx still records everything that
             // did happen before the cut: completed steps, any partial reply,
             // then the one call that never got its result.
-            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
+            out.append(contentsOf: responseEvents(from: turn, idPrefix: idPrefix))
             if let call = turn["tool_call"] as? [String: Any] {
-                out.append(toolCallEvent(from: call, turnIndex: turnIndex, suffix: "t"))
+                out.append(toolCallEvent(from: call, idPrefix: idPrefix, suffix: "t"))
             }
             let reason = turn["terminal_reason"] as? String ?? "interrupted"
             var text = "[interrupted: \(reason)]"
@@ -207,16 +501,16 @@ enum FxSessionParser {
                 // persisted, so the names are the only surviving evidence.
                 text = "[interrupted: \(reason) — completed: \(completed.joined(separator: ", "))]"
             }
-            out.append(event(turnIndex: turnIndex, suffix: "i", kind: .meta, role: "system",
+            out.append(event(idPrefix: idPrefix, suffix: "i", kind: .meta, role: "system",
                              text: text, messageID: nil, raw: jsonEncode(turn)))
 
         default:
-            out.append(event(turnIndex: turnIndex, suffix: "m", kind: .meta, role: kind,
+            out.append(event(idPrefix: idPrefix, suffix: "m", kind: .meta, role: kind,
                              text: nil, messageID: nil, raw: jsonEncode(turn)))
         }
 
         if out.isEmpty {
-            out.append(event(turnIndex: turnIndex, suffix: "e", kind: .meta, role: kind,
+            out.append(event(idPrefix: idPrefix, suffix: "e", kind: .meta, role: kind,
                              text: nil, messageID: nil, raw: jsonEncode(turn)))
         }
         return out
@@ -225,22 +519,24 @@ enum FxSessionParser {
     /// The shared body of an agent turn — ordinary, background, or cut short:
     /// narrated tool steps with keyed calls and results, then the final (or,
     /// when interrupted, partial) reply.
-    private static func responseEvents(from turn: [String: Any], turnIndex: Int) -> [SessionEvent] {
+    private static func responseEvents(from turn: [String: Any], idPrefix: String) -> [SessionEvent] {
         var out: [SessionEvent] = []
         if let execution = turn["execution"] as? [String: Any] {
             let steps = execution["tool_steps"] as? [[String: Any]] ?? []
             for (stepIndex, step) in steps.enumerated() {
-                out.append(contentsOf: toolStepEvents(from: step, turnIndex: turnIndex, stepIndex: stepIndex))
+                out.append(contentsOf: toolStepEvents(from: step, idPrefix: idPrefix, stepIndex: stepIndex))
             }
         }
         if let reply = durableString(turn["assistant"]), !reply.isEmpty {
-            out.append(event(turnIndex: turnIndex, suffix: "a", kind: .assistant, role: "assistant", text: reply,
+            out.append(event(idPrefix: idPrefix, suffix: "a", kind: .assistant, role: "assistant", text: reply,
                              messageID: nil, raw: jsonEncode(turn)))
         }
         return out
     }
 
-    private static func userEvents(from user: [String: Any], turnIndex: Int) -> [SessionEvent] {
+    /// `time` is nil for checkpoint history entries, which carry no time of
+    /// their own; schema-4 frames pass theirs.
+    private static func userEvents(from user: [String: Any], idPrefix: String, time: Date? = nil) -> [SessionEvent] {
         let text = durableString(user["text"])
         let images = user["images"] as? [[String: Any]] ?? []
         var rendered = text
@@ -249,29 +545,29 @@ enum FxSessionParser {
             rendered = [markers, text].compactMap { $0 }.joined(separator: "\n")
         }
         guard let rendered, !rendered.isEmpty else { return [] }
-        return [event(turnIndex: turnIndex, suffix: "u", kind: .user, role: "user", text: rendered,
-                      messageID: nil, raw: jsonEncode(user))]
+        return [event(idPrefix: idPrefix, suffix: "u", kind: .user, role: "user", text: rendered,
+                      messageID: nil, time: time, raw: jsonEncode(user))]
     }
 
-    private static func toolStepEvents(from step: [String: Any], turnIndex: Int, stepIndex: Int) -> [SessionEvent] {
+    private static func toolStepEvents(from step: [String: Any], idPrefix: String, stepIndex: Int) -> [SessionEvent] {
         var out: [SessionEvent] = []
         if let narration = durableString(step["assistant"]), !narration.isEmpty {
-            out.append(event(turnIndex: turnIndex, suffix: "s\(stepIndex)a", kind: .assistant, role: "assistant", text: narration,
+            out.append(event(idPrefix: idPrefix, suffix: "s\(stepIndex)a", kind: .assistant, role: "assistant", text: narration,
                              messageID: nil, raw: jsonEncode(step)))
         }
         let calls = step["tool_calls"] as? [[String: Any]] ?? []
         for (callIndex, call) in calls.enumerated() {
-            out.append(toolCallEvent(from: call, turnIndex: turnIndex, suffix: "s\(stepIndex)t\(callIndex)"))
+            out.append(toolCallEvent(from: call, idPrefix: idPrefix, suffix: "s\(stepIndex)t\(callIndex)"))
         }
         let results = step["tool_results"] as? [[String: Any]] ?? []
         for (resultIndex, result) in results.enumerated() {
-            out.append(toolResultEvent(from: result, turnIndex: turnIndex, suffix: "s\(stepIndex)r\(resultIndex)"))
+            out.append(toolResultEvent(from: result, idPrefix: idPrefix, suffix: "s\(stepIndex)r\(resultIndex)"))
         }
         return out
     }
 
-    private static func toolCallEvent(from call: [String: Any], turnIndex: Int, suffix: String) -> SessionEvent {
-        event(turnIndex: turnIndex, suffix: suffix, kind: .tool_call, role: "assistant", text: nil,
+    private static func toolCallEvent(from call: [String: Any], idPrefix: String, suffix: String) -> SessionEvent {
+        event(idPrefix: idPrefix, suffix: suffix, kind: .tool_call, role: "assistant", text: nil,
               toolName: durableString(call["name"]),
               // `arguments_json` is already a JSON string on the wire.
               toolInput: durableString(call["arguments_json"]),
@@ -280,13 +576,13 @@ enum FxSessionParser {
               raw: jsonEncode(call))
     }
 
-    private static func toolResultEvent(from result: [String: Any], turnIndex: Int, suffix: String) -> SessionEvent {
+    private static func toolResultEvent(from result: [String: Any], idPrefix: String, suffix: String) -> SessionEvent {
         var output = durableString(result["output"])
         if output == nil, let preview = durableString(result["preview"]) { output = preview }
         if let truncated = result["truncated"] as? Bool, truncated, output != nil {
             output! += "\n[truncated]"
         }
-        return event(turnIndex: turnIndex, suffix: suffix, kind: .tool_result, role: "tool", text: nil,
+        return event(idPrefix: idPrefix, suffix: suffix, kind: .tool_result, role: "tool", text: nil,
                      toolName: durableString(result["tool_name"]),
                      toolInput: nil,
                      toolOutput: output,
@@ -305,7 +601,7 @@ enum FxSessionParser {
     // MARK: - Sidecars
 
     private static func readSidecar(for url: URL) -> Sidecar? {
-        guard let data = try? Data(contentsOf: FxSessionDiscovery.sidecarFile(forCheckpoint: url)),
+        guard let data = try? Data(contentsOf: FxSessionDiscovery.sidecarFile(forSessionFile: url)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return Sidecar(object: object)
     }
@@ -330,7 +626,9 @@ enum FxSessionParser {
 
     // MARK: - Helpers
 
-    private static func event(turnIndex: Int,
+    /// Ids are `"<prefix>-<suffix>"`: the history-turn index for a checkpoint,
+    /// the frame `seq` for an event log, `recovery` for `recovery.json`.
+    private static func event(idPrefix: String,
                               suffix: String,
                               kind: SessionEventKind,
                               role: String?,
@@ -341,7 +639,7 @@ enum FxSessionParser {
                               messageID: String?,
                               time: Date? = nil,
                               raw: String) -> SessionEvent {
-        SessionEvent(id: "\(turnIndex)-\(suffix)", timestamp: time, kind: kind, role: role, text: text,
+        SessionEvent(id: "\(idPrefix)-\(suffix)", timestamp: time, kind: kind, role: role, text: text,
                      toolName: toolName, toolInput: toolInput, toolOutput: toolOutput,
                      messageID: messageID, parentID: nil, isDelta: false, rawJSON: raw)
     }

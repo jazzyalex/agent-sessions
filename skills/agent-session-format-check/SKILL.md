@@ -765,7 +765,7 @@ Key contracts (simplified from regexes in
 | Grok     | `~/.grok/sessions/<enc-workdir>/<sessionId>/chat_history.jsonl` |
 | Qwen     | `*/projects/<project>/chats/<id>.jsonl` or `chats/archive/<id>.jsonl` |
 | Devin    | `~/.local/share/devin/cli/sessions.db` |
-| fx       | `~/.fx/sessions/<id>/checkpoint.json` |
+| fx       | `~/.fx/sessions/<id>/checkpoint.json` (schema 3, ≤0.0.7) or `<id>/events.jsonl` (schema 4, 0.0.8+; only with no checkpoint and no `authority.json`); `session.json` companion required; `v2/` skipped |
 
 ### `required_companion_files` — sidecars discovery refuses to work without
 
