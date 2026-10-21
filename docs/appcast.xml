@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.0</title>
-            <pubDate>Tue, 20 Oct 2026 17:39:56 -0700</pubDate>
+            <title>6.0.1</title>
+            <pubDate>Wed, 21 Oct 2026 16:30:02 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,33 +27,39 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.0</h2>
+<h2>What&#x27;s New in 6.0.1</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Quota Meter in the notch.</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back.</li>
-<li><strong>OpenCode 2.x sessions.</strong> OpenCode 2.0 keeps new sessions in a new store, so they never reached the list. They do now, and sessions carried over from 1.x keep their full history.</li>
-</ul>
-<h3>Features</h3>
-<ul>
-<li><strong>Notch, Desktop or Automatic.</strong> Pick where the Quota Meter lives in Settings, the View menu or its toolbar. Automatic uses the notch on the MacBook display and the desktop window on external monitors.</li>
-<li><strong>Wings or Minimal.</strong> Wings shows both agents beside the notch; Minimal draws two thin bars under it and leaves the menu bar free. Right-click the open notch for its toolbar.</li>
+<li><strong>Every agent&#x27;s latest format, checked.</strong> Fresh sessions from Codex 0.163, Claude Code 2.1.306, OpenCode 2.1.2, Copilot 1.0.102, Cursor 2026.10.19, Hermes 0.22.4, OpenClaw 2026.10.5, Kimi 2.3, Pi 1.3, Grok 1.0.62, Cline 3.0.73 and DeepSeek Harness 0.2.1 all read cleanly.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li><strong>The notch takes over the menu bar limits item.</strong> If you used it, the Quota Meter moves to the notch, and a click on the notch opens the same menu. Desktop setups stay as they are, with a one-time offer to try the notch.</li>
-<li><strong>Free models read as Free.</strong> A session that ran only on free models with no published API price, such as OpenCode&#x27;s Big Pickle or a <code>-free</code> route, shows Free in Session Info instead of a dash.</li>
+<li><strong>fx 0.0.8 and later.</strong> fx moved to a new session layout; those sessions now open alongside the old ones.</li>
+<li><strong>MiniMax M3.1 Flash has a price.</strong> Session Info counts it in dollars.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>OpenCode prompts no longer go missing.</strong> A message that recorded file changes failed to load, which hid its prompt from the transcript.</li>
+<li><strong>OpenClaw sessions are back.</strong> OpenClaw 2026.10.5 moved its history into a database, and new sessions stopped showing up. The list reads that database now.</li>
+<li><strong>Claude transcripts no longer repeat each turn.</strong> Claude Code 2.1.303 logs every API request into the session file; those copies are skipped.</li>
+<li><strong>Claude safety stops read as notices, not prompts.</strong> A classifier stop no longer looks like something you typed.</li>
+<li><strong>DeepSeek Harness 0.2.1 sessions open.</strong> Its newer session records made every v4 session drop from the list.</li>
+<li><strong>Antigravity desktop and Cline Desktop sessions appear.</strong> Antigravity 2.25 writes transcripts to a second folder, and the app now reads both.</li>
+<li><strong>Hermes shows its cost.</strong> Usage that stayed under a model&#x27;s long-context threshold was left unpriced.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0</a></p>
+<h3>Reminder: What You Got in 6.0</h3>
+<ul>
+<li><strong>Quota Meter in the notch.</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back.</li>
+<li><strong>OpenCode 2.x sessions.</strong> OpenCode 2.0 keeps new sessions in a new store, so they never reached the list. They do now, and sessions carried over from 1.x keep their full history.</li>
+<li><strong>Notch, Desktop or Automatic.</strong> Pick where the Quota Meter lives in Settings, the View menu or its toolbar. Automatic uses the notch on the MacBook display and the desktop window on external monitors.</li>
+<li><strong>Wings or Minimal.</strong> Wings shows both agents beside the notch; Minimal draws two thin bars under it and leaves the menu bar free. Right-click the open notch for its toolbar.</li>
+</ul>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.0.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>82</sparkle:version>
-            <sparkle:shortVersionString>6.0</sparkle:shortVersionString>
+            <sparkle:version>83</sparkle:version>
+            <sparkle:shortVersionString>6.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg" length="29541270" type="application/octet-stream" sparkle:edSignature="qvC4ERNHOf1dCWcS2wVZG4bokgRcPB9gwCBFVBrLtKBoocZIKydU7o1vx8CidGsWn9VcfZR5AxMrKWCu/4N2BA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0.1/AgentSessions-6.0.1.dmg" length="29755620" type="application/octet-stream" sparkle:edSignature="pYNEaAhs0jACQnSBYLaqdz+fG79CuwS1ccM3jgZZHUouGRL62IukOfoIEyv8oPK8WWyOafQ2THf304t7N4euCQ=="/>
         </item>
     </channel>
 </rss>
