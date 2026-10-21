@@ -6994,6 +6994,10 @@ def _run_prebump(
                 fp = _openclaw_sqlite_schema_fingerprint(
                     result.session_path, session_ids=[session_id] if session_id else ["<unknown>"]
                 )
+            elif agent_name == "cline":
+                # Same manifest+transcript fingerprint as the baseline and weekly paths;
+                # the generic JSONL fallback would read zero events from pretty JSON.
+                fp = _cline_session_schema_fingerprint(result.session_path)
             else:
                 fp = _schema_fingerprint_for_agent(agent_name, result.session_path, max_lines=5000)
             schema_diff, fresh_matches = _prebump_schema_check(

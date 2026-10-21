@@ -1519,3 +1519,153 @@ class DeepSeekHarnessHeadlessDriver:
 
 
 DRIVERS["deepseek_harness_headless"] = DeepSeekHarnessHeadlessDriver()
+
+
+class ClineHeadlessDriver:
+    """Cline CLI headless act-mode run that lands in the real session store.
+
+    Cline signs in with an OAuth account whose access token lives one hour and is
+    refreshed through the refresh token in ``settings/providers.json``. Copying that
+    file into a sandbox would let a sandboxed refresh rotate the owner's real refresh
+    token and sign the real CLI out, so this driver deliberately requires the
+    framework's ``--allow-real-home`` opt-in (config ``real_home_session: true``).
+
+    A session is a directory ``<epochms>_<id>/`` holding ``<id>.json`` (manifest) and
+    ``<id>.messages.json`` (transcript). The driver returns the manifest, which is what
+    the fingerprinter and the discovery contract both key on. It picks the session by
+    its working directory (a sandbox subdirectory seeded with ``a.txt``) and a manifest
+    mtime newer than the start of the run, so a concurrent Cline run in another
+    directory can never be mistaken for this one. It then requires a real tool call
+    and tool result in the transcript: a text-only reply is a thin sample, not evidence.
+    """
+
+    name = "cline_headless"
+    _AUTH_CUES = (
+        "not logged in", "not authenticated", "unauthorized", "sign in",
+        "re-authenticate", "authentication failed",
+    )
+
+    @staticmethod
+    def _sessions_root(env: dict[str, str]) -> Path:
+        configured = str(env.get("CLINE_DATA_DIR") or "").strip()
+        if configured:
+            data_dir = Path(os.path.expanduser(os.path.expandvars(configured)))
+        else:
+            session_home = Path(env.get("AGENT_WATCH_SESSION_HOME") or env.get("HOME") or "")
+            data_dir = session_home / ".cline" / "data"
+        return data_dir / "sessions"
+
+    @staticmethod
+    def _read_object(path: Path) -> dict | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @classmethod
+    def _transcript_has_tool_turn(cls, manifest: Path) -> bool:
+        """True when an assistant tool_use is answered by a tool_result block."""
+        transcript = cls._read_object(manifest.with_name(f"{manifest.stem}.messages.json"))
+        messages = transcript.get("messages") if transcript else None
+        if not isinstance(messages, list):
+            return False
+        saw_call = saw_result = False
+        for message in messages:
+            if not isinstance(message, dict) or not isinstance(message.get("content"), list):
+                continue
+            for block in message["content"]:
+                if not isinstance(block, dict):
+                    continue
+                if message.get("role") == "assistant" and block.get("type") == "tool_use":
+                    saw_call = True
+                elif block.get("type") == "tool_result":
+                    saw_result = True
+        return saw_call and saw_result
+
+    @classmethod
+    def _find_session(cls, sessions_root: Path, workdir: Path, min_mtime: float) -> Path | None:
+        wanted = workdir.resolve()
+        newest: Path | None = None
+        newest_m = -1.0
+        if not sessions_root.is_dir():
+            return None
+        for session_dir in sessions_root.iterdir():
+            manifest = session_dir / f"{session_dir.name}.json"
+            try:
+                m = manifest.stat().st_mtime
+            except OSError:
+                continue
+            if m < min_mtime or m <= newest_m:
+                continue
+            data = cls._read_object(manifest)
+            cwd = data.get("cwd") if data else None
+            if not isinstance(cwd, str) or not cwd:
+                continue
+            try:
+                if Path(cwd).resolve() != wanted:
+                    continue
+            except OSError:
+                continue
+            newest, newest_m = manifest, m
+        return newest
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        stdout_file = sandbox / "cline.stdout.txt"
+        stderr_file = sandbox / "cline.stderr.txt"
+        if not env.get("AGENT_WATCH_SESSION_HOME"):
+            stdout_file.write_text("")
+            stderr_file.write_text(
+                "Cline prebump requires --allow-real-home: the OAuth refresh token "
+                "must stay in the real ~/.cline store, never in a sandbox copy."
+            )
+            return DriverResult(
+                False, None, stdout_file, stderr_file, 4,
+                "sandbox_breach:cline_requires_real_home",
+            )
+
+        workdir = sandbox / "workspace"
+        workdir.mkdir(parents=True, exist_ok=True)
+        # A file to list and read, so the tool-using prompt has real work to do.
+        (workdir / "a.txt").write_text("agent-watch prebump probe\n", encoding="utf-8")
+        sessions_root = self._sessions_root(env)
+        run_started = time.time()
+        try:
+            proc = subprocess.run(
+                [
+                    "cline",
+                    # Let Cline stop itself before the harness timeout kills it mid-write.
+                    "-t", str(max(30, timeout - 20)),
+                    "--json",
+                    "-c", str(workdir),
+                    prompt,
+                ],
+                cwd=workdir,
+                env=dict(env),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            stdout_file.write_text(proc.stdout or "")
+            stderr_file.write_text(proc.stderr or "")
+            rc = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "cline", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "cline", "cline", exc)
+
+        newest = self._find_session(sessions_root, workdir, run_started - 2.0)
+        if rc != 0 or newest is None:
+            error = f"cline_headless_failed rc={rc}" if rc != 0 else "cline_no_fresh_session"
+            output = f"{proc.stdout or ''}\n{proc.stderr or ''}".lower()
+            if any(cue in output for cue in self._AUTH_CUES):
+                error += " authentication_failed"
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, error)
+        if not self._transcript_has_tool_turn(newest):
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, "cline_tool_turn_missing")
+        return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
+
+
+DRIVERS["cline_headless"] = ClineHeadlessDriver()

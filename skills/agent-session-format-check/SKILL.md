@@ -174,8 +174,9 @@ stops it from masking drift. Check the fresh session's type count before treatin
 broad evidence.
 
 Configured real-session drivers today are `codex`, `claude`, `antigravity`,
-`copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, `pi`, `kimi`, and `grok`.
-Droid is legacy-only and excluded from active checks. Qwen, Devin, and fx have no
+`copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, and
+`cline` (`cline_headless`, real-home: its OAuth refresh token must not be copied into
+a sandbox, so run it with `--allow-real-home`). Droid is legacy-only and excluded from active checks. Qwen, Devin, and fx have no
 drivers. Judge them on current weekly evidence plus their stewardship record (§1g), and
 never claim latest-build support without a session written by that build. Qwen cannot
 produce a newer session on this machine because its OAuth free tier was discontinued
@@ -196,7 +197,7 @@ credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
 `codex_exec`, `claude_print`, `antigravity_print`, `copilot_prompt`,
 `opencode_run`, `hermes_oneshot`, `openclaw_local_agent`,
-`cursor_agent_print`, `pi_prompt`, and `kimi_prompt`. Some OAuth/keychain-backed CLIs use
+`cursor_agent_print`, `pi_prompt`, `kimi_prompt`, and `cline_headless`. Some OAuth/keychain-backed CLIs use
 `real_home_session: true`; run them with `--allow-real-home` so the session
 lands in the real agent store instead of copying single-use auth state into a
 sandbox.

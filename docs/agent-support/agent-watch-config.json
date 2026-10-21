@@ -786,6 +786,27 @@
             }
           ]
         }
+      },
+      "prebump": {
+        "driver": "cline_headless",
+        "sandbox": { "mode": "home_override", "subdir": "cline_sandbox" },
+        "prompt": "Use your tools to list the files in the current directory, then read a.txt and say what it contains.",
+        "real_home_session": true,
+        "timeout_seconds": 240,
+        "env_vars": [],
+        "credential_files": [],
+        "support_files": [],
+        "required_schema_buckets": [
+          "manifest", "transcript", "message.user", "message.assistant",
+          "content.tool_use", "content.tool_result"
+        ],
+        "discover_session": {
+          "kind": "cline_session_manifest",
+          "roots": [".cline/data/sessions"],
+          "globs": ["*/*.json"],
+          "required_types": []
+        },
+        "_real_home_note": "Cline signs in with an OAuth account (~/.cline/data/settings/providers.json). Copying that file into a sandbox would let a sandboxed token refresh rotate the owner's real refresh token, so run this driver with --allow-real-home: the session lands in the real store, while stdout/stderr and the seeded a.txt workspace stay in the disposable sandbox. The driver returns the <id>.json manifest; the fingerprinter opens the adjacent <id>.messages.json. Manifest and transcript are pretty JSON, not JSONL, so required_types stays empty and the driver itself requires a tool_use plus a tool_result block."
       }
     },
     "deepseek_harness": {
