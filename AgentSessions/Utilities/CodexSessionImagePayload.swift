@@ -116,6 +116,36 @@ struct GrokImageUserTurns {
     }
 }
 
+/// Claude's user turns in file-line space, for the same reason as `GrokImageUserTurns`.
+///
+/// Claude 2.1.303+ writes request-log records (`api-request*`, 20-30% of the lines of a
+/// busy session) that the parser skips, and one record can also split into several
+/// events. Either way event positions stop tracking line numbers, and the generic
+/// "event index <= line index" rule files an image under the wrong prompt. Claude event
+/// ids carry their source line (`ClaudeSessionParser.sourceLineIndex(forEventID:)`), so
+/// the image's scanner line can be compared against real lines instead.
+///
+/// Empty for a non-Claude session or one whose ids do not decode (synthetic test
+/// sessions, lightweight ids); callers then fall back to the generic rule.
+struct ClaudeImageUserTurns {
+    /// Each Claude user turn as (0-based file line, position in `session.events`).
+    /// Non-decreasing in both components.
+    let turns: [(lineIndex: Int, eventIndex: Int)]
+
+    init(session: Session) {
+        guard session.source == .claude else {
+            turns = []
+            return
+        }
+        var built: [(lineIndex: Int, eventIndex: Int)] = []
+        for (idx, ev) in session.events.enumerated() where ev.kind == .user {
+            guard let line = ClaudeSessionParser.sourceLineIndex(forEventID: ev.id) else { continue }
+            built.append((lineIndex: line, eventIndex: idx))
+        }
+        turns = built
+    }
+}
+
 /// The rule deciding which user turn an image belongs to, shared by the two surfaces
 /// that place images: `SessionInlineImageMapper` (inline images in the transcript) and
 /// `ImageBrowserViewModel.buildItems` (the browser's prompt label).
@@ -143,6 +173,7 @@ struct ImageUserTurnResolver {
 
     private let session: Session
     private let grokTurns: GrokImageUserTurns
+    private let claudeTurns: ClaudeImageUserTurns
     private let antigravityFallsBackToFirstEvent: Bool
 
     init(session: Session, antigravityFallsBackToFirstEvent: Bool) {
@@ -151,6 +182,7 @@ struct ImageUserTurnResolver {
             ev.kind == .user ? idx : nil
         }
         self.grokTurns = GrokImageUserTurns(session: session)
+        self.claudeTurns = ClaudeImageUserTurns(session: session)
         self.antigravityFallsBackToFirstEvent = antigravityFallsBackToFirstEvent
     }
 
@@ -164,10 +196,27 @@ struct ImageUserTurnResolver {
         return Session.isAgentsPreambleText(session.events[idx].text ?? "")
     }
 
-    /// Grok's line-space lookup. Nil for every other source, and for a Grok session whose
-    /// ids no longer decode — callers then fall through to `nearestUserEventIndex(for:)`.
-    func grokUserEventIndex(forFileLineIndex fileLineIndex: Int) -> Int? {
-        grokTurns.userEventIndex(forFileLineIndex: fileLineIndex)
+    /// Line-space lookup for the providers whose event ids carry their file line (Grok,
+    /// Claude). Nil for every other source, and for a session whose ids do not decode —
+    /// callers then fall through to `nearestUserEventIndex(for:)`.
+    func lineSpaceUserEventIndex(forFileLineIndex fileLineIndex: Int) -> Int? {
+        if let grok = grokTurns.userEventIndex(forFileLineIndex: fileLineIndex) {
+            return grok
+        }
+        return claudeUserEventIndex(forFileLineIndex: fileLineIndex)
+    }
+
+    /// The generic rule (last user turn at or before the image, else the first after it,
+    /// preferring a real prompt over scaffolding) evaluated on Claude file lines.
+    private func claudeUserEventIndex(forFileLineIndex fileLineIndex: Int) -> Int? {
+        let turns = claudeTurns.turns
+        guard !turns.isEmpty else { return nil }
+        let prior = turns.filter { $0.lineIndex <= fileLineIndex }
+        if let preferred = prior.last(where: { !isPreambleUserEventIndex($0.eventIndex) }) ?? prior.last {
+            return preferred.eventIndex
+        }
+        let after = turns.filter { $0.lineIndex > fileLineIndex }
+        return (after.first(where: { !isPreambleUserEventIndex($0.eventIndex) }) ?? after.first)?.eventIndex
     }
 
     /// Last user turn at or before `index`, else the first one after it, preferring a real
@@ -177,7 +226,7 @@ struct ImageUserTurnResolver {
     /// physical file line, which only holds while a provider emits about one event per
     /// line. That conflation is deliberate and unchanged: the providers reaching this path
     /// have shipped with it, and the ones where it plainly fails get their own branch —
-    /// Grok above, OpenClaw at the call sites.
+    /// Grok and Claude above, OpenClaw at the call sites.
     func nearestUserEventIndex(for index: Int) -> Int? {
         if antigravityFallsBackToFirstEvent, session.source == .antigravity, userEventIndices.isEmpty {
             return session.events.indices.first
@@ -417,16 +466,16 @@ enum SessionInlineImageMapper {
                             blockIndex)
                 }
 
-                // Grok resolves in line space. `GrokImageUserTurns` returns nil for
-                // every other provider and for a Grok id that no longer carries its
-                // line, and falling through then puts the image back where it used to
-                // land rather than dropping it — the pinning test in
-                // `InlineSessionImageMappingTests` is what makes that fallback loud.
-                if let targetGrokUserEventIndex = turns.grokUserEventIndex(forFileLineIndex: item.lineIndex) {
-                    let targetGrokUserEventID = session.events[targetGrokUserEventIndex].id
-                    if let blockIndex = userEventIDToBlockIndex[targetGrokUserEventID] {
-                        return (targetGrokUserEventID,
-                                userPromptOrdinal(forEventIndex: targetGrokUserEventIndex),
+                // Grok and Claude resolve in line space. The lookup returns nil for
+                // every other provider and for ids that no longer carry their line,
+                // and falling through then puts the image back where it used to land
+                // rather than dropping it — the pinning tests in
+                // `InlineSessionImageMappingTests` are what make that fallback loud.
+                if let targetLineUserEventIndex = turns.lineSpaceUserEventIndex(forFileLineIndex: item.lineIndex) {
+                    let targetLineUserEventID = session.events[targetLineUserEventIndex].id
+                    if let blockIndex = userEventIDToBlockIndex[targetLineUserEventID] {
+                        return (targetLineUserEventID,
+                                userPromptOrdinal(forEventIndex: targetLineUserEventIndex),
                                 blockIndex)
                     }
                 }

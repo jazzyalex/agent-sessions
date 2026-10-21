@@ -84,6 +84,22 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains(where: { $0.kind == .meta }))
     }
 
+    // The baseline fixture carries redacted 2.1.303 request-log records
+    // (`api-request`, `api-request-blob`, `api-request-shape`); none may become events.
+    func testClaudeRequestLogRecordsInBaselineProduceNoEvents() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(fixture.contains("\"type\":\"api-request-blob\""), "fixture should cover request-log records")
+
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        let leaked = full.events.filter { event in
+            guard let data = Data(base64Encoded: event.rawJSON),
+                  let raw = String(data: data, encoding: .utf8) else { return false }
+            return raw.contains("\"type\":\"api-request")
+        }
+        XCTAssertTrue(leaked.isEmpty, "request-log records became \(leaked.count) events")
+    }
+
     func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else {

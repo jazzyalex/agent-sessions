@@ -310,7 +310,11 @@ actor ImageBrowserIndexCache {
     }
 
     func invalidateIndex(for session: Session) {
-        let url = indexURL(forPath: session.filePath)
+        invalidateIndex(forPath: session.filePath)
+    }
+
+    func invalidateIndex(forPath filePath: String) {
+        let url = indexURL(forPath: filePath)
         try? fileManager.removeItem(at: url)
     }
 }

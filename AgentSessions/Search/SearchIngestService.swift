@@ -202,6 +202,10 @@ actor SearchIngestService {
 
     private let db: IndexDB
 
+    /// Set once `ClaudeRequestLogReindexMigration` has run (or found its marker) in this
+    /// process, so later Claude passes skip even the marker query.
+    private var claudeRequestLogReindexDone = false
+
     /// Remembered aggregate from the last ingest pass that ran to completion (no
     /// throw, no cancellation) for each source. Only ever read/written from within
     /// `ingest`, which is safe since this is an actor. Cleared implicitly by simply
@@ -263,6 +267,18 @@ actor SearchIngestService {
                 livePathAuthority: LivePathAuthority = .notApplicable) async throws -> Progress {
         let sourceRaw = source.rawValue
         let descriptor = source.descriptor
+
+        // One-time Claude request-log cleanup. It must run before the early-out below and
+        // before the ready-path reads, so the paths it drops are re-ingested in this pass.
+        // A failure leaves the marker unwritten and is retried on the next pass.
+        if source == .claude, !claudeRequestLogReindexDone {
+            do {
+                try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db)
+                claudeRequestLogReindexDone = true
+            } catch {
+                // Non-fatal: ordinary ingest proceeds; the cleanup retries next pass.
+            }
+        }
 
         // Directory-artifact early-out guard: the remembered aggregate is keyed by the
         // caller's anchor (selected path + manifest revision). If the directory has

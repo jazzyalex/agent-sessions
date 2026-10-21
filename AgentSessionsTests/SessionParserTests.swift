@@ -2986,6 +2986,168 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(toolResults.first?.toolOutput?.contains("file1") ?? false)
     }
 
+    // Request-log records before the first real prompt: the lightweight (preview)
+    // path must skip them too, or the row title becomes the request-log copy and the
+    // start time comes from the request log. Covers the written key order (byte
+    // pre-check), another key order and mixed case (decoded fallback).
+    func testClaudeRequestLogRecordsBeforeFirstPromptDoNotSetTitleOrTimes() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeAPIRequestHead-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_api_request_head.jsonl")
+        let sid = "ses_apiRequestHead"
+        let lines = [
+            #"{"type":"api-request-blob","sessionId":"\#(sid)","hash":"b0","message":{"role":"user","content":[{"type":"text","text":"REQLOG_FIRST_PROMPT"}]}}"#,
+            #"{"hash":"b1","sessionId":"\#(sid)","message":{"role":"user","content":[{"type":"text","text":"REQLOG_REORDERED"}]},"type":"api-request-blob"}"#,
+            #"{"type":"API-Request-Blob","sessionId":"\#(sid)","hash":"b2","message":{"role":"user","content":[{"type":"text","text":"REQLOG_MIXED_CASE"}]}}"#,
+            #"{"type":"api-request","sessionId":"\#(sid)","id":"r1","timestamp":"2026-10-21T00:20:00.000Z","version":"2.1.306","params":{"model":"claude-opus-5-5"},"keep":0,"tail":["b0","b1","b2"]}"#,
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":"Fix the login bug"},"uuid":"u1","timestamp":"2026-10-21T00:25:50.000Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sid)","version":"2.1.306","message":{"id":"m1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Done."}]},"uuid":"a1","timestamp":"2026-10-21T00:25:58.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let firstPrompt = isoFormatter.date(from: "2026-10-21T00:25:50.000Z")
+
+        let preview = try XCTUnwrap(ClaudeSessionParser.parseFile(at: url))
+        XCTAssertEqual(preview.listTitle, "Fix the login bug")
+        XCTAssertEqual(preview.startTime, firstPrompt, "request-log timestamps must not set the start time")
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.listTitle, "Fix the login bug")
+        XCTAssertEqual(full.startTime, firstPrompt)
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.compactMap(\.text), ["Fix the login bug"])
+        XCTAssertFalse(full.events.contains { ($0.text ?? "").contains("REQLOG_") })
+
+        XCTAssertTrue(ClaudeSessionParser.isRequestLogType("api-request"))
+        XCTAssertTrue(ClaudeSessionParser.isRequestLogType("API-REQUEST-SHAPE"))
+        XCTAssertTrue(ClaudeSessionParser.isRequestLogType("api-request-future"))
+        XCTAssertFalse(ClaudeSessionParser.isRequestLogType("user"))
+        XCTAssertFalse(ClaudeSessionParser.isRequestLogType("x-api-request"))
+    }
+
+    /// Pins the Claude event-id format, which image placement decodes back into a file
+    /// line (`ClaudeSessionParser.sourceLineIndex(forEventID:)`). Skipped request-log
+    /// lines still advance the line count, so the ids keep matching file lines.
+    func testClaudeEventIDsEncodeTheirFileLine() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeEventIDs-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_ids.jsonl")
+        let lines = [
+            #"{"type":"user","sessionId":"s","message":{"role":"user","content":"first"},"uuid":"u1","timestamp":"2026-10-21T00:00:00.000Z"}"#,
+            #"{"type":"api-request-blob","sessionId":"s","hash":"b1","message":{"role":"user","content":[{"type":"text","text":"copy"}]}}"#,
+            #"{"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},"uuid":"a1","timestamp":"2026-10-21T00:00:01.000Z"}"#,
+            #"{"type":"user","sessionId":"s","message":{"role":"user","content":"second"},"uuid":"u2","timestamp":"2026-10-21T00:00:02.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.events.map { ClaudeSessionParser.sourceLineIndex(forEventID: $0.id) }, [0, 2, 2, 3])
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.map { ClaudeSessionParser.sourceLineIndex(forEventID: $0.id) }, [0, 3])
+
+        let hash = String(repeating: "a", count: 64)
+        XCTAssertEqual(ClaudeSessionParser.sourceLineIndex(forEventID: "\(hash)-0042"), 41)
+        XCTAssertEqual(ClaudeSessionParser.sourceLineIndex(forEventID: "\(hash)-0042-t03"), 41)
+        XCTAssertEqual(ClaudeSessionParser.sourceLineIndex(forEventID: "\(hash)-12345-p01"), 12344)
+        XCTAssertNil(ClaudeSessionParser.sourceLineIndex(forEventID: "e0"))
+        XCTAssertNil(ClaudeSessionParser.sourceLineIndex(forEventID: "light-3"))
+        XCTAssertNil(ClaudeSessionParser.sourceLineIndex(forEventID: "abc-0001"))
+    }
+
+    // Claude Code 2.1.303 logs every API request into the transcript as
+    // `api-request-shape` (system prompt + tool definitions), `api-request-blob`
+    // (message bodies with role system/user/assistant) and `api-request`
+    // (params, cache control, blob refs). They duplicate turns already present
+    // as `user`/`assistant` records, so they must stay out of the transcript,
+    // message counts, titles and search text. Shapes from a real 2.1.304
+    // session, content replaced with placeholders.
+    func testClaudeAPIRequestLogRecordsDoNotReachTranscriptCountsOrSearch() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeAPIRequest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_api_request.jsonl")
+        let sid = "ses_apiRequest"
+        let lines = [
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.304","cwd":"/tmp","message":{"role":"user","content":"Fix the login bug"},"uuid":"u1","timestamp":"2026-10-21T00:25:50.000Z"}"#,
+            #"{"type":"api-request-shape","sessionId":"\#(sid)","shapeHash":"h1","timestamp":"2026-10-21T00:25:52.000Z","version":"2.1.304","shape":{"system":[{"type":"text","text":"REQLOG_SYSTEM_PROMPT"}],"tools":[{"name":"Bash","description":"REQLOG_TOOL_DESCRIPTION","input_schema":{"type":"object"},"eager_input_streaming":true}]}}"#,
+            #"{"type":"api-request-blob","sessionId":"\#(sid)","hash":"b1","message":{"role":"system","content":[{"type":"text","text":"REQLOG_SYSTEM_REMINDER"}],"output_config":{"effort":"medium"}}}"#,
+            #"{"type":"api-request-blob","sessionId":"\#(sid)","hash":"b2","message":{"role":"user","content":[{"type":"text","text":"REQLOG_USER_PROMPT"}]}}"#,
+            #"{"type":"api-request","sessionId":"\#(sid)","id":"r1","timestamp":"2026-10-21T00:25:52.000Z","version":"2.1.304","querySource":"sdk","shapeHash":"h1","params":{"model":"claude-opus-5-5","betas":["x"],"max_tokens":128000,"thinking":{"type":"adaptive","display":"updates"},"output_config":{"effort":"medium"}},"keep":0,"tail":["b1","b2"],"cacheControl":[{"path":["system",1],"value":{"type":"ephemeral","ttl":"1h"}}],"requestDigest":"d1"}"#,
+            #"{"type":"assistant","sessionId":"\#(sid)","version":"2.1.304","requestRef":"r1","message":{"id":"m1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"uuid":"a1","timestamp":"2026-10-21T00:25:55.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sid)","version":"2.1.304","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file1"}]},"uuid":"u2","timestamp":"2026-10-21T00:25:56.000Z"}"#,
+            #"{"type":"api-request-blob","sessionId":"\#(sid)","hash":"b3","message":{"role":"assistant","content":[{"type":"thinking","thinking":"REQLOG_THINKING","signature":"sig"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"REQLOG_TOOL_INPUT"},"caller":{"type":"direct"}}]}}"#,
+            #"{"type":"api-request-blob","sessionId":"\#(sid)","hash":"b4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"REQLOG_TOOL_OUTPUT","is_error":false}]}}"#,
+            #"{"type":"api-request","sessionId":"\#(sid)","id":"r2","base":"r1","timestamp":"2026-10-21T00:25:57.000Z","version":"2.1.304","querySource":"sdk","shapeHash":"h1","params":{"model":"claude-opus-5-5"},"keep":2,"tail":["b3","b4"],"cacheControl":[],"requestDigest":"d2"}"#,
+            #"{"type":"assistant","sessionId":"\#(sid)","version":"2.1.304","requestRef":"r2","message":{"id":"m2","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Done."}]},"uuid":"a2","timestamp":"2026-10-21T00:25:58.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+
+        XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1, "only the real prompt is a user message")
+        XCTAssertEqual(full.events.filter { $0.kind == .assistant }.count, 1, "only the real reply is an assistant message")
+        XCTAssertEqual(full.events.filter { $0.kind == .tool_call }.count, 1, "request-log tool_use blocks must not duplicate tool calls")
+        XCTAssertEqual(full.events.filter { $0.kind == .tool_result }.count, 1, "request-log tool_result blocks must not duplicate tool results")
+        XCTAssertEqual(full.eventCount, 4)
+
+        let surfaced = full.events.flatMap { [$0.text, $0.toolInput, $0.toolOutput].compactMap { $0 } }
+        XCTAssertFalse(surfaced.contains { $0.contains("REQLOG_") },
+                       "request-log content leaked into transcript events: \(surfaced.filter { $0.contains("REQLOG_") })")
+
+        let searchText = SessionSearchTextBuilder.build(session: full)
+        XCTAssertFalse(searchText.contains("REQLOG_"), "request-log content leaked into search text")
+        XCTAssertTrue(searchText.contains("Fix the login bug"))
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        XCTAssertEqual(full.startTime, isoFormatter.date(from: "2026-10-21T00:25:50.000Z"))
+        XCTAssertEqual(full.model, "claude-opus-5-5")
+
+        let preview = try XCTUnwrap(ClaudeSessionParser.parseFile(at: url))
+        XCTAssertEqual(preview.listTitle, "Fix the login bug")
+    }
+
+    // Codex 0.163.0 writes `response_item.payload:additional_tools` (role
+    // `developer`, a `tools` definition list) and adds `status`, `annotations`
+    // and `logprobs` to message/function_call payloads. The tool list must stay
+    // metadata: no message row, no tool-call row, nothing in search text.
+    func testCodexAdditionalToolsStaysMetadataAndOutOfSearch() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexAdditionalTools-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-10-18T20-46-15-01a15244-6186-7981-8865-0010e7462d08.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-10-18T20:46:15.000Z","type":"session_meta","payload":{"id":"01a15244-6186-7981-8865-0010e7462d08","timestamp":"2026-10-18T20:46:15.000Z","cwd":"/tmp","originator":"codex_cli_rs","cli_version":"0.163.0"}}"#,
+            #"{"timestamp":"2026-10-18T20:46:16.000Z","type":"response_item","payload":{"type":"additional_tools","role":"developer","id":"at_1","tools":[{"type":"namespace","name":"functions","description":"","tools":[{"type":"custom","name":"exec","description":"ADDTOOLS_DESCRIPTION"}]}]}}"#,
+            #"{"timestamp":"2026-10-18T20:46:17.000Z","type":"response_item","payload":{"type":"message","role":"user","status":null,"content":[{"type":"input_text","text":"List the files","annotations":null,"logprobs":null}]}}"#,
+            #"{"timestamp":"2026-10-18T20:46:18.000Z","type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"{}","call_id":"c1","status":"completed"}}"#,
+            #"{"timestamp":"2026-10-18T20:46:19.000Z","type":"response_item","payload":{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done.","annotations":[],"logprobs":[]}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let s = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        let additional = s.events.filter { $0.rawJSON.contains("\"additional_tools\"") }
+        XCTAssertEqual(additional.count, 1)
+        XCTAssertEqual(additional.first?.kind, .meta)
+        XCTAssertNil(additional.first?.text)
+        XCTAssertNil(additional.first?.toolName)
+
+        XCTAssertEqual(s.events.filter { $0.kind == .user }.compactMap(\.text), ["List the files"])
+        XCTAssertEqual(s.events.filter { $0.kind == .assistant }.compactMap(\.text), ["Done."])
+        XCTAssertEqual(s.events.filter { $0.kind == .tool_call }.count, 1)
+        XCTAssertFalse(SessionSearchTextBuilder.build(session: s).contains("ADDTOOLS_"))
+    }
+
     func testClaudeFullParsePreservesCleanedLightweightTitle() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeTitle-\(UUID().uuidString)", isDirectory: true)

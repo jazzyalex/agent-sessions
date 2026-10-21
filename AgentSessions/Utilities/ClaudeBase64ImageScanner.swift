@@ -51,6 +51,14 @@ enum ClaudeBase64ImageScanner {
 
         // Per-line gating: only report user-attached images (role=user/human or top-level type=user-like).
         var isUserLine = false
+        // Claude Code 2.1.303+ request-log lines (`api-request-blob` etc.) repeat
+        // user messages, including their images; they must not add duplicate spans.
+        var isRequestLogLine = false
+        var lineResultsStart = 0
+        // Line numbering matches `JSONLReader`, which skips blank lines: a line counts
+        // only once it holds a byte other than '\n' or '\r'. Claude event ids encode the
+        // reader's count, and image placement compares the two.
+        var lineHasContent = false
 
         // String parsing
         var inString = false
@@ -72,6 +80,8 @@ enum ClaudeBase64ImageScanner {
         func resetForNewLine() {
             stack.removeAll(keepingCapacity: true)
             isUserLine = false
+            isRequestLogLine = false
+            lineResultsStart = results.count
             inString = false
             stringEscaped = false
             stringMode = .ignored
@@ -139,6 +149,13 @@ enum ClaudeBase64ImageScanner {
                         if let v = value?.lowercased() {
                             let userTypes: Set<String> = ["user", "user_input", "user-input", "input", "prompt", "human"]
                             if userTypes.contains(v) { isUserLine = true }
+                            if ClaudeSessionParser.isRequestLogType(v) {
+                                isRequestLogLine = true
+                                // Drop spans recorded earlier on this line if `type` came late.
+                                if results.count > lineResultsStart {
+                                    results.removeSubrange(lineResultsStart..<results.count)
+                                }
+                            }
                         }
                     }
 
@@ -162,7 +179,7 @@ enum ClaudeBase64ImageScanner {
                         // Base64 payload string (potentially very large). Only record if:
                         // - This line is a user message
                         // - We're inside a base64 source object under an image object
-                        if isUserLine, frame.isBase64Source, isUnderImageObject(), !largeStringInvalid {
+                        if isUserLine, !isRequestLogLine, frame.isBase64Source, isUnderImageObject(), !largeStringInvalid {
                             let start = stringContentStartOffset
                             let end = endOffsetExclusive
                             let length = max(0, largeStringLength)
@@ -231,7 +248,8 @@ enum ClaudeBase64ImageScanner {
         func handleNonStringStructuralByte(_ byte: UInt8) {
             // Reset per-line state at newline boundaries (JSONL).
             if byte == 0x0A { // '\n'
-                lineIndex += 1
+                if lineHasContent { lineIndex += 1 }
+                lineHasContent = false
                 resetForNewLine()
                 return
             }
@@ -323,6 +341,7 @@ enum ClaudeBase64ImageScanner {
                 }
 
                 let pos = fileOffset + UInt64(i)
+                if byte != 0x0A && byte != 0x0D { lineHasContent = true }
 
                 if inString {
                     if stringEscaped {
@@ -404,14 +423,16 @@ enum ClaudeBase64ImageScanner {
 
                 handleNonStringStructuralByte(byte)
 
-                if results.count >= maxMatches {
-                    return results
+                // Cap only at a line boundary: a request-log line can name its `type`
+                // after its images, and those spans are dropped when it does.
+                if byte == 0x0A, results.count >= maxMatches {
+                    return Array(results.prefix(maxMatches))
                 }
             }
 
             fileOffset += UInt64(chunk.count)
         }
 
-        return results
+        return Array(results.prefix(maxMatches))
     }
 }

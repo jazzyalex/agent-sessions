@@ -521,11 +521,11 @@ extension ImageBrowserViewModel {
                 }()
 
                 let resolvedEventIndex = openClawEventIndex ?? stored.lineIndex
-                // The Grok lookup takes `stored.lineIndex` directly rather than
-                // `resolvedEventIndex`: the two are equal here (only OpenClaw sets
-                // `openClawEventIndex`) but they mean different things, and this one
+                // The line-space lookup (Grok, Claude) takes `stored.lineIndex` directly
+                // rather than `resolvedEventIndex`: the two are equal here (only OpenClaw
+                // sets `openClawEventIndex`) but they mean different things, and this one
                 // wants the file line.
-                let resolvedUserEventIndex = turns.grokUserEventIndex(forFileLineIndex: stored.lineIndex)
+                let resolvedUserEventIndex = turns.lineSpaceUserEventIndex(forFileLineIndex: stored.lineIndex)
                     ?? turns.nearestUserEventIndex(for: resolvedEventIndex)
                     ?? resolvedEventIndex
 

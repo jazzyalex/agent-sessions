@@ -580,6 +580,10 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
         }
 
+        // `claude_request_log_reindex_v1` is a Claude marker too, but it is not applied
+        // here: it has to read session files to find the affected paths, so it runs from
+        // the first Claude search-ingest pass. See `ClaudeRequestLogReindexMigration`.
+
         // Identity-backed sources historically wrote their millisecond logical revision
         // into session_meta.mtime, while the rest of session_meta uses Unix seconds.
         // Repair those rows in place for every source. This preserves the search corpus,
@@ -1703,6 +1707,83 @@ actor IndexDB {
         }
         for source in sources {
             try execBind(db, "DELETE FROM session_meta WHERE source = ?;", source)
+        }
+    }
+
+    // MARK: - Path-scoped one-time reindex (runs outside `bootstrap`)
+
+    func isMigrationApplied(_ key: String) throws -> Bool {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        return Self.migrationApplied(db, key: key)
+    }
+
+    /// Every path recorded for `source` in `files` or `session_meta`.
+    func recordedPaths(source: String) throws -> [String] {
+        let stmt = try prepare("""
+        SELECT path FROM files WHERE source = ?
+        UNION
+        SELECT path FROM session_meta WHERE source = ?;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT)
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { out.append(String(cString: c)) }
+        }
+        return out
+    }
+
+    /// Drops the `files`, `session_meta`, `session_search` and `session_tool_io` rows of
+    /// the given paths (scoped to `source`) and records `migrationKey`, in one
+    /// transaction. Search ingest then treats those paths as never indexed and writes all
+    /// four back from a fresh parse; the Claude indexer force-parses files missing from
+    /// `session_meta`. `session_days`/`rollups_daily` are left alone.
+    ///
+    /// This deletes search-corpus rows on purpose, against the guardrail above
+    /// `bootstrap`'s markers: the corpus rows for these paths are themselves wrong, and
+    /// the scope is a handful of sessions, not a source. Do not use it for a whole source.
+    func applyPathScopedReindex(source: String, paths: [String], migrationKey: String) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        try begin()
+        do {
+            let chunkSize = 200
+            var i = 0
+            while i < paths.count {
+                let slice = Array(paths[i..<min(i + chunkSize, paths.count)])
+                i += slice.count
+                let inSQL = Array(repeating: "?", count: slice.count).joined(separator: ",")
+                let statements: [(sql: String, sourceBinds: Int)] = [
+                    ("DELETE FROM session_search WHERE source = ? AND session_id IN (SELECT session_id FROM session_meta WHERE source = ? AND path IN (\(inSQL)));", 2),
+                    ("DELETE FROM session_tool_io WHERE source = ? AND session_id IN (SELECT session_id FROM session_meta WHERE source = ? AND path IN (\(inSQL)));", 2),
+                    ("DELETE FROM session_meta WHERE source = ? AND path IN (\(inSQL));", 1),
+                    ("DELETE FROM files WHERE source = ? AND path IN (\(inSQL));", 1),
+                ]
+                for statement in statements {
+                    var stmt: OpaquePointer?
+                    guard sqlite3_prepare_v2(db, statement.sql, -1, &stmt, nil) == SQLITE_OK else {
+                        throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+                    }
+                    defer { sqlite3_finalize(stmt) }
+                    var bindIdx: Int32 = 1
+                    for _ in 0..<statement.sourceBinds {
+                        sqlite3_bind_text(stmt, bindIdx, source, -1, SQLITE_TRANSIENT)
+                        bindIdx += 1
+                    }
+                    for p in slice {
+                        sqlite3_bind_text(stmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                        bindIdx += 1
+                    }
+                    guard sqlite3_step(stmt) == SQLITE_DONE else {
+                        throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+                    }
+                }
+            }
+            try Self.execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", migrationKey)
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
         }
     }
 
@@ -3354,6 +3435,65 @@ struct IndexedFileRow {
 struct SessionSearchIdentityState: Equatable, Sendable {
     let storagePath: String
     let revision: SearchIngestService.ContentRevision
+}
+
+/// One-time cleanup for Claude sessions indexed before request-log records were skipped.
+///
+/// Claude Code 2.1.303+ writes `api-request*` records that older builds parsed as real
+/// turns, so those sessions carry duplicate messages and system-prompt text in
+/// `session_meta`, `session_search`, `session_tool_io` and the Image Browser index, and
+/// the skip gates (mtime + size + format version) keep them until the file changes.
+/// This finds the affected files and drops their rows so the next ingest rebuilds them.
+///
+/// It runs from the first Claude search-ingest pass (a background actor), not from
+/// `IndexDB.bootstrap`: finding the files means reading them, which must not block
+/// launch or hold the bootstrap transaction. Files last modified before
+/// `earliestAffectedModification` cannot contain the records and are not opened.
+/// Unreadable or missing files count as unaffected. The marker is written in the same
+/// transaction as the deletes, so the scan never repeats once it has succeeded.
+enum ClaudeRequestLogReindexMigration {
+    static let migrationKey = "claude_request_log_reindex_v1"
+    static let source = "claude"
+    /// Claude Code 2.1.303 shipped after this date; 2.1.296 (2026-10-12) wrote none.
+    static let earliestAffectedModification = Date(timeIntervalSince1970: 1_790_812_800) // 2026-10-01T00:00:00Z
+    private static let marker = Data(#""type":"api-request"#.utf8)
+
+    /// Returns the paths that were reindexed (empty when the migration already ran).
+    @discardableResult
+    static func runIfNeeded(db: IndexDB,
+                            imageIndexCache: ImageBrowserIndexCache? = ImageBrowserIndexCache(),
+                            fileContainsRequestLog: (String) -> Bool = ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath:)) async throws -> [String] {
+        if try await db.isMigrationApplied(migrationKey) { return [] }
+        let candidates = try await db.recordedPaths(source: source)
+        let affected = candidates.filter { fileContainsRequestLog($0) }
+        try await db.applyPathScopedReindex(source: source, paths: affected, migrationKey: migrationKey)
+        if let imageIndexCache {
+            for path in affected {
+                await imageIndexCache.invalidateIndex(forPath: path)
+            }
+        }
+        return affected
+    }
+
+    /// Streams the file in 1 MiB chunks looking for `"type":"api-request`. False for a
+    /// file that is missing, unreadable, or older than `earliestAffectedModification`.
+    static func fileContainsRequestLog(atPath path: String) -> Bool {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: path),
+              let modified = attrs[.modificationDate] as? Date,
+              modified >= earliestAffectedModification,
+              let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let chunkSize = 1 << 20
+        var carry = Data()
+        while true {
+            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else { return false }
+            var window = carry
+            window.append(chunk)
+            if window.range(of: marker) != nil { return true }
+            carry = Data(window.suffix(marker.count - 1))
+        }
+    }
 }
 
 // MARK: - SQLite helper

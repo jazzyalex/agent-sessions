@@ -55,10 +55,15 @@ final class ClaudeSessionParser {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
+                // Request-log records are ~20% of the bytes of a 2.1.303+ session; skip the
+                // common written form before paying for a JSON decode.
+                if isRequestLogLinePrefix(rawLine) { return }
                 guard let data = rawLine.data(using: .utf8),
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return
                 }
+                // Fallback for a request-log record written in another key order.
+                if isRequestLogRecord(obj) { return }
 
                 // Extract session-level metadata from first few events
                 if sessionID == nil, let sid = obj["sessionId"] as? String {
@@ -264,6 +269,51 @@ final class ClaudeSessionParser {
 
     // MARK: - Event Parsing
 
+    /// Claude Code 2.1.303+ logs each API request into the transcript:
+    /// `api-request-shape` (system prompt + tool definitions), `api-request-blob`
+    /// (message bodies with role system/user/assistant) and `api-request`
+    /// (params, cache control, blob refs). They repeat turns that already exist as
+    /// `user`/`assistant` records, so they are skipped entirely: no transcript events,
+    /// message counts, titles, search text, timestamps or images.
+    ///
+    /// One rule for every reader: a record whose top-level `type` starts with
+    /// `api-request`, compared case-insensitively. The prefix also covers later
+    /// members of the same family.
+    static func isRequestLogType(_ type: String) -> Bool {
+        type.range(of: "api-request", options: [.anchored, .caseInsensitive]) != nil
+    }
+
+    static func isRequestLogRecord(_ obj: [String: Any]) -> Bool {
+        guard let type = obj["type"] as? String else { return false }
+        return isRequestLogType(type)
+    }
+
+    /// Cheap pre-check on the raw line for the form Claude Code writes
+    /// (`{"type":"api-request...` first). Lines in any other key order fall through
+    /// to `isRequestLogRecord` after decoding.
+    static func isRequestLogLinePrefix(_ rawLine: String) -> Bool {
+        rawLine.hasPrefix(#"{"type":"api-request"#)
+    }
+
+    /// The 0-based file line an event was parsed from, decoded from its id.
+    ///
+    /// Full-parse event ids are `<sha256 of path>-<line>` with an optional block suffix
+    /// (`-p01`, `-m01`, `-t01`, `-r01`), where `<line>` is 1-based and counts the
+    /// non-blank lines `JSONLReader` delivers. `ClaudeBase64ImageScanner` counts lines
+    /// the same way (blank lines skipped), so the two agree. The one known mismatch is a
+    /// line that is not valid UTF-8, which the reader drops and the scanner counts; none
+    /// of the 2,029 local Claude files on 2026-10-21 had one (or a blank line). Image placement uses this
+    /// to work in line space; returns nil for any other id shape (lightweight `light-N`
+    /// ids, synthetic test ids), and callers then fall back.
+    static func sourceLineIndex(forEventID eventID: String) -> Int? {
+        let parts = eventID.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count >= 2,
+              parts[0].count == 64,
+              parts[0].allSatisfy(\.isHexDigit),
+              let line = Int(parts[1]), line >= 1 else { return nil }
+        return line - 1
+    }
+
     private static func parseLine(_ obj: [String: Any], eventID: String) -> SessionEvent {
         let derived = parseLineEvents(obj, baseEventID: eventID)
         if let preferred = derived.first(where: { $0.kind == .user || $0.kind == .assistant }) {
@@ -289,6 +339,7 @@ final class ClaudeSessionParser {
     /// Claude Code can embed `tool_use`, `tool_result`, and `thinking` blocks inside `message.content[]`.
     /// We split these into separate `SessionEvent`s to avoid collapsing tool activity into a single line.
     private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
+        if isRequestLogRecord(obj) { return [] }
         let timestamp = extractTimestamp(from: obj)
         let rawJSON = rawJSONBase64(sanitizeLargeStrings(in: obj))
         let messageID = obj["uuid"] as? String
@@ -846,6 +897,8 @@ final class ClaudeSessionParser {
             var entrypoint: String?
 
             func ingest(_ rawLine: String) {
+                // Request-log records are skipped entirely (see `isRequestLogType`).
+                if isRequestLogLinePrefix(rawLine) { return }
                 guard let data = rawLine.data(using: .utf8),
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return
@@ -880,6 +933,7 @@ final class ClaudeSessionParser {
                     if tmin == nil || ts < tmin! { tmin = ts }
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
+                if isRequestLogRecord(obj) { return }
 
                 // Extract row titles. custom-title from /rename always wins;
                 // ai-title is a generated fallback; agent-name is weakest.

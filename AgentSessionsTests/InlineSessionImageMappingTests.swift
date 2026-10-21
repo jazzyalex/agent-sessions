@@ -225,6 +225,79 @@ final class InlineSessionImageMappingTests: XCTestCase {
         XCTAssertEqual(viewModel.loadedUserPromptText(for: item), "second prompt")
     }
 
+    // MARK: - Claude: request-log lines make line indexes outrun event indexes
+
+    /// A Claude 2.1.303+ transcript where request-log lines sit between the first prompt
+    /// and its screenshot. The parser skips those lines, so the screenshot's file line (5)
+    /// is past the *second* prompt's event index (3); the generic "last user event index
+    /// <= line index" rule then files it under the later prompt.
+    private func claudeRequestLogImageTranscript(base64: String) -> String {
+        """
+        {"type":"user","sessionId":"s","message":{"role":"user","content":"first prompt"},"uuid":"u1","timestamp":"2026-10-21T00:00:00.000Z"}
+        {"type":"api-request-shape","sessionId":"s","shapeHash":"h1","shape":{"system":[{"type":"text","text":"sys"}],"tools":[]}}
+        {"type":"api-request-blob","sessionId":"s","hash":"b1","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}
+        {"type":"api-request","sessionId":"s","id":"r1","timestamp":"2026-10-21T00:00:01.000Z","params":{"model":"claude-opus-5-5"},"tail":["b1"]}
+        {"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Screenshot","input":{}}]},"uuid":"a1","timestamp":"2026-10-21T00:00:02.000Z"}
+        {"type":"user","sessionId":"s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"\(base64)"}}]}]},"uuid":"u2","timestamp":"2026-10-21T00:00:03.000Z"}
+        {"type":"assistant","sessionId":"s","message":{"role":"assistant","content":[{"type":"text","text":"here it is"}]},"uuid":"a2","timestamp":"2026-10-21T00:00:04.000Z"}
+        {"type":"user","sessionId":"s","message":{"role":"user","content":"second prompt"},"uuid":"u3","timestamp":"2026-10-21T00:00:05.000Z"}
+        """
+    }
+
+    func testClaudeImageMapsToItsPromptAcrossSkippedRequestLogLines() throws {
+        let url = try writeTempJSONL(claudeRequestLogImageTranscript(base64: "QUJDRA==") + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+
+        // Guard the premise: the second prompt's event index must be at or below the
+        // image's file line, or the old rule would pass this test by accident.
+        let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
+            ev.kind == .user ? idx : nil
+        }
+        XCTAssertEqual(userEventIndices.count, 2)
+        let located = try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: 20)
+        XCTAssertEqual(located.map(\.lineIndex), [5], "guard: the image must be on file line 5")
+        XCTAssertLessThanOrEqual(try XCTUnwrap(userEventIndices.last), 5,
+                                 "guard: the second prompt must sit at an event index <= the image line")
+
+        let mapped = SessionInlineImageMapper.imagesByUserBlockIndex(for: session)
+        let placed = mapped.values.flatMap { $0 }
+        XCTAssertEqual(placed.count, 1)
+        // Before the line-space lookup this was the second prompt.
+        XCTAssertEqual(placed.first?.imageEventID, session.events[userEventIndices[0]].id)
+        XCTAssertEqual(placed.first?.userPromptIndex, 0)
+    }
+
+    @MainActor
+    func testClaudeImageBrowserLabelsItsPromptAcrossSkippedRequestLogLines() async throws {
+        let url = try writeTempJSONL(claudeRequestLogImageTranscript(base64: String(repeating: "A", count: 160)) + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
+            ev.kind == .user ? idx : nil
+        }
+        XCTAssertEqual(userEventIndices.count, 2)
+
+        let cacheRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("ImageBrowserCache-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: cacheRoot) }
+        let cache = ImageBrowserIndexCache(cacheRootOverride: cacheRoot)
+        let index = await cache.getOrBuildIndex(for: session, maxMatches: 10)
+        XCTAssertEqual(index.spans.map(\.lineIndex), [5], "guard: the stored span must record file line 5")
+
+        let viewModel = ImageBrowserViewModel(indexCache: cache)
+        viewModel.updateSessions(allSessions: [session], seedSession: session)
+        viewModel.cancelBackgroundWork()
+
+        let items = viewModel.buildItems(for: session, index: index)
+        XCTAssertEqual(items.count, 1)
+        let item = try XCTUnwrap(items.first)
+        XCTAssertEqual(item.eventID, session.events[userEventIndices[0]].id)
+        XCTAssertEqual(item.userPromptIndex, 0)
+        XCTAssertEqual(item.lineIndex, userEventIndices[0])
+        XCTAssertEqual(viewModel.loadedUserPromptText(for: item), "first prompt")
+    }
+
     /// The transcript half of the preamble-preference pin. Its counterpart below covers
     /// the Image Browser, and both now run through the same `ImageUserTurnResolver` — so
     /// this pair is what makes a change to that shared rule fail on both surfaces rather

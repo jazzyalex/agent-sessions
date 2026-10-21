@@ -279,6 +279,24 @@ def test_codex_agent_state_map_does_not_expose_agent_ids(tmp_path):
     assert "event_msg.payload:item_completed.item.agents_states" not in keys
 
 
+def test_codex_top_level_tools_map_does_not_expose_tool_names(tmp_path):
+    # Codex 0.163 `world_state.payload.state.top_level_tools` is keyed by tool path;
+    # walking it made every enabled connector read as Codex drift.
+    p = _write(tmp_path, [{
+        "type": "world_state",
+        "payload": {"state": {
+            "base_instructions": "hash",
+            "top_level_tools": {"functions.exec": {}, "mcp__private_connector.js": {}},
+        }},
+    }])
+
+    keys = agent_watch._schema_fingerprint_for_agent("codex", p, max_lines=100)["type_keys"]
+
+    assert "top_level_tools" in keys["world_state.payload.state"]
+    assert not [b for b in keys if "top_level_tools" in b]
+    assert not [k for ks in keys.values() for k in ks if "mcp__private_connector" in k]
+
+
 def test_codex_recent_response_metadata_is_fingerprinted_without_values(tmp_path):
     p = _write(tmp_path, [{
         "type": "response_item",

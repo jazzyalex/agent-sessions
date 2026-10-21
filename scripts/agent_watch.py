@@ -1156,6 +1156,9 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
         # 18 buckets like `mcp__codex_apps__gmail` on 2026-10-11. Every connector a user
         # enables would read as Codex drift.
         "tools",
+        # `world_state.payload.state.top_level_tools` (0.163) is the same kind of map,
+        # keyed by tool path (`functions.exec`, `mcp__cua_repl.js`).
+        "top_level_tools",
     },
     # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
     # but `.message` was opaque — hiding content-block types and the whole `usage`
