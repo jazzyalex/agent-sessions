@@ -173,6 +173,28 @@ def test_weekly_samples_the_store_and_not_the_codex_harness(tmp_path):
     assert "session_meta" not in fp["type_keys"]
 
 
+def test_weekly_fails_when_one_of_several_stores_cannot_be_read(tmp_path):
+    """A healthy store must not hide a broken one: the union is a read failure."""
+    state = tmp_path / ".openclaw"
+    healthy = _build_store(state / "agents" / "main" / "agent" / "openclaw-agent.sqlite")
+    broken = state / "agents" / "other" / "agent" / "openclaw-agent.sqlite"
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"not a database")
+    fp = agent_watch._openclaw_weekly_sqlite_fingerprint(_weekly_cfg(state))
+    assert fp is not None
+    assert agent_watch._sample_read_failed(fp)
+    assert str(broken) in fp["read_failed_files"]
+    assert str(broken) in fp["error"]
+    # The healthy store's fingerprint stays for diagnostics.
+    assert str(healthy) in fp["sampled_files"]
+    assert fp["type_counts"] == {"message": 8, "session": 2}
+    diff = _diff(fp)
+    assert diff["unknown_only_is_empty"], diff
+    assert not agent_watch._weekly_schema_matches(diff, fp)
+    assert diff["read_failed"] is True
+    assert str(broken) in diff["read_error"]
+
+
 def test_weekly_returns_none_without_a_store(tmp_path):
     state = tmp_path / ".openclaw"
     (state / "agents" / "main" / "sessions").mkdir(parents=True)

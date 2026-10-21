@@ -5372,9 +5372,12 @@ def _openclaw_weekly_sqlite_fingerprint(local_schema_cfg: dict[str, Any]) -> dic
         _openclaw_sqlite_schema_fingerprint(db, max_events=max_events, exclude_prebump=True)
         for db in databases
     ]
-    readable = [fp for fp in fingerprints if not fp.get("read_failed")]
+    readable = [fp for fp in fingerprints if not _sample_read_failed(fp)]
+    failed = [fp for fp in fingerprints if _sample_read_failed(fp)]
     if not readable:
-        return fingerprints[0]
+        lead = dict(fingerprints[0])
+        lead["read_failed_files"] = [str(fp.get("file")) for fp in failed]
+        return lead
     lead = dict(readable[0])
     if len(readable) > 1:
         lead["type_keys"] = _merge_type_keys(readable)
@@ -5391,6 +5394,15 @@ def _openclaw_weekly_sqlite_fingerprint(local_schema_cfg: dict[str, Any]) -> dic
         if newest:
             lead["logical_mtime_epoch"] = max(newest)
     lead["sampled_files"] = [str(fp.get("file")) for fp in readable]
+    if failed:
+        # A discovered store that cannot be inspected fails the whole sample, even
+        # when another store reads cleanly: dropping it could hide a format change
+        # behind a baseline match. The readable stores' keys stay for diagnostics.
+        lead["read_failed"] = True
+        lead["read_failed_files"] = [str(fp.get("file")) for fp in failed]
+        lead["error"] = "; ".join(
+            f"{fp.get('file')}: {fp.get('error') or 'read_failed'}" for fp in failed
+        )
     return lead
 
 
