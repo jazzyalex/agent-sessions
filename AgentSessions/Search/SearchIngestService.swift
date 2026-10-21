@@ -201,10 +201,12 @@ actor SearchIngestService {
     }
 
     private let db: IndexDB
+    private let claudeImageIndexCache: ImageBrowserIndexCache
 
-    /// Set once `ClaudeRequestLogReindexMigration` has run (or found its marker) in this
-    /// process, so later Claude passes skip even the marker query.
+    /// The migration scan is complete only after its marker commits. Image Browser
+    /// invalidations are a separate retry obligation, including after that marker.
     private var claudeRequestLogReindexDone = false
+    private var claudeRequestLogPendingInvalidations = false
 
     /// Remembered aggregate from the last ingest pass that ran to completion (no
     /// throw, no cancellation) for each source. Only ever read/written from within
@@ -222,8 +224,9 @@ actor SearchIngestService {
     /// was actually taken rather than inferring it indirectly from `Progress` alone.
     private(set) var earlyOutHitCountForTesting = 0
 
-    init(db: IndexDB) {
+    init(db: IndexDB, claudeImageIndexCache: ImageBrowserIndexCache = ImageBrowserIndexCache()) {
         self.db = db
+        self.claudeImageIndexCache = claudeImageIndexCache
     }
 
     /// Re-ingest cooldown tiers: a changed-but-quiet file is re-ingested at most
@@ -268,15 +271,19 @@ actor SearchIngestService {
         let sourceRaw = source.rawValue
         let descriptor = source.descriptor
 
-        // One-time Claude request-log cleanup. It must run before the early-out below and
-        // before the ready-path reads, so the paths it drops are re-ingested in this pass.
-        // A failure leaves the marker unwritten and is retried on the next pass.
-        if source == .claude, !claudeRequestLogReindexDone {
+        // The scan marker and external image-cache invalidations have separate
+        // lifetimes. Retry pending removals before the aggregate early-out even
+        // when the migration marker has already committed in this actor.
+        if source == .claude, !claudeRequestLogReindexDone || claudeRequestLogPendingInvalidations {
             do {
-                try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db)
-                claudeRequestLogReindexDone = true
+                try await ClaudeRequestLogReindexMigration.runIfNeeded(
+                    db: db, imageIndexCache: claudeImageIndexCache)
+                claudeRequestLogReindexDone = try await db.isMigrationApplied(
+                    ClaudeRequestLogReindexMigration.migrationKey)
+                let pending = try await db.pendingImageCacheInvalidations()
+                claudeRequestLogPendingInvalidations = !pending.isEmpty
             } catch {
-                // Non-fatal: ordinary ingest proceeds; the cleanup retries next pass.
+                // Non-fatal: the next Claude pass retries the failed cleanup.
             }
         }
 

@@ -3551,13 +3551,12 @@ struct SessionSearchIdentityState: Equatable, Sendable {
 /// pending invalidation, and every run (also after the marker) removes the pending
 /// indexes and clears an entry only once its removal succeeded.
 enum ClaudeRequestLogReindexMigration {
-    static let migrationKey = "claude_request_log_reindex_v1"
+    static let migrationKey = "claude_request_log_reindex_v2"
     static let source = "claude"
     /// Claude Code 2.1.303 shipped after this date; 2.1.296 (2026-10-12) wrote none.
     static let earliestAffectedModification = Date(timeIntervalSince1970: 1_790_812_800) // 2026-10-01T00:00:00Z
-    /// The form Claude Code writes. A hit is a request-log record without decoding.
-    private static let exactMarker = Data(#""type":"api-request"#.utf8)
-    /// Lowercase ASCII. A line must contain this, in any case, to be decoded at all.
+    /// Raw byte matches only select candidate files. A decoded top-level
+    /// request record and a complete readable file are required for deletion.
     private static let candidateMarker = Data("api-request".utf8)
 
     enum Scan: Equatable { case affected, unaffected, unreadable }
@@ -3566,7 +3565,7 @@ enum ClaudeRequestLogReindexMigration {
     @discardableResult
     static func runIfNeeded(db: IndexDB,
                             imageIndexCache: ImageBrowserIndexCache? = ImageBrowserIndexCache(),
-                            scanFile: (String) -> Scan = ClaudeRequestLogReindexMigration.scanFile(atPath:)) async throws -> [String] {
+                            scanFile: (String) -> Scan = { ClaudeRequestLogReindexMigration.scanFile(atPath: $0) }) async throws -> [String] {
         var affected: [String] = []
         if !(try await db.isMigrationApplied(migrationKey)) {
             let retryPaths = try await db.pathScopedReindexRetryPaths(migrationKey: migrationKey)
@@ -3594,13 +3593,13 @@ enum ClaudeRequestLogReindexMigration {
     }
 
     /// Whether the file holds a record that `ClaudeSessionParser.isRequestLogRecord`
-    /// skips. One streaming pass in 1 MiB chunks looks for `"type":"api-request` and
-    /// notes whether `api-request` appears in any case. Only then a second pass decodes
-    /// the lines that contain it (through `JSONLReader`, as the parser reads them).
+    /// skips. A byte-level candidate scan is followed by a full JSONL pass that
+    /// validates top-level records and reads through EOF before returning affected.
     ///
     /// `.unaffected` for a missing file or one older than `earliestAffectedModification`;
     /// `.unreadable` when the file exists but cannot be opened or read.
-    static func scanFile(atPath path: String) -> Scan {
+    static func scanFile(atPath path: String,
+                         readChunk: ((FileHandle, Int) throws -> Data)? = nil) -> Scan {
         let fm = FileManager.default
         let attrs: [FileAttributeKey: Any]
         do {
@@ -3619,28 +3618,33 @@ enum ClaudeRequestLogReindexMigration {
         while true {
             let chunk: Data
             do {
-                guard let read = try handle.read(upToCount: chunkSize), !read.isEmpty else { break }
+                guard let read = try (readChunk?(handle, chunkSize) ?? handle.read(upToCount: chunkSize)),
+                      !read.isEmpty else { break }
                 chunk = read
             } catch {
                 return .unreadable
             }
             var window = carry
             window.append(chunk)
-            if window.range(of: exactMarker) != nil { return .affected }
-            if !sawCandidate, asciiLowercased(window).range(of: candidateMarker) != nil { sawCandidate = true }
-            carry = Data(window.suffix(exactMarker.count - 1))
+            if !sawCandidate, asciiLowercased(window).range(of: candidateMarker) != nil {
+                sawCandidate = true
+            }
+            carry = Data(window.suffix(candidateMarker.count - 1))
         }
         guard sawCandidate else { return .unaffected }
 
         var found = false
         do {
-            let reader = JSONLReader(url: URL(fileURLWithPath: path), chunkSize: chunkSize, propagatesReadErrors: true)
+            let reader = JSONLReader(url: URL(fileURLWithPath: path), chunkSize: chunkSize,
+                                     propagatesReadErrors: true, readChunk: readChunk)
             try reader.forEachLineWhile { line in
                 guard line.range(of: "api-request", options: .caseInsensitive) != nil,
                       let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                       ClaudeSessionParser.isRequestLogRecord(object) else { return true }
                 found = true
-                return false
+                // Do not stop at the first hit: a later read failure must
+                // block migration, not classify a partially read file.
+                return true
             }
         } catch {
             return .unreadable

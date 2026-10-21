@@ -216,7 +216,7 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         XCTAssertTrue(claudeDayUpdates.isEmpty)
     }
 
-    // MARK: - claude_request_log_reindex_v1
+    // MARK: - claude_request_log_reindex_v2 (repairs v1)
 
     private static let requestLogLine = #"{"type":"api-request-blob","sessionId":"s","hash":"b1","message":{"role":"user","content":[{"type":"text","text":"copy"}]}}"#
     private static let plainLine = #"{"type":"user","sessionId":"s","message":{"role":"user","content":"hello"},"uuid":"u1","timestamp":"2026-10-21T00:00:00.000Z"}"#
@@ -475,6 +475,44 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         XCTAssertEqual(pendingAfterRerun, [])
     }
 
+    func testClaudeRequestLogV1MarkerDoesNotBlockV2Repair() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        try await db.applyPathScopedReindex(source: "claude", paths: [],
+                                            migrationKey: "claude_request_log_reindex_v1")
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeRequestLogV2-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try (Self.requestLogLine + "\n").write(to: file, atomically: true, encoding: .utf8)
+        try await seedPath(db, source: "claude", id: "v1-survivor", path: file.path)
+
+        let repaired = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: nil)
+        XCTAssertEqual(repaired, [file.path])
+        let v2Applied = try await db.isMigrationApplied(ClaudeRequestLogReindexMigration.migrationKey)
+        let remaining = try await db.rowCountForTesting(table: "session_meta", source: "claude")
+        XCTAssertTrue(v2Applied)
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testClaudeRequestLogEarlyMatchDoesNotMaskLateReadFailure() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeRequestLogLateRead-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try (Self.requestLogLine + "\n" + String(repeating: "x", count: 1 << 20) + "\n")
+            .write(to: file, atomically: true, encoding: .utf8)
+        var calls = 0
+        let result = ClaudeRequestLogReindexMigration.scanFile(atPath: file.path) { handle, count in
+            calls += 1
+            // Three reads complete the cheap candidate pass (including EOF).
+            // Fail the second read of the JSONL validation pass, after a
+            // valid top-level request-log record has already been decoded.
+            if calls == 5 { throw NSError(domain: "injected-late-read", code: 1) }
+            return try handle.read(upToCount: min(count, 1 << 20)) ?? Data()
+        }
+        XCTAssertEqual(result, .unreadable)
+        XCTAssertGreaterThan(calls, 4)
+    }
+
     /// The streaming check finds a marker split across its 1 MiB read boundary, treats
     /// missing and pre-cutoff files as unaffected and reports unreadable files.
     func testClaudeRequestLogFileCheck() throws {
@@ -487,10 +525,21 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         }
 
         let split = dir.appendingPathComponent("split.jsonl")
-        var data = Data(repeating: UInt8(ascii: "x"), count: (1 << 20) - 6)
-        data.append(Data(#""type":"api-request-blob"}"#.utf8))
-        try data.write(to: split)
+        // A valid JSONL object crosses the one-MiB chunk boundary.
+        let prefix = #"{"content":""# + String(repeating: "x", count: (1 << 20) - 20)
+        let line = prefix + "\"" + #","type":"api-request-blob"}"#
+        XCTAssertNotNil(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        try (line + "\n").write(to: split, atomically: true, encoding: .utf8)
         XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: split.path), .affected)
+
+        let malformed = dir.appendingPathComponent("malformed.jsonl")
+        try (#""type":"api-request-blob"}"# + "\n").write(to: malformed, atomically: true, encoding: .utf8)
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: malformed.path), .unaffected)
+
+        let nested = dir.appendingPathComponent("nested.jsonl")
+        try (#"{"type":"user","payload":{"type":"api-request-blob"}}"# + "\n")
+            .write(to: nested, atomically: true, encoding: .utf8)
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: nested.path), .unaffected)
 
         let plain = dir.appendingPathComponent("plain.jsonl")
         try (Self.plainLine + "\n").write(to: plain, atomically: true, encoding: .utf8)

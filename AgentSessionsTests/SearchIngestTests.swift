@@ -366,6 +366,44 @@ final class SearchIngestTests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testClaudeIngestRetriesPendingImageInvalidationsInSameActor() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let file = ingestTempDir.appendingPathComponent("claude-request.jsonl")
+        try (#"{"type":"api-request-blob","sessionId":"s","message":{"role":"user","content":"copy"}}"# + "\n")
+            .write(to: file, atomically: true, encoding: .utf8)
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: "claude-test", source: "claude", path: file.path,
+            mtime: 100, size: 200, startTS: 100, endTS: 200,
+            model: nil, cwd: nil, repo: nil, title: "old",
+            codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0,
+            parentSessionID: nil, subagentType: nil, customTitle: nil))
+
+        let cacheRoot = ingestTempDir.appendingPathComponent("ImageCache", isDirectory: true)
+        let indexDir = cacheRoot.appendingPathComponent("Index", isDirectory: true)
+        let cache = ImageBrowserIndexCache(cacheRootOverride: cacheRoot)
+        let session = Session(id: "claude-test", source: .claude, startTime: nil, endTime: nil,
+                              model: nil, filePath: file.path, eventCount: 0, events: [])
+        _ = await cache.getOrBuildIndex(for: session, maxMatches: 10)
+        let before = await cache.loadIndexIfValid(for: session)
+        XCTAssertNotNil(before)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: indexDir.path) }
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: indexDir.path)
+        let service = SearchIngestService(db: db, claudeImageIndexCache: cache)
+        _ = try await service.ingest(source: .claude, files: [], toolIOEnabled: false, yieldNanoseconds: 0)
+        let pendingAfterFailure = try await db.pendingImageCacheInvalidations()
+        XCTAssertEqual(pendingAfterFailure, [file.path])
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: indexDir.path)
+        _ = try await service.ingest(source: .claude, files: [], toolIOEnabled: false, yieldNanoseconds: 0)
+        let pendingAfterRetry = try await db.pendingImageCacheInvalidations()
+        XCTAssertTrue(pendingAfterRetry.isEmpty, "the done flag must not suppress image-cache retry")
+        let invalidated = await cache.loadIndexIfValid(for: session)
+        XCTAssertNil(invalidated)
+    }
+
     func testIngestPopulatesSearchCorpusFromJSONLFixture() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
