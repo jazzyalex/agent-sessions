@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **OpenClaw sessions are back.** OpenClaw 2026.10.5 moved its history into a database, and new sessions stopped showing up. The list now reads that database, with titles and projects for sessions OpenClaw carried over, and compressed tool output opens normally. A session that exists in both places shows once.
+- **Claude transcripts no longer repeat each turn.** Claude Code 2.1.303 started logging every API request into the session file. Those copies showed up as extra user messages, system-prompt text, and duplicate tool calls and images, and they inflated message counts and search. The app now skips them.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- Format check 2026-10-21: verified ceilings advance from fresh tool-using sessions to Codex 0.163.0, Claude Code 2.1.306, Copilot 1.0.101, OpenCode 2.1.2, Kimi 2.2.0, Pi 1.3.0, Grok 1.0.62, Cursor 2026.10.19, Hermes 0.22.2 and Cline CLI 3.0.73. Antigravity 1.4.3 stays at 1.1.27 (thin sample). Codex `top_level_tools` is now opaque to the fingerprint, and the Claude, Codex and Copilot fixtures cover the new fields.
+- OpenClaw 2026.10.5 verified (was 2026.7.1). `OpenClawSqliteReader` decodes zstd `transcript_events` rows and builds list previews from the transcript; a NULL `started_at` no longer drops the whole store. Same-id JSONL and SQLite copies dedupe to the newer one (SQLite on ties), and discovery stops at `agents/<id>/sessions`, skipping the embedded `agent/codex-home`. Monitoring samples the store (`openclaw_latest_session`) against `Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql`, and the prebump driver reads its session by `--session-key`.
+
 ## [6.0] - 2026-10-20
 
 ### Highlights

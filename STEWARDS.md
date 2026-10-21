@@ -81,22 +81,22 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 
 | Agent | Steward | Last verified | Tier |
 |---|---|---|---|
-| Codex | @jazzyalex (maintainer) | 2026-10-12 · 0.162.1 | Maintained |
-| Claude Code | @jazzyalex (maintainer) | 2026-10-12 · 2.1.296 | Maintained |
-| Cursor Agent | steward wanted | 2026-08-13 · 2026.8.11 | Best-effort |
-| GitHub Copilot CLI | steward wanted | 2026-10-13 · 1.0.97 | Best-effort |
-| OpenCode | steward wanted | 2026-10-20 · 2.1.1 | Best-effort |
+| Codex | @jazzyalex (maintainer) | 2026-10-21 · 0.163.0 | Maintained |
+| Claude Code | @jazzyalex (maintainer) | 2026-10-21 · 2.1.306 | Maintained |
+| Cursor Agent | steward wanted | 2026-10-21 · 2026.10.19 | Best-effort |
+| GitHub Copilot CLI | steward wanted | 2026-10-21 · 1.0.101 | Best-effort |
+| OpenCode | steward wanted | 2026-10-21 · 2.1.2 | Best-effort |
 | Antigravity CLI | steward wanted | 2026-08-13 · 1.1.12 | Best-effort |
-| Pi | steward wanted | 2026-10-13 · 1.1.0 | Best-effort |
-| Kimi Code | steward wanted | 2026-08-17 · 0.36.1 | Best-effort |
-| Grok CLI | steward wanted | 2026-10-13 · 1.0.44 | Best-effort |
-| OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
-| Hermes | steward wanted | 2026-10-13 · 0.21.5 | Best-effort |
+| Pi | steward wanted | 2026-10-21 · 1.3.0 | Best-effort |
+| Kimi Code | steward wanted | 2026-10-21 · 2.3.0 | Best-effort |
+| Grok CLI | steward wanted | 2026-10-21 · 1.0.62 | Best-effort |
+| OpenClaw | steward wanted | 2026-10-21 · 2026.10.5 | Best-effort |
+| Hermes | steward wanted | 2026-10-21 · 0.22.2 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
-| Cline CLI and Desktop | steward wanted | 2026-09-15 · CLI 3.0.62 / Desktop 0.0.28 | Best-effort |
-| DeepSeek Harness | steward wanted | 2026-09-25 · installed 0.1.5-rc.2 real-session sample; matrix ceiling 0.1.6-alpha.2 | Best-effort |
+| Cline CLI and Desktop | steward wanted | 2026-10-21 · CLI 3.0.73 / Desktop 0.0.28 (2026-09-15) | Best-effort |
+| DeepSeek Harness | steward wanted | 2026-10-21 · 0.2.1-rc.2 | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),

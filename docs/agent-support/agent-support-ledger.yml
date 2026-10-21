@@ -9,6 +9,112 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "79e9f272+working-tree"
+    note: "Follow-up weekly (scripts/probe_scan_output/agent_watch/20261021-060018-769980Z-p10393/report.json) flagged Claude user.refusedMessageId and Kimi 2.3.0 changeNotifier.snapshot. Claude: since 2.1.304 a safety-classifier stop writes a harness type:user notice (isMeta, turnCompanion, refusedMessageId = the stopped assistant reply's message.id; that reply has stop_reason refusal). It parsed as a user prompt: a user row, a counted message, a turn start, and the title when the real first prompt has no text. ClaudeSessionParser now emits it as a system .meta event keyed on a non-empty refusedMessageId (failing-first tests SessionParserTests.testClaudeClassifierStopNoticeIsMetaNotUserPrompt, testClaudeUserPromptWithoutRefusedMessageIdStaysUserPrompt, Stage0GoldenFixturesTests.testClaudeClassifierStopNoticeInBaselineIsMeta). Value pass: candidate (records a state transition the UI hides) -> backlog 'Claude safety-classifier stops are hidden in the transcript'. General isMeta handling measured (696 of 102,789 user records, 298 of 2,033 files, never the first user record) and left as backlog 'Claude isMeta user records still render as user prompts'. Final weekly: scripts/probe_scan_output/agent_watch/20261021-060948-140119Z-p13897/report.json (claude and kimi supports_latest, zero unknown schema)."
+    verified:
+      claude:
+        sessions:
+          max_verified_version: "2.1.306"
+          scope: "latest; unchanged, refusal notice now handled"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-060948-140119Z-p13897/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl", "AgentSessionsTests/SessionParserTests.swift", "AgentSessionsTests/Stage0GoldenFixturesTests.swift"]
+          notes: "Redacted refusal-notice record added to the normal baseline fixture; weekly reports zero unknown schema."
+      kimi:
+        sessions:
+          max_verified_version: "2.3.0"
+          scope: "latest; installed and upstream both 2.3.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-060807-777726Z-p13346-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-060948-140119Z-p13897/report.json", "Resources/Fixtures/stage0/agents/kimi/small.jsonl", "AgentSessionsTests/KimiSessionParserTests.swift"]
+          notes: "Fresh 2.3.0 prebump session with tool-call and tool-result buckets matches the refreshed baseline. New changeNotifier.snapshot op (agentId, agentsMdHash, agentsMdFiles, skillsHash, subagentNames, modelPool, time) is durable replayable change-detection state for AGENTS.md, skills and subagent catalog reminders (upstream packages/agent-core-v2/src/agent/changeNotifier/changeNotifierOps.ts). It parses as text-less .meta (KimiSessionParserTests.testNonMessageOpFamiliesSurviveAsMeta). Value pass: noise."
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "79e9f272+working-tree"
+    note: "DeepSeek Harness 0.2.1-rc.2 drift (weekly scripts/probe_scan_output/agent_watch/20261021-051532-021389Z-p87057/report.json: 7 unknown buckets, all from a failed-credential prebump session). Upstream source (tags dsh-v0.2.0-rc.2..dsh-v0.2.1-rc.2) and a fresh tool session showed changes the strict v4 reader refused, each hiding the whole session: request/context systemPromptUpdate (already in 0.2.0-rc.2); optional session/title-llm-request reasoningEffort; required job/registered and job/settled around every shell tool; required working-directory/change; subagent/catalog version 2 for external children. All are admitted, and a turn/end error now renders as one error row. Synthetic fixture v4_job_failed_turn_session.jsonl(.zstd) is validated by the installed 0.2.1-rc.2 catalog. The prebump driver restores DSH's stored credential store per run (the 0.2.1-rc.2 headless bundle disables it) with the upstream --patch overlay."
+    verified:
+      deepseek_harness:
+        sessions:
+          max_verified_version: "0.2.1-rc.2"
+          scope: "latest; installed and upstream both 0.2.1-rc.2"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-053131-183838Z-p97821-prebump/report.json", "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_job_failed_turn_session.jsonl", ".deriveddata-tests/Logs/Test/Run-AgentSessions-2026.10.20_22-47-27--0700.xcresult"]
+          notes: "Fresh 31-event 0.2.1-rc.2 tool session matches the refreshed baseline with message, tool, usage, relationship and integrity buckets (prebump exit 0). The first Swift run also caught request/context.systemPromptUpdate, written by every real v4 session since 0.2.0-rc.2 and refused by the strict key check; it is admitted now. A local sweep through the production reader parsed all 11 real sessions under ~/.dsh/sessions, three written by 0.2.1-rc.2. DSH, parity and Stage0 classes: 201 passed, 0 failed. Value pass: assistant/attempt (failure reason) handled, diagnostic-only, no duplicated text (DeepSeekHarnessSessionParserTests.testAssistantAttemptStaysDiagnosticOnly); turn/end reason.error handled (testTurnEndErrorRendersOneErrorRow); title-request reasoningEffort noise; job/registered and job/settled candidate (docs/backlog.md, shell-job timing); working-directory/change watch (no sighting yet); subagent/catalog version 2 watch (no sighting yet)."
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "79e9f272+working-tree"
+    note: "OpenClaw 2026.10.5 moved transcripts into agents/<id>/agent/openclaw-agent.sqlite. The app's SQLite reader (added 2026-10-07) had listed nothing from a real store: a NULL started_at/ended_at was read as an invalid column. Fixed, plus zstd row decoding, transcript previews for imported sessions, same-id JSONL/SQLite dedupe, and discovery limited to agents/<id>/sessions. Monitoring samples the store and the prebump driver reads it by session key."
+    verified:
+      openclaw:
+        sessions:
+          max_verified_version: "2026.10.5"
+          scope: "latest; installed and upstream both 2026.10.5"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-052254-375889Z-p92944-prebump/report.json", "scripts/probe_scan_output/steward_check/openclaw/scan/20261021-052343-562016Z-p93415/report.json", "Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql"]
+          notes: "Fresh real-home session (2 exec tool calls, 2 zstd tool results) matches the baseline with 0 parse errors. Weekly over the real store: 5 sessions, 76 records, 7 compressed, zero unknown schema, discovery contract ok. Value pass: usage.contextUsage and reasoningTokens handled (OpenClawTelemetryProvider, SessionParserTests.testOpenClawTelemetryUsesExplicitContextUsageWhenPresent); __openclaw runId/runTerminal/mirrorSourceFingerprint/transport/toolOutput, openclawDisplayContent and openclawStreamFallback (copies of visible text) are noise; tool-defined `details` is fingerprinted one level deep (exec exitCode/status are read by ToolTextBlockNormalizer; the fresh session re-checked against that baseline offline still matches, 28 types); __openclaw.upstreamUserText and openclawDelivery.mediaUrls are watch."
+  - agent_sessions_version: "6.0.1-unreleased"
+    as_of_date_utc: "2026-10-21"
+    as_of_commit: "79e9f272+working-tree"
+    note: "Claude 2.1.303+ request-log records (api-request, api-request-blob, api-request-shape) were parsed as real turns; the app now skips them. Codex 0.163.0 additional_tools stays metadata. Fixtures refreshed from all local sessions. After the owner updated CLIs, nine agents have fresh tool-bearing prebump sessions that match baseline. The Codex ChatGPT plan now rejects gpt-5.5, so the Pi prebump model moved to openai-codex/gpt-6-luna and the owner's Hermes default switched to gpt-6-luna (copilot fallback claude-haiku-5.5). Antigravity 1.4.3 is held (thin sample: 4 events, tool call without result); OpenClaw and DeepSeek Harness are out of scope for this entry."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.163.0"
+          scope: "latest; installed and upstream both 0.163.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-045755-165577Z-p75378/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "Fresh codex_exec session on 0.163.0 matches the refreshed baseline. additional_tools parses as a text-less meta event (SessionParserTests.testCodexAdditionalToolsStaysMetadataAndOutOfSearch); world_state top_level_tools is opaque. Status probe passes."
+      claude:
+        sessions:
+          max_verified_version: "2.1.306"
+          scope: "latest; installed and upstream both 2.1.306"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-045755-165577Z-p75378/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl"]
+          notes: "Fresh Bash-tool session written by 2.1.306 (with request-log records) matches the refreshed baseline. Request-log records are skipped by ClaudeSessionParser and ClaudeBase64ImageScanner (SessionParserTests.testClaudeAPIRequestLogRecordsDoNotReachTranscriptCountsOrSearch). Usage and status probes pass."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.101"
+          scope: "latest; installed and upstream both 1.0.101"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-050306-660954Z-p77035-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
+          notes: "Fresh 1.0.101 session with tool execution start/complete matches the fixture after usage_record gained customToolCallCount, unmatchedToolResultCount and orphanToolCallCount (watch/noise; the app does not read usage_record yet)."
+      opencode:
+        sessions:
+          max_verified_version: "2.1.2"
+          scope: "latest; installed and upstream both 2.1.2"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh 2.1.2 standalone session has the required user, assistant and completed-tool rows and matches the sqlite_v2 baseline."
+      kimi:
+        sessions:
+          max_verified_version: "2.2.0"
+          scope: "latest; installed and upstream both 2.2.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh 2.2.0 session has the required tool-call and tool-result buckets (34 events) and matches baseline."
+      pi:
+        sessions:
+          max_verified_version: "1.3.0"
+          scope: "latest; installed and upstream both 1.3.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh 1.3.0 session with an assistant toolCall matches baseline. Prebump model is now openai-codex/gpt-6-luna (gpt-5.5 rejected by the Codex ChatGPT plan)."
+      grok:
+        sessions:
+          max_verified_version: "1.0.62"
+          scope: "latest; installed and upstream both 1.0.62"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh session written after ~/.local/bin/grok was relinked to 1.0.62 has assistant tool_calls and a tool_result and matches baseline."
+      cursor:
+        sessions:
+          max_verified_version: "2026.10.19"
+          scope: "latest; installed and upstream both 2026.10.19"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh session has the required content.tool_use bucket and matches baseline."
+      hermes:
+        sessions:
+          max_verified_version: "0.22.2"
+          scope: "latest; installed and upstream both 0.22.2"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261021-050400-058297Z-p77318/report.json"]
+          notes: "Fresh real-home one-shot session (written after the 0.22.2 update at 04:49Z) has a tool_call function and a tool message and matches baseline. Owner's default model is now gpt-6-luna with copilot fallback claude-haiku-5.5."
+      cline:
+        sessions:
+          max_verified_version: "3.0.73"
+          scope: "installed CLI 3.0.73 (upstream 3.0.73); Desktop stays 0.0.28"
+          evidence: ["~/.cline/data/sessions/1792559400112_5ule2/ (manifest + messages, not committed)", "./scripts/steward_check.py cline (all good, 5 sessions sampled)"]
+          notes: "The cline_headless prebump driver (real-home, tool-using prompt) now exists; its first run matched baseline (scripts/probe_scan_output/agent_watch/20261021-051441-757225Z-p86168-prebump/report.json, 18 baseline types, 0 unknown). The evidence below predates it: after the owner re-authenticated, a headless `cline -t 150 --json` run wrote a completed session at 2026-10-21T05:10Z with metadata.sessionHistoryOrigin.version 3.0.73 and two tool_use/tool_result pairs (run_commands, read_files). The steward check matched the baseline over the 5 newest sessions."
+    not_verified:
+      antigravity: {sessions: {held_at_version: "1.1.27", installed_version: "1.4.3", upstream_version: "1.4.3", reason: "Fresh session (20261021-045218-153538Z-p72636-prebump) has 4 events and a tool call with no result; weekly reports blocked_thin_sample."}}
   - agent_sessions_version: "5.6-unreleased"
     as_of_date_utc: "2026-10-20"
     as_of_commit: "545a0f69+working-tree"

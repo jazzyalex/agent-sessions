@@ -261,6 +261,25 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Risk if wrong:** pre-v4 rows show a bare `plugin` source, or a session that the
   harness refuses opens in the app with no warning.
 
+### DeepSeek Harness shell-job timing and exit status are not shown
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **What:** DSH 0.2.1-rc.2 writes `job/registered` and `job/settled` around every shell
+  tool call (2 of 2 fresh 0.2.1-rc.2 tool sessions). `job/settled` carries `startedAt`,
+  `finishedAt`, `status` (`completed`/`killed`/`failed`), `cause` and `detail`
+  (`exit code: 0`), keyed to the tool call by `toolCall.callId`. That is a source-reported
+  per-tool duration and a killed/failed state that the tool result alone does not show.
+- **Where:** [DeepSeekHarnessFormatTypes.swift](../AgentSessions/DeepSeekHarness/DeepSeekHarnessFormatTypes.swift)
+  `v4Dispositions` marks both types `intentionallyIgnored`; the parser renders no row.
+- **Fix shape:** join `job/settled` to its `tool/result` by call id and show duration and a
+  non-`completed` status on the tool row. Same UI question as the Kimi tool-duration entry.
+- **Why deferred:** found during the 2026-10-21 drift fix; admitting the events (so 0.2.1
+  sessions show at all) came first.
+- **Risk if wrong:** only DSH and Kimi report tool durations, so the UI must degrade
+  cleanly for every other source.
+- **To close:** DSH tool rows show source-reported duration and kill/failure state, or the
+  fields are declared redundant.
+
 ### Codex MCP attribution sources are preserved but never shown
 > **open** · sev: low · urg: low · verified 2026-09-26
 
@@ -283,11 +302,35 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **To close:** a redacted fixture with one and multiple sources, parser behavior tests,
   and a UI decision for source labels and disclosure details.
 
+### OpenClaw 2026.10.5 deleted, reset and cold transcripts are not read
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **What:** in the SQLite store, a deleted or reset session moves to
+  `session_transcript_archives` (`encoding` identity or zstd, one blob per generation),
+  and an idle one can move to `session_transcript_cold_archives` (`storage` file or
+  sqlite). The app reads only `transcript_events`. Legacy `.jsonl.deleted.*` files still
+  show with "include deleted", but sessions deleted after the 2026.10.5 import do not,
+  and a cold session lists with its count but will not open (telemetry says so).
+- **Where:** [OpenClawSqliteReader.swift](../AgentSessions/OpenClaw/OpenClawSqliteReader.swift)
+  (`coldArchiveLookup`, `queryEvents`); both tables were empty on this machine on
+  2026-10-21, and the fixture `Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql`
+  carries their columns only.
+- **Fix shape:** read upstream's archive and cold-archive readers in npm `openclaw`
+  (`dist/session-transcript-retained-data-*.mjs`, `session-accessor.sqlite-*`) for the blob
+  framing, then decode them read-only and list deleted sessions behind the existing
+  include-deleted preference.
+- **Why deferred:** no local rows to verify the blob framing against; guessing it risks
+  showing a wrong transcript.
+- **Risk if wrong:** deleted OpenClaw sessions quietly drop out of the include-deleted view.
+- **To close:** a real archived row (redacted into the fixture), reader tests, and a
+  weekly bucket for the archive blob shape.
+
 ### OpenClaw message provenance is richer than the current origin inference
-> **open** · sev: low · urg: low · verified 2026-09-26
+> **open** · sev: low · urg: low · verified 2026-10-21
 
 - **What:** current OpenClaw messages add `sourceChannel` and an `__openclaw` object with
-  `mirrorOrigin`, `mirrorIdentity`, and `senderIsOwner`. The app still infers origins
+  `mirrorOrigin`, `mirrorIdentity`, `senderIsOwner` and, since 2026.10.x,
+  `upstreamUserText` (22 of 41 user rows on 2026-10-21). The app still infers origins
   from user prompt prefixes and separate conversation metadata, so this direct message
   provenance is retained only in raw JSON.
 - **Where:** the weekly report
@@ -441,7 +484,7 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   explains Grok and blocks it.
 
 ### Telemetry: Copilot now writes a usage record for every model call
-> **open** · sev: low · urg: low · verified 2026-10-13
+> **open** · sev: low · urg: low · verified 2026-10-21
 
 - **What:** Copilot 1.0.95 adds a `session.usage_record` event after each model call.
   It carries `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`,
@@ -459,6 +502,9 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   shutdown, and for sessions that never write a shutdown summary. This may also answer
   the subagent-token entry below.
 - **Why deferred:** found by the 2026-10-13 format check; only three sessions carry it.
+  1.0.101 (2026-10-21) adds `customToolCallCount`, `unmatchedToolResultCount` and
+  `orphanToolCallCount` to the usage object; they are tool-pairing counters, not tokens,
+  and do not change the fix shape.
 - **Risk if wrong:** summing per-call records and the shutdown summary would double
   count. `usageAccountingWatermarks` looks like the upstream guard against that; read
   it before adding anything.
@@ -665,6 +711,56 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   sessions, so any UI must show nothing rather than zero. Only `accept` decisions were
   observed; the shape of a denial is unknown.
 - **To close:** both values are shown, or each is declared noise with a reason.
+
+### Claude safety-classifier stops are hidden in the transcript
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **What:** when a safety classifier stops a Claude reply, 2.1.304+ writes three things:
+  the assistant record with `message.stop_reason: "refusal"` and `stop_details`
+  (`category`, `explanation`); a `system`/`informational` notice ("safeguards stopped the
+  response above"); and a harness `type:"user"` notice (`isMeta`, `turnCompanion`,
+  `refusedMessageId` = the stopped reply's `message.id`). Both notices now parse as `.meta`,
+  so with meta hidden (the default) the transcript shows a cut-off reply and "Not run"
+  tool results with no reason. 1 record in 2,033 local files on 2026-10-21.
+- **Where:** [ClaudeSessionParser.swift](../AgentSessions/Services/ClaudeSessionParser.swift)
+  `isClassifierStopNotice` (notice → system `.meta`); no code reads `stop_reason` or
+  `stop_details` for the transcript.
+- **Fix shape:** mark the stopped assistant reply (match `refusedMessageId` to the
+  assistant's `message.id`, or read `stop_reason == "refusal"` directly) with a visible
+  one-line notice and the category. Keep the harness notice out of user prompts.
+- **Why deferred:** found by the 2026-10-21 follow-up weekly; the fix kept scope to
+  stopping the notice from posing as a user prompt.
+- **Risk if wrong:** refusals are rare, so a heavy UI treatment is not worth it; the
+  `explanation` text is vendor policy copy and may change.
+- **To close:** a stopped reply is visibly marked in the default transcript view, or the
+  hidden state is declared acceptable.
+
+### Claude `isMeta` user records still render as user prompts
+> **open** · sev: low · urg: low · verified 2026-10-21
+
+- **What:** Claude marks harness-injected `type:"user"` records with `isMeta: true`. No
+  Swift code reads `isMeta`, so they parse as `.user`. Measured on 2026-10-21: 696 of
+  102,789 user records, in 298 of 2,033 files, and none is a session's first user record.
+  Families: skill bodies ("Base directory for this skill", 272), workflow/skill prompt
+  expansions (141), peer or coordinator messages (77), local-command caveats (71), image
+  placeholders (`[Image: original …]`, 62), slash-command expansions (40),
+  `<system-reminder>` (32), the classifier-stop notice (1, handled). Titles are already
+  protected by text filters (`Session.looksLikeAgentsPreamble`,
+  `claudeLocalCommandPromptTail`), but these records still add user rows, user counts,
+  prompt-navigation stops and turn starts.
+- **Where:** [ClaudeSessionParser.swift](../AgentSessions/Services/ClaudeSessionParser.swift)
+  `parseLineEvents` role inference;
+  [TranscriptTurnTiming.swift](../AgentSessions/Services/TranscriptTurnTiming.swift).
+- **Fix shape:** classify by family, not wholesale: skill bodies, command expansions,
+  caveats and reminders become `.meta`; image placeholders stay tied to their image
+  mapping; peer/coordinator messages probably stay visible but labelled as not typed.
+- **Why deferred:** a wholesale `isMeta → .meta` would hide peer messages the user wants
+  and could move image placeholders that inline image mapping and the image browser read.
+  Not low-risk enough for a format-check fix.
+- **Risk if wrong:** turn counts and analytics message counts shift for ~15% of files;
+  needs before/after numbers.
+- **To close:** each family has a decided kind with a parser test, or the current
+  rendering is declared acceptable.
 
 ### Watch list from the 2026-10-11 format sweep
 > **open** · sev: low · urg: low · verified 2026-10-11

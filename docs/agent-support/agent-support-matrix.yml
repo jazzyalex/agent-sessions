@@ -3,6 +3,8 @@ as_of_commit: "7714ccaf+working-tree"
 as_of_date: 2026-09-29
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-10-21 follow-up weekly: Claude `user.refusedMessageId` (written since 2.1.304 on a harness `type:user`, `isMeta`, `turnCompanion` notice after a safety-classifier stop; the id is the stopped assistant reply's message.id, whose stop_reason is `refusal`). The notice had parsed as a user prompt (title fallback, user count, turn start); ClaudeSessionParser now emits it as a system `.meta` event (SessionParserTests.testClaudeClassifierStopNoticeIsMetaNotUserPrompt). Claude stays 2.1.306. Kimi 2.3.0 `changeNotifier.snapshot` is change-detection state, parsed as `.meta`; Kimi advanced 2.2.0 -> 2.3.0. Details in docs/agent-json-tracking.md."
+  - "2026-10-21 Claude 2.1.303 / Codex 0.163.0 drift: Claude's new api-request, api-request-blob and api-request-shape request-log records are now skipped by the app (they had produced duplicate transcript rows and system-prompt search text); Codex additional_tools stays metadata and top_level_tools is opaque. Normal fixtures refreshed from all local sessions. Bumped Codex 0.162.1 -> 0.163.0 and Claude 2.1.296 -> 2.1.306 from fresh prebumps that match the new baseline (scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json, scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json); Copilot 1.0.101 usage_record counters are fixture-covered. Same day, after CLI updates, fresh tool-bearing prebump sessions matched baseline and advanced Copilot 1.0.97 -> 1.0.101 (scripts/probe_scan_output/agent_watch/20261021-050306-660954Z-p77035-prebump/report.json), OpenCode 2.1.1 -> 2.1.2, Kimi 2.1.1 -> 2.2.0, Pi 1.1.0 -> 1.3.0, Grok 1.0.44 -> 1.0.62, Cursor 2026.9.8 -> 2026.10.19 and Hermes 0.21.5 -> 0.22.2. Antigravity 1.4.3 is held: its fresh session has 4 events and a tool call with no result (blocked_thin_sample). Cline CLI 3.0.62 -> 3.0.73 (Desktop stays 0.0.28) from a fresh 3.0.73 session with run_commands/read_files tool calls and results; steward_check reports all good over 5 sessions. Final weekly: scripts/probe_scan_output/agent_watch/20261021-050648-843636Z-p79189/report.json. Details in docs/agent-json-tracking.md."
   - "2026-09-29 final 16-agent sweep: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json. Codex 0.159.0, Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and DeepSeek Harness 0.2.0-rc.2 have fresh schema-clean evidence; Kimi alone reports supports_latest because its upstream fetch was current, while GitHub rate limiting degraded the other equal-version latest sources to cached evidence. Codex status and both Claude status/usage probes passed. Held: Antigravity 1.2.13 has a thin two-event tool-start sample; Hermes 0.21.5 cannot produce a post-update session because the migrated Copilot provider lacks COPILOT_GITHUB_TOKEN; Pi 0.86.1 cannot refresh its reused OAuth token; Grok 1.0.44 is not signed in; OpenClaw still requires its vendor-owned state migration; Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin and fx remain steward-owned."
   - "2026-09-29 Copilot 1.0.89 verification: a fresh tool-bearing session exposed additive Responses reasoning, internal system-block, friendly tool-title, and user-message model/effort fields. An all-session 16-session sweep found no remaining fixture bucket/key gap or dynamic-key container; four standard-redacted records extend the normal fixture, and the repeat prebump proves all required buckets with zero unknown types, unknown keys, or parse errors. Reasoning presentation and model/effort attribution are filed as backlog candidates. All-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/copilot/all-session-baseline.txt. Drift report: scripts/probe_scan_output/agent_watch/20260929-190756-016498Z-p80735-prebump/report.json. Clean prebump: scripts/probe_scan_output/agent_watch/20260929-191448-106542Z-p83701-prebump/report.json."
   - "2026-09-29 Claude 2.1.285 and Kimi 2.1.1 verification: fresh tool-bearing sessions match refreshed sanitized baselines after all-session sweeps classified Claude's new organization, fallback-credit, rendered-role, turn-position, prompt-snapshot, and announcement fields and Kimi's tool-result duration. Claude's 1,922-session and Kimi's 8-session repeat sweeps report no remaining fixture bucket/key gap. Claude's new Sonnet 5.5 model label is priced from Anthropic's published rates. Claude all-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/claude/all-session-baseline.txt. Kimi all-session summary: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/kimi/all-session-baseline.txt. Claude prebump: scripts/probe_scan_output/agent_watch/20260929-190710-208052Z-p80382-prebump/report.json. Kimi prebump: scripts/probe_scan_output/agent_watch/20260929-190503-758607Z-p79741-prebump/report.json."
@@ -60,14 +62,14 @@ notes:
   - "2026-10-20 OpenCode 2.x check: bumped OpenCode 1.19.0->2.1.1 from a fresh sandboxed prebump (scripts/probe_scan_output/agent_watch/20261020-215234-201674Z-p42358-prebump/report.json, matches baseline, 0 unknown types/keys) and a weekly that reports supports_latest (scripts/probe_scan_output/agent_watch/20261020-215312-323639Z-p42511/report.json). 2.x keeps the v1 session/message/part tables frozen and writes new sessions to session_v2 + session_message (typed rows by seq); it also copies v1 sessions there, lossily for some older ones. The app reads both stores (commits c4e21e01, 2badae02, cc7870c0). Monitoring: the fingerprint samples the store being written with nested buckets (row type, assistant content item, tool state, tokens), backed by the new redacted sqlite_v2 fixture built from every 2.x row on disk; upstream moved to npm @opencode/cli; the driver uses --standalone --auto (2.x dropped --pure/--dir, and its background service uses a fixed port)."
 agents:
   codex_cli:
-    max_verified_version: "0.162.1"
+    max_verified_version: "0.163.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.296"
+    max_verified_version: "2.1.306"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -83,7 +85,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.97"
+    max_verified_version: "1.0.101"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -91,7 +93,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "2.1.1"
+    max_verified_version: "2.1.2"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -120,40 +122,32 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/shell.json"
   hermes:
-    max_verified_version: "0.21.5"
+    max_verified_version: "0.22.2"
     version_field: "not_logged"
     notes:
-      - "Hermes updated to 0.21.5 on 2026-09-29 and restored its pre-existing local patch exactly, but the post-update one-shot stops before session creation because the migrated configuration selects provider `copilot` without `COPILOT_GITHUB_TOKEN`. Keep 0.21.1 until a noninteractive authenticated run writes a fresh matching session. Current-build clean report: scripts/probe_scan_output/agent_watch/20260929-191147-275916Z-p82817-prebump/report.json. Post-update failure: scripts/probe_scan_output/agent_watch/20260929-192532-724083Z-p88348-prebump/report.json."
+      - "2026-10-21: verified 0.22.2 from a fresh real-home one-shot session with a tool call (scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json). The owner's Hermes default model is now openai-codex gpt-6-luna (copilot fallback claude-haiku-5.5) because the Codex ChatGPT plan rejects gpt-5.5."
+      - "History: on 2026-09-29 the post-0.21.5 one-shot stopped before session creation because the migrated configuration selected provider `copilot` without `COPILOT_GITHUB_TOKEN` (scripts/probe_scan_output/agent_watch/20260929-192532-724083Z-p88348-prebump/report.json)."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/hermes/small.json"
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
       - "Resources/Fixtures/stage0/agents/hermes/schema_drift.json"
   openclaw:
-    # BLOCKED UPSTREAM 2026-08-31, do not re-diagnose. openclaw 2026.8.1 defers its own
-    # doctor-owned state migrations and then fails agent turns with "Legacy workspace
-    # setup state requires migration ...; run openclaw doctor --fix" - an instruction
-    # naming itself as the remedy and not performing it. Upstream openclaw/openclaw#133881
-    # and #133962, both CLOSED 2026-08-31. #133881's stated trigger (Gateway running) does
-    # NOT apply here: the LaunchAgent is not loaded and no openclaw process is up, and the
-    # migration is still dropped - which matches #133962 (preflight builds the step list
-    # with a hardcoded mode and silently drops doctor-only migrations). The fix is not in
-    # stable when last checked on 2026-08-31: npm dist-tags latest was 2026.8.1, and the
-    # first build carrying the migration fix was 2026.9.1-beta.1. The 2026-09-25 source
-    # reports 2026.9.6, past the retry trigger. A real-home prebump on 2026-09-25 failed
-    # before writing a session because local state migrations are pending and the agent
-    # requested `openclaw doctor --fix` (report 20260925-182844-238155Z-p15894). Keep this
-    # ceiling unchanged until the local profile is repaired and a fresh session matches. Do not
-    # hand-migrate openclaw state to clear this - the migration also covers
-    # ~/.openclaw/workspace-attestations/, so moving the workspace-state file achieves
-    # nothing (tried and reverted 2026-08-31).
-    max_verified_version: "2026.7.1"
+    # 2026.8.1-2026.9.x were blocked by OpenClaw's own deferred doctor migrations
+    # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
+    max_verified_version: "2026.10.5"
     version_field: "not_logged"
+    notes:
+      - "2026-10-21: verified 2026.10.5 from a fresh real-home prebump with two exec tool calls and two zstd-compressed tool results (scripts/probe_scan_output/agent_watch/20261021-052254-375889Z-p92944-prebump/report.json: ok, fresh_matches_baseline, 26 baseline types). 2026.10.5 keeps transcripts in agents/<id>/agent/openclaw-agent.sqlite (schema_meta version 25): transcript_events rows hold the JSONL record shapes as event_json TEXT or one zstd frame (event_zstd + event_utf8_bytes). Its startup import copied the legacy agents/<id>/sessions/*.jsonl under the same session ids and moved the originals to session-sqlite-import-archive/*.jsonl.imported-<ms>. The app reads that store (OpenClawSqliteReader), prefers it over a same-id JSONL copy, and never treats agents/<id>/agent/codex-home/ (the embedded Codex harness) as OpenClaw. Not read yet: session_transcript_archives (deleted/reset sessions) and cold archives (fail closed)."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
       - "Resources/Fixtures/stage0/agents/openclaw/large.jsonl"
+      - "Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql"
       - "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl"
+    evidence_tests:
+      - "AgentSessionsTests/OpenClawSqliteStoreTests.swift"
+      - "scripts/tests/test_openclaw_sqlite_monitoring.py"
   cursor:
-    max_verified_version: "2026.9.8"
+    max_verified_version: "2026.10.19"
     version_field: "not_logged"
     notes:
       - "Weekly SQLite monitoring covers both legacy chat metadata and up to five newest persisted ACP stores. ACP validation mirrors the app-required meta.json schema version, exact meta/blobs column names, typed root metadata, content-addressed blob references, and protobuf graph field/wire structure without reporting paths, IDs, metadata values, transcript text, or blob contents."
@@ -167,7 +161,7 @@ agents:
       - "AgentSessionsTests/CursorSessionParserTests.swift"
       - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
-    max_verified_version: "1.1.0"
+    max_verified_version: "1.3.0"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -175,7 +169,7 @@ agents:
       - "account-level quota/rate-limit feed"
       - "subagent hierarchy"
     notes:
-      - "Pi session transcripts provide token and API-equivalent cost telemetry; the unsupported quota surface is an account-level feed. The driver enables only read-only `ls` and requires an assistant `toolCall`. The 2026-09-29 0.86.1 run wrote a fresh six-event text-only session after OpenAI Codex OAuth refresh failed with 401 `refresh_token_reused`; it therefore failed `pi_tool_turn_missing`. Keep the 0.85.1 ceiling until authentication can produce a rich matching tool session. Report: scripts/probe_scan_output/agent_watch/20260929-190305-339226Z-p78815-prebump/report.json."
+      - "Pi session transcripts provide token and API-equivalent cost telemetry; the unsupported quota surface is an account-level feed. The driver enables only read-only `ls` and requires an assistant `toolCall`. 2026-10-21: verified 1.3.0 from a fresh `toolCall` session (scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json). The prebump model is now openai-codex/gpt-6-luna because the Codex ChatGPT plan rejects gpt-5.5."
     evidence_docs:
       - "https://pi.dev/docs/latest/quickstart"
       - "https://pi.dev/docs/latest/usage"
@@ -190,7 +184,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "2.1.1"
+    max_verified_version: "2.3.0"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -198,6 +192,7 @@ agents:
       - "quota/rate-limit tracking (Kimi publishes no limit or quota endpoint). NOT the same as token accounting: Kimi 0.38.0 writes per-turn `token_counting.measured` and `token_counting.turn_recorded` records carrying tokens, length, turnId and time. That data is on disk in every session and Agent Sessions does not yet read it — the gap is a missing surface, not a missing source."
       - "subagent hierarchy"
     notes:
+      - "2026-10-21: verified 2.3.0 from a fresh tool-bearing prebump session that matches the refreshed baseline (scripts/probe_scan_output/agent_watch/20261021-060807-777726Z-p13346-prebump/report.json). 2.3.0 adds a durable `changeNotifier.snapshot` op (agentId, agentsMdHash, agentsMdFiles keyed by AGENTS.md path, skillsHash, subagentNames, modelPool, time): the harness's replayable change-detection state for AGENTS.md, skills and subagent catalog reminders (upstream packages/agent-core-v2/src/agent/changeNotifier/changeNotifierOps.ts). It parses as text-less `.meta` (KimiSessionParserTests.testNonMessageOpFamiliesSurviveAsMeta); value pass: noise."
       - "A fresh 2026-09-29 Kimi 2.1.1 Bash turn produced required tool-call and tool-result buckets and matched the refreshed sanitized baseline. Kimi 2.1.1 adds `durationMs` to tool results; the field is retained in raw JSON and tracked with the existing turn-duration presentation follow-up. The parser intentionally keeps `agent.message.appended` projection rows as metadata to prevent duplicate transcript content. Report: scripts/probe_scan_output/agent_watch/20260929-190503-758607Z-p79741-prebump/report.json."
     evidence_docs:
       - "https://github.com/MoonshotAI/kimi-code"
@@ -216,7 +211,7 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.44"
+    max_verified_version: "1.0.62"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and subagent hierarchy"
     unsupported_surfaces:
@@ -330,7 +325,7 @@ agents:
       - "AgentSessionsTests/FxSessionDiscoveryTests.swift"
       - "AgentSessionsTests/FxIntegrationSurfaceTests.swift"
   cline:
-    max_verified_version: "3.0.62"
+    max_verified_version: "3.0.73"
     desktop_max_verified_version: "0.0.28"
     version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.28 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
     support_scope: "tier-2 shared local manifest/messages transcript discovery for Cline CLI and Desktop, browsing, search, Preferences controls, colors, saved-session backfill, and analytics source filtering"
@@ -360,8 +355,8 @@ agents:
       - "AgentSessionsTests/ClineIntegrationTests.swift"
       - "scripts/tests/test_cline_monitoring.py"
   deepseek_harness:
-    max_verified_version: "0.2.0-rc.2"
-    version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887 and 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2)"
+    max_verified_version: "0.2.1-rc.2"
+    version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887, 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2) and 687f282e8625c6b8d11ff58211a90524be2e4317 (tag dsh-v0.2.1-rc.2)"
     support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v4 plain or independently framed Zstandard histories"
     unsupported_surfaces:
       - "resume and live ingestion"
@@ -370,7 +365,7 @@ agents:
       - "source-reported per-message usage in Analytics (usage is present and validated, but not surfaced)"
       - "live quota and rate-limit status"
       - "image extraction"
-      - "custom required event extensions outside the pinned 59-event v4 catalog"
+      - "custom required event extensions outside the 62-event v4 catalog (pinned 0.2.0-rc.2 plus the 0.2.1-rc.2 job/registered, job/settled and working-directory/change records)"
     notes:
       - "Compatibility tests use the committed sanitized synthetic corpus and pinned DSH checkout. The weekly monitor reads bounded headers, selects up to five canonical sessions by source-reported createdAt, then fingerprints every validated row in each selected session. The bounded sample is not a representative compatibility corpus."
       - "Weekly monitoring compares upstream releases, fingerprints canonical sessions under $DSH_HOME/sessions (or ~/.dsh/sessions) across plain/Zstandard encodings, and verifies every fixture hash. The private report records event types, schema keys, counts, and sample paths, not prompt or tool payload values."
@@ -378,6 +373,7 @@ agents:
       - "Fork provenance is retained as metadata while forks remain roots; DSH archive flags are ignored; incomplete or corrupt artifacts remain invisible."
       - "2026-09-25 weekly verification: the authorized headless CLI run produced a real installed 0.1.5-rc.2 session newer than the binary. Five individually fresh sessions contributed 1,139 validated events with no unknown event types or keys; per-session freshness uses source-reported createdAt, not artifact mtime. Upstream 0.1.7-rc.2 is newer and remains unverified because DSH has no prebump driver. The 0.1.6-alpha.2 app ceiling is unchanged. Report: scripts/probe_scan_output/agent_watch/20260925-161641-619599Z-p136/report.json."
       - "2026-09-29 v4 verification: installed and upstream both resolve to 0.2.0-rc.2. The real-home headless prebump driver produced a fresh 29-event v4 tool session and proved message, tool, usage, relationship, and integrity buckets with zero parse errors, unknown required types, or unknown keys. Native v4 fixtures are synthetic and validated through the installed production catalog; no prompt or tool values were copied from the private session. Prebump report: scripts/probe_scan_output/agent_watch/20260929-183411-482948Z-p71544-prebump/report.json."
+      - "2026-10-21 0.2.1-rc.2 drift: installed and upstream are 0.2.1-rc.2. Before the fix the app dropped every real v4 session: request/context.systemPromptUpdate (written since 0.2.0-rc.2, absent from the synthetic v4 fixture) failed the strict key check, the title request gained an optional reasoningEffort the strict v4 key check refused, and shell tools now write required job/registered and job/settled records (plus required working-directory/change and subagent/catalog version 2 for external children). The reader admits all of them; a failed turn's turn/end error now renders as one error row. A local sweep through the production reader parsed all 11 real sessions under ~/.dsh/sessions (5 v3, 6 v4, three written by 0.2.1-rc.2). The headless bundle now disables the stored credential store, so the prebump driver restores it per run with the upstream --patch overlay. Fresh 31-event tool session matches the refreshed baseline with all five evidence buckets: scripts/probe_scan_output/agent_watch/20261021-053131-183838Z-p97821-prebump/report.json. DSH, parity and Stage0 Swift classes pass (201 tests, .deriveddata-tests/Logs/Test/Run-AgentSessions-2026.10.20_22-47-27--0700.xcresult); max_verified_version advances to 0.2.1-rc.2."
     evidence_docs:
       - "docs/superpowers/plans/2026-09-18-dsh-source-implementation-plan.md"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/manifest.json"
@@ -395,6 +391,8 @@ agents:
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v3_minimal_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_tool_session.jsonl.zstd"
       - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/unknown_ignorable_event.jsonl.zstd"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_job_failed_turn_session.jsonl"
+      - "AgentSessionsTests/Resources/Fixtures/stage0/agents/deepseek-harness/v4_job_failed_turn_session.jsonl.zstd"
     evidence_tests:
       - "AgentSessionsTests/DeepSeekHarnessFixtureParityTests.swift"
       - "AgentSessionsTests/DeepSeekHarnessDiscoveryTests.swift"
