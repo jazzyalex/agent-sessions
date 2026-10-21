@@ -378,9 +378,8 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                     if s.events.isEmpty, let stat = Self.fileStat(for: url) {
                         hydratedPreviewStats[s.id] = stat
                     }
-                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                       let m = rv.contentModificationDate {
-                        hydratedPreviewTimes[s.id] = m
+                    if let modified = Self.modificationDate(for: url) {
+                        hydratedPreviewTimes[s.id] = modified
                     }
                 }
                 let capturedPreviewTimes = hydratedPreviewTimes
@@ -751,9 +750,8 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                 if let stat = Self.fileStat(for: url) {
                     previewStats[s.id] = stat
                 }
-                if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                   let m = rv.contentModificationDate {
-                    previewTimes[s.id] = m
+                if let modified = Self.modificationDate(for: url) {
+                    previewTimes[s.id] = modified
                 }
             }
             let previewTimesByID = previewTimes
@@ -1106,7 +1104,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             let postRevision = postProof?.revision
             let postStorageIdentity = postProof?.storageIdentity
             let postParseStat = Self.fileStat(for: url)
-            let postParseMTime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            let postParseMTime = Self.modificationDate(for: url)
             let postDatabaseVersion = isSQLite
                 ? OpenClawSqliteReader.storageRevisionToken(for: existing)
                 : nil
@@ -1341,6 +1339,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                         merged.sourceStorageIdentity = full.sourceStorageIdentity ?? postProof.storageIdentity
                         merged.sourceStorageRevision = full.sourceStorageRevision ?? Self.sessionRevisionKey(postRevision)
                         merged.sourceStorageDatabaseVersion = postProof.databaseVersionToken
+                        merged.sourcePreviewDigest = current.sourcePreviewDigest
                     }
                     if !isSQLite {
                         merged.sourceFileStat = validatedJSONLStatForPublication
@@ -1592,6 +1591,8 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             reasoningEffort: current.reasoningEffort,
             deletedAt: current.deletedAt)
         if Self.isSQLiteSession(replacement) {
+            // A test-only path handoff must not carry proof for another store.
+            replacement.sourcePreviewDigest = nil
             if let proof = OpenClawSqliteReader.sessionProof(for: replacement) {
                 replacement.sourceStorageIdentity = proof.storageIdentity
                 replacement.sourceStorageRevision = Self.sessionRevisionKey(proof.revision)
@@ -1697,6 +1698,11 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
         SessionFileStat.precise(from: url)
     }
 
+    private static func modificationDate(for url: URL) -> Date? {
+        // URL.resourceValues can reuse a cached timestamp across reloads.
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+
     private static func isSQLiteSession(_ session: Session) -> Bool {
         OpenClawSqliteReader.isSupportedDatabasePath(session.filePath)
     }
@@ -1741,6 +1747,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
         retained.sourceStorageIdentity = session.sourceStorageIdentity
         retained.sourceStorageRevision = session.sourceStorageRevision
         retained.sourceStorageDatabaseVersion = session.sourceStorageDatabaseVersion
+        retained.sourcePreviewDigest = session.sourcePreviewDigest
         retained.sourceFileStat = session.sourceFileStat
         return retained
     }
@@ -2237,7 +2244,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                 : nil
             let currentMTime = isSQLiteDatabase
                 ? nil
-                : (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                : Self.modificationDate(for: url)
             let currentFileStat = isSQLiteDatabase ? nil : Self.fileStat(for: url)
             let stale: Bool
             if isSQLiteDatabase {
@@ -2346,7 +2353,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             let afterStat = isSQLiteDatabase ? nil : Self.fileStat(for: url)
             let afterMTime = isSQLiteDatabase
                 ? nil
-                : (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                : Self.modificationDate(for: url)
             let previewTranscripts = Self.transcriptCacheEntries(for: [existing])
             if isSQLiteDatabase {
                 guard let lightProof,
@@ -2439,6 +2446,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                         merged.sourceStorageIdentity = lightProof.storageIdentity
                         merged.sourceStorageRevision = Self.sessionRevisionKey(lightProof.revision)
                         merged.sourceStorageDatabaseVersion = lightProof.databaseVersionToken
+                        merged.sourcePreviewDigest = light.sourcePreviewDigest
                     }
                     self.notePublishedStoragePaths([merged])
                     if canRetainJSONLEvents {

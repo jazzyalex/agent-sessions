@@ -276,6 +276,16 @@ actor IndexDB {
             }
         }
 
+        // Additive proof for OpenClaw transcript-derived list metadata.
+        // A legacy NULL forces one verified preview scan after upgrading.
+        if !tableHasColumn(db, table: "session_meta", column: "openclaw_preview_digest") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN openclaw_preview_digest TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
         if tableHasColumn(db, table: "session_meta", column: "parent_session_id") {
             try exec(db, "CREATE INDEX IF NOT EXISTS idx_session_meta_parent ON session_meta(parent_session_id);")
         }
@@ -1068,7 +1078,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface, openclaw_preview_digest
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -1107,7 +1117,8 @@ actor IndexDB {
                 reasoningEffort: sqlite3_column_type(stmt, 21) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 21)),
                 originator: sqlite3_column_type(stmt, 22) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 22)),
                 originSource: sqlite3_column_type(stmt, 23) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 23)),
-                surface: sqlite3_column_type(stmt, 24) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 24))
+                surface: sqlite3_column_type(stmt, 24) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 24)),
+                openClawPreviewDigest: sqlite3_column_type(stmt, 25) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 25))
             )
             out.append(row)
         }
@@ -2093,8 +2104,8 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface, openclaw_preview_digest)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
@@ -2113,7 +2124,8 @@ actor IndexDB {
           -- sources, and a writer that never parsed a header must not blank them.
           originator=COALESCE(excluded.originator, session_meta.originator),
           origin_source=COALESCE(excluded.origin_source, session_meta.origin_source),
-          surface=COALESCE(excluded.surface, session_meta.surface);
+          surface=COALESCE(excluded.surface, session_meta.surface),
+          openclaw_preview_digest=excluded.openclaw_preview_digest;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -2142,6 +2154,11 @@ actor IndexDB {
         if let originator = m.originator { sqlite3_bind_text(stmt, 23, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 23) }
         if let source = m.originSource { sqlite3_bind_text(stmt, 24, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 24) }
         if let surface = m.surface { sqlite3_bind_text(stmt, 25, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 25) }
+        if let proof = m.openClawPreviewDigest {
+            sqlite3_bind_text(stmt, 26, proof, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 26)
+        }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -2151,8 +2168,8 @@ actor IndexDB {
     /// while NULL values (from lightweight parses that missed the record) preserve existing data.
     func upsertSessionMetaCore(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface, openclaw_preview_digest)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
@@ -2171,7 +2188,8 @@ actor IndexDB {
           origin_source=COALESCE(excluded.origin_source, session_meta.origin_source),
           surface=COALESCE(excluded.surface, session_meta.surface),
           reasoning_effort=COALESCE(excluded.reasoning_effort, session_meta.reasoning_effort),
-          codex_internal_session_id=CASE WHEN session_meta.codex_internal_session_id IS NULL THEN excluded.codex_internal_session_id ELSE session_meta.codex_internal_session_id END;
+          codex_internal_session_id=CASE WHEN session_meta.codex_internal_session_id IS NULL THEN excluded.codex_internal_session_id ELSE session_meta.codex_internal_session_id END,
+          openclaw_preview_digest=excluded.openclaw_preview_digest;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -2200,6 +2218,11 @@ actor IndexDB {
         if let originator = m.originator { sqlite3_bind_text(stmt, 23, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 23) }
         if let source = m.originSource { sqlite3_bind_text(stmt, 24, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 24) }
         if let surface = m.surface { sqlite3_bind_text(stmt, 25, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 25) }
+        if let proof = m.openClawPreviewDigest {
+            sqlite3_bind_text(stmt, 26, proof, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 26)
+        }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta core") }
     }
 
@@ -3424,6 +3447,7 @@ struct SessionMetaRow {
     let originator: String?
     let originSource: String?
     let surface: String?
+    let openClawPreviewDigest: String?
 
     init(sessionID: String,
          source: String,
@@ -3449,7 +3473,8 @@ struct SessionMetaRow {
          reasoningEffort: String? = nil,
          originator: String? = nil,
          originSource: String? = nil,
-         surface: String? = nil) {
+         surface: String? = nil,
+         openClawPreviewDigest: String? = nil) {
         self.sessionID = sessionID
         self.source = source
         self.path = path
@@ -3475,6 +3500,7 @@ struct SessionMetaRow {
         self.originator = originator ?? codexOriginator
         self.originSource = originSource ?? codexSource
         self.surface = surface ?? codexSurface
+        self.openClawPreviewDigest = openClawPreviewDigest
     }
 }
 

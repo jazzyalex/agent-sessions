@@ -1444,7 +1444,8 @@ final class SessionIndexer: ObservableObject {
             reasoningEffort: s.reasoningEffort,
             originator: s.originator,
             originSource: s.originSource,
-            surface: s.surface?.rawValue
+            surface: s.surface?.rawValue,
+            openClawPreviewDigest: s.sourcePreviewDigest
         )
     }
 

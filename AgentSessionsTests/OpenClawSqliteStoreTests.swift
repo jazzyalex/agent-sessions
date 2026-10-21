@@ -218,7 +218,7 @@ final class OpenClawSqliteStoreTests: XCTestCase {
     }
 
     private func indexedRow(like fresh: Session, path: URL, eventCount: Int? = nil) -> Session {
-        Session(id: fresh.id,
+        var indexed = Session(id: fresh.id,
                 source: .openclaw,
                 startTime: fresh.startTime,
                 endTime: fresh.endTime,
@@ -231,6 +231,8 @@ final class OpenClawSqliteStoreTests: XCTestCase {
                 repoName: nil,
                 lightweightTitle: "Indexed title",
                 lightweightCommands: 1)
+        indexed.sourcePreviewDigest = fresh.sourcePreviewDigest
+        return indexed
     }
 
     private func copyDatabase(_ database: URL, to relativePath: String) throws -> URL {
@@ -269,6 +271,89 @@ final class OpenClawSqliteStoreTests: XCTestCase {
             priorSessions: [indexedRow(like: fresh, path: other, eventCount: fresh.eventCount - 1)])?
             .first { $0.id == fresh.id })
         XCTAssertEqual(reread.lightweightTitle, "List the files in the fixture repo")
+    }
+
+    /// The on-disk digest must round-trip through session_meta and hydration.
+    /// Otherwise a relaunch cannot distinguish a rewritten prompt from stale
+    /// indexed title/cwd when the count and timestamps remain unchanged.
+    func testPreviewDigestRoundTripsCoreIndexAndHydration() async throws {
+        let database = try makeFixtureDatabase()
+        let original = try session("openclaw-fixture-native", in: database)
+        let proof = try XCTUnwrap(original.sourcePreviewDigest)
+        XCTAssertEqual(proof.count, 64)
+
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: original))
+        let indexedRows = try await db.fetchSessionMeta(for: "openclaw")
+        XCTAssertEqual(indexedRows.first?.openClawPreviewDigest, proof)
+        let hydrated = try await SessionMetaRepository(db: db).fetchSessions(for: .openclaw)
+        XCTAssertEqual(hydrated.first?.sourcePreviewDigest, proof)
+    }
+
+    /// A previously indexed row is not proof after a relaunch. Same-byte-count
+    /// edits must be detected even when no in-process digest cache exists for
+    /// the newly copied database path.
+    func testColdCacheRejectsSameLengthFirstPromptRewrite() throws {
+        let original = try makeFixtureDatabase()
+        let before = try session("openclaw-fixture-native", in: original)
+        let copy = try copyDatabase(original, to: "agents/main/cold/openclaw-agent.sqlite")
+        try execute("""
+            UPDATE transcript_events
+            SET event_json = replace(event_json, 'Run pwd, then say hello', 'Say pwd, then run hello')
+            WHERE session_id = 'openclaw-fixture-native' AND seq = 2;
+            """, at: copy)
+        let actual = try XCTUnwrap(OpenClawSqliteReader.listSessions(
+            databaseURL: copy, agentID: "main",
+            priorSessions: [indexedRow(like: before, path: copy)])?
+            .first(where: { $0.id == before.id }))
+        XCTAssertEqual(actual.eventCount, before.eventCount)
+        XCTAssertEqual(actual.endTime, before.endTime)
+        XCTAssertEqual(actual.lightweightTitle, "Say pwd, then run hello")
+        XCTAssertEqual(actual.lightweightCwd, "/tmp/repo")
+        XCTAssertNotEqual(actual.sourcePreviewDigest, before.sourcePreviewDigest)
+    }
+
+    /// An atomic store replacement at the *same pathname* is not the same
+    /// database, even if its session ID/count/activity time happen to match.
+    func testColdCacheRejectsReplacedDatabaseAtSamePath() throws {
+        let original = try makeFixtureDatabase()
+        let before = try session("openclaw-fixture-native", in: original)
+        let prior = indexedRow(like: before, path: original)
+        let replacement = try copyDatabase(original, to: "agents/main/replacement/openclaw-agent.sqlite")
+        try execute("""
+            UPDATE transcript_events
+            SET event_json = replace(event_json, 'Run pwd, then say hello', 'Say pwd, then run hello')
+            WHERE session_id = 'openclaw-fixture-native' AND seq = 2;
+            """, at: replacement)
+        try FileManager.default.removeItem(at: original)
+        // Do not attach an old store's WAL or shared-memory sidecar to the
+        // replacement main file; either would invalidate the test's setup.
+        for suffix in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(
+                at: URL(fileURLWithPath: original.path + suffix))
+        }
+        try FileManager.default.moveItem(at: replacement, to: original)
+        let actual = try XCTUnwrap(OpenClawSqliteReader.listSessions(
+            databaseURL: original, agentID: "main", priorSessions: [prior])?
+            .first(where: { $0.id == before.id }))
+        XCTAssertEqual(actual.lightweightTitle, "Say pwd, then run hello")
+        XCTAssertEqual(actual.eventCount, before.eventCount)
+        XCTAssertNotEqual(actual.sourcePreviewDigest, before.sourcePreviewDigest)
+    }
+
+    /// The completed store-level fingerprint and per-session cheap signature
+    /// prove an unchanged listing; no second SHA-256 window scan is needed.
+    func testUnchangedStoreSkipsPreviewDigestHashing() throws {
+        let database = try makeFixtureDatabase()
+        let before = OpenClawSqliteReader.previewDigestReadCountForTesting(databaseURL: database)
+        let first = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: database))
+        let afterFirst = OpenClawSqliteReader.previewDigestReadCountForTesting(databaseURL: database)
+        XCTAssertGreaterThan(afterFirst, before, "the initial pass must hash a preview window")
+        let again = try XCTUnwrap(OpenClawSqliteReader.listSessions(databaseURL: database))
+        XCTAssertEqual(again.count, first.count)
+        XCTAssertEqual(OpenClawSqliteReader.previewDigestReadCountForTesting(databaseURL: database),
+                       afterFirst, "the same unchanged store must not hash the preview rows twice")
     }
 
     // MARK: - JSONL and SQLite copies of one session

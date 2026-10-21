@@ -266,6 +266,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // It lets shared-storage handoffs detect an intervening commit without
     // re-hashing every loaded transcript.
     internal var sourceStorageDatabaseVersion: String? = nil
+    // OpenClaw list previews carry a digest of the stored preview-window rows.
+    // Core index persistence writes this proof separately from displayed fields;
+    // it is never inferred from session timestamps, sizes, or a file path.
+    internal var sourcePreviewDigest: String? = nil
     // File proof captured by a full JSONL parser. It is deliberately runtime
     // only: a caller must not manufacture a proof from a later stat sample.
     internal var sourceFileStat: SessionFileStat? = nil

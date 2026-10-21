@@ -151,7 +151,20 @@ struct OpenClawSqliteReader {
     private static let revisionCacheLock = NSLock()
     private static var revisionStates: [String: RevisionState] = [:]
     private static let previewCacheLock = NSLock()
-    private static var previewCache: [String: (signature: String, preview: Preview?)] = [:]
+    private static var previewCache: [String: (signature: String,
+                                                cheapSignature: String,
+                                                digest: String,
+                                                fingerprint: String,
+                                                preview: Preview?)] = [:]
+    private static var lastListedFingerprintByPath: [String: String] = [:]
+    private static var previewDigestReadCountsForTesting: [String: Int] = [:]
+
+    static func previewDigestReadCountForTesting(databaseURL: URL) -> Int {
+        let path = canonicalDatabasePath(databaseURL.path)
+        previewCacheLock.lock()
+        defer { previewCacheLock.unlock() }
+        return previewDigestReadCountsForTesting[path, default: 0]
+    }
     private static var listSessionsBeforeMaterializationHookForTesting: (() -> Void)?
     private static var cacheHitBeforeBoundaryProbeHookForTesting: (() -> Void)?
 
@@ -199,17 +212,24 @@ struct OpenClawSqliteReader {
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: storageIdentity)[.size] as? NSNumber)?.intValue
         let resolvedAgentID = requestedAgentID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? agentID(from: databaseURL)
-        let previewContext = PreviewContext(db: db, storageIdentity: storageIdentity, prior: priorSessions)
-        let sessions = rows.map {
-            var session = makeSession(from: $0,
+        previewCacheLock.lock()
+        let unchangedDatabase = lastListedFingerprintByPath[storageIdentity] == startingFingerprint
+        previewCacheLock.unlock()
+        let previewContext = PreviewContext(db: db, storageIdentity: storageIdentity,
+                                            prior: priorSessions, fingerprintUnchanged: unchangedDatabase,
+                                            storeFingerprint: startingFingerprint)
+        let sessions = rows.map { row in
+            var digest: String?
+            let rowPreview = preview(db: db, context: previewContext, row: row,
+                                     sessionID: sessionID(agentID: resolvedAgentID, rawID: row.id),
+                                     digest: &digest)
+            var session = makeSession(from: row,
                                       databaseURL: databaseURL,
                                       storageIdentity: storageIdentity,
                                       resolvedAgentID: resolvedAgentID,
                                       fileSize: fileSize,
-                                      preview: preview(db: db,
-                                                       context: previewContext,
-                                                       row: $0,
-                                                       sessionID: sessionID(agentID: resolvedAgentID, rawID: $0.id)))
+                                      preview: rowPreview)
+            session.sourcePreviewDigest = digest
             session.sourceStorageDatabaseVersion = databaseVersionToken(fingerprint: startingFingerprint)
             return session
         }
@@ -220,6 +240,9 @@ struct OpenClawSqliteReader {
             // those rows with the replacement store's identity or token.
             return nil
         }
+        previewCacheLock.lock()
+        lastListedFingerprintByPath[storageIdentity] = startingFingerprint
+        previewCacheLock.unlock()
         return SessionListResult(
             sessions: sessions,
             storageIdentity: storageIdentity,
@@ -273,10 +296,12 @@ struct OpenClawSqliteReader {
             rollbackReadTransaction(db)
             return nil
         }
+        var rowDigest: String?
         let rowPreview = preview(db: db,
-                                 context: PreviewContext(db: db, storageIdentity: storageIdentity, prior: []),
-                                 row: row,
-                                 sessionID: sessionID)
+                                 context: PreviewContext(db: db, storageIdentity: storageIdentity,
+                                                         prior: [], fingerprintUnchanged: false,
+                                                         storeFingerprint: fingerprint),
+                                 row: row, sessionID: sessionID, digest: &rowDigest)
         rollbackReadTransaction(db)
         guard let endingDataVersion = sqliteDataVersion(db),
               endingDataVersion == startingDataVersion,
@@ -293,6 +318,7 @@ struct OpenClawSqliteReader {
                                   fileSize: fileSize,
                                   preview: rowPreview)
         session.sourceStorageIdentity = storageIdentity
+        session.sourcePreviewDigest = rowDigest
         session.sourceStorageRevision = sessionRevisionKey(revision)
         return (session,
                 revision,
@@ -1095,6 +1121,9 @@ struct OpenClawSqliteReader {
         /// Changes when the store is replaced at the same path, so a replacement
         /// whose counts happen to match never reuses an old preview.
         let fileNumber: UInt64
+        /// True only after a completed, fingerprint-stable listing of this store.
+        let fingerprintUnchanged: Bool
+        let storeFingerprint: String
         /// SELECT of the preview payload columns; nil when the table is absent.
         let eventSQL: String?
         /// SELECT of the stored (undecoded) preview-window rows for the digest.
@@ -1105,8 +1134,11 @@ struct OpenClawSqliteReader {
         /// the preview after a relaunch.
         let priorByID: [String: Session]
 
-        init(db: OpaquePointer?, storageIdentity: String, prior: [Session]) {
+        init(db: OpaquePointer?, storageIdentity: String, prior: [Session],
+             fingerprintUnchanged: Bool, storeFingerprint: String) {
             self.storageIdentity = storageIdentity
+            self.fingerprintUnchanged = fingerprintUnchanged
+            self.storeFingerprint = storeFingerprint
             fileNumber = (try? FileManager.default.attributesOfItem(atPath: storageIdentity)[.systemFileNumber]
                           as? NSNumber)?.uint64Value ?? 0
             if let columns = OpenClawSqliteReader.tableColumns(db, name: "transcript_events") {
@@ -1135,8 +1167,12 @@ struct OpenClawSqliteReader {
     /// raw bytes, without zstd or JSON decoding). Any rewrite of a row the
     /// preview reads changes it, even one that keeps the count, the last
     /// sequence, the byte sizes and the transcript time. nil when unreadable.
-    private static func previewWindowDigest(db: OpaquePointer?, sql: String?, sessionID: String) -> String? {
+    private static func previewWindowDigest(db: OpaquePointer?, sql: String?,
+                                            storageIdentity: String, sessionID: String) -> String? {
         guard let sql else { return nil }
+        previewCacheLock.lock()
+        previewDigestReadCountsForTesting[storageIdentity, default: 0] += 1
+        previewCacheLock.unlock()
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(statement) }
@@ -1173,32 +1209,57 @@ struct OpenClawSqliteReader {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Same-snapshot list preview. Cached in memory per session until its event
-    /// count, last sequence, transcript time or preview-window digest changes;
-    /// after a relaunch an indexed row from the same database with the same
-    /// count and end time is reused instead of a decode. The index does not
-    /// store the digest, so that first reuse trusts count and time; every
-    /// later rewrite of the window in this process is caught by the digest.
-    private static func preview(db: OpaquePointer?, context: PreviewContext, row: SessionRow, sessionID: String) -> Preview? {
+    /// Bind the raw preview digest to the session-window fields that can
+    /// supply fallback title/model values. An unchanged transcript in a
+    /// replaced database must not reuse a stale display-name-derived title.
+    private static func previewProof(windowDigest: String, row: SessionRow) -> String {
+        var hasher = SHA256()
+        feed("preview.digest", windowDigest, into: &hasher)
+        feedOptional("session.display_name", row.displayName, into: &hasher)
+        feedOptional("session.model", row.model, into: &hasher)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Same-snapshot list preview. The cheap database fingerprint plus the
+    /// row's count/max seq/time skips re-hashing only after a prior successful
+    /// listing of this exact storage revision. A changed database must verify
+    /// the window's SHA-256 before reusing either in-memory or persisted metadata.
+    private static func preview(db: OpaquePointer?, context: PreviewContext, row: SessionRow,
+                                sessionID: String, digest: inout String?) -> Preview? {
         guard row.eventCount > 0, let lastSequence = row.lastSequence else { return nil }
         let key = context.storageIdentity + "\u{0}" + row.id
-        guard let digest = previewWindowDigest(db: db, sql: context.digestSQL, sessionID: row.id) else {
-            // The window could not be read; never answer from a cache.
-            return scanPreview(db: db, sql: context.eventSQL, sessionID: row.id)
-        }
-        let signature = "\(context.fileNumber):\(row.eventCount):\(lastSequence):\(revisionDate(row.activityEnd)):\(digest)"
+        let cheapSignature = "\(context.fileNumber):\(row.eventCount):\(lastSequence):\(revisionDate(row.activityEnd)):\(row.model ?? "<nil>"):\(row.displayName ?? "<nil>")"
         previewCacheLock.lock()
         let cached = previewCache[key]
         previewCacheLock.unlock()
+        if context.fingerprintUnchanged, let cached,
+           cached.fingerprint == context.storeFingerprint,
+           cached.cheapSignature == cheapSignature {
+            digest = cached.digest
+            return cached.preview
+        }
+
+        guard let currentDigest = previewWindowDigest(db: db, sql: context.digestSQL,
+                                                      storageIdentity: context.storageIdentity,
+                                                      sessionID: row.id) else {
+            // An unreadable digest cannot authorize an indexed or memory preview.
+            return scanPreview(db: db, sql: context.eventSQL, sessionID: row.id)
+        }
+        let proof = previewProof(windowDigest: currentDigest, row: row)
+        digest = proof
+        let signature = cheapSignature + ":" + proof
         if let cached, cached.signature == signature {
+            // The exact window and row metadata match. Reuse is safe even
+            // when another session changed the database-wide fingerprint.
             return cached.preview
         }
 
         var result: Preview?
-        // A cached entry with another signature proves this process saw the
-        // window change, so the indexed row (published before it) is stale.
+        // A persisted digest must match the current read snapshot. Count,
+        // timestamp and canonical path alone are not sufficient evidence.
         if cached == nil,
            let prior = context.priorByID[sessionID],
+           prior.sourcePreviewDigest == proof,
            prior.eventCount == row.eventCount,
            let priorEnd = prior.endTime, let rowEnd = row.activityEnd,
            Int64(priorEnd.timeIntervalSince1970) == Int64(rowEnd.timeIntervalSince1970),
@@ -1213,7 +1274,9 @@ struct OpenClawSqliteReader {
             result = scanPreview(db: db, sql: context.eventSQL, sessionID: row.id)
         }
         previewCacheLock.lock()
-        previewCache[key] = (signature, result)
+        previewCache[key] = (signature: signature, cheapSignature: cheapSignature,
+                             digest: proof, fingerprint: context.storeFingerprint,
+                             preview: result)
         previewCacheLock.unlock()
         return result
     }

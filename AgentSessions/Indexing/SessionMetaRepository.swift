@@ -98,7 +98,7 @@ actor SessionMetaRepository {
                                surface: session.surface,
                                reasoningEffort: session.reasoningEffort)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
-            out.append(Session(id: enriched.id,
+            var persisted = Session(id: enriched.id,
                                source: enriched.source,
                                startTime: enriched.startTime,
                                endTime: enriched.endTime,
@@ -124,7 +124,9 @@ actor SessionMetaRepository {
                                originSource: enriched.originSource,
                                surface: enriched.surface,
                                reasoningEffort: enriched.reasoningEffort,
-                               deletedAt: deletedAt(fromPath: r.path)))
+                               deletedAt: deletedAt(fromPath: r.path))
+            persisted.sourcePreviewDigest = r.openClawPreviewDigest
+            out.append(persisted)
         }
         return out
     }
