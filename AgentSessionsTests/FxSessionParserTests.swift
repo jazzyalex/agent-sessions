@@ -586,6 +586,30 @@ extension FxSessionParserTests {
         XCTAssertEqual(session.startTime, Date(timeIntervalSince1970: 1_789_000_000))
     }
 
+    /// Unchanged schema-4 logs must not decode every frame again just to
+    /// report an exact count. A changed revision must be rescanned.
+    func testSchema4LightweightCountCacheSkipsUnchangedLog() throws {
+        let url = try stageSchema4(frames: shortConversationFrames())
+        let before = FxSessionParser.lightweightScanCountForTesting(at: url)
+        let first = try XCTUnwrap(FxSessionParser.parseFile(at: url))
+        let afterFirst = FxSessionParser.lightweightScanCountForTesting(at: url)
+        XCTAssertEqual(afterFirst, before + 1)
+        let second = try XCTUnwrap(FxSessionParser.parseFile(at: url))
+        XCTAssertEqual(second.eventCount, first.eventCount)
+        XCTAssertEqual(FxSessionParser.lightweightScanCountForTesting(at: url), afterFirst)
+
+        let added = Data(#"{"schema_version":3,"seq":8,"event":{"user":{"text":"new turn"}}}"#.utf8)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: added + Data([0x0a]))
+        try handle.close()
+        let changed = try XCTUnwrap(FxSessionParser.parseFile(at: url))
+        XCTAssertEqual(changed.eventCount, first.eventCount + 1)
+        XCTAssertGreaterThan(try XCTUnwrap(changed.fileSizeBytes),
+                             try XCTUnwrap(second.fileSizeBytes))
+        XCTAssertEqual(FxSessionParser.lightweightScanCountForTesting(at: url), afterFirst + 1)
+    }
+
     /// `title` is optional in the manifest (fx writes it after the first turn).
     /// Without it the first user prompt names the session — never steering.
     func testSchema4TitleFallsBackToFirstPrompt() throws {

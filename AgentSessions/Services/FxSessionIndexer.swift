@@ -40,6 +40,21 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
+    // Deterministic seams for refresh/reload regression tests.
+    internal var discoverFilesOverride: (() -> [URL])?
+    internal var parseLightweightOverride: ((URL) -> Session?)?
+    internal var parseFullOverride: ((URL) -> Session?)?
+
+    internal func seedSessionsForTesting(_ sessions: [Session]) {
+        allSessions = sessions
+    }
+
+    internal func isReloadingForTesting(_ id: String) -> Bool {
+        reloadLock.lock()
+        defer { reloadLock.unlock() }
+        return reloadingSessionIDs.contains(id)
+    }
+
     init() {
         let initialOverride = UserDefaults.standard.string(forKey: FxPreferencesKey.sessionsRootOverride) ?? ""
         self.discovery = FxSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
@@ -81,7 +96,7 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
     func refresh(mode: IndexRefreshMode = .incremental,
                  trigger: IndexRefreshTrigger = .manual,
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
-        if !AgentEnablement.isEnabled(.fx) { return }
+        if !AgentEnablement.isEnabled(.fx) && discoverFilesOverride == nil { return }
 
         let currentOverride = UserDefaults.standard.string(forKey: FxPreferencesKey.sessionsRootOverride) ?? ""
         if currentOverride != lastOverride {
@@ -106,13 +121,31 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
         // `discovery` on the caller's thread while that scan is still enumerating,
         // and the scan must keep reading the root it started with.
         let scanDiscovery = discovery
+        let discoverFiles = discoverFilesOverride
+        let parseLightweight = parseLightweightOverride
+        // A previous row is retained only for a file that discovery still lists.
+        // A removed file never enters the scan, so deletion stays authoritative.
+        let previousByPath = Dictionary(allSessions.map { ($0.filePath, $0) },
+                                        uniquingKeysWith: { first, _ in first })
         Task.detached(priority: prio) { [weak self, token, executionProfile] in
             guard let self else { return }
 
             let config = SessionIndexingEngine.ScanConfig(
                 source: .fx,
-                discoverFiles: { scanDiscovery.discoverSessionFiles() },
-                parseLightweight: { FxSessionParser.parseFile(at: $0) },
+                discoverFiles: { discoverFiles?() ?? scanDiscovery.discoverSessionFiles() },
+                parseLightweight: { url in
+                    let parsed: Session?
+                    if let override = parseLightweight {
+                        parsed = override(url)
+                    } else {
+                        parsed = FxSessionParser.parseFile(at: url)
+                    }
+                    if let parsed { return parsed }
+                    // Discovery can race an unlink: do not resurrect a session
+                    // whose file disappeared after the directory was listed.
+                    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                    return previousByPath[url.path]
+                },
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
                 shouldContinue: { self.refreshToken == token },
@@ -228,10 +261,19 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
                 }
             }
 
-            let parsed = FxSessionParser.parseFileFull(at: url, allowLargeFile: true) ?? existing
-            self.reloadLock.lock()
-            if let preParseStat { self.lastFullReloadFileStatsBySessionID[id] = preParseStat }
-            self.reloadLock.unlock()
+            let parsed: Session?
+            if let override = self.parseFullOverride {
+                parsed = override(url)
+            } else {
+                parsed = FxSessionParser.parseFileFull(at: url, allowLargeFile: true)
+            }
+            // A failed read is not a successful reload. In particular, do not
+            // poison the stat gate with a revision that never parsed.
+            if let parsed, let preParseStat {
+                self.reloadLock.lock()
+                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                self.reloadLock.unlock()
+            }
 
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -242,7 +284,7 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
                     }
                 }
 
-                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                if let parsed, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                     let current = self.allSessions[idx]
                     let merged = Self.mergedSession(parsed: parsed, current: current)
                     self.allSessions[idx] = merged
@@ -285,8 +327,8 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
-              let modified = values.contentModificationDate else { return nil }
-        return SessionFileStat(mtime: Int64(modified.timeIntervalSince1970), size: Int64(values.fileSize ?? 0))
+        // The same URL is checked before and after parsing; avoid URL-cached
+        // resource values and preserve subsecond mtime plus inode identity.
+        SessionFileStat.precise(from: url)
     }
 }

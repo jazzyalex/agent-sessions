@@ -121,6 +121,66 @@ enum FxSessionParser {
     /// The head of the log the lightweight pass builds events for. Frames past
     /// it are still read, but only counted.
     private static let previewFrameLimit = 200
+
+    /// Exact schema-4 lightweight count/title keyed to one on-disk file
+    /// revision. Cached entries have no rendered events or artifact contents.
+    private struct LightweightCountCacheEntry {
+        let size: Int
+        let modifiedAt: Date
+        let nonMetaCount: Int
+        let firstPromptText: String?
+    }
+    private static let countCacheLock = NSLock()
+    private static var countCache: [String: LightweightCountCacheEntry] = [:]
+    private static var countScansByPathForTesting: [String: Int] = [:]
+
+    static func lightweightScanCountForTesting(at url: URL) -> Int {
+        countCacheLock.lock()
+        defer { countCacheLock.unlock() }
+        return countScansByPathForTesting[url.path, default: 0]
+    }
+
+    private static func freshFileSize(at url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.intValue ?? 0
+    }
+
+    private static func logRevision(at url: URL) -> (size: Int, modifiedAt: Date)? {
+        // URL.resourceValues caches metadata on the URL instance. A second
+        // lightweight parse may reuse that URL after the log has grown.
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber,
+              let modifiedAt = attributes[.modificationDate] as? Date else { return nil }
+        return (size.intValue, modifiedAt)
+    }
+
+    private static func cachedLightweightScan(at url: URL) -> EventLogScan? {
+        guard let revision = logRevision(at: url) else { return nil }
+        countCacheLock.lock()
+        defer { countCacheLock.unlock() }
+        guard let entry = countCache[url.path],
+              entry.size == revision.size, entry.modifiedAt == revision.modifiedAt else { return nil }
+        var scan = EventLogScan()
+        scan.nonMetaCount = entry.nonMetaCount
+        scan.firstPromptText = entry.firstPromptText
+        return scan
+    }
+
+    private static func recordLightweightScan(_ scan: EventLogScan, at url: URL,
+                                              revision: (size: Int, modifiedAt: Date)?) {
+        countCacheLock.lock()
+        defer { countCacheLock.unlock() }
+        if countScansByPathForTesting.count >= 2_048,
+           countScansByPathForTesting[url.path] == nil {
+            countScansByPathForTesting.removeAll(keepingCapacity: true)
+        }
+        countScansByPathForTesting[url.path, default: 0] += 1
+        guard let revision, let after = logRevision(at: url),
+              revision.size == after.size, revision.modifiedAt == after.modifiedAt else { return }
+        if countCache.count >= 2_048 { countCache.removeAll(keepingCapacity: true) }
+        countCache[url.path] = LightweightCountCacheEntry(
+            size: revision.size, modifiedAt: revision.modifiedAt,
+            nonMetaCount: scan.nonMetaCount, firstPromptText: scan.firstPromptText)
+    }
     /// Ceiling for one `tool-results/` artifact read during a full parse;
     /// fx itself caps stored text at 8 MiB.
     private static let maxArtifactReadBytes = 2 * 1024 * 1024
@@ -140,7 +200,7 @@ enum FxSessionParser {
     }
 
     static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let size = freshFileSize(at: url)
         if !allowLargeFile, size > defaultFullParseMaxBytes { return nil }
         return build(url: url, includeEvents: true, readChunk: nil)
     }
@@ -166,7 +226,7 @@ enum FxSessionParser {
     private static func buildFromCheckpoint(url: URL, includeEvents: Bool) -> Session? {
         guard let id = FxSessionDiscovery.sessionID(forSessionFile: url) else { return nil }
 
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let size = freshFileSize(at: url)
         let sidecar = readSidecar(for: url)
         let startTime = sidecar?.createdAtMS.flatMap(msDate)
         let endTime = sidecar?.updatedAtMS.flatMap(msDate)
@@ -237,13 +297,22 @@ enum FxSessionParser {
               let sidecar = readSidecar(for: url),
               sidecar.isEventLogSchema else { return nil }
 
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        // An unreadable or failing log is a failed parse, never a short
-        // session: nil lets the caller keep its last good representation.
-        guard var scan = scanEventLog(at: url,
-                                      previewFrameLimit: includeEvents ? nil : previewFrameLimit,
-                                      readArtifacts: includeEvents,
-                                      readChunk: readChunk) else { return nil }
+        let size = freshFileSize(at: url)
+        // A reader override is test-only and intentionally bypasses the
+        // cache. Never record a failed or racing scan as a good revision.
+        let useCountCache = !includeEvents && readChunk == nil
+        let before = useCountCache ? logRevision(at: url) : nil
+        var scan: EventLogScan
+        if useCountCache, let cached = cachedLightweightScan(at: url) {
+            scan = cached
+        } else {
+            guard let parsed = scanEventLog(at: url,
+                                           previewFrameLimit: includeEvents ? nil : previewFrameLimit,
+                                           readArtifacts: includeEvents,
+                                           readChunk: readChunk) else { return nil }
+            scan = parsed
+            if useCountCache { recordLightweightScan(scan, at: url, revision: before) }
+        }
         if includeEvents {
             let recovered = recoveryEvents(for: url, after: scan)
             scan.events.append(contentsOf: recovered)

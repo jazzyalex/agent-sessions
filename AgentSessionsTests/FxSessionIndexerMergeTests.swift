@@ -34,6 +34,102 @@ final class FxSessionIndexerMergeTests: XCTestCase {
                        lightweightCommands: commands)
     }
 
+    private final class ReloadAttempts: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func next() -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            value += 1
+            return value
+        }
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        for _ in 0..<150 {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for fx indexer", file: file, line: line)
+    }
+
+    /// Success -> transient read failure -> file disappearance. Only the last
+    /// step may remove the previously visible row.
+    @MainActor
+    func testTwoRefreshesPreserveLastGoodSessionWhenParseFails() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fx-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("events.jsonl")
+        try Data("existing discovered file".utf8).write(to: url)
+        let good = Session(id: "fx-good", source: .fx,
+                           startTime: nil, endTime: Date(timeIntervalSince1970: 200),
+                           model: nil, filePath: url.path, eventCount: 5, events: [],
+                           cwd: nil, repoName: nil, lightweightTitle: "Last good title")
+        let indexer = FxSessionIndexer()
+        indexer.discoverFilesOverride = { [url] }
+        indexer.parseLightweightOverride = { _ in good }
+        indexer.refresh()
+        try await waitUntil { !indexer.isIndexing }
+        XCTAssertEqual(indexer.allSessions.map(\.id), ["fx-good"])
+
+        indexer.parseLightweightOverride = { _ in nil }
+        indexer.refresh()
+        try await waitUntil { !indexer.isIndexing }
+        XCTAssertEqual(indexer.allSessions.map(\.id), ["fx-good"])
+        XCTAssertEqual(indexer.allSessions.first?.lightweightTitle, "Last good title")
+
+        try FileManager.default.removeItem(at: url)
+        indexer.discoverFilesOverride = { [] }
+        indexer.refresh()
+        try await waitUntil { !indexer.isIndexing }
+        XCTAssertTrue(indexer.allSessions.isEmpty, "only authoritative absence removes the session")
+    }
+
+    /// A failed full parse must not update the file stat gate: the next forced
+    /// monitor reload of the same revision must retry without any new file edit.
+    @MainActor
+    func testFailedFullReloadDoesNotPoisonStatGate() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FxReload-\(UUID().uuidString).jsonl")
+        try Data("same file revision".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let existing = Session(id: "fx-reload", source: .fx,
+                               startTime: nil, endTime: nil, model: nil,
+                               filePath: url.path, eventCount: 4,
+                               events: [SessionEvent(id: "1", timestamp: nil, kind: .user, role: "user",
+                                                     text: "old", toolName: nil, toolInput: nil,
+                                                     toolOutput: nil, messageID: nil, parentID: nil,
+                                                     isDelta: false, rawJSON: "")],
+                               cwd: nil, repoName: nil, lightweightTitle: "Old")
+        let updated = Session(id: existing.id, source: .fx,
+                              startTime: nil, endTime: nil, model: nil,
+                              filePath: url.path, eventCount: 1,
+                              events: existing.events, cwd: nil, repoName: nil,
+                              lightweightTitle: "Reloaded")
+        let indexer = FxSessionIndexer()
+        indexer.seedSessionsForTesting([existing])
+        let attempts = ReloadAttempts()
+        indexer.parseFullOverride = { _ in
+            attempts.next() == 1 ? nil : updated
+        }
+        indexer.reloadSession(id: existing.id, force: true, reason: .focusedSessionMonitor)
+        try await waitUntil { !indexer.isReloadingForTesting(existing.id) }
+        indexer.reloadSession(id: existing.id, force: true, reason: .focusedSessionMonitor)
+        try await waitUntil { !indexer.isReloadingForTesting(existing.id)
+                              && indexer.allSessions.first?.lightweightTitle == "Reloaded" }
+        XCTAssertEqual(attempts.count, 2)
+        XCTAssertEqual(indexer.allSessions.first?.lightweightTitle, "Reloaded")
+    }
+
     /// Compaction shrank the transcript: the reloaded count must shrink with
     /// it, not ride `max` on the pre-compaction row.
     func testCompactedReloadShrinksEventCount() {
