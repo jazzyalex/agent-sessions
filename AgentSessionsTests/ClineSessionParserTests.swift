@@ -111,13 +111,72 @@ final class ClineSessionParserTests: XCTestCase {
         ])
     }
 
+    // MARK: - Desktop 0.0.48 native session
+
+    private func desktopToolManifestURL() -> URL {
+        FixturePaths.stage0FixtureURL("agents/cline/desktop_tool/session_1792607722905_fixt1.json")
+    }
+
+    /// Desktop 0.0.48 names session directories `session_<epochms>_<id>` (the CLI
+    /// uses `<epochms>_<id>`) and writes the same v1 manifest/messages pair. The
+    /// workspace-less desktop session reports cwd "/".
+    func testDesktop0048NativeSessionPreviewAndFull() throws {
+        guard let preview = ClineSessionParser.parseFile(at: desktopToolManifestURL()) else {
+            return XCTFail("preview parse returned nil")
+        }
+        XCTAssertEqual(preview.id, "session_1792607722905_fixt1")
+        XCTAssertEqual(preview.surface, .desktop)
+        XCTAssertEqual(preview.model, "~anthropic/claude-fable-latest")
+        XCTAssertEqual(preview.lightweightTitle, "List the files in /tmp/desk-probe")
+        XCTAssertEqual(preview.cwd, "/")
+        XCTAssertEqual(preview.eventCount, 9)
+        XCTAssertEqual(preview.lightweightCommands, 2)
+
+        guard let full = ClineSessionParser.parseFileFull(at: desktopToolManifestURL()) else {
+            return XCTFail("full parse returned nil")
+        }
+        XCTAssertEqual(full.events.filter { $0.kind != .meta }.count, preview.eventCount,
+                       "preview and full parse must count the same events")
+        XCTAssertEqual(full.events.filter { $0.kind == .tool_call }.map(\.toolName), ["run_commands", "read_files"])
+        let results = full.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(results.map(\.toolName), ["run_commands", "read_files"])
+        XCTAssertTrue((results.last?.toolOutput ?? "").contains("probe file for agent session format check"))
+    }
+
+    /// A failed model request is written as an assistant message marked
+    /// `metadata: {displayOnly: true, displayRole: "error"}`. It must render as an
+    /// error, not as the assistant's reply.
+    func testDisplayOnlyErrorMessageRendersAsErrorNotAssistantReply() throws {
+        guard let full = ClineSessionParser.parseFileFull(at: desktopToolManifestURL()) else {
+            return XCTFail("full parse returned nil")
+        }
+        let errors = full.events.filter { $0.kind == .error }
+        XCTAssertEqual(errors.map(\.text), ["model not found (Request ID: fixture-request-id)"])
+        XCTAssertEqual(errors.first?.messageID, "error_cline-desktop-error-1")
+        XCTAssertFalse(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("model not found") })
+        XCTAssertEqual(full.events.filter { $0.kind == .assistant }.count, 2)
+    }
+
+    /// Only text becomes the error; other blocks of a display-only error message keep
+    /// their own kind, and a message without the marker stays an assistant reply.
+    func testDisplayOnlyErrorAffectsTextBlocksOnly() {
+        let blocks: [[String: Any]] = [["type": "text", "text": "failed"],
+                                       ["type": "thinking", "thinking": "t"]]
+        let marked = ClineSessionParser.Message(role: "assistant", time: nil, id: "m1",
+                                                blocks: blocks, rawBlocks: [], displayRole: "error")
+        XCTAssertEqual(ClineSessionParser.eventsForMessage(marked, messageIndex: 0).map(\.kind), [.error, .meta])
+        let plain = ClineSessionParser.Message(role: "assistant", time: nil, id: "m2",
+                                               blocks: blocks, rawBlocks: [])
+        XCTAssertEqual(ClineSessionParser.eventsForMessage(plain, messageIndex: 0).map(\.kind), [.assistant, .meta])
+    }
+
     // MARK: - Manifest rules
 
     /// The manifest's `messages_path` is an absolute export-time path and must
     /// never be followed — the adjacent messages file is read instead. Both
     /// fixtures carry such a path pointing outside the repo, yet still parse.
     func testAdjacentMessagesFileIsPreferredOverAbsoluteMessagesPath() throws {
-        for url in [cliManifestURL(), desktopManifestURL()] {
+        for url in [cliManifestURL(), desktopManifestURL(), desktopToolManifestURL()] {
             let data = try Data(contentsOf: url)
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             let messagesPath = try XCTUnwrap(object["messages_path"] as? String)

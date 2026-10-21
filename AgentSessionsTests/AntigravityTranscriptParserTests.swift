@@ -207,4 +207,120 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         }
         XCTAssertEqual(session.model, "Gemini 3.5 Flash (Low)")
     }
+
+    // MARK: - Desktop app (2.25.0+) transcripts under ~/.gemini/antigravity/brain
+
+    private func makeHome() -> URL {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("AntigravityDesktop.\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        return home
+    }
+
+    @discardableResult
+    private func writeBrainTranscript(root: URL, conversation: String, from fixture: String = "agents/antigravity/desktop_small.jsonl",
+                                      mtime: Date? = nil) throws -> URL {
+        let logs = root.appendingPathComponent("\(conversation)/.system_generated/logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let url = logs.appendingPathComponent("transcript.jsonl")
+        try Data(contentsOf: FixturePaths.stage0FixtureURL(fixture)).write(to: url)
+        if let mtime {
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+        }
+        return url
+    }
+
+    /// The desktop app writes the CLI's transcript layout into the desktop brain root,
+    /// with no markdown artifact beside it. The markdown-only scan of that root never
+    /// looked inside `.system_generated`, so desktop sessions were not listed at all.
+    func testDesktopBrainTranscriptWithoutArtifactsIsDiscovered() throws {
+        let home = makeHome()
+        let desktopRoot = home.appendingPathComponent(".gemini/antigravity/brain", isDirectory: true)
+        let transcript = try writeBrainTranscript(root: desktopRoot, conversation: "107fd67f-desktop")
+        let absentCLI = home.appendingPathComponent(".gemini/antigravity-cli/brain").path
+
+        let snapshot = AntigravitySessionDiscovery(customRoot: desktopRoot.path, cliRoot: absentCLI).discoverSnapshot()
+
+        XCTAssertEqual(snapshot.files.map { $0.resolvingSymlinksInPath().path },
+                       [transcript.resolvingSymlinksInPath().path])
+        XCTAssertTrue(snapshot.isAuthoritative(path: transcript.path))
+    }
+
+    /// A conversation with both a transcript and markdown artifacts is one session:
+    /// the transcript holds the whole conversation, so the artifacts are not listed
+    /// beside it. A conversation with artifacts only still lists them.
+    func testDesktopTranscriptReplacesMarkdownArtifactsOfTheSameConversation() throws {
+        let home = makeHome()
+        let desktopRoot = home.appendingPathComponent(".gemini/antigravity/brain", isDirectory: true)
+        try writeBrainTranscript(root: desktopRoot, conversation: "conv-both")
+        let both = desktopRoot.appendingPathComponent("conv-both", isDirectory: true)
+        try "# Task\n".write(to: both.appendingPathComponent("task.md"), atomically: true, encoding: .utf8)
+        let mdOnly = desktopRoot.appendingPathComponent("conv-md-only", isDirectory: true)
+        try FileManager.default.createDirectory(at: mdOnly, withIntermediateDirectories: true)
+        try "# Walkthrough\n".write(to: mdOnly.appendingPathComponent("walkthrough.md"), atomically: true, encoding: .utf8)
+        let absentCLI = home.appendingPathComponent(".gemini/antigravity-cli/brain").path
+
+        let files = AntigravitySessionDiscovery(customRoot: desktopRoot.path, cliRoot: absentCLI).discoverSessionFiles()
+        let names = files.map { "\($0.pathComponents.first { $0.hasPrefix("conv-") } ?? "?")/\($0.lastPathComponent)" }.sorted()
+
+        XCTAssertEqual(names, ["conv-both/transcript.jsonl", "conv-md-only/walkthrough.md"])
+    }
+
+    /// Transcripts use the bare conversation id as the session id, so the same
+    /// conversation in both brain roots must list once (the newer file), never as two
+    /// sessions sharing one id.
+    func testSameConversationInBothBrainRootsIsListedOnceNewestWins() throws {
+        let home = makeHome()
+        let desktopRoot = home.appendingPathComponent(".gemini/antigravity/brain", isDirectory: true)
+        let cliRoot = home.appendingPathComponent(".gemini/antigravity-cli/brain", isDirectory: true)
+        try writeBrainTranscript(root: desktopRoot, conversation: "shared-id", mtime: Date(timeIntervalSince1970: 1_000))
+        let newer = try writeBrainTranscript(root: cliRoot, conversation: "shared-id", from: "agents/antigravity/cli_small.jsonl",
+                                             mtime: Date(timeIntervalSince1970: 2_000))
+        try writeBrainTranscript(root: cliRoot, conversation: "cli-only")
+
+        let files = AntigravitySessionDiscovery(customRoot: desktopRoot.path, cliRoot: cliRoot.path).discoverSessionFiles()
+        let shared = files.filter { $0.pathComponents.contains("shared-id") }
+
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(shared.map { $0.resolvingSymlinksInPath().path }, [newer.resolvingSymlinksInPath().path])
+    }
+
+    /// Desktop tool results are `GENERIC` records (so are most CLI ones: run_command,
+    /// view_file, replace_file_content). They rendered as system meta, so a tool-using
+    /// session showed calls with no results. Each result is paired with its own call.
+    func testDesktopFixtureParsesGenericToolResultsPairedWithTheirCalls() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/antigravity/desktop_small.jsonl")
+        guard let s = AntigravityTranscriptParser.parse(at: url, forcedID: "desk-1", includeEvents: true) else {
+            return XCTFail("parse returned nil")
+        }
+        XCTAssertEqual(s.model, "Gemini 3.8 Flash (High)")
+        XCTAssertEqual(s.lightweightTitle,
+                       "Use your tools to list the files in /tmp/desk-probe, then read a.txt there and say what it contains in one line.")
+        XCTAssertEqual(s.eventCount, 6)
+        XCTAssertEqual(s.events.filter { $0.kind == .tool_call }.map(\.toolName), ["run_command", "read_file"])
+        let results = s.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(results.map(\.toolName), ["run_command", "read_file"])
+        XCTAssertTrue((results.last?.toolOutput ?? "").contains("probe file for agent session format check"))
+        XCTAssertFalse(s.events.contains { $0.kind == .meta }, "no record in this session is system meta")
+        XCTAssertTrue(s.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("The directory contains") })
+    }
+
+    func testToolResultsPairWithCallsInOrderAndSystemRecordsStayMeta() throws {
+        let url = writeTranscript([
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-10-21T18:36:32Z","content":"<USER_REQUEST>\ngo\n</USER_REQUEST>"}"#,
+            #"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-10-21T18:36:33Z","tool_calls":[{"name":"grep_search","args":{}},{"name":"run_command","args":{}}]}"#,
+            #"{"step_index":2,"source":"MODEL","type":"GREP_SEARCH","status":"DONE","created_at":"2026-10-21T18:36:34Z","content":"grep out"}"#,
+            #"{"step_index":3,"source":"MODEL","type":"GENERIC","status":"ERROR","created_at":"2026-10-21T18:36:35Z","content":"Encountered error in step execution: denied","error":"denied"}"#,
+            #"{"step_index":4,"source":"MODEL","type":"BROWSER_NAVIGATE","status":"DONE","created_at":"2026-10-21T18:36:36Z","content":"opened page"}"#,
+            #"{"step_index":5,"source":"SYSTEM","type":"CHECKPOINT","status":"DONE","created_at":"2026-10-21T18:36:37Z","content":"checkpoint"}"#,
+            #"{"step_index":6,"source":"SYSTEM","type":"FUTURE_SYSTEM_NOTE","status":"DONE","created_at":"2026-10-21T18:36:38Z","content":"note"}"#,
+        ])
+        guard let s = AntigravityTranscriptParser.parse(at: url, forcedID: "conv-1", includeEvents: true) else {
+            return XCTFail("parse returned nil")
+        }
+        let results = s.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(results.map(\.toolOutput), ["grep out", "Encountered error in step execution: denied", "opened page"])
+        XCTAssertEqual(results.map(\.toolName), ["grep_search", "run_command", "run_command"],
+                       "results pair with calls in order; an unmatched MODEL result keeps the last call name")
+        XCTAssertEqual(s.events.filter { $0.kind == .meta }.map(\.text), ["checkpoint", "note"])
+    }
 }

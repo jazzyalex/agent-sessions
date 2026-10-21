@@ -181,14 +181,22 @@ enum ClineSessionParser {
         let id: String?
         let blocks: [[String: Any]]
         let rawBlocks: [String]
+        /// `metadata.displayRole` of a display-only message. Cline Desktop 0.0.48
+        /// writes a failed model request as an assistant message with
+        /// `metadata: {displayOnly: true, displayRole: "error"}`; it was never a reply.
+        let displayRole: String?
 
-        init(role: String, time: Date?, id: String?, blocks: [[String: Any]], rawBlocks: [String]) {
+        init(role: String, time: Date?, id: String?, blocks: [[String: Any]], rawBlocks: [String],
+             displayRole: String? = nil) {
             self.role = role
             self.time = time
             self.id = id
             self.blocks = blocks
             self.rawBlocks = rawBlocks
+            self.displayRole = displayRole
         }
+
+        var isDisplayOnlyError: Bool { displayRole?.lowercased() == "error" }
     }
 
     private struct MessagesFile {
@@ -213,7 +221,10 @@ enum ClineSessionParser {
             let id = raw["id"] as? String
             let blocks = raw["content"] as? [[String: Any]] ?? []
             let rawBlocks = preserveRawBlocks ? blocks.map { jsonEncode($0) } : []
-            out.append(Message(role: role, time: time, id: id, blocks: blocks, rawBlocks: rawBlocks))
+            let metadata = raw["metadata"] as? [String: Any]
+            let displayRole = (metadata?["displayOnly"] as? Bool) == true ? metadata?["displayRole"] as? String : nil
+            out.append(Message(role: role, time: time, id: id, blocks: blocks, rawBlocks: rawBlocks,
+                               displayRole: displayRole))
         }
         return MessagesFile(version: version, sessionId: sessionId, messages: out)
     }
@@ -259,7 +270,8 @@ enum ClineSessionParser {
                                                   time: message.time,
                                                   messageIndex: messageIndex,
                                                   blockIndex: blockIndex,
-                                                  raw: raw))
+                                                  raw: raw,
+                                                  displayOnlyError: message.isDisplayOnlyError))
         }
         return out
     }
@@ -286,14 +298,20 @@ enum ClineSessionParser {
                                        time: Date?,
                                        messageIndex: Int,
                                        blockIndex: Int,
-                                       raw: String) -> [SessionEvent] {
+                                       raw: String,
+                                       displayOnlyError: Bool = false) -> [SessionEvent] {
         let eventID = "\(messageIndex)-\(blockIndex)"
         let type = (block["type"] as? String) ?? ""
         switch type {
         case "text":
             let text = block["text"] as? String
             let lowered = role.lowercased()
-            if lowered == "user" {
+            if displayOnlyError {
+                // A request failure Cline shows in the conversation, not model output.
+                return [SessionEvent(id: eventID, timestamp: time, kind: .error, role: role, text: text,
+                                     toolName: nil, toolInput: nil, toolOutput: nil,
+                                     messageID: messageID, parentID: nil, isDelta: false, rawJSON: raw)]
+            } else if lowered == "user" {
                 return [SessionEvent(id: eventID, timestamp: time, kind: .user, role: role, text: text,
                                      toolName: nil, toolInput: nil, toolOutput: nil,
                                      messageID: messageID, parentID: nil, isDelta: false, rawJSON: raw)]

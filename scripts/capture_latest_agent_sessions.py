@@ -3,7 +3,8 @@
 Capture the most recently modified local agent session artifacts into a repo-local folder.
 
 This is intended for "auto mode" evidence collection when upstream session formats drift:
-- Antigravity: copy the newest markdown artifact from `~/.gemini/antigravity/brain/<conversation-id>/*.md`.
+- Antigravity: copy the newest `<conversation-id>/.system_generated/logs/transcript.jsonl` from
+  `~/.gemini/antigravity-cli/brain` (CLI) or `~/.gemini/antigravity/brain` (desktop app).
 - OpenCode: copy the newest `ses_*.json` plus the referenced message/part trees from
   `~/.local/share/opencode/storage/**`.
 - OpenClaw: export the newest session in `agents/*/agent/openclaw-agent.sqlite`
@@ -68,10 +69,18 @@ def _try_version(cmd: list[str]) -> str | None:
 
 
 def capture_antigravity(dest_root: Path) -> list[CaptureResult]:
-    brain_root = Path.home() / ".gemini" / "antigravity-cli" / "brain"
-    if not brain_root.exists():
-        return []
-    candidates = [p for p in brain_root.glob("*/.system_generated/logs/transcript.jsonl") if p.is_file()]
+    # The desktop app writes the CLI transcript layout into its own brain root.
+    brain_roots = [
+        Path.home() / ".gemini" / "antigravity-cli" / "brain",
+        Path.home() / ".gemini" / "antigravity" / "brain",
+    ]
+    candidates = [
+        p
+        for root in brain_roots
+        if root.exists()
+        for p in root.glob("*/.system_generated/logs/transcript.jsonl")
+        if p.is_file()
+    ]
     if not candidates:
         return []
     src = max(candidates, key=lambda p: p.stat().st_mtime)

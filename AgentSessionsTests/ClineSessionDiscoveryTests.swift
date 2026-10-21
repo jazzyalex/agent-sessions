@@ -130,6 +130,29 @@ final class ClineSessionDiscoveryTests: XCTestCase {
         XCTAssertEqual(found[0].lastPathComponent, "\(sessionID).json")
     }
 
+    /// Cline Desktop 0.0.48 names its session directories `session_<epochms>_<id>`
+    /// while the CLI uses `<epochms>_<id>`. Both are canonical manifests.
+    func testDesktopSessionPrefixedDirectoriesAreDiscoveredBesideCLIOnes() {
+        let sessions = "/Users/cline-demo/.cline/data/sessions"
+        let desktop = "session_1792607722905_poep2"
+        let cli = "1792559682716_vdhoe"
+        let files: Set<String> = [
+            "\(sessions)/\(desktop)/\(desktop).json",
+            "\(sessions)/\(desktop)/\(desktop).messages.json",
+            "\(sessions)/\(cli)/\(cli).json",
+            "\(sessions)/\(cli)/\(cli).messages.json"
+        ]
+        let discovery = ClineSessionDiscovery(customRoot: nil,
+                                              fileProbe: FakeFileProbe(files: files,
+                                                                       directories: ["\(sessions)/\(desktop)", "\(sessions)/\(cli)"]),
+                                              homeDirectory: home,
+                                              environment: [:])
+        XCTAssertEqual(Set(discovery.discoverSessionFiles().map(\.lastPathComponent)),
+                       ["\(desktop).json", "\(cli).json"])
+        XCTAssertEqual(ClineSessionDiscovery.sessionID(forManifest: URL(fileURLWithPath: "\(sessions)/\(desktop)/\(desktop).json")),
+                       desktop)
+    }
+
     func testMessagesFilesAreNeverDiscoveryUnits() {
         let manifest = URL(fileURLWithPath: "/s/abc/abc.json")
         let messages = URL(fileURLWithPath: "/s/abc/abc.messages.json")

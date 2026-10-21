@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-21T18:36:00.140Z",
+  "agent": "lead",
+  "sessionId": "session_1792607722905_fixt1",
+  "origin": {
+    "source": "desktop",
+    "mode": "user",
+    "sessionId": "session_1792607722905_fixt1",
+    "version": "0.0.48"
+  },
+  "system_prompt": "You are a coding assistant working in a disposable fixture project.",
+  "messages": [
+    {
+      "id": "cline-desktop-user-1",
+      "role": "user",
+      "ts": 1792607724926,
+      "content": [
+        {
+          "type": "text",
+          "text": "<user_input mode=\"act\">List the files in /tmp/desk-probe, then read a.txt there.</user_input>"
+        }
+      ]
+    },
+    {
+      "id": "error_cline-desktop-error-1",
+      "role": "assistant",
+      "ts": 1792607725289,
+      "metadata": {
+        "displayOnly": true,
+        "displayRole": "error"
+      },
+      "modelInfo": {
+        "id": "cline-free/deepseek-v4.1-flash",
+        "provider": "cline-pass"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "model not found (Request ID: fixture-request-id)"
+        }
+      ]
+    },
+    {
+      "id": "cline-desktop-user-2",
+      "role": "user",
+      "ts": 1792607755407,
+      "content": [
+        {
+          "type": "text",
+          "text": "<user_input mode=\"act\">List the files in /tmp/desk-probe, then read a.txt there.</user_input>"
+        }
+      ]
+    },
+    {
+      "id": "cline-desktop-assistant-1",
+      "role": "assistant",
+      "ts": 1792607758604,
+      "modelInfo": {
+        "id": "~anthropic/claude-fable-latest",
+        "provider": "cline",
+        "family": "claude-fable"
+      },
+      "metrics": {
+        "inputTokens": 15742,
+        "outputTokens": 262,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "cost": 0.17052
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "I'll list the directory and read a.txt in one go."
+        },
+        {
+          "type": "tool_use",
+          "id": "cline-desktop-tool-1",
+          "name": "run_commands",
+          "input": {
+            "commands": [
+              "ls -la /tmp/desk-probe"
+            ]
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "cline-desktop-tool-2",
+          "name": "read_files",
+          "input": {
+            "files": [
+              {
+                "path": "/tmp/desk-probe/a.txt"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cline-desktop-tool-result-1",
+      "role": "user",
+      "ts": 1792607758671,
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "cline-desktop-tool-1",
+          "name": "run_commands",
+          "content": [
+            {
+              "query": "ls -la /tmp/desk-probe",
+              "result": "total 8\n-rw-r--r--  1 user  wheel  42 Oct 21 11:34 a.txt\n",
+              "success": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cline-desktop-tool-result-2",
+      "role": "user",
+      "ts": 1792607758694,
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "cline-desktop-tool-2",
+          "name": "read_files",
+          "content": [
+            {
+              "query": "/tmp/desk-probe/a.txt",
+              "result": "1 | probe file for agent session format check",
+              "success": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cline-desktop-assistant-2",
+      "role": "assistant",
+      "ts": 1792607760119,
+      "modelInfo": {
+        "id": "~anthropic/claude-fable-latest",
+        "provider": "cline",
+        "family": "claude-fable"
+      },
+      "metrics": {
+        "inputTokens": 16361,
+        "outputTokens": 39,
+        "cacheReadTokens": 15738,
+        "cacheWriteTokens": 0,
+        "cost": 0.0121145
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The directory contains a single file, a.txt, which contains: probe file for agent session format check."
+        }
+      ]
+    }
+  ]
+}

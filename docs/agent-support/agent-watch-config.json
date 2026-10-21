@@ -263,14 +263,17 @@
       "weekly": {
         "local_schema": {
           "kind": "jsonl_newest",
-          "roots": ["~/.gemini/antigravity-cli/brain"],
+          "roots": ["~/.gemini/antigravity-cli/brain", "~/.gemini/antigravity/brain"],
           "glob": "*/.system_generated/logs/transcript.jsonl",
           "max_lines": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "Antigravity brain artifacts should be under ~/.gemini/antigravity/brain/<conversation-id>/*.md.",
-          "patterns": ["/\\.gemini/antigravity-cli/brain/[^/]+/\\.system_generated/logs/transcript\\.jsonl$"]
+          "description": "Antigravity transcripts should be at <brain>/<conversation-id>/.system_generated/logs/transcript.jsonl under ~/.gemini/antigravity-cli/brain (CLI) or ~/.gemini/antigravity/brain (desktop app 2.25.0+; older IDE conversations there keep *.md artifacts only).",
+          "patterns": [
+            "/\\.gemini/antigravity-cli/brain/[^/]+/\\.system_generated/logs/transcript\\.jsonl$",
+            "/\\.gemini/antigravity/brain/[^/]+/\\.system_generated/logs/transcript\\.jsonl$"
+          ]
         },
         "probes": [
           {

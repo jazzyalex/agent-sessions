@@ -756,7 +756,7 @@ Key contracts (simplified from regexes in
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/opencode.db` or legacy `*/opencode/storage/session/*/ses_*.json` |
 | Hermes   | `~/.hermes/state.db` or legacy `~/.hermes/sessions/session_*.json` |
-| Antigravity | `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` |
+| Antigravity | `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` (CLI) or the same under `~/.gemini/antigravity/brain` (desktop app 2.25.0+; older IDE conversations there keep `*.md` only) |
 | Copilot  | `~/.copilot/session-state/*.jsonl` or `*/events.jsonl` |
 | OpenClaw | `*/agents/<id>/agent/openclaw-agent.sqlite` (2026.10.5+, zstd rows decoded) or legacy `*/agents/<id>/sessions/*.jsonl`; never `agent/codex-home/` (embedded Codex harness) |
 | Cursor   | `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` |

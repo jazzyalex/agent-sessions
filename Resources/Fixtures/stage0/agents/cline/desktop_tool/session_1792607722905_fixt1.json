@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "session_id": "session_1792607722905_fixt1",
+  "source": "desktop",
+  "pid": 4343,
+  "started_at": "2026-10-21T18:35:23.146Z",
+  "exit_code": null,
+  "status": "idle",
+  "interactive": true,
+  "provider": "cline",
+  "model": "~anthropic/claude-fable-latest",
+  "cwd": "/",
+  "workspace_root": "/",
+  "team_name": "team-fixture",
+  "enable_tools": true,
+  "enable_spawn": true,
+  "enable_teams": true,
+  "prompt": "<user_input mode=\"act\">List the files in /tmp/desk-probe, then read a.txt there.</user_input>",
+  "metadata": {
+    "sessionHistoryOrigin": {
+      "mode": "user",
+      "version": "0.0.48"
+    },
+    "source": "desktop",
+    "provider": "cline-pass",
+    "model": "cline-free/deepseek-v4.1-flash",
+    "enableTools": true,
+    "interactive": true,
+    "mode": "act",
+    "systemPrompt": "You are a coding assistant working in a disposable fixture project.",
+    "checkpointEnabled": true,
+    "autoApproveTools": true,
+    "title": "List the files in /tmp/desk-probe",
+    "totalCost": 0.1826345,
+    "aggregatedAgentsCost": 0.1826345,
+    "usage": {
+      "inputTokens": 32103,
+      "outputTokens": 301,
+      "cacheReadTokens": 15738,
+      "cacheWriteTokens": 0,
+      "totalCost": 0.1826345
+    },
+    "aggregateUsage": {
+      "inputTokens": 32103,
+      "outputTokens": 301,
+      "cacheReadTokens": 15738,
+      "cacheWriteTokens": 0,
+      "totalCost": 0.1826345
+    }
+  },
+  "messages_path": "/tmp/as-agent-fixture/cline/desktop_tool/session_1792607722905_fixt1.messages.json"
+}

@@ -2,8 +2,10 @@ import Foundation
 
 // MARK: - Antigravity Session Discovery
 
-/// Discovery for Antigravity local brain artifacts.
-/// Expected layout: ~/.gemini/antigravity/brain/<conversation-id>/*.md.
+/// Discovery for Antigravity local brain stores.
+/// Desktop/IDE: ~/.gemini/antigravity/brain/<conversation-id>/ holds either
+/// `.system_generated/logs/transcript.jsonl` (desktop app) or legacy `*.md` artifacts.
+/// CLI: ~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl.
 final class AntigravitySessionDiscovery: SessionDiscovery {
     struct DiscoverySnapshot {
         var files: [URL]
@@ -51,14 +53,36 @@ final class AntigravitySessionDiscovery: SessionDiscovery {
         let fm = FileManager.default
         let markdownRoot = sessionsRoot()
         let cliRootURL = cliSessionsRoot()
-        let md = scanMarkdownSnapshot(root: markdownRoot, fm: fm)
+        let desktop = scanDesktopSnapshot(root: markdownRoot, fm: fm)
         let cli = scanCLISnapshot(root: cliRootURL, fm: fm)
-        var files = md.files + cli.files
+        var files = Self.dedupedByConversation(desktop.files + cli.files, mtime: mtime)
         files.sort { mtime($0) > mtime($1) }
         var roots: [URL] = []
-        if md.authoritative { roots.append(markdownRoot) }
+        if desktop.authoritative { roots.append(markdownRoot) }
         if cli.authoritative { roots.append(cliRootURL) }
         return DiscoverySnapshot(files: files, authoritativeRoots: roots)
+    }
+
+    /// One session per conversation id. A transcript is the whole conversation, so it
+    /// replaces the markdown artifacts of the same conversation (their ids are
+    /// `<conversation>#<artifact>`, never the bare id). Transcripts share the bare
+    /// conversation id as their session id, so when both brain roots hold one for the
+    /// same conversation only the newer file is kept.
+    static func dedupedByConversation(_ files: [URL], mtime: (URL) -> Date) -> [URL] {
+        var transcriptByConversation: [String: URL] = [:]
+        for url in files where url.pathExtension.lowercased() == "jsonl" {
+            guard let id = AntigravityTranscriptParser.conversationID(for: url) else { continue }
+            if let existing = transcriptByConversation[id], mtime(existing) >= mtime(url) { continue }
+            transcriptByConversation[id] = url
+        }
+        return files.filter { url in
+            if url.pathExtension.lowercased() == "jsonl" {
+                guard let id = AntigravityTranscriptParser.conversationID(for: url) else { return true }
+                return transcriptByConversation[id] == url
+            }
+            guard let id = AntigravitySessionIDHelper.conversationID(fromArtifactURL: url) else { return true }
+            return transcriptByConversation[id] == nil
+        }
     }
 
     func discoverSessionFiles() -> [URL] {
@@ -69,19 +93,36 @@ final class AntigravitySessionDiscovery: SessionDiscovery {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
-    private func scanMarkdownSnapshot(root: URL, fm: FileManager) -> (files: [URL], authoritative: Bool) {
+    /// The desktop brain root holds two generations of one layout. Older IDE builds
+    /// left only `*.md` artifacts per conversation; the desktop app (2.25.0+) writes
+    /// the same `.system_generated/logs/transcript.jsonl` as the CLI. A conversation
+    /// with a transcript is listed by its transcript, so its artifacts do not show as
+    /// separate sessions; one without a transcript keeps its markdown artifacts.
+    private func scanDesktopSnapshot(root: URL, fm: FileManager) -> (files: [URL], authoritative: Bool) {
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { return ([], false) }
         do {
             let conversations = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
             var out: [URL] = []
+            var authoritative = true
             for conversation in conversations {
                 let values = try conversation.resourceValues(forKeys: [.isDirectoryKey])
                 guard values.isDirectory == true else { continue }
+                let t = conversation.appendingPathComponent(".system_generated/logs/transcript.jsonl")
+                do {
+                    if try cliTranscriptProbe(t) {
+                        out.append(t)
+                        continue
+                    }
+                } catch {
+                    // Unknown whether a transcript exists: keep the artifacts so the
+                    // conversation stays listed, and stop claiming the root is complete.
+                    authoritative = false
+                }
                 let files = try fm.contentsOfDirectory(at: conversation, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
                 out.append(contentsOf: files.filter { $0.pathExtension.lowercased() == "md" })
             }
-            return (out, true)
+            return (out, authoritative)
         } catch {
             return ([], false)
         }

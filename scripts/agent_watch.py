@@ -4456,7 +4456,9 @@ def _cline_session_schema_fingerprint(path: Path) -> dict[str, Any]:
             role = message.get("role")
             role_bucket = role if isinstance(role, str) and role else "unknown"
             _add(f"message.{role_bucket}", message)
-            for nested_key in ("modelInfo", "metrics"):
+            # `metadata` carries `displayOnly`/`displayRole` (Desktop 0.0.48 writes a
+            # failed request as a display-only assistant error); the parser reads both.
+            for nested_key in ("modelInfo", "metrics", "metadata"):
                 nested = message.get(nested_key)
                 if isinstance(nested, dict):
                     _add(f"message.{role_bucket}.{nested_key}", nested)

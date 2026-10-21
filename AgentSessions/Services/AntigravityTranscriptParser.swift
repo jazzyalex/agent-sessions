@@ -25,6 +25,9 @@ enum AntigravityTranscriptParser {
         var firstUserText: String? = nil
         var model: String? = nil
         var lastToolName: String? = nil
+        // Tool results follow their PLANNER_RESPONSE in call order, so the names of
+        // the calls not yet answered pair each result with the call that made it.
+        var pendingToolNames: [String?] = []
         var firstDate: Date? = nil
         var lastDate: Date? = nil
         var count = 0
@@ -67,6 +70,7 @@ enum AntigravityTranscriptParser {
                                             markTruncated(assistantText, contentTruncated && content != nil),
                                             nil, nil, nil, raw))
                     if let calls = obj["tool_calls"] as? [[String: Any]] {
+                        pendingToolNames = calls.map { $0["name"] as? String }
                         for (ci, call) in calls.enumerated() {
                             let name = call["name"] as? String
                             lastToolName = name
@@ -77,16 +81,19 @@ enum AntigravityTranscriptParser {
                         }
                     }
                 }
-            // Every one of these carries the same MODEL-sourced result envelope
-            // (`source`/`status`/`step_index`/`content`), so they all render as tool
-            // results. CODE_ACTION and SEARCH_WEB were previously left to `default:`
-            // and showed up as system meta noise instead of the tool work they are.
-            case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY", "CODE_ACTION", "SEARCH_WEB":
+            // Every step the model's tool calls produce carries the same MODEL-sourced
+            // result envelope (`source`/`status`/`step_index`/`content`), so it renders
+            // as a tool result whatever its type. CODE_ACTION and SEARCH_WEB were once
+            // left to `default:` as system meta; GENERIC (the result of run_command,
+            // view_file, replace_file_content, and every tool of the desktop app) and
+            // GREP_SEARCH were too, and they are most of the tool results on disk.
+            case _ where isToolResult(type: type, source: obj["source"] as? String):
                 if includeEvents {
-                    events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, lastToolName, nil,
+                    let name = pendingToolNames.isEmpty ? lastToolName : (pendingToolNames.removeFirst() ?? lastToolName)
+                    events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, name, nil,
                                             markTruncated(content, contentTruncated), raw))
                 }
-            default: // CHECKPOINT, CONVERSATION_HISTORY, SYSTEM_MESSAGE, unknown
+            default: // CHECKPOINT, CONVERSATION_HISTORY, SYSTEM_MESSAGE, unknown SYSTEM records
                 if includeEvents {
                     events.append(makeEvent(sid, eventID(idx), ts, .meta, "system",
                                             markTruncated(content, contentTruncated), nil, nil, nil, raw))
@@ -111,6 +118,23 @@ enum AntigravityTranscriptParser {
                        cwd: nil,
                        repoName: nil,
                        lightweightTitle: title)
+    }
+
+    /// Named result types are tool results even without a `source`. Any other record
+    /// written by the model (`source: MODEL`) that is not a PLANNER_RESPONSE is the
+    /// output of a tool call too: all 200 such records on disk (both brain roots,
+    /// 2026-10-21) follow a call.
+    /// SYSTEM-sourced records (CHECKPOINT, CONVERSATION_HISTORY, SYSTEM_MESSAGE)
+    /// stay meta.
+    static func isToolResult(type: String, source: String?) -> Bool {
+        switch type {
+        case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY", "CODE_ACTION", "SEARCH_WEB", "GREP_SEARCH", "GENERIC":
+            return true
+        case "USER_INPUT", "PLANNER_RESPONSE", "CHECKPOINT", "CONVERSATION_HISTORY", "SYSTEM_MESSAGE":
+            return false
+        default:
+            return source == "MODEL"
+        }
     }
 
     /// Antigravity-cli transcripts tag every record with a top-level `step_index`

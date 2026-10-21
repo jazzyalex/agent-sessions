@@ -160,3 +160,24 @@ def test_real_cline_config_is_monitored_against_fixture_baseline():
     assert "manifest" in baseline
     assert "message.user" in baseline
     assert "message.assistant" in baseline
+
+
+def test_desktop_0048_display_only_metadata_is_fingerprinted_and_in_the_baseline(tmp_path):
+    repo = Path(__file__).resolve().parents[2]
+    fixture = repo / "Resources/Fixtures/stage0/agents/cline/desktop_tool/session_1792607722905_fixt1.json"
+    fingerprint = agent_watch._cline_session_schema_fingerprint(fixture)
+
+    assert fingerprint["contract_errors"] == []
+    assert fingerprint["type_keys"]["message.assistant.metadata"] == ["displayOnly", "displayRole"]
+    assert "metadata" in fingerprint["type_keys"]["message.assistant"]
+
+    # The matrix lists the fixture, so a real Desktop 0.0.48 session diffs clean.
+    matrix = (repo / "docs/agent-support/agent-support-matrix.yml").read_text(encoding="utf-8")
+    listed = [
+        line.strip().strip("-").strip().strip('"')
+        for line in matrix.splitlines()
+        if "Resources/Fixtures/stage0/agents/cline/" in line
+    ]
+    baseline = agent_watch._baseline_type_keys_for_agent("cline", [str(repo / p) for p in listed])
+    assert set(baseline["message.assistant.metadata"]) == {"displayOnly", "displayRole"}
+    assert "metadata" in baseline["message.assistant"]
