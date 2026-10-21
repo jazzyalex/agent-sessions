@@ -198,42 +198,76 @@ final class OpenClawSqliteStoreTests: XCTestCase {
         XCTAssertEqual(relisted.eventCount, 6)
     }
 
-    /// After a relaunch, an indexed row whose count and end time still match the
-    /// store supplies the preview, so the list does not reread its transcript.
+    /// A rewrite that keeps the event count, last sequence, byte size and
+    /// transcript time (an in-place edit of the first prompt) must still
+    /// invalidate the cached preview.
+    func testPreviewCacheRecomputesAfterSameCountRewrite() throws {
+        let database = try makeFixtureDatabase()
+        let before = try session("openclaw-fixture-native", in: database)
+        XCTAssertEqual(before.lightweightTitle, "Run pwd, then say hello")
+        // Same length, so event_utf8_bytes and the store size stay valid.
+        try execute("""
+            UPDATE transcript_events
+            SET event_json = replace(event_json, 'Run pwd, then say hello', 'Say pwd, then run hello')
+            WHERE session_id = 'openclaw-fixture-native' AND seq = 2;
+            """, at: database)
+        let after = try session("openclaw-fixture-native", in: database)
+        XCTAssertEqual(after.eventCount, before.eventCount)
+        XCTAssertEqual(after.endTime, before.endTime)
+        XCTAssertEqual(after.lightweightTitle, "Say pwd, then run hello")
+    }
+
+    private func indexedRow(like fresh: Session, path: URL, eventCount: Int? = nil) -> Session {
+        Session(id: fresh.id,
+                source: .openclaw,
+                startTime: fresh.startTime,
+                endTime: fresh.endTime,
+                model: fresh.model,
+                filePath: path.path,
+                fileSizeBytes: nil,
+                eventCount: eventCount ?? fresh.eventCount,
+                events: [],
+                cwd: "/indexed",
+                repoName: nil,
+                lightweightTitle: "Indexed title",
+                lightweightCommands: 1)
+    }
+
+    private func copyDatabase(_ database: URL, to relativePath: String) throws -> URL {
+        let copy = root.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: database, to: copy)
+        return copy
+    }
+
+    /// After a relaunch, an indexed row from the same store whose count and end
+    /// time still match supplies the preview, so the list does not reread its
+    /// transcript. A row indexed from another database never does, even with
+    /// the same session id, count and end time.
     func testUnchangedIndexedRowSuppliesPreview() throws {
         let database = try makeFixtureDatabase()
         let fresh = try session("openclaw-fixture-migrated", in: database)
-        let indexed = Session(id: fresh.id,
-                              source: .openclaw,
-                              startTime: fresh.startTime,
-                              endTime: fresh.endTime,
-                              model: fresh.model,
-                              filePath: database.path,
-                              fileSizeBytes: nil,
-                              eventCount: fresh.eventCount,
-                              events: [],
-                              cwd: "/indexed",
-                              repoName: nil,
-                              lightweightTitle: "Indexed title",
-                              lightweightCommands: 1)
-        // A new store path, so the in-memory cache from `fresh` cannot answer.
-        let copy = root.appendingPathComponent("agents/main/copy/openclaw-agent.sqlite")
-        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: database, to: copy)
+        // New store paths, so the in-memory cache from `fresh` cannot answer.
+        let copy = try copyDatabase(database, to: "agents/main/copy/openclaw-agent.sqlite")
         let reused = try XCTUnwrap(OpenClawSqliteReader.listSessions(
-            databaseURL: copy, agentID: "main", priorSessions: [indexed])?.first { $0.id == fresh.id })
+            databaseURL: copy, agentID: "main",
+            priorSessions: [indexedRow(like: fresh, path: copy)])?.first { $0.id == fresh.id })
         XCTAssertEqual(reused.lightweightTitle, "Indexed title")
         XCTAssertEqual(reused.lightweightCwd, "/indexed")
 
-        let stale = Session(id: fresh.id, source: .openclaw, startTime: fresh.startTime, endTime: fresh.endTime,
-                            model: nil, filePath: database.path, fileSizeBytes: nil,
-                            eventCount: fresh.eventCount - 1, events: [], cwd: "/indexed", repoName: nil,
-                            lightweightTitle: "Indexed title", lightweightCommands: 1)
-        let other = root.appendingPathComponent("agents/main/other/openclaw-agent.sqlite")
-        try FileManager.default.createDirectory(at: other.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: database, to: other)
+        let foreign = try copyDatabase(database, to: "agents/main/foreign/openclaw-agent.sqlite")
+        let notReused = try XCTUnwrap(OpenClawSqliteReader.listSessions(
+            databaseURL: foreign, agentID: "main",
+            priorSessions: [indexedRow(like: fresh, path: database)])?.first { $0.id == fresh.id })
+        XCTAssertEqual(notReused.lightweightTitle, "List the files in the fixture repo",
+                       "a row indexed from another database must not supply this store's preview")
+        XCTAssertEqual(notReused.lightweightCwd, "/tmp/repo")
+
+        let other = try copyDatabase(database, to: "agents/main/other/openclaw-agent.sqlite")
         let reread = try XCTUnwrap(OpenClawSqliteReader.listSessions(
-            databaseURL: other, agentID: "main", priorSessions: [stale])?.first { $0.id == fresh.id })
+            databaseURL: other, agentID: "main",
+            priorSessions: [indexedRow(like: fresh, path: other, eventCount: fresh.eventCount - 1)])?
+            .first { $0.id == fresh.id })
         XCTAssertEqual(reread.lightweightTitle, "List the files in the fixture repo")
     }
 
@@ -274,14 +308,40 @@ final class OpenClawSqliteStoreTests: XCTestCase {
                        [second.filePath, first.filePath], "both kept, in path order")
     }
 
-    /// A configured agent id can differ from the JSONL directory name; the pair
-    /// still matches on the raw session id.
+    /// A configured `agentDir` can live outside `agents/<id>/` under a directory
+    /// name unrelated to the agent id. OpenClaw still writes that agent's JSONL
+    /// to `agents/<normalized id>/sessions/`, so the pair matches on the agent id
+    /// the store was listed under, not on the database directory name.
     func testPairsWhenConfiguredAgentIDDiffersFromDirectoryName() {
-        let jsonl = makeSession(id: "openclaw:main:same", path: "/x/agents/main/sessions/same.jsonl", end: 2_000)
+        let jsonl = makeSession(id: "openclaw:configured:same",
+                                path: "/x/agents/configured/sessions/same.jsonl", end: 2_000)
         let sqlite = makeSession(id: "openclaw:configured:same",
                                  path: "/elsewhere/agent/openclaw-agent.sqlite", end: 2_000)
         XCTAssertEqual(OpenClawSessionIndexer.preferringCurrentStore([jsonl, sqlite]).map(\.filePath),
                        [sqlite.filePath])
+        // A JSONL directory OpenClaw would normalize to the same id still pairs.
+        let upper = makeSession(id: "openclaw:Configured:same",
+                                path: "/x/agents/Configured/sessions/same.jsonl", end: 2_000)
+        XCTAssertEqual(OpenClawSessionIndexer.preferringCurrentStore([upper, sqlite]).map(\.filePath),
+                       [sqlite.filePath])
+    }
+
+    /// Two agents can hold independent sessions with one raw id. Agent A's
+    /// SQLite row and agent B's JSONL row are different sessions: keep both.
+    func testCrossAgentRawIDCollisionKeepsBothRows() {
+        let sqliteA = makeSession(id: "openclaw:agenta:shared-id",
+                                  path: "/x/agents/agenta/agent/openclaw-agent.sqlite", end: 2_000)
+        let jsonlB = makeSession(id: "openclaw:agentb:shared-id",
+                                 path: "/x/agents/agentb/sessions/shared-id.jsonl", end: 3_000)
+        let result = OpenClawSessionIndexer.preferringCurrentStore([sqliteA, jsonlB])
+        XCTAssertEqual(Set(result.map(\.id)), ["openclaw:agenta:shared-id", "openclaw:agentb:shared-id"])
+        XCTAssertEqual(result.count, 2)
+
+        // Same agent, same raw id: the JSONL copy still collapses into SQLite.
+        let jsonlA = makeSession(id: "openclaw:agenta:shared-id",
+                                 path: "/x/agents/agenta/sessions/shared-id.jsonl", end: 2_000)
+        let collapsed = OpenClawSessionIndexer.preferringCurrentStore([sqliteA, jsonlA, jsonlB])
+        XCTAssertEqual(collapsed.map(\.filePath), [sqliteA.filePath, jsonlB.filePath])
     }
 
     /// End to end through the indexer: an imported session whose JSONL original is

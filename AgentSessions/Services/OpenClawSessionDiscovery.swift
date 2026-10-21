@@ -729,7 +729,8 @@ final class OpenClawSessionDiscovery: SessionDiscovery, @unchecked Sendable {
         return normalizeAgentID(parts[agentsIndex + 1])
     }
 
-    private static func normalizeAgentID(_ rawID: String) -> String? {
+    /// OpenClaw's `normalizeAgentId`: the form used for `agents/<id>/` paths.
+    static func normalizeAgentID(_ rawID: String) -> String? {
         let bytes = Array(rawID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8)
         guard !bytes.isEmpty else { return nil }
         var normalized: [UInt8] = []

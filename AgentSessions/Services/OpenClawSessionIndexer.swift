@@ -2140,27 +2140,43 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     /// deferred plugin import leaves it in `sessions/`), both are discovered.
     ///
     /// Only JSONL↔SQLite pairs collapse; rows of one store are never merged here.
-    /// Pairs match on the raw session id, so a configured agent id that differs
-    /// from its directory name still pairs. The SQLite row is the current store
-    /// and wins ties; live JSONL copies win only with strictly newer activity, and
-    /// a deleted JSONL copy never beats it. Output order is deterministic.
+    /// Pairs match on the owning agent and the raw session id. The SQLite row's
+    /// agent is the configured (or inferred) owner it was listed under, and
+    /// OpenClaw writes that agent's JSONL to `agents/<normalized id>/sessions/`,
+    /// so a database directory named differently from its agent still pairs,
+    /// while two agents that reuse one raw id stay separate. A row whose agent
+    /// cannot be read from its id never pairs. The SQLite row is the current
+    /// store and wins ties; live JSONL copies win only with strictly newer
+    /// activity, and a deleted JSONL copy never beats it. Output order is
+    /// deterministic.
     static func preferringCurrentStore(_ sessions: [Session]) -> [Session] {
-        func rawID(_ session: Session) -> String {
-            let parts = session.id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-            return parts.count == 3 && parts[0] == "openclaw" ? String(parts[2]) : session.id
+        struct PairKey: Hashable {
+            let agentID: String
+            let rawID: String
         }
-        var sqliteByRawID: [String: [Session]] = [:]
-        var jsonlByRawID: [String: [Session]] = [:]
-        for session in sessions {
-            if isSQLiteSession(session) {
-                sqliteByRawID[rawID(session), default: []].append(session)
-            } else {
-                jsonlByRawID[rawID(session), default: []].append(session)
-            }
+        func pairKey(_ session: Session) -> PairKey? {
+            let parts = session.id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3, parts[0] == "openclaw", !parts[2].isEmpty,
+                  let agentID = OpenClawSessionDiscovery.normalizeAgentID(String(parts[1])) else { return nil }
+            return PairKey(agentID: agentID, rawID: String(parts[2]))
         }
         var result: [Session] = []
         result.reserveCapacity(sessions.count)
-        var pairedJSONLKeys = Set<String>()
+        var sqliteByRawID: [PairKey: [Session]] = [:]
+        var jsonlByRawID: [PairKey: [Session]] = [:]
+        for session in sessions {
+            guard let key = pairKey(session) else {
+                // Unknown ownership: keep the row unpaired.
+                result.append(session)
+                continue
+            }
+            if isSQLiteSession(session) {
+                sqliteByRawID[key, default: []].append(session)
+            } else {
+                jsonlByRawID[key, default: []].append(session)
+            }
+        }
+        var pairedJSONLKeys = Set<PairKey>()
         for (key, sqliteCopies) in sqliteByRawID {
             // Two stores claiming one raw id is ambiguous: keep every row.
             guard sqliteCopies.count == 1, let sqliteCopy = sqliteCopies.first,

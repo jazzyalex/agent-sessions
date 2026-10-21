@@ -1097,8 +1097,12 @@ struct OpenClawSqliteReader {
         let fileNumber: UInt64
         /// SELECT of the preview payload columns; nil when the table is absent.
         let eventSQL: String?
-        /// Hydrated rows from the index, by session id. One whose event count and
-        /// end time still match the store supplies the preview after a relaunch.
+        /// SELECT of the stored (undecoded) preview-window rows for the digest.
+        let digestSQL: String?
+        /// Hydrated rows from the index, by session id, limited to rows indexed
+        /// from this same physical database. The id carries the owning agent.
+        /// One whose event count and end time still match the store supplies
+        /// the preview after a relaunch.
         let priorByID: [String: Session]
 
         init(db: OpaquePointer?, storageIdentity: String, prior: [Session]) {
@@ -1109,35 +1113,92 @@ struct OpenClawSqliteReader {
                 let payload = columns.isSuperset(of: ["event_zstd", "event_utf8_bytes"])
                     ? "event_json, event_zstd, event_utf8_bytes"
                     : "event_json, NULL, NULL"
-                eventSQL = "SELECT \(payload) FROM transcript_events WHERE session_id = ? ORDER BY seq LIMIT \(OpenClawSqliteReader.previewEventLimit);"
+                let window = "FROM transcript_events WHERE session_id = ? ORDER BY seq LIMIT \(OpenClawSqliteReader.previewEventLimit);"
+                eventSQL = "SELECT \(payload) \(window)"
+                digestSQL = "SELECT seq, \(payload) \(window)"
             } else {
                 eventSQL = nil
+                digestSQL = nil
             }
             var byID: [String: Session] = [:]
-            for session in prior where session.source == .openclaw {
+            for session in prior where session.source == .openclaw
+                && OpenClawSqliteReader.isSupportedDatabasePath(session.filePath)
+                && (session.sourceStorageIdentity
+                    ?? OpenClawSqliteReader.canonicalDatabasePath(session.filePath)) == storageIdentity {
                 byID[session.id] = session
             }
             priorByID = byID
         }
     }
 
+    /// SHA-256 of the stored preview-window rows (sequence, column kinds and
+    /// raw bytes, without zstd or JSON decoding). Any rewrite of a row the
+    /// preview reads changes it, even one that keeps the count, the last
+    /// sequence, the byte sizes and the transcript time. nil when unreadable.
+    private static func previewWindowDigest(db: OpaquePointer?, sql: String?, sessionID: String) -> String? {
+        guard let sql else { return nil }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, index: 1, value: sessionID)
+        var hasher = SHA256()
+        var stepResult = sqlite3_step(statement)
+        while stepResult == SQLITE_ROW {
+            var sequence = sqlite3_column_int64(statement, 0).littleEndian
+            withUnsafeBytes(of: &sequence) { hasher.update(bufferPointer: $0) }
+            for column: Int32 in 1...3 {
+                let type = sqlite3_column_type(statement, column)
+                var kind = Int64(type).littleEndian
+                withUnsafeBytes(of: &kind) { hasher.update(bufferPointer: $0) }
+                switch type {
+                case SQLITE_INTEGER:
+                    var value = sqlite3_column_int64(statement, column).littleEndian
+                    withUnsafeBytes(of: &value) { hasher.update(bufferPointer: $0) }
+                case SQLITE_TEXT, SQLITE_BLOB:
+                    // Blob access first: it returns the stored bytes unchanged.
+                    let bytes = sqlite3_column_blob(statement, column)
+                    let count = Int(sqlite3_column_bytes(statement, column))
+                    var length = Int64(count).littleEndian
+                    withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+                    if count > 0, let bytes {
+                        hasher.update(bufferPointer: UnsafeRawBufferPointer(start: bytes, count: count))
+                    }
+                default:
+                    break
+                }
+            }
+            stepResult = sqlite3_step(statement)
+        }
+        guard stepResult == SQLITE_DONE else { return nil }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Same-snapshot list preview. Cached in memory per session until its event
-    /// count, last sequence or transcript time changes; after a relaunch an
-    /// indexed row with the same count and end time is reused instead of a read.
+    /// count, last sequence, transcript time or preview-window digest changes;
+    /// after a relaunch an indexed row from the same database with the same
+    /// count and end time is reused instead of a decode. The index does not
+    /// store the digest, so that first reuse trusts count and time; every
+    /// later rewrite of the window in this process is caught by the digest.
     private static func preview(db: OpaquePointer?, context: PreviewContext, row: SessionRow, sessionID: String) -> Preview? {
         guard row.eventCount > 0, let lastSequence = row.lastSequence else { return nil }
         let key = context.storageIdentity + "\u{0}" + row.id
-        let signature = "\(context.fileNumber):\(row.eventCount):\(lastSequence):\(revisionDate(row.activityEnd))"
+        guard let digest = previewWindowDigest(db: db, sql: context.digestSQL, sessionID: row.id) else {
+            // The window could not be read; never answer from a cache.
+            return scanPreview(db: db, sql: context.eventSQL, sessionID: row.id)
+        }
+        let signature = "\(context.fileNumber):\(row.eventCount):\(lastSequence):\(revisionDate(row.activityEnd)):\(digest)"
         previewCacheLock.lock()
-        if let cached = previewCache[key], cached.signature == signature {
-            previewCacheLock.unlock()
+        let cached = previewCache[key]
+        previewCacheLock.unlock()
+        if let cached, cached.signature == signature {
             return cached.preview
         }
-        previewCacheLock.unlock()
 
         var result: Preview?
-        if let prior = context.priorByID[sessionID],
-           isSupportedDatabasePath(prior.filePath),
+        // A cached entry with another signature proves this process saw the
+        // window change, so the indexed row (published before it) is stale.
+        if cached == nil,
+           let prior = context.priorByID[sessionID],
            prior.eventCount == row.eventCount,
            let priorEnd = prior.endTime, let rowEnd = row.activityEnd,
            Int64(priorEnd.timeIntervalSince1970) == Int64(rowEnd.timeIntervalSince1970),
