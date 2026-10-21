@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.0] - 2026-10-20
+
 ### Highlights
 
 - **Quota Meter in the notch.** Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on displays without one. Hover and it opens into the full Quota Meter with live session burn; move away and it folds back.
