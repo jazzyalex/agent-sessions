@@ -804,7 +804,15 @@ enum DeepSeekHarnessPayloadValidator {
             "team/message/queued", "tool/result", "user/message",
         ]
         if let admitted = v2Dispositions[event.type] {
-            try keys(event.data, required: admitted.required, optional: admitted.optional,
+            var optional = admitted.optional
+            // DSH 0.2.1-rc.2 records the resolved title-request effort
+            // (`ReasoningEffortId`); older v4 requests omit it.
+            if event.type == "session/title-llm-request" { optional += ["reasoningEffort"] }
+            // `RequestContext.systemPromptUpdate` ('in-history'), written by
+            // every real v4 route since 0.2.0-rc.2 but absent from the frozen
+            // v2 inventory this table ports.
+            if event.type == "request/context" { optional += ["systemPromptUpdate"] }
+            try keys(event.data, required: admitted.required, optional: optional,
                      label: "\(subject) data")
             for key in admitted.opaque {
                 if let value = event.data[key], !isLosslessJSON(value) {
@@ -812,6 +820,12 @@ enum DeepSeekHarnessPayloadValidator {
                         "\(subject) opaque \(key) is not lossless JSON")
                 }
             }
+        }
+        if event.type == "session/title-llm-request", let effort = event.data["reasoningEffort"] {
+            _ = try stringValue(effort, "\(subject) reasoningEffort")
+        }
+        if event.type == "request/context", let update = event.data["systemPromptUpdate"] {
+            _ = try nonEmptyString(update, "\(subject) systemPromptUpdate")
         }
         if DeepSeekHarnessVocabulary.v0Events.contains(event.type),
            !representationChanged.contains(event.type),

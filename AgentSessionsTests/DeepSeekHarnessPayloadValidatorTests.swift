@@ -602,6 +602,38 @@ final class DeepSeekHarnessPayloadValidatorTests: XCTestCase {
         malformed["maxTokens"] = 0
         XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
             v3("session/title-llm-request", 2, data: malformed)))
+
+        // DSH 0.2.1-rc.2 records the resolved effort; older requests omit it.
+        var withEffort = valid
+        withEffort["reasoningEffort"] = "off"
+        try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: withEffort))
+        withEffort["reasoningEffort"] = 3
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: withEffort)),
+            "reasoningEffort is a ReasoningEffortId string")
+        var unexpected = valid
+        unexpected["extra"] = true
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("session/title-llm-request", 2, data: unexpected)))
+    }
+
+    /// Every real v4 session (0.2.0-rc.2 and 0.2.1-rc.2) writes
+    /// `request/context.systemPromptUpdate: "in-history"`; refusing it hid
+    /// the whole session.
+    func testV4RequestContextAdmitsSystemPromptUpdate() throws {
+        var context: [String: Any] = [
+            "provider": "p", "model": "m", "contextWindow": 1_000_000,
+            "systemPromptUpdate": "in-history",
+        ]
+        try DeepSeekHarnessPayloadValidator.assertV4Event(v3("request/context", 1, data: context))
+        context["systemPromptUpdate"] = ""
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("request/context", 1, data: context)))
+        context.removeValue(forKey: "systemPromptUpdate")
+        context["extra"] = true
+        XCTAssertThrowsError(try DeepSeekHarnessPayloadValidator.assertV4Event(
+            v3("request/context", 1, data: context)))
     }
 
     func testV4RepresentationChangesRetainReleasedCommonSemantics() throws {

@@ -584,7 +584,12 @@ enum DeepSeekHarnessVocabulary {
     ]
 
     /// V4 retains the released V3 catalog and adds durable developer history.
-    static let v4Known: Set<String> = v3Known.union(["developer/message"])
+    /// DSH 0.2.1-rc.2 adds three required (non-ignorable) log-only types
+    /// without a format bump: `job/registered` and `job/settled` around every
+    /// shell job, and `working-directory/change`.
+    static let v4Known: Set<String> = v3Known.union([
+        "developer/message", "job/registered", "job/settled", "working-directory/change",
+    ])
 
     static let surfaceV0: Set<String> = ["user/message", "assistant/message", "tool/result"]
     static let surfaceV3: Set<String> = ["system/message", "user/message", "assistant/message", "tool/result"]
@@ -696,6 +701,11 @@ enum DeepSeekHarnessPresentation {
     static let v4Dispositions: [String: DeepSeekHarnessPresentationDisposition] = {
         var result = dispositions
         result["developer/message"] = .systemMetadata
+        // Log-only DSH 0.2.1-rc.2 records: the paired tool/call and
+        // tool/result already render the shell invocation and its output.
+        result["job/registered"] = .intentionallyIgnored
+        result["job/settled"] = .intentionallyIgnored
+        result["working-directory/change"] = .intentionallyIgnored
         return result
     }()
 

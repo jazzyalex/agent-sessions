@@ -1343,6 +1343,11 @@ class DeepSeekHarnessHeadlessDriver:
 
     name = "deepseek_harness_headless"
     _MAX_DISCOVERY_ENTRIES = 10_000
+    _STORED_CREDENTIALS_OVERLAY = (
+        "- id: credentials\n  disabled: false\n"
+        "- id: authorization\n  disabled: false\n"
+        "- id: deepseek-account\n  disabled: false\n"
+    )
 
     @staticmethod
     def _sessions_root(env: dict[str, str]) -> Path:
@@ -1449,6 +1454,13 @@ class DeepSeekHarnessHeadlessDriver:
         (workspace / "PREBUMP.txt").write_text(
             "DeepSeek Harness agent-watch prebump probe\n", encoding="utf-8"
         )
+        # DSH 0.2.1-rc.2's headless bundle disables the managed credential store,
+        # so the key saved through DSH's own Models page no longer resolves.
+        # Restore it for this invocation only with the upstream-documented
+        # overlay (packages/bundle/headless/README.md "Credentials"); the user's
+        # profile files are never edited.
+        overlay = sandbox / "dsh-stored-credentials.patch.yml"
+        overlay.write_text(self._STORED_CREDENTIALS_OVERLAY, encoding="utf-8")
         sessions_root = self._sessions_root(env)
         project_root = sessions_root / self._project_key(workspace.resolve())
         before, scan_exhausted = self._snapshot_project(project_root)
@@ -1461,7 +1473,7 @@ class DeepSeekHarnessHeadlessDriver:
         run_started_ns = time.time_ns()
         try:
             proc = subprocess.run(
-                ["dsh", "headless", prompt],
+                ["dsh", "headless", "--patch", str(overlay), prompt],
                 cwd=workspace,
                 env=dict(env),
                 stdout=subprocess.PIPE,

@@ -1669,12 +1669,14 @@ enum DeepSeekHarnessHistoricalNormalizer {
                     "compaction cannot shadow the protected system head")
             }
             if event.type == "subagent/catalog", event.sequence >= inheritedCut {
+                // Version 2 (DSH 0.2.1-rc.2) exists only for external children.
                 guard let version = DeepSeekHarnessJSON.safeInt(event.data["version"]),
-                      version == 0 || version == 1,
+                      (0...2).contains(version),
                       let childID = DeepSeekHarnessJSON.nonEmptyString(event.data["childId"]),
                       DeepSeekHarnessJSON.count(event.data["childCreatedAt"]) != nil,
                       let mode = event.data["mode"] as? String,
-                      ["continuable", "one-shot", "unknown"].contains(mode),
+                      ["continuable", "one-shot", "external", "unknown"].contains(mode),
+                      (version == 2) == (mode == "external"),
                       !(version == 0 && mode == "unknown"),
                       (mode != "continuable" || event.data["label"] is String),
                       event.data["label"] == nil || event.data["label"] is String else {

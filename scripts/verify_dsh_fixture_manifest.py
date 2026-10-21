@@ -14,6 +14,11 @@ PINNED_SOURCE_COMMIT = "ddefc45fbc7f8e46dd73185e68295696d1297887"
 PINNED_V4_SOURCE_COMMIT = "639ed015397290b3745d163aafe02ffee4aa3f84"
 PINNED_V4_SOURCE_TAG = "dsh-v0.2.0-rc.2"
 PINNED_V4_PACKAGE_VERSION = "0.2.0-rc.2"
+# Every DSH release that authored a committed v4 fixture: version -> (commit, tag).
+PINNED_V4_REVISIONS = {
+    PINNED_V4_PACKAGE_VERSION: (PINNED_V4_SOURCE_COMMIT, PINNED_V4_SOURCE_TAG),
+    "0.2.1-rc.2": ("687f282e8625c6b8d11ff58211a90524be2e4317", "dsh-v0.2.1-rc.2"),
+}
 
 
 def sha256(path: Path) -> str:
@@ -52,12 +57,13 @@ def verify() -> int:
         if sha256(path) != expected:
             raise SystemExit(f"DSH fixture hash mismatch: {entry['file']}")
         if entry.get("physicalFormatVersion") == 4:
-            if entry.get("sourceCommit") != PINNED_V4_SOURCE_COMMIT:
-                raise SystemExit(f"DSH v4 fixture source commit mismatch: {entry['file']}")
-            if entry.get("sourceTag") != PINNED_V4_SOURCE_TAG:
-                raise SystemExit(f"DSH v4 fixture source tag mismatch: {entry['file']}")
-            if entry.get("sourcePackageVersion") != PINNED_V4_PACKAGE_VERSION:
+            revision = PINNED_V4_REVISIONS.get(entry.get("sourcePackageVersion"))
+            if revision is None:
                 raise SystemExit(f"DSH v4 fixture package version mismatch: {entry['file']}")
+            if entry.get("sourceCommit") != revision[0]:
+                raise SystemExit(f"DSH v4 fixture source commit mismatch: {entry['file']}")
+            if entry.get("sourceTag") != revision[1]:
+                raise SystemExit(f"DSH v4 fixture source tag mismatch: {entry['file']}")
 
     expected = manifest.get("expectedNormalizedV3")
     if not isinstance(expected, dict) or not isinstance(expected.get("file"), str):
@@ -68,7 +74,8 @@ def verify() -> int:
 
     print(
         "verified DSH fixture manifest: "
-        f"{len(entries)} artifacts at {PINNED_SOURCE_COMMIT} and {PINNED_V4_SOURCE_COMMIT}"
+        f"{len(entries)} artifacts at {PINNED_SOURCE_COMMIT} and "
+        + ", ".join(commit for commit, _ in PINNED_V4_REVISIONS.values())
     )
     return 0
 

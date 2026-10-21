@@ -61,6 +61,56 @@ def test_dsh_fixture_manifest_and_monitoring_baseline_are_nonempty() -> None:
     ).read_text()
 
 
+def _dsh_matrix_evidence_fixtures() -> list[str]:
+    lines = (REPO / "docs/agent-support/agent-support-matrix.yml").read_text().splitlines()
+    start = lines.index("  deepseek_harness:")
+    fixtures: list[str] = []
+    in_block = False
+    for line in lines[start + 1:]:
+        if line.startswith("  ") and not line.startswith("    "):
+            break
+        if line == "    evidence_fixtures:":
+            in_block = True
+            continue
+        if in_block:
+            if not line.startswith("      - "):
+                break
+            fixtures.append(line.removeprefix("      - ").strip('"'))
+    return fixtures
+
+
+def test_dsh_baseline_covers_0_2_1_shapes() -> None:
+    """The 2026-10-21 weekly drift came from a failed-credential 0.2.1-rc.2
+    session, and the first fresh 0.2.1-rc.2 tool session added required job
+    records. Every reported bucket must now be in the fixture baseline."""
+    evidence = [str(REPO / path) for path in _dsh_matrix_evidence_fixtures()]
+    assert any(path.endswith("v4_job_failed_turn_session.jsonl") for path in evidence)
+    assert any(path.endswith("v4_job_failed_turn_session.jsonl.zstd") for path in evidence)
+    baseline = agent_watch._baseline_type_keys_for_agent("deepseek_harness", evidence)
+    job = {"jobId", "owner", "kind", "label", "startedAt", "toolCall"}
+    drift = {
+        "job/registered": {"data", "seq", "time", "type"},
+        "job/registered.data": job,
+        "job/registered.data.toolCall": {"callId", "rootCallId"},
+        "job/settled": {"data", "seq", "time", "type"},
+        "job/settled.data": job | {
+            "finishedAt", "status", "cause", "producerReported", "detail",
+        },
+        "job/settled.data.toolCall": {"callId", "rootCallId"},
+        "assistant/attempt": {"data", "seq", "time", "type"},
+        "assistant/attempt.data": {"step", "stream", "turn"},
+        "assistant/attempt.data.stream": {"chunk", "time", "type"},
+        "assistant/attempt.data.stream.chunk": {"reason", "type"},
+        "assistant/attempt.data.stream.chunk.reason": {"failure", "kind"},
+        "session/title-llm-request.data": {"reasoningEffort"},
+        "turn/end.data.reason": {"error"},
+        "turn/end.data.reason.error": {"code", "message"},
+    }
+    for bucket, keys in drift.items():
+        assert bucket in baseline, bucket
+        assert keys <= set(baseline[bucket]), (bucket, keys - set(baseline[bucket]))
+
+
 def test_dsh_is_public_and_mapped_to_its_matrix_entry() -> None:
     public = json.loads((REPO / "docs/agent-support/public-agents.json").read_text())
     assert {agent["id"] for agent in public["agents"]} >= {"deepseek-harness"}
@@ -454,9 +504,12 @@ def test_dsh_schema_fingerprint_rejects_sequence_gaps() -> None:
 def test_dsh_catalog_is_read_from_the_app_and_classifies_unbaselined_shapes() -> None:
     catalog = agent_watch._dsh_app_event_catalog()
     assert len(catalog[3]) == 58
-    assert len(catalog[4]) == 59
+    assert len(catalog[4]) == 62
     assert "tool/call" in catalog[3]
-    assert catalog[4] == catalog[3] | {"developer/message"}
+    # DSH 0.2.1-rc.2 adds required job and working-directory records to v4.
+    assert catalog[4] == catalog[3] | {
+        "developer/message", "job/registered", "job/settled", "working-directory/change",
+    }
     assert "feedback/message-put" in catalog[2]
 
     fingerprint = {

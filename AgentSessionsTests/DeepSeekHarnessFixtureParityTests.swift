@@ -264,6 +264,39 @@ final class DeepSeekHarnessFixtureParityTests: XCTestCase {
         XCTAssertEqual(normalizedRepresentations[0], normalizedRepresentations[1])
     }
 
+    /// DSH 0.2.1-rc.2 shapes: required `job/registered` / `job/settled`
+    /// records around a shell tool, a failed `assistant/attempt`, a structured
+    /// `turn/end` error, and the optional title-request `reasoningEffort`.
+    func testNativeV4JobAndFailedTurnFixturePlainAndZstdNormalizeIdentically() throws {
+        let dir = try fixtureDir()
+        var normalizedRepresentations: [Data] = []
+        for (file, compression) in [
+            ("v4_job_failed_turn_session.jsonl", DeepSeekHarnessCompression.plain),
+            ("v4_job_failed_turn_session.jsonl.zstd", DeepSeekHarnessCompression.zstd),
+        ] {
+            let result = try DeepSeekHarnessArtifactReader.read(
+                url: dir.appendingPathComponent(file), compression: compression)
+            XCTAssertEqual(result.header.version, 4, file)
+            XCTAssertEqual(result.rows.count, 32, file)
+            let normalized = try DeepSeekHarnessHistoricalNormalizer.normalize(result)
+            XCTAssertEqual(normalized.count, 32, file)
+            for type in ["job/registered", "job/settled"] {
+                let job = try XCTUnwrap(normalized.first { $0.canonicalType == type }, "\(file) \(type)")
+                XCTAssertFalse(job.envelope.ignorable, "0.2.1-rc.2 writes \(type) as a required event")
+                XCTAssertFalse(job.diagnosticOnly, file)
+            }
+            let attempt = try XCTUnwrap(normalized.first { $0.canonicalType == "assistant/attempt" })
+            XCTAssertTrue(attempt.diagnosticOnly, file)
+            let title = try XCTUnwrap(normalized.first { $0.canonicalType == "session/title-llm-request" })
+            XCTAssertEqual(title.data["reasoningEffort"] as? String, "off", file)
+            let turnEnd = try XCTUnwrap(normalized.last { $0.canonicalType == "turn/end" })
+            let reason = try XCTUnwrap(turnEnd.data["reason"] as? [String: Any])
+            XCTAssertEqual((reason["error"] as? [String: Any])?["code"] as? String, "MISSING_CREDENTIAL", file)
+            normalizedRepresentations.append(try stableRepresentation(result: result, events: normalized))
+        }
+        XCTAssertEqual(normalizedRepresentations[0], normalizedRepresentations[1])
+    }
+
     func testMonitorOnlyAgentInstructionSourceFixtureIsAdmitted() throws {
         let dir = try fixtureDir()
         let file = "v3_agent_instructions_source.jsonl"

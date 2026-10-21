@@ -33,7 +33,7 @@ def test_deepseek_harness_driver_returns_only_a_fresh_real_home_session(
 
     def fake_run(argv, *, cwd=None, env=None, **kwargs):
         assert argv[:2] == ["dsh", "headless"]
-        assert "shell tool" in argv[2]
+        assert "shell tool" in argv[-1]
         assert cwd == sandbox / "workspace"
         assert env is not None and env["HOME"] == str(real_home)
         project_key = drv_mod.DeepSeekHarnessHeadlessDriver._project_key(cwd.resolve())
@@ -60,6 +60,39 @@ def test_deepseek_harness_driver_returns_only_a_fresh_real_home_session(
     assert result.session_path is not None
     assert result.session_path.name == "session.v4.jsonl"
     assert str(result.session_path).startswith(str(real_home / ".dsh/sessions"))
+
+
+def test_deepseek_harness_driver_restores_the_stored_credential_store(
+    tmp_path,
+) -> None:
+    """DSH 0.2.1-rc.2's headless bundle disables the managed credential store,
+    so the key saved through DSH's own Models page stopped resolving
+    (MISSING_CREDENTIAL). The driver restores it per invocation with the
+    upstream-documented --patch overlay and never edits the user's profile."""
+    sandbox = tmp_path / "sandbox"
+    real_home = tmp_path / "real-home"
+    sandbox.mkdir()
+    seen: dict[str, object] = {}
+
+    def fake_run(argv, *, cwd=None, env=None, **kwargs):
+        seen["argv"] = list(argv)
+        assert argv[:3] == ["dsh", "headless", "--patch"]
+        overlay = Path(argv[3])
+        seen["overlay"] = overlay.read_text(encoding="utf-8")
+        assert overlay.parent == sandbox
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stopped")
+
+    env = {"HOME": str(real_home), "AGENT_WATCH_SESSION_HOME": str(real_home)}
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        drv_mod.DRIVERS["deepseek_harness_headless"].run(
+            sandbox, env, "Use the shell tool to run pwd.", 30
+        )
+
+    overlay = seen["overlay"]
+    for plugin_id in ("credentials", "authorization", "deepseek-account"):
+        assert f"- id: {plugin_id}\n  disabled: false\n" in overlay
+    assert seen["argv"][-1] == "Use the shell tool to run pwd."
+    assert not (real_home / ".dsh/profiles").exists()
 
 
 def test_deepseek_harness_prebump_config_requires_rich_v4_evidence() -> None:

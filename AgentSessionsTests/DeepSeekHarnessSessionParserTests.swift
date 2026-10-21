@@ -251,6 +251,201 @@ final class DeepSeekHarnessSessionParserTests: XCTestCase {
         XCTAssertEqual(parsed.lightweightTitle, "Name this session")
     }
 
+    /// DSH 0.2.1-rc.2 records the resolved title-request reasoning effort
+    /// (`reasoningEffort`, optional). Rejecting the key hid every session the
+    /// new build wrote.
+    func testV4TitleRequestWithReasoningEffortParses() throws {
+        let url = try writeSession(filename: "session.v4.jsonl", rows: [
+            header(id: "dsh-v4-title-effort", version: 4),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("user/message", 1,
+                     data: userData(id: "user-v4", text: "Name this session"),
+                     surfaceAppend: true),
+            envelope("session/title-llm-request", 2, data: [
+                "titleProvider": "session-title-first-prompt-llm",
+                "messageSeqs": [1],
+                "route": ["provider": "p", "model": "m"],
+                "system": "Generate a concise session title.",
+                "messages": [[
+                    "id": "title-request-v4", "role": "user",
+                    "content": [["type": "text", "text": "Name this session"]],
+                    "source": ["kind": "dsh-session-title-llm"] as [String: Any],
+                ] as [String: Any]],
+                "maxTokens": 64,
+                "reasoningEffort": "off",
+            ]),
+            envelope("turn/end", 3,
+                     data: ["turn": 1, "reason": ["kind": "completed"]]),
+        ])
+
+        XCTAssertNotNil(DeepSeekHarnessSessionParser.parseFile(at: url))
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(parsed.id, "dsh-v4-title-effort")
+        XCTAssertEqual(parsed.lightweightTitle, "Name this session")
+    }
+
+    /// DSH 0.2.1-rc.2 adds catalog fact version 2 for external children.
+    /// Upstream admits exactly `version 2 <=> mode external`.
+    func testV4ExternalSubagentCatalogFactParses() throws {
+        func rows(version: Int, mode: String) -> [[String: Any]] {
+            [
+                header(id: "dsh-v4-external-child", version: 4),
+                envelope("turn/start", 0, data: ["turn": 1]),
+                envelope("user/message", 1,
+                         data: userData(id: "user-v4", text: "Delegate to an external agent"),
+                         surfaceAppend: true),
+                envelope("subagent/catalog", 2, data: [
+                    "version": version, "childId": "dsh-synth-child-1",
+                    "childCreatedAt": Int(baseTime) + 1, "mode": mode,
+                ]),
+                envelope("turn/end", 3,
+                         data: ["turn": 1, "reason": ["kind": "completed"]]),
+            ]
+        }
+        let external = try writeSession(filename: "session.v4.jsonl",
+                                        rows: rows(version: 2, mode: "external"))
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: external))
+        XCTAssertEqual(parsed.lightweightTitle, "Delegate to an external agent")
+
+        let wrongVersion = try writeSession(filename: "session.v4.jsonl",
+                                            rows: rows(version: 1, mode: "external"))
+        XCTAssertNil(DeepSeekHarnessSessionParser.parseFileFull(at: wrongVersion),
+                     "external mode requires catalog version 2")
+        let wrongMode = try writeSession(filename: "session.v4.jsonl",
+                                         rows: rows(version: 2, mode: "one-shot"))
+        XCTAssertNil(DeepSeekHarnessSessionParser.parseFileFull(at: wrongMode),
+                     "catalog version 2 requires external mode")
+    }
+
+    /// A turn that fails before any assistant message (here a missing
+    /// provider credential) records the failure on `assistant/attempt` and on
+    /// `turn/end`. The transcript shows the terminal error once, as an error
+    /// row, and the attempt stays diagnostic-only.
+    func testTurnEndErrorRendersOneErrorRow() throws {
+        let failure: [String: Any] = [
+            "message": "SYNTHETIC provider route has no credential",
+            "code": "MISSING_CREDENTIAL",
+        ]
+        let url = try writeSession(filename: "session.v4.jsonl", rows: [
+            header(id: "dsh-v4-failed-turn", version: 4),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("user/message", 2,
+                     data: userData(id: "user-v4", text: "Run the build"),
+                     surfaceAppend: true),
+            envelope("assistant/attempt", 3, data: [
+                "turn": 1, "step": 1,
+                "stream": [["type": "chunk", "time": Int(baseTime) + 3,
+                            "chunk": ["type": "finish",
+                                      "reason": ["kind": "error", "failure": failure]]]],
+            ]),
+            envelope("step/end", 4, data: ["turn": 1, "step": 1]),
+            envelope("turn/end", 5,
+                     data: ["turn": 1, "reason": ["kind": "error", "error": failure]]),
+        ])
+
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        let errors = parsed.events.filter { $0.kind == .error }
+        XCTAssertEqual(errors.map(\.text),
+                       ["MISSING_CREDENTIAL: SYNTHETIC provider route has no credential"])
+        XCTAssertEqual(parsed.events.filter { $0.kind == .assistant }.count, 0)
+        XCTAssertTrue(parsed.events.contains { $0.text == "Turn 1 ended: error" })
+        XCTAssertEqual(parsed.events.filter { ($0.text ?? "").contains("SYNTHETIC provider route") }.count, 1,
+                       "the attempt failure must not render a second copy of the turn error")
+        XCTAssertEqual(DeepSeekHarnessSessionParser.parseFile(at: url)?.eventCount, parsed.eventCount)
+    }
+
+    /// DSH 0.2.1-rc.2 writes required (non-ignorable) `job/registered` and
+    /// `job/settled` records around every shell tool, plus
+    /// `working-directory/change`. Rejecting them as unknown required events
+    /// hid every new tool session; they render no rows because the paired
+    /// tool call and result already show the invocation.
+    func testV4JobAndWorkingDirectoryRecordsParseWithoutExtraRows() throws {
+        let job: [String: Any] = [
+            "jobId": "job-v4-1", "owner": "dsh-v4-jobs", "kind": "bash", "label": "JOB-LABEL",
+            "startedAt": Int(baseTime) + 4_000,
+            "toolCall": ["callId": "call-1", "rootCallId": "call-1"],
+        ]
+        var settled = job
+        settled["finishedAt"] = Int(baseTime) + 5_000
+        settled["status"] = "completed"
+        settled["cause"] = "producer"
+        settled["producerReported"] = true
+        settled["detail"] = "exit code: 0"
+        var assistant = assistantData(id: "a-1", text: "Running it.",
+                                      toolCall: (id: "call-1", name: "bash",
+                                                 args: "{\"command\":\"pwd\"}"))
+        assistant["stream"] = [] as [Any]
+        let url = try writeSession(filename: "session.v4.jsonl", rows: [
+            header(id: "dsh-v4-jobs", version: 4),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("step/start", 1, data: ["turn": 1, "step": 1]),
+            envelope("user/message", 2,
+                     data: userData(id: "user-v4", text: "Where am I?"),
+                     surfaceAppend: true),
+            envelope("assistant/message", 3, data: assistant, surfaceAppend: true),
+            envelope("tool/call", 4, data: [
+                "turn": 1, "step": 1, "callId": "call-1", "name": "bash",
+                "arguments": "{\"command\":\"pwd\"}",
+            ]),
+            envelope("job/registered", 5, data: job),
+            envelope("job/settled", 6, data: settled),
+            envelope("tool/result", 7, data: [
+                "turn": 1, "step": 1,
+                "message": [
+                    "id": "r-1", "role": "tool", "toolCallId": "call-1",
+                    "content": [["type": "text", "text": "/tmp/synthetic-dsh-demo"]],
+                    "isError": false,
+                    "source": ["kind": "tool", "callId": "call-1"],
+                ] as [String: Any],
+            ], surfaceAppend: true),
+            envelope("working-directory/change", 8, data: ["cwd": "/tmp/synthetic-dsh-demo/sub"]),
+            envelope("step/end", 9, data: ["turn": 1, "step": 1]),
+            envelope("turn/end", 10, data: ["turn": 1, "reason": ["kind": "completed"]]),
+        ])
+
+        let preview = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFile(at: url))
+        XCTAssertEqual(preview.lightweightCommands, 1)
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(parsed.events.filter { $0.kind == .tool_call }.count, 1)
+        XCTAssertEqual(parsed.events.filter { $0.kind == .tool_result }.count, 1)
+        XCTAssertFalse(parsed.events.contains { $0.rawJSON.contains("JOB-LABEL") },
+                       "job records are log-only and render no row")
+        XCTAssertFalse(parsed.events.contains { $0.rawJSON.contains("synthetic-dsh-demo/sub") })
+    }
+
+    func testV4PresentationInventoryCoversThe021Additions() {
+        XCTAssertEqual(DeepSeekHarnessVocabulary.v4Known,
+                       DeepSeekHarnessVocabulary.v3Known.union([
+                           "developer/message", "job/registered", "job/settled",
+                           "working-directory/change",
+                       ]))
+        XCTAssertTrue(DeepSeekHarnessPresentation.isComplete(version: 4))
+        for type in ["job/registered", "job/settled", "working-directory/change"] {
+            XCTAssertEqual(DeepSeekHarnessPresentation.disposition(for: type, version: 4),
+                           .intentionallyIgnored, type)
+            XCTAssertNil(DeepSeekHarnessPresentation.disposition(for: type, version: 3), type)
+        }
+    }
+
+    func testTurnEndErrorWithUnknownCodeShowsMessageOnly() throws {
+        let url = try writeSession(filename: "session.v4.jsonl", rows: [
+            header(id: "dsh-v4-unknown-error", version: 4),
+            envelope("turn/start", 0, data: ["turn": 1]),
+            envelope("user/message", 1,
+                     data: userData(id: "user-v4", text: "Run the build"),
+                     surfaceAppend: true),
+            envelope("turn/end", 2, data: [
+                "turn": 1,
+                "reason": ["kind": "error",
+                           "error": ["message": "SYNTHETIC flattened failure", "code": "UNKNOWN"]],
+            ]),
+        ])
+        let parsed = try XCTUnwrap(DeepSeekHarnessSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(parsed.events.filter { $0.kind == .error }.map(\.text),
+                       ["SYNTHETIC flattened failure"])
+    }
+
     func testPluginMessageExcludedFromTitleCountsAndUserKind() throws {
         let url = try mainURL()
         guard let full = DeepSeekHarnessSessionParser.parseFileFull(at: url) else {

@@ -72,7 +72,10 @@ import Foundation
 /// - `request/context` → `.meta` marker with role `"request-context"` and no
 ///   text (injected context stays out of search text).
 /// - `turn/start` / `turn/end` → `.meta` lifecycle markers (`"Turn N
-///   started"` / `"Turn N ended: <kind>"`) and duration inputs.
+///   started"` / `"Turn N ended: <kind>"`) and duration inputs. A `turn/end`
+///   whose reason is `error` also emits one `.error` row (`"CODE: message"`)
+///   so a failed turn shows why it failed; the matching failed
+///   `assistant/attempt` stays diagnostic-only, so the error renders once.
 /// - `step/start` / `step/end` → intentionally ignored; step coordinates are
 ///   preserved in every neighbouring event's raw payload.
 /// - `session/end-seed` → `.meta` seed-boundary marker.
@@ -410,6 +413,11 @@ enum DeepSeekHarnessSessionParser {
                                               kind: .meta, role: "turn", text: "Turn \(turn) ended: \(kind)",
                                               raw: boundedRaw(envelope.rawObject)))
                     }
+                    if let text = turnErrorText(data["reason"]) {
+                        rows.append(makeEvent(id: "dsh-\(envelope.sequence)-error", timestamp: timestamp,
+                                              kind: .error, role: "system", text: capped(text),
+                                              raw: boundedRaw(envelope.rawObject)))
+                    }
                 }
             case .seedBoundary:
                 rows.append(makeEvent(id: "dsh-\(envelope.sequence)-seed", timestamp: timestamp,
@@ -739,6 +747,18 @@ enum DeepSeekHarnessSessionParser {
     private static func eventDate(milliseconds: Int64) -> Date? {
         guard milliseconds > 0 else { return nil }
         return Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
+    }
+
+    /// The user-facing text of a failed turn: `turn/end` reason
+    /// `{kind: "error", error: {message, code}}`. `UNKNOWN` is DSH's code for
+    /// a flattened non-LLM error and adds nothing, so only the message shows.
+    private static func turnErrorText(_ reason: Any?) -> String? {
+        guard let reason = reason as? [String: Any],
+              (reason["kind"] as? String) == "error",
+              let error = reason["error"] as? [String: Any],
+              let message = nonEmptyString(error["message"]) else { return nil }
+        guard let code = nonEmptyString(error["code"]), code != "UNKNOWN" else { return message }
+        return "\(code): \(message)"
     }
 
     private static func nonEmptyString(_ value: Any?) -> String? {
