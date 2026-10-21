@@ -334,12 +334,25 @@ final class OpenClawSqliteStoreTests: XCTestCase {
                 at: URL(fileURLWithPath: original.path + suffix))
         }
         try FileManager.default.moveItem(at: replacement, to: original)
+        // Cold cache: only the persisted digest on `prior` can authorize reuse.
+        OpenClawSqliteReader.resetPreviewCachesForTesting()
         let actual = try XCTUnwrap(OpenClawSqliteReader.listSessions(
             databaseURL: original, agentID: "main", priorSessions: [prior])?
             .first(where: { $0.id == before.id }))
         XCTAssertEqual(actual.lightweightTitle, "Say pwd, then run hello")
         XCTAssertEqual(actual.eventCount, before.eventCount)
         XCTAssertNotEqual(actual.sourcePreviewDigest, before.sourcePreviewDigest)
+    }
+
+    /// Search ingest writes session_meta from the full load. That load must
+    /// carry the same preview proof as the listing, or each ingest clears it.
+    func testFullLoadCarriesListingPreviewProof() throws {
+        let database = try makeFixtureDatabase()
+        let listed = try session("openclaw-fixture-native", in: database)
+        let full = try XCTUnwrap(OpenClawSqliteReader.loadFullSession(databaseURL: database,
+                                                                      sessionID: listed.id))
+        XCTAssertNotNil(listed.sourcePreviewDigest)
+        XCTAssertEqual(full.sourcePreviewDigest, listed.sourcePreviewDigest)
     }
 
     /// The completed store-level fingerprint and per-session cheap signature

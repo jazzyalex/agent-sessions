@@ -779,7 +779,10 @@ actor SearchIngestService {
             codexSurface: session.codexSurface?.rawValue,
             originator: session.originator,
             originSource: session.originSource,
-            surface: session.surface?.rawValue
+            surface: session.surface?.rawValue,
+            // The OpenClaw full load computes this proof from the same read
+            // snapshot; omitting it would clear the column on every ingest.
+            openClawPreviewDigest: session.sourcePreviewDigest
         )
 
         let searchText = SessionSearchTextBuilder.build(session: session)

@@ -525,10 +525,13 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         }
 
         let split = dir.appendingPathComponent("split.jsonl")
-        // A valid JSONL object crosses the one-MiB chunk boundary.
-        let prefix = #"{"content":""# + String(repeating: "x", count: (1 << 20) - 20)
+        // A valid JSONL object whose `api-request` marker itself straddles the
+        // one-MiB chunk boundary: it starts 5 bytes before it.
+        let prefix = #"{"content":""# + String(repeating: "x", count: (1 << 20) - 27)
         let line = prefix + "\"" + #","type":"api-request-blob"}"#
         XCTAssertNotNil(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let markerStart = try XCTUnwrap(line.utf8.firstRange(of: Array("api-request".utf8))).lowerBound
+        XCTAssertEqual(line.utf8.distance(from: line.utf8.startIndex, to: markerStart), (1 << 20) - 5)
         try (line + "\n").write(to: split, atomically: true, encoding: .utf8)
         XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: split.path), .affected)
 

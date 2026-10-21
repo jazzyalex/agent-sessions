@@ -165,6 +165,14 @@ struct OpenClawSqliteReader {
         defer { previewCacheLock.unlock() }
         return previewDigestReadCountsForTesting[path, default: 0]
     }
+    /// Simulates a relaunch: drops the in-memory preview cache and the
+    /// last-listed fingerprints so the next listing must use persisted proof.
+    static func resetPreviewCachesForTesting() {
+        previewCacheLock.lock()
+        previewCache.removeAll()
+        lastListedFingerprintByPath.removeAll()
+        previewCacheLock.unlock()
+    }
     private static var listSessionsBeforeMaterializationHookForTesting: (() -> Void)?
     private static var cacheHitBeforeBoundaryProbeHookForTesting: (() -> Void)?
 
@@ -679,6 +687,15 @@ struct OpenClawSqliteReader {
         // snapshot than the content returned above.
         result.sourceStorageIdentity = storageIdentity
         result.sourceStorageRevision = sessionRevisionKey(storageRevision)
+        // Same-snapshot preview proof, so a full load written to session_meta
+        // (search ingest) keeps a verifiable digest instead of clearing it.
+        let digestContext = PreviewContext(db: db, storageIdentity: storageIdentity, prior: [],
+                                           fingerprintUnchanged: false, storeFingerprint: "")
+        if let windowDigest = previewWindowDigest(db: db, sql: digestContext.digestSQL,
+                                                  storageIdentity: storageIdentity,
+                                                  sessionID: sessionRow.id) {
+            result.sourcePreviewDigest = previewProof(windowDigest: windowDigest, row: sessionRow)
+        }
         return result
     }
 
