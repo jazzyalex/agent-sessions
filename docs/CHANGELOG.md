@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- **Sessions survive transient read failures.** An fx session stays visible during a failed refresh or full reload, and retries are not suppressed until a parse succeeds. Unchanged schema-4 logs avoid redundant frame scans.
+- **OpenClaw preview titles stay current after relaunch.** Persisted previews are accepted only with matching SHA-256 evidence; unchanged SQLite revisions skip repeat hashing.
+- **Claude request-log repair is safe and repeatable.** The v2 path-scoped migration validates complete readable JSONL records, retries even if v1 ran, and retries pending Image Browser invalidations in the same process.
 - **OpenClaw sessions are back.** OpenClaw 2026.10.5 moved its history into a database, and new sessions stopped showing up. The list now reads that database, with titles and projects for sessions OpenClaw carried over, and compressed tool output opens normally. A session that exists in both places shows once.
 - **Claude transcripts no longer repeat each turn.** Claude Code 2.1.303 started logging every API request into the session file. Those copies showed up as extra user messages, system-prompt text, and duplicate tool calls and images, and they inflated message counts and search. The app now skips them.
 
