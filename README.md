@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg"><b>Download Agent Sessions 6.0</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.0.1/AgentSessions-6.0.1.dmg"><b>Download Agent Sessions 6.0.1</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -33,6 +33,10 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 6.0.1
+
+- **Every agent's latest format, checked.** Current Codex, Claude Code, OpenCode, Copilot, Cursor, Hermes, OpenClaw, Kimi, Pi, Grok, Cline and DeepSeek Harness sessions read cleanly. OpenClaw 2026.10.5 sessions are back, Claude transcripts stop repeating each turn, and fx 0.0.8+ sessions open.
 
 ## What's New in 6.0
 
@@ -137,7 +141,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-6.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.0/AgentSessions-6.0.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-6.0.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.0.1/AgentSessions-6.0.1.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 

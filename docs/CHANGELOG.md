@@ -4,19 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **Every agent's latest format, checked.** Fresh sessions from Codex 0.163, Claude Code 2.1.306, OpenCode 2.1.2, Copilot 1.0.102, Cursor 2026.10.19, Hermes 0.22.4, OpenClaw 2026.10.5, Kimi 2.3, Pi 1.3, Grok 1.0.62, Cline 3.0.73 and DeepSeek Harness 0.2.1 all read cleanly.
+
+### Improvements
+
+- **fx 0.0.8 and later.** fx moved to a new session layout; those sessions now open alongside the old ones.
+- **MiniMax M3.1 Flash has a price.** Session Info counts it in dollars.
+
 ### Bug Fixes
 
-- **Sessions survive transient read failures.** An fx session stays visible during a failed refresh or full reload, and retries are not suppressed until a parse succeeds. Unchanged schema-4 logs avoid redundant frame scans.
-- **OpenClaw preview titles stay current after relaunch.** Persisted previews are accepted only with matching SHA-256 evidence; unchanged SQLite revisions skip repeat hashing.
-- **Claude request-log repair is safe and repeatable.** The v2 path-scoped migration validates complete readable JSONL records, retries even if v1 ran, and retries pending Image Browser invalidations in the same process.
-- **OpenClaw sessions are back.** OpenClaw 2026.10.5 moved its history into a database, and new sessions stopped showing up. The list now reads that database, with titles and projects for sessions OpenClaw carried over, and compressed tool output opens normally. A session that exists in both places shows once.
-- **Claude transcripts no longer repeat each turn.** Claude Code 2.1.303 started logging every API request into the session file. Those copies showed up as extra user messages, system-prompt text, and duplicate tool calls and images, and they inflated message counts and search. The app now skips them.
+- **OpenClaw sessions are back.** OpenClaw 2026.10.5 moved its history into a database, and new sessions stopped showing up. The list reads that database now.
+- **Claude transcripts no longer repeat each turn.** Claude Code 2.1.303 logs every API request into the session file; those copies are skipped.
+- **Claude safety stops read as notices, not prompts.** A classifier stop no longer looks like something you typed.
+- **DeepSeek Harness 0.2.1 sessions open.** Its newer session records made every v4 session drop from the list.
+- **Antigravity desktop and Cline Desktop sessions appear.** Antigravity 2.25 writes transcripts to a second folder, and the app now reads both.
+- **Hermes shows its cost.** Usage that stayed under a model's long-context threshold was left unpriced.
 
 <!-- Development history for this release. The release-note generator drops this heading. -->
 ### Maintenance
 
+- Review hardening for code new in this release: fx keeps the last good session on a failed refresh and caches exact counts; OpenClaw previews are reused only with matching SHA-256 proof (new `openclaw_preview_digest` column); the Claude request-log re-index runs as a validated, retry-safe v2 migration.
 - Qwen Code source review through 0.25.3 (no real session; ceiling stays 0.14.3). The parser now follows four 0.25.x reader rules: `session_sources_snapshot` and `managed_session_*_v1` records cannot be the active leaf (also in `QwenTelemetryReader`), `agent_mention`/`agent_message` are metadata and never the title, `code_mode_tool_result` is metadata, and generated `@attachment:///` tokens are stripped from prompt text. Synthetic fixture `qwen/019f0000-0000-7000-8000-000000000007.jsonl`.
-- Format check 2026-10-21: verified ceilings advance from fresh tool-using sessions to Codex 0.163.0, Claude Code 2.1.306, Copilot 1.0.101, OpenCode 2.1.2, Kimi 2.2.0, Pi 1.3.0, Grok 1.0.62, Cursor 2026.10.19, Hermes 0.22.2 and Cline CLI 3.0.73. Antigravity 1.4.3 stays at 1.1.27 (thin sample). Codex `top_level_tools` is now opaque to the fingerprint, and the Claude, Codex and Copilot fixtures cover the new fields.
+- Format check 2026-10-21: verified ceilings advance from fresh tool-using sessions to Codex 0.163.0, Claude Code 2.1.306, Copilot 1.0.102, OpenCode 2.1.2, Kimi 2.3.0, Pi 1.3.0, Grok 1.0.62, Cursor 2026.10.19, Hermes 0.22.4, DeepSeek Harness 0.2.1-rc.2 and Cline CLI 3.0.73. Antigravity 1.4.3 stays at 1.1.27 (thin sample). Codex `top_level_tools` is now opaque to the fingerprint, and the Claude, Codex and Copilot fixtures cover the new fields.
 - OpenClaw 2026.10.5 verified (was 2026.7.1). `OpenClawSqliteReader` decodes zstd `transcript_events` rows and builds list previews from the transcript; a NULL `started_at` no longer drops the whole store. Same-id JSONL and SQLite copies dedupe to the newer one (SQLite on ties), and discovery stops at `agents/<id>/sessions`, skipping the embedded `agent/codex-home`. Monitoring samples the store (`openclaw_latest_session`) against `Resources/Fixtures/stage0/agents/openclaw/sqlite/openclaw-agent.sql`, and the prebump driver reads its session by `--session-key`.
 
 ## [6.0] - 2026-10-20
