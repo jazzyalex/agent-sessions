@@ -21,6 +21,38 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Do not clone to temporary directories and do not switch to alternate worktrees as a deployment workaround.
 - If the local worktree is dirty, stop and tell the user to clean the tree first (commit, stash, or discard), then continue in the same local repo.
 
+## Resource Preflight (Before QA, Bump, and Release)
+
+Heavy steps (QA test runs, the Release build, notarization) crawl when the Mac is out of
+memory. During 6.0 the Release build ran 20+ minutes at 15% CPU because swap was nearly full.
+The cause was `fseventsd`, a macOS daemon holding 21 GB (20 GB compressed). The machine
+reported "31% free" and `ps` RSS showed every process small, so both looked healthy. Run
+this check before each heavy step, and again if a Release build passes 12 minutes:
+
+```bash
+sysctl -n vm.swapusage                                    # swap used / total
+top -l 1 -o mem -n 8 -stats pid,command,mem,cmprs         # MEM includes compressed memory
+df -h / | tail -1                                         # free disk
+du -sh ~/Library/Developer/Xcode/DerivedData .deriveddata-* 2>/dev/null
+```
+
+Use `top`, not `ps`: RSS hides compressed and swapped memory, which is where the problem was.
+Do not trust `memory_pressure`'s "free percentage" either.
+
+Act on what you find:
+
+- **Swap above half of its total, or any process above 8 GB in `top` MEM** — fix before the
+  heavy step. If the process is `fseventsd`, restart it: launchd respawns it at once, and
+  nothing is lost. Try `sudo -n killall fseventsd` first. When that fails (no cached sudo),
+  stop and give the user that command without `-n` to run in Terminal, then re-check. Never
+  kill other system daemons. For user apps (Chrome, other Claude sessions, test runners), name
+  the biggest ones and ask the user to quit them; do not kill them yourself.
+- **Free disk under 20 GB, or the DerivedData folders above 10 GB together** — recommend
+  deleting the repo's `.deriveddata-*` folders and `~/Library/Developer/Xcode/DerivedData`.
+  They are build caches and regenerate. Delete them only when the user agrees, and never
+  while a build is running.
+- Otherwise continue. Report the swap and top-memory numbers in one line.
+
 ## QA Gate (Mandatory — Run Automatically Before Deploy)
 
 - **Always run QA automatically** before any bump/release/verify step, unless the user explicitly says to skip it (e.g. "skip QA", "no QA").
