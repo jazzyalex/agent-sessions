@@ -313,9 +313,17 @@ actor ImageBrowserIndexCache {
         invalidateIndex(forPath: session.filePath)
     }
 
-    func invalidateIndex(forPath filePath: String) {
+    /// Removes the stored index for `filePath`. True when no index is left: it was
+    /// removed, or there was none.
+    @discardableResult
+    func invalidateIndex(forPath filePath: String) -> Bool {
         let url = indexURL(forPath: filePath)
-        try? fileManager.removeItem(at: url)
+        do {
+            try fileManager.removeItem(at: url)
+            return true
+        } catch {
+            return !fileManager.fileExists(atPath: url.path)
+        }
     }
 }
 

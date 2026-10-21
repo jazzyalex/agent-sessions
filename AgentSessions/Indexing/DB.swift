@@ -1717,6 +1717,55 @@ actor IndexDB {
         return Self.migrationApplied(db, key: key)
     }
 
+    /// `index_state` key prefix for a session path whose Image Browser index must still
+    /// be removed. `applyPathScopedReindex` writes these with its deletes, so a crash or
+    /// a failed removal after the commit leaves them for the next run.
+    static let pendingImageCacheInvalidationPrefix = "pending_image_cache_invalidation:"
+
+    /// `index_state` key prefix for a path whose scan failed and must be retried before
+    /// `migrationKey` is written.
+    static func pathScopedReindexRetryPrefix(migrationKey: String) -> String {
+        "\(migrationKey):retry:"
+    }
+
+    func pendingImageCacheInvalidations() throws -> [String] {
+        try indexStatePaths(prefix: Self.pendingImageCacheInvalidationPrefix)
+    }
+
+    func pathScopedReindexRetryPaths(migrationKey: String) throws -> [String] {
+        try indexStatePaths(prefix: Self.pathScopedReindexRetryPrefix(migrationKey: migrationKey))
+    }
+
+    /// Clears the given pending Image Browser invalidations, in one transaction.
+    func clearPendingImageCacheInvalidations(_ paths: [String]) throws {
+        guard !paths.isEmpty, let db = handle else { return }
+        try begin()
+        do {
+            for path in paths {
+                try Self.execBind(db, "DELETE FROM index_state WHERE key = ?;",
+                                  Self.pendingImageCacheInvalidationPrefix + path)
+            }
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
+    }
+
+    /// The suffixes of the `index_state` keys that start with `prefix`, in key order.
+    private func indexStatePaths(prefix: String) throws -> [String] {
+        let stmt = try prepare("SELECT key FROM index_state WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key;")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, prefix, -1, SQLITE_TRANSIENT)
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let c = sqlite3_column_text(stmt, 0) else { continue }
+            let key = String(cString: c)
+            if key.hasPrefix(prefix) { out.append(String(key.dropFirst(prefix.count))) }
+        }
+        return out
+    }
+
     /// Every path recorded for `source` in `files` or `session_meta`.
     func recordedPaths(source: String) throws -> [String] {
         let stmt = try prepare("""
@@ -1740,10 +1789,15 @@ actor IndexDB {
     /// four back from a fresh parse; the Claude indexer force-parses files missing from
     /// `session_meta`. `session_days`/`rollups_daily` are left alone.
     ///
+    /// The same transaction records each path as a pending Image Browser invalidation
+    /// (see `pendingImageCacheInvalidations`) and replaces the migration's retry list with
+    /// `retryPaths`. `migrationKey` is written only when `retryPaths` is empty.
+    ///
     /// This deletes search-corpus rows on purpose, against the guardrail above
     /// `bootstrap`'s markers: the corpus rows for these paths are themselves wrong, and
     /// the scope is a handful of sessions, not a source. Do not use it for a whole source.
-    func applyPathScopedReindex(source: String, paths: [String], migrationKey: String) throws {
+    func applyPathScopedReindex(source: String, paths: [String], migrationKey: String,
+                                retryPaths: [String] = []) throws {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         try begin()
         do {
@@ -1779,7 +1833,18 @@ actor IndexDB {
                     }
                 }
             }
-            try Self.execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", migrationKey)
+            let insertState = "INSERT OR REPLACE INTO index_state(key, value) VALUES(?, '1');"
+            for path in paths {
+                try Self.execBind(db, insertState, Self.pendingImageCacheInvalidationPrefix + path)
+            }
+            let retryPrefix = Self.pathScopedReindexRetryPrefix(migrationKey: migrationKey)
+            try Self.execBind(db, "DELETE FROM index_state WHERE substr(key, 1, length(?1)) = ?1;", retryPrefix)
+            for path in retryPaths {
+                try Self.execBind(db, insertState, retryPrefix + path)
+            }
+            if retryPaths.isEmpty {
+                try Self.execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", migrationKey)
+            }
             try commit()
         } catch {
             rollbackSilently()
@@ -3449,50 +3514,131 @@ struct SessionSearchIdentityState: Equatable, Sendable {
 /// `IndexDB.bootstrap`: finding the files means reading them, which must not block
 /// launch or hold the bootstrap transaction. Files last modified before
 /// `earliestAffectedModification` cannot contain the records and are not opened.
-/// Unreadable or missing files count as unaffected. The marker is written in the same
-/// transaction as the deletes, so the scan never repeats once it has succeeded.
+/// Missing files count as unaffected.
+///
+/// The marker is written in the same transaction as the deletes, so the scan never
+/// repeats once it has succeeded. A file that exists but cannot be read blocks the
+/// marker: the affected files found are still reindexed, the unreadable paths are kept
+/// as a retry list, and the next run scans only those paths.
+///
+/// Image Browser indexes live outside the database. The deletes record each path as a
+/// pending invalidation, and every run (also after the marker) removes the pending
+/// indexes and clears an entry only once its removal succeeded.
 enum ClaudeRequestLogReindexMigration {
     static let migrationKey = "claude_request_log_reindex_v1"
     static let source = "claude"
     /// Claude Code 2.1.303 shipped after this date; 2.1.296 (2026-10-12) wrote none.
     static let earliestAffectedModification = Date(timeIntervalSince1970: 1_790_812_800) // 2026-10-01T00:00:00Z
-    private static let marker = Data(#""type":"api-request"#.utf8)
+    /// The form Claude Code writes. A hit is a request-log record without decoding.
+    private static let exactMarker = Data(#""type":"api-request"#.utf8)
+    /// Lowercase ASCII. A line must contain this, in any case, to be decoded at all.
+    private static let candidateMarker = Data("api-request".utf8)
+
+    enum Scan: Equatable { case affected, unaffected, unreadable }
 
     /// Returns the paths that were reindexed (empty when the migration already ran).
     @discardableResult
     static func runIfNeeded(db: IndexDB,
                             imageIndexCache: ImageBrowserIndexCache? = ImageBrowserIndexCache(),
-                            fileContainsRequestLog: (String) -> Bool = ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath:)) async throws -> [String] {
-        if try await db.isMigrationApplied(migrationKey) { return [] }
-        let candidates = try await db.recordedPaths(source: source)
-        let affected = candidates.filter { fileContainsRequestLog($0) }
-        try await db.applyPathScopedReindex(source: source, paths: affected, migrationKey: migrationKey)
-        if let imageIndexCache {
-            for path in affected {
-                await imageIndexCache.invalidateIndex(forPath: path)
+                            scanFile: (String) -> Scan = ClaudeRequestLogReindexMigration.scanFile(atPath:)) async throws -> [String] {
+        var affected: [String] = []
+        if !(try await db.isMigrationApplied(migrationKey)) {
+            let retryPaths = try await db.pathScopedReindexRetryPaths(migrationKey: migrationKey)
+            let candidates = retryPaths.isEmpty ? try await db.recordedPaths(source: source) : retryPaths
+            var unreadable: [String] = []
+            for path in candidates {
+                switch scanFile(path) {
+                case .affected: affected.append(path)
+                case .unreadable: unreadable.append(path)
+                case .unaffected: break
+                }
             }
+            try await db.applyPathScopedReindex(source: source, paths: affected,
+                                                migrationKey: migrationKey, retryPaths: unreadable)
+        }
+        if let imageIndexCache {
+            let pending = try await db.pendingImageCacheInvalidations()
+            var removed: [String] = []
+            for path in pending {
+                if await imageIndexCache.invalidateIndex(forPath: path) { removed.append(path) }
+            }
+            try await db.clearPendingImageCacheInvalidations(removed)
         }
         return affected
     }
 
-    /// Streams the file in 1 MiB chunks looking for `"type":"api-request`. False for a
-    /// file that is missing, unreadable, or older than `earliestAffectedModification`.
-    static func fileContainsRequestLog(atPath path: String) -> Bool {
+    /// Whether the file holds a record that `ClaudeSessionParser.isRequestLogRecord`
+    /// skips. One streaming pass in 1 MiB chunks looks for `"type":"api-request` and
+    /// notes whether `api-request` appears in any case. Only then a second pass decodes
+    /// the lines that contain it (through `JSONLReader`, as the parser reads them).
+    ///
+    /// `.unaffected` for a missing file or one older than `earliestAffectedModification`;
+    /// `.unreadable` when the file exists but cannot be opened or read.
+    static func scanFile(atPath path: String) -> Scan {
         let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: path),
-              let modified = attrs[.modificationDate] as? Date,
-              modified >= earliestAffectedModification,
-              let handle = FileHandle(forReadingAtPath: path) else { return false }
+        let attrs: [FileAttributeKey: Any]
+        do {
+            attrs = try fm.attributesOfItem(atPath: path)
+        } catch {
+            return isMissingFileError(error) ? .unaffected : .unreadable
+        }
+        guard let modified = attrs[.modificationDate] as? Date else { return .unreadable }
+        guard modified >= earliestAffectedModification else { return .unaffected }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return .unreadable }
         defer { try? handle.close() }
+
         let chunkSize = 1 << 20
         var carry = Data()
+        var sawCandidate = false
         while true {
-            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else { return false }
+            let chunk: Data
+            do {
+                guard let read = try handle.read(upToCount: chunkSize), !read.isEmpty else { break }
+                chunk = read
+            } catch {
+                return .unreadable
+            }
             var window = carry
             window.append(chunk)
-            if window.range(of: marker) != nil { return true }
-            carry = Data(window.suffix(marker.count - 1))
+            if window.range(of: exactMarker) != nil { return .affected }
+            if !sawCandidate, asciiLowercased(window).range(of: candidateMarker) != nil { sawCandidate = true }
+            carry = Data(window.suffix(exactMarker.count - 1))
         }
+        guard sawCandidate else { return .unaffected }
+
+        var found = false
+        do {
+            let reader = JSONLReader(url: URL(fileURLWithPath: path), chunkSize: chunkSize, propagatesReadErrors: true)
+            try reader.forEachLineWhile { line in
+                guard line.range(of: "api-request", options: .caseInsensitive) != nil,
+                      let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                      ClaudeSessionParser.isRequestLogRecord(object) else { return true }
+                found = true
+                return false
+            }
+        } catch {
+            return .unreadable
+        }
+        return found ? .affected : .unaffected
+    }
+
+    private static func asciiLowercased(_ data: Data) -> Data {
+        var out = data
+        out.withUnsafeMutableBytes { bytes in
+            for i in bytes.indices where bytes[i] &- 0x41 < 26 { bytes[i] |= 0x20 }
+        }
+        return out
+    }
+
+    private static func isMissingFileError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain {
+            return ns.code == NSFileReadNoSuchFileError || ns.code == NSFileNoSuchFileError
+        }
+        if ns.domain == NSPOSIXErrorDomain {
+            return ns.code == Int(ENOENT) || ns.code == Int(ENOTDIR)
+        }
+        return false
     }
 }
 

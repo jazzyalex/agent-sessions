@@ -312,21 +312,171 @@ final class MigrationCorpusPreservationTests: XCTestCase {
 
         var scans = 0
         let first = try await ClaudeRequestLogReindexMigration.runIfNeeded(
-            db: db, imageIndexCache: nil, fileContainsRequestLog: { _ in scans += 1; return true })
+            db: db, imageIndexCache: nil, scanFile: { _ in scans += 1; return .affected })
         XCTAssertEqual(first.count, 1)
         XCTAssertEqual(scans, 1)
 
         try await seedPath(db, source: "claude", id: "b", path: "/tmp/does-not-exist-\(UUID().uuidString).jsonl")
         let second = try await ClaudeRequestLogReindexMigration.runIfNeeded(
-            db: db, imageIndexCache: nil, fileContainsRequestLog: { _ in scans += 1; return true })
+            db: db, imageIndexCache: nil, scanFile: { _ in scans += 1; return .affected })
         XCTAssertEqual(second, [])
         XCTAssertEqual(scans, 1, "a recorded marker must skip the scan")
         let claudeMeta = try await db.rowCountForTesting(table: "session_meta", source: "claude")
         XCTAssertEqual(claudeMeta, 1, "rows written after the migration stay")
     }
 
-    /// The streaming check finds a marker split across its 1 MiB read boundary and
-    /// treats missing, unreadable and pre-cutoff files as unaffected.
+    /// The scan uses the parser's rule (`ClaudeSessionParser.isRequestLogRecord`): a
+    /// top-level `type` that starts with `api-request`, any case, any JSON spacing or
+    /// key order. Text that only mentions the type inside another record does not count.
+    func testClaudeRequestLogScanMatchesParserRule() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("ClaudeRequestLogRule-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let cases: [(name: String, line: String, expected: ClaudeRequestLogReindexMigration.Scan)] = [
+            ("whitespace", #"{"type": "api-request-blob", "sessionId": "s", "message": {"role": "user", "content": "copy"}}"#, .affected),
+            ("uppercase", #"{"type":"API-REQUEST-SHAPE","sessionId":"s","system":"prompt"}"#, .affected),
+            ("mixed-case-key-order", #"{"sessionId":"s","type" : "Api-Request","params":{}}"#, .affected),
+            ("mention-only", #"{"type":"user","sessionId":"s","message":{"role":"user","content":"why does \"type\": \"API-Request-blob\" show up?"}}"#, .unaffected),
+        ]
+        for c in cases {
+            let url = dir.appendingPathComponent("\(c.name).jsonl")
+            try (Self.plainLine + "\n" + c.line + "\n" + Self.plainLine + "\n").write(to: url, atomically: true, encoding: .utf8)
+            let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(c.line.utf8)) as? [String: Any])
+            XCTAssertEqual(ClaudeSessionParser.isRequestLogRecord(obj), c.expected == .affected,
+                           "guard: \(c.name) must match what the parser skips")
+            XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: url.path), c.expected, c.name)
+        }
+    }
+
+    /// A Claude file that exists but cannot be read keeps the marker unwritten. The
+    /// readable affected file is reindexed at once; the next run rescans only the file
+    /// that failed, reindexes it, and then writes the marker.
+    func testClaudeRequestLogReindexRetriesUnreadableFiles() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("ClaudeRequestLogRetry-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let unreadable = dir.appendingPathComponent("unreadable.jsonl")
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path)
+            try? fm.removeItem(at: dir)
+        }
+
+        let readable = dir.appendingPathComponent("readable.jsonl")
+        let missing = dir.appendingPathComponent("missing.jsonl")
+        try (Self.requestLogLine + "\n").write(to: readable, atomically: true, encoding: .utf8)
+        try (Self.requestLogLine + "\n").write(to: unreadable, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+        try await seedPath(db, source: "claude", id: "readable", path: readable.path)
+        try await seedPath(db, source: "claude", id: "unreadable", path: unreadable.path)
+        try await seedPath(db, source: "claude", id: "missing", path: missing.path)
+
+        let first = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: nil)
+        XCTAssertEqual(first, [readable.path])
+        let appliedAfterFirst = try await db.isMigrationApplied(ClaudeRequestLogReindexMigration.migrationKey)
+        XCTAssertFalse(appliedAfterFirst, "an unreadable candidate must leave the marker unwritten")
+        let pathsAfterFirst = try await db.recordedPaths(source: "claude")
+        XCTAssertEqual(Set(pathsAfterFirst), Set([unreadable.path, missing.path]))
+
+        // Ingest rebuilds the readable file's rows with the fixed parser.
+        try await seedPath(db, source: "claude", id: "readable", path: readable.path)
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path)
+
+        let second = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: nil)
+        XCTAssertEqual(second, [unreadable.path], "the retry reindexes the file that failed, and only that file")
+        let appliedAfterSecond = try await db.isMigrationApplied(ClaudeRequestLogReindexMigration.migrationKey)
+        XCTAssertTrue(appliedAfterSecond)
+        let pathsAfterSecond = try await db.recordedPaths(source: "claude")
+        XCTAssertEqual(Set(pathsAfterSecond), Set([readable.path, missing.path]),
+                       "the rebuilt rows of the already-reindexed file stay")
+    }
+
+    /// A failed Image Browser index removal stays pending after the marker commits, and
+    /// a later run removes it and clears the entry.
+    func testClaudeRequestLogReindexRetriesFailedImageIndexRemoval() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("ClaudeRequestLogImage-\(UUID().uuidString)", isDirectory: true)
+        let cacheRoot = dir.appendingPathComponent("ImageCache", isDirectory: true)
+        let indexDir = cacheRoot.appendingPathComponent("Index", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: indexDir.path)
+            try? fm.removeItem(at: dir)
+        }
+
+        let affected = dir.appendingPathComponent("affected.jsonl")
+        try (Self.plainLine + "\n" + Self.requestLogLine + "\n").write(to: affected, atomically: true, encoding: .utf8)
+        try await seedPath(db, source: "claude", id: "affected", path: affected.path)
+        let cache = ImageBrowserIndexCache(cacheRootOverride: cacheRoot)
+        let session = Session(id: "affected", source: .claude, startTime: nil, endTime: nil,
+                              model: nil, filePath: affected.path, eventCount: 0, events: [])
+        _ = await cache.getOrBuildIndex(for: session, maxMatches: 10)
+        let before = await cache.loadIndexIfValid(for: session)
+        XCTAssertNotNil(before, "guard: the affected file must have a cached image index")
+
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: indexDir.path)
+        let first = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: cache)
+        XCTAssertEqual(first, [affected.path])
+        let stillCached = await cache.loadIndexIfValid(for: session)
+        XCTAssertNotNil(stillCached, "guard: the removal must really have failed")
+        let pendingAfterFailure = try await db.pendingImageCacheInvalidations()
+        XCTAssertEqual(pendingAfterFailure, [affected.path], "a failed removal stays pending")
+
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: indexDir.path)
+        let second = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: cache)
+        XCTAssertEqual(second, [], "the marker is written; no rescan")
+        let afterRetry = await cache.loadIndexIfValid(for: session)
+        XCTAssertNil(afterRetry, "the pending removal is retried after the marker")
+        let pendingAfterRetry = try await db.pendingImageCacheInvalidations()
+        XCTAssertEqual(pendingAfterRetry, [])
+    }
+
+    /// Crash after the commit: the marker and the pending entries are in the database
+    /// but no index was removed. The next run removes the index (a missing index counts
+    /// as removed) and clears every entry.
+    func testClaudeRequestLogReindexFinishesImageInvalidationAfterCrash() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("ClaudeRequestLogCrash-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let affected = dir.appendingPathComponent("affected.jsonl")
+        let noIndex = dir.appendingPathComponent("no-index.jsonl")
+        try (Self.plainLine + "\n" + Self.requestLogLine + "\n").write(to: affected, atomically: true, encoding: .utf8)
+        try (Self.requestLogLine + "\n").write(to: noIndex, atomically: true, encoding: .utf8)
+        try await seedPath(db, source: "claude", id: "affected", path: affected.path)
+        try await seedPath(db, source: "claude", id: "no-index", path: noIndex.path)
+        let cache = ImageBrowserIndexCache(cacheRootOverride: dir.appendingPathComponent("ImageCache", isDirectory: true))
+        let session = Session(id: "affected", source: .claude, startTime: nil, endTime: nil,
+                              model: nil, filePath: affected.path, eventCount: 0, events: [])
+        _ = await cache.getOrBuildIndex(for: session, maxMatches: 10)
+        let before = await cache.loadIndexIfValid(for: session)
+        XCTAssertNotNil(before, "guard: the affected file must have a cached image index")
+
+        // The transaction commits, then the process dies before touching the cache.
+        try await db.applyPathScopedReindex(source: "claude", paths: [affected.path, noIndex.path],
+                                            migrationKey: ClaudeRequestLogReindexMigration.migrationKey)
+        let pendingAfterCrash = try await db.pendingImageCacheInvalidations()
+        XCTAssertEqual(Set(pendingAfterCrash), Set([affected.path, noIndex.path]),
+                       "the pending removals commit with the deletes")
+
+        let rerun = try await ClaudeRequestLogReindexMigration.runIfNeeded(db: db, imageIndexCache: cache)
+        XCTAssertEqual(rerun, [])
+        let after = await cache.loadIndexIfValid(for: session)
+        XCTAssertNil(after, "the stale index must be removed even though the marker was already written")
+        let pendingAfterRerun = try await db.pendingImageCacheInvalidations()
+        XCTAssertEqual(pendingAfterRerun, [])
+    }
+
+    /// The streaming check finds a marker split across its 1 MiB read boundary, treats
+    /// missing and pre-cutoff files as unaffected and reports unreadable files.
     func testClaudeRequestLogFileCheck() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("ClaudeRequestLogCheck-\(UUID().uuidString)", isDirectory: true)
@@ -340,18 +490,24 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         var data = Data(repeating: UInt8(ascii: "x"), count: (1 << 20) - 6)
         data.append(Data(#""type":"api-request-blob"}"#.utf8))
         try data.write(to: split)
-        XCTAssertTrue(ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath: split.path))
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: split.path), .affected)
 
         let plain = dir.appendingPathComponent("plain.jsonl")
         try (Self.plainLine + "\n").write(to: plain, atomically: true, encoding: .utf8)
-        XCTAssertFalse(ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath: plain.path))
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: plain.path), .unaffected)
 
-        XCTAssertFalse(ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath: dir.appendingPathComponent("missing.jsonl").path))
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: dir.appendingPathComponent("missing.jsonl").path), .unaffected)
+
+        let old = dir.appendingPathComponent("old.jsonl")
+        try (Self.requestLogLine + "\n").write(to: old, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_788_220_800)], // 2026-09-01
+                             ofItemAtPath: old.path)
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: old.path), .unaffected)
 
         let unreadable = dir.appendingPathComponent("unreadable.jsonl")
         try (Self.requestLogLine + "\n").write(to: unreadable, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
-        XCTAssertFalse(ClaudeRequestLogReindexMigration.fileContainsRequestLog(atPath: unreadable.path))
+        XCTAssertEqual(ClaudeRequestLogReindexMigration.scanFile(atPath: unreadable.path), .unreadable)
     }
 }
 #endif
