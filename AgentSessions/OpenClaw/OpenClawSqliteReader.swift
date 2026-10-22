@@ -173,6 +173,17 @@ struct OpenClawSqliteReader {
         lastListedFingerprintByPath.removeAll()
         previewCacheLock.unlock()
     }
+    /// Closes the cached revision handles for stores under `directory`, so a test can
+    /// delete its fixture store without deleting a database SQLite still has open.
+    static func closeRevisionHandlesForTesting(under directory: URL) {
+        let prefixes = [directory.path, directory.resolvingSymlinksInPath().path].map { $0 + "/" }
+        revisionCacheLock.lock()
+        defer { revisionCacheLock.unlock() }
+        for (path, state) in revisionStates where prefixes.contains(where: { path.hasPrefix($0) }) {
+            if let database = state.database { sqlite3_close(database) }
+            revisionStates.removeValue(forKey: path)
+        }
+    }
     private static var listSessionsBeforeMaterializationHookForTesting: (() -> Void)?
     private static var cacheHitBeforeBoundaryProbeHookForTesting: (() -> Void)?
 

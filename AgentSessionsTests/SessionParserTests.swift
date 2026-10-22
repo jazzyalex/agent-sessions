@@ -1750,7 +1750,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexDesktopSiblingWorktreeUsesGitMetadataWhenNameIsLowercase() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-WorktreeMetadata-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let repo = root.appendingPathComponent("Repository", isDirectory: true)
         let base = repo.appendingPathComponent("agent-sessions", isDirectory: true)
@@ -1784,7 +1784,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexDesktopArbitrarySiblingWorktreeUsesGitOriginMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OriginMetadata-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let repo = root.appendingPathComponent("Repository", isDirectory: true)
         let base = repo.appendingPathComponent("stable-home", isDirectory: true)
@@ -1836,7 +1836,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexDesktopSiblingRepositoryWithoutGitOriginMetadataDoesNotUseBaseDirectoryFallback() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ExistingSiblingRepo-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let repo = root.appendingPathComponent("Repository", isDirectory: true)
         let base = repo.appendingPathComponent("alpha-control", isDirectory: true)
@@ -2143,7 +2143,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexPayloadCwdRepoAndBranchExtraction() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex073-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let repoDir = root.appendingPathComponent("repo", isDirectory: true)
@@ -2175,7 +2175,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSurfaceClassifiesDesktopBeforeVscodeSource() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexDesktop-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-26T13-43-29-019dc662-1345-7301-b0da-bd28cfab7887.jsonl")
@@ -2194,7 +2194,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSurfaceClassifiesVSCodeOriginator() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexVSCode-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-26T17-50-52-019dcc6a-eae1-7cf1-abc6-3e89614353f1.jsonl")
@@ -2213,7 +2213,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSurfaceClassifiesSubagentObjectAndPreservesHierarchy() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagent-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-17T13-28-49-019d9d21-c62f-7290-aab2-809d579e782e.jsonl")
@@ -2238,7 +2238,7 @@ final class SessionParserTests: XCTestCase {
         // thread_spawn_edges row for them).
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardian-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
@@ -2263,7 +2263,7 @@ final class SessionParserTests: XCTestCase {
         // that only touches the parseFileFull block gets caught here too.
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardianFull-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
@@ -2286,7 +2286,7 @@ final class SessionParserTests: XCTestCase {
         // via SubagentHierarchyBuilder's role-only same-cwd inference).
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardianOld-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-06-01T10-00-00-019f0000-0000-7000-8000-000000000001.jsonl")
@@ -2308,7 +2308,7 @@ final class SessionParserTests: XCTestCase {
         // a root session — that silence is exactly how guardian slipped through.
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexFutureSub-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-07-19T18-00-00-019f0000-0000-7000-8000-000000000002.jsonl")
@@ -2464,7 +2464,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSubagentParsesReasoningEffortFromTurnContext() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagentEffort-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-28T10-00-00-019e3b0c-0000-7000-8000-000000000031.jsonl")
@@ -2484,7 +2484,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexNormalSessionDoesNotPersistReasoningEffort() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexNormalEffort-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-28T10-10-00-019e3b0c-0000-7000-8000-000000000032.jsonl")
@@ -2504,7 +2504,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSurfaceDefaultsUnknownWithoutMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexUnknown-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-04-26T00-00-00-unknown.jsonl")
@@ -2875,7 +2875,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexLightweightHandlesHugeFirstLine() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexHugeMeta-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let repoDir = root.appendingPathComponent("repo", isDirectory: true)
@@ -2900,7 +2900,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexSanitizesEncryptedContentWhenHuge() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexEncrypted-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
@@ -2927,7 +2927,7 @@ final class SessionParserTests: XCTestCase {
         // of the same key in a single JSONL line (possible in malformed logs).
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexDupKeys-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
@@ -3190,7 +3190,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexAdditionalToolsStaysMetadataAndOutOfSearch() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexAdditionalTools-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-10-18T20-46-15-01a15244-6186-7981-8865-0010e7462d08.jsonl")
@@ -3389,7 +3389,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeParsesTextPartsIntoConversation() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionID = "ses_testQuickCheckIn"
         let projectID = "global"
@@ -3593,7 +3593,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeToolExitCodeClassifiesErrorAndAppendsExitCode() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Exit-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
         let sessionDir = storageRoot.appendingPathComponent("session", isDirectory: true).appendingPathComponent("proj", isDirectory: true)
@@ -3648,7 +3648,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeDiscoveryAcceptsStorageRootOverride() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
         let sessionDir = storageRoot.appendingPathComponent("session", isDirectory: true).appendingPathComponent("global", isDirectory: true)
@@ -3668,7 +3668,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeSqliteReaderLoadsCurrentDatabaseLayout() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-SQLite-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("opencode.db")
@@ -3800,7 +3800,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeSqliteReaderFindsLegacyModelBeyondQuickProbe() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-LegacyModel-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("opencode.db")
@@ -3830,7 +3830,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenCodeSQLiteSearchIngestTracksIdentityUpdatesAndRemoval() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-SearchIngest-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("opencode.db")
@@ -4015,7 +4015,7 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenCode-PinnedArchive-\(UUID().uuidString)",
             isDirectory: true
         )
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let liveRoot = root.appendingPathComponent("live", isDirectory: true)
         let archiveRoot = root.appendingPathComponent("archive", isDirectory: true)
@@ -4142,7 +4142,7 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenCode-RootOverride-\(UUID().uuidString)",
             isDirectory: true
         )
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let oldDBURL = root.appendingPathComponent("old/opencode.db")
@@ -4273,7 +4273,7 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenCode-FailedLiveRead-\(UUID().uuidString)",
             isDirectory: true
         )
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let liveDBURL = root.appendingPathComponent("live/opencode.db")
         let archiveDBURL = root.appendingPathComponent("archive/opencode.db")
         let corruptArchiveDBURL = root.appendingPathComponent("corrupt-archive/opencode.db")
@@ -4372,7 +4372,7 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenCode-MixedArchiveFailure-\(UUID().uuidString)",
             isDirectory: true
         )
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let liveDBURL = root.appendingPathComponent("live/opencode.db")
         let oldMovedDBURL = root.appendingPathComponent("old-moved/opencode.db")
         let staleArchiveDBURL = root.appendingPathComponent("stale-archive/opencode.db")
@@ -4538,7 +4538,7 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenCode-PurgeGeneration-\(UUID().uuidString)",
             isDirectory: true
         )
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let dbURL = root.appendingPathComponent("opencode.db")
         try createOpenCodeSQLiteFixture(at: dbURL)
@@ -4593,7 +4593,7 @@ final class SessionParserTests: XCTestCase {
     func testCodexDiscoveryFindsRolloutFilesInDateHierarchy() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let dayDir = root
             .appendingPathComponent("2026", isDirectory: true)
@@ -4918,7 +4918,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeDiscoveryUsesProjectsSubtreeWhenPresent() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let projectsDir = root.appendingPathComponent("projects/demo", isDirectory: true)
         try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
@@ -4937,7 +4937,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeDiscoveryIncludesDesktopRootsWithCustomRoot() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-CustomDesktop-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let customProjectsDir = root.appendingPathComponent("custom/.claude/projects/custom", isDirectory: true)
         try fm.createDirectory(at: customProjectsDir, withIntermediateDirectories: true)
@@ -4968,7 +4968,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeSessionScanRootsIncludeDesktopLocalAgentProjects() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeScanRoots-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let customConfigRoot = root.appendingPathComponent("custom/.claude", isDirectory: true)
         let customProjectsRoot = customConfigRoot.appendingPathComponent("projects", isDirectory: true)
@@ -4991,7 +4991,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeParserEnrichesDesktopLocalAgentTranscript() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktop-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let localDir = root
             .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
@@ -5027,7 +5027,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeParserMarksDesktopEntrypointTranscript() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopEntrypoint-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let projectsDir = root.appendingPathComponent(".claude/projects/-Users-test-Repo", isDirectory: true)
         try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
@@ -5049,7 +5049,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeParserUsesDesktopMetadataTitleWhenTranscriptTitleIsFallback() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopTitle-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let localDir = root
             .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
@@ -5077,7 +5077,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeParserIgnoresDesktopMetadataForDifferentTranscript() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopMismatch-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let localDir = root
             .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
@@ -5108,7 +5108,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeDiscoveryDeltaTracksDesktopMetadataChanges() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopDelta-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let desktopRoot = root.appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
         let localDir = desktopRoot.appendingPathComponent("account/workspace/local_abc", isDirectory: true)
@@ -5145,7 +5145,7 @@ final class SessionParserTests: XCTestCase {
     func testCopilotDiscoveryAcceptsConfigRootOverride() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
         try fm.createDirectory(at: sessionStateDir, withIntermediateDirectories: true)
@@ -5161,7 +5161,7 @@ final class SessionParserTests: XCTestCase {
     func testCopilotDiscoveryFindsSubdirectoryEventsLayout() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
         let uuidDir = sessionStateDir.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
@@ -5178,7 +5178,7 @@ final class SessionParserTests: XCTestCase {
     func testCopilotDiscoveryFindsBothFlatAndSubdirectoryLayouts() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
         try fm.createDirectory(at: sessionStateDir, withIntermediateDirectories: true)
@@ -5205,7 +5205,7 @@ final class SessionParserTests: XCTestCase {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-FallbackID-\(UUID().uuidString)", isDirectory: true)
         let uuidDir = root.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
 
         // Write a session without sessionId in session.start so fallbackID is used
@@ -5223,7 +5223,7 @@ final class SessionParserTests: XCTestCase {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-WorkspaceName-\(UUID().uuidString)", isDirectory: true)
         let uuidDir = root.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
 
         let eventsURL = uuidDir.appendingPathComponent("events.jsonl")
@@ -5298,7 +5298,7 @@ final class SessionParserTests: XCTestCase {
     func testDroidDiscoveryIncludesSessionStoreAndStreamJSON() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Droid-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionsRoot = root.appendingPathComponent("sessions", isDirectory: true)
         let projectsRoot = root.appendingPathComponent("projects", isDirectory: true)
@@ -5333,7 +5333,7 @@ final class SessionParserTests: XCTestCase {
     func testAntigravityDiscoveryFindsBrainArtifactsOnly() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let conversation = root.appendingPathComponent("conv-123", isDirectory: true)
         let oldAntigravityProject = root.appendingPathComponent("radio4j/chats", isDirectory: true)
@@ -5364,7 +5364,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-Parser-\(UUID().uuidString)", isDirectory: true)
         let conversation = root.appendingPathComponent("conv-abc", isDirectory: true)
         try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let url = conversation.appendingPathComponent("task.md")
         try writeText("""
@@ -5399,7 +5399,7 @@ final class SessionParserTests: XCTestCase {
         try fm.createDirectory(at: brain, withIntermediateDirectories: true)
         try fm.createDirectory(at: sourceDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: repo.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sourceFile = sourceDir.appendingPathComponent("Feature.swift")
         try writeText("struct Feature {}\n", to: sourceFile)
@@ -5425,7 +5425,7 @@ final class SessionParserTests: XCTestCase {
         try fm.createDirectory(at: brain, withIntermediateDirectories: true)
         try fm.createDirectory(at: docsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: repo.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let doc = docsDir.appendingPathComponent("index.html")
         try writeText("<h1>Docs</h1>\n", to: doc)
@@ -5449,7 +5449,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-IDs-\(UUID().uuidString)", isDirectory: true)
         let conversation = root.appendingPathComponent("conv-shared", isDirectory: true)
         try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let task = conversation.appendingPathComponent("task.md")
         let walkthrough = conversation.appendingPathComponent("walkthrough.md")
@@ -5464,7 +5464,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryFindsAgentSessionFiles() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Discovery-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionsDir = root.appendingPathComponent("agents/main/sessions", isDirectory: true)
         try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
@@ -5487,7 +5487,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryIncludesDeletedByDefault() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DefaultDeleted-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionsDir = root.appendingPathComponent("agents/main/sessions", isDirectory: true)
         try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
@@ -5505,7 +5505,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryFindsAgentDatabases() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DBDiscovery-(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let mainDB = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         let otherDB = root.appendingPathComponent("agents/other/agent/openclaw-agent.sqlite")
@@ -5525,7 +5525,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryFindsConfiguredExternalAgentDirectory() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ExternalDB-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let externalAgentDir = root.appendingPathComponent("custom/worker-state", isDirectory: true)
         let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
@@ -5544,7 +5544,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryResolvesJSON5IncludesForExternalAgentDirectory() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-JSON5Config-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let externalAgentDir = root.appendingPathComponent("configured-agent", isDirectory: true)
         let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
         try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
@@ -5578,7 +5578,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-IncludeSymlinkTOCTOU-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
         let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
@@ -5636,7 +5636,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-WorkspaceDotEnv-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let state = root.appendingPathComponent("state", isDirectory: true)
         let workspace = root.appendingPathComponent("workspace", isDirectory: true)
@@ -5737,7 +5737,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ValidatorTimeout-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let state = root.appendingPathComponent("state", isDirectory: true)
         try fm.createDirectory(
@@ -5781,7 +5781,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ValidatorPipeDrain-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let state = root.appendingPathComponent("state", isDirectory: true)
         try fm.createDirectory(
@@ -5824,7 +5824,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryResolvesLegacyAgentListExternalDirectory() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-LegacyAgentList-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let externalAgentDir = root.appendingPathComponent("legacy-agent", isDirectory: true)
         let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
         try fm.createDirectory(at: externalAgentDir, withIntermediateDirectories: true)
@@ -5847,7 +5847,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryExpandsEnvironmentVariableExternalDirectory() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-EnvironmentAgentDirectory-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let externalAgentDir = root.appendingPathComponent("environment-agent", isDirectory: true)
         let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
@@ -5875,7 +5875,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryConcatenatesIncludedLegacyAgentLists() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-IncludedAgentLists-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
         let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
@@ -5911,7 +5911,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryMarksUnresolvedConfiguredDirectoryNonAuthoritative() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-UnresolvedAgentDirectory-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let validDirectory = root.appendingPathComponent("valid-agent", isDirectory: true)
         let validDatabase = validDirectory.appendingPathComponent("openclaw-agent.sqlite")
@@ -5939,7 +5939,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryMarksMalformedAgentRosterNonAuthoritative() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-MalformedAgentRoster-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent("valid-agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -5962,7 +5962,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoverySupportsJSON5HexEscapeInAgentDirectory() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-HexEscape-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let externalAgentDir = root.appendingPathComponent("hex-agent", isDirectory: true)
         let database = externalAgentDir.appendingPathComponent("openclaw-agent.sqlite")
@@ -5988,7 +5988,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryKeepsDatabaseOwnerFromOneSnapshot() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-SnapshotOwner-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
         let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
@@ -6019,7 +6019,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ConfiguredOwner-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let inferredDirectory = root.appendingPathComponent("agents/legacy/agent", isDirectory: true)
         let database = inferredDirectory.appendingPathComponent("openclaw-agent.sqlite")
@@ -6046,7 +6046,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ConfiguredStoreWins-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let defaultDirectory = root.appendingPathComponent("agents/worker/agent", isDirectory: true)
         let configuredDirectory = root.appendingPathComponent("external/worker", isDirectory: true)
@@ -6078,7 +6078,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ExternalStoreMove-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDirectory = root.appendingPathComponent("external/first", isDirectory: true)
         let secondDirectory = root.appendingPathComponent("external/second", isDirectory: true)
@@ -6110,7 +6110,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-IndexerConfiguredStore-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let defaultDatabase = root.appendingPathComponent(
             "agents/worker/agent/openclaw-agent.sqlite")
@@ -6151,7 +6151,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-FinalRefreshSearchRace-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -6256,7 +6256,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-HydrationFinalRefreshRace-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -6415,7 +6415,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-StalePreviewFinalRefresh-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -6494,7 +6494,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-StaleJSONLFinalRefresh-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionURL = root.appendingPathComponent(
             "agents/main/sessions/jsonl-session.jsonl")
@@ -6574,7 +6574,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-JSONLStatHandoff-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let sessionURL = root.appendingPathComponent(
             "agents/main/sessions/jsonl-stat-session.jsonl")
@@ -6811,7 +6811,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-HydrationStalePreview-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -6886,7 +6886,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-PreviewStalenessRace-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -6967,7 +6967,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-UnprovableFreshStaleness-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7000,7 +7000,7 @@ final class SessionParserTests: XCTestCase {
             XCTAssertFalse(indexer.previewStaleByID[baselineSession.id] == true,
                            "the accepted full row must begin fresh")
 
-            try fm.removeItem(at: database)
+            try moveStoreAside(database)
             let unprovableReached = expectation(description: "fresh unprovable SQLite check reaches publication")
             let unprovableSettled = expectation(description: "fresh unprovable SQLite check settles")
             indexer.setPreviewStalenessBeforePublicationHookForTesting {
@@ -7028,7 +7028,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-UnprovableStaleness-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7076,7 +7076,7 @@ final class SessionParserTests: XCTestCase {
 
             // Remove the lexical path so the next revision read is unprovable.
             // The cached SQLite handle must not turn that absence into a fresh verdict.
-            try fm.removeItem(at: database)
+            try moveStoreAside(database)
             let unprovableReached = expectation(description: "unprovable SQLite check reaches publication")
             let unprovableSettled = expectation(description: "unprovable SQLite check settles")
             indexer.setPreviewStalenessBeforePublicationHookForTesting {
@@ -7104,7 +7104,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-RefreshPreviewGeneration-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7202,7 +7202,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-PreviewReverseRace-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7312,7 +7312,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-FinalRefreshLatePublication-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7399,7 +7399,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadGeneration-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7491,7 +7491,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadSourceDriftRetry-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7616,7 +7616,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-PendingReloadOwner-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7780,7 +7780,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-PendingReloadRefreshToken-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -7874,7 +7874,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-LatePublicationSupersession-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8037,7 +8037,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadHydrationProof-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8128,7 +8128,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadPublicationProof-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8210,7 +8210,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadSameStorePublication-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8286,7 +8286,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadLightweightPublicationRace-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8383,7 +8383,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-SameRefreshStoreMove-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8477,7 +8477,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-DelayedReloadRegistration-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8572,7 +8572,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadStrength-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8630,6 +8630,9 @@ final class SessionParserTests: XCTestCase {
             hookLock.unlock()
             XCTAssertGreaterThanOrEqual(observedHookCalls, 2,
                                         "a stronger manual refresh must not coalesce into a focused-session reload")
+            // The stronger reload is still reading the store; let it finish before
+            // the store is deleted.
+            waitForOpenClawIndexerQuiescence(indexer)
         }
     }
 
@@ -8639,7 +8642,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ReloadStrengthInverse-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8720,8 +8723,8 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenClaw-CanonicalTarget-\(UUID().uuidString)",
             isDirectory: true)
         defer {
-            try? fm.removeItem(at: root)
-            try? fm.removeItem(at: canonicalRoot)
+            removeTestRoot(root)
+            removeTestRoot(canonicalRoot)
         }
 
         let canonicalDatabase = canonicalRoot.appendingPathComponent(
@@ -8806,8 +8809,8 @@ final class SessionParserTests: XCTestCase {
             "AgentSessions-OpenClaw-SearchCanonicalTarget-\(UUID().uuidString)",
             isDirectory: true)
         defer {
-            try? fm.removeItem(at: root)
-            try? fm.removeItem(at: canonicalRoot)
+            removeTestRoot(root)
+            removeTestRoot(canonicalRoot)
         }
 
         let canonicalDatabase = canonicalRoot.appendingPathComponent(
@@ -8870,7 +8873,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-RetiredSearchCache-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -8885,7 +8888,7 @@ final class SessionParserTests: XCTestCase {
             waitForOpenClawIndexerQuiescence(indexer)
             let retiredSession = try XCTUnwrap(indexer.allSessions.first)
 
-            try fm.removeItem(at: database)
+            try moveStoreAside(database)
             indexer.refresh(mode: .fullReconcile)
             waitForOpenClawIndexerQuiescence(indexer)
             XCTAssertFalse(indexer.allSessions.contains { $0.id == retiredSession.id })
@@ -8904,7 +8907,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-PartialPublicationReload-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent(
             "agents/first/agent/openclaw-agent.sqlite")
@@ -9027,7 +9030,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-IndexerPartialSnapshot-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let readableDatabase = root.appendingPathComponent(
             "agents/readable/agent/openclaw-agent.sqlite")
@@ -9068,7 +9071,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-SymlinkAlias-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let agentDirectory = root.appendingPathComponent("agents/main/agent", isDirectory: true)
         let database = agentDirectory.appendingPathComponent("openclaw-agent.sqlite")
@@ -9117,7 +9120,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-InferredSymlinkConflict-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent(
             "agents/first/agent/openclaw-agent.sqlite")
@@ -9144,7 +9147,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-BrokenAgentSymlink-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let agentDirectory = root.appendingPathComponent("agents/main/agent", isDirectory: true)
         let missingTarget = root.appendingPathComponent("moved-agent", isDirectory: true)
@@ -9164,7 +9167,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-AgentSymlinkTransition-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let realAgentDirectory = root.appendingPathComponent("real-agent", isDirectory: true)
         let database = realAgentDirectory.appendingPathComponent(
@@ -9192,7 +9195,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-DatabaseSymlinkTransition-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDirectory = root.appendingPathComponent("first-agent", isDirectory: true)
         let secondDirectory = root.appendingPathComponent("second-agent", isDirectory: true)
@@ -9398,7 +9401,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-MissingExplicitConfig-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let inferredDatabase = root.appendingPathComponent(
             "agents/main/agent/openclaw-agent.sqlite")
@@ -9423,7 +9426,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-OwnerlessDatabase-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent(
             "agents/!!!/agent/openclaw-agent.sqlite")
@@ -9565,7 +9568,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawDiscoveryUsesStateDotEnvBeforeConfigEnvVarsAndHonorsEscapes() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-EnvironmentPrecedence-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let stateDirectory = root.appendingPathComponent("state-agent", isDirectory: true)
         let configDirectory = root.appendingPathComponent("config-agent", isDirectory: true)
@@ -9610,7 +9613,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-RemovedIdentity-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -9655,7 +9658,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawSqliteReaderListsAndScansSessionScopedTelemetry() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-SQLite-(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: dbURL)
@@ -9712,7 +9715,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-CapturedStorageToken-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent("first/openclaw-agent.sqlite")
         let secondDatabase = root.appendingPathComponent("second/openclaw-agent.sqlite")
@@ -9745,7 +9748,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-CachedRevisionBoundary-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         let replacement = root.appendingPathComponent("replacement/openclaw-agent.sqlite")
@@ -9763,7 +9766,7 @@ final class SessionParserTests: XCTestCase {
         var mutationError: Error?
         OpenClawSqliteReader.setCacheHitBeforeBoundaryProbeHookForTesting {
             do {
-                try fm.removeItem(at: database)
+                try moveStoreAside(database)
                 try fm.moveItem(at: replacement, to: database)
             } catch {
                 mutationError = error
@@ -9784,7 +9787,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ListAliasRetarget-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let firstDatabase = root.appendingPathComponent("first/openclaw-agent.sqlite")
         let secondDatabase = root.appendingPathComponent("second/openclaw-agent.sqlite")
@@ -9830,7 +9833,7 @@ final class SessionParserTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(
             "AgentSessions-OpenClaw-ListReplacement-\(UUID().uuidString)",
             isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let database = root.appendingPathComponent("current/openclaw-agent.sqlite")
         let replacement = root.appendingPathComponent("replacement/openclaw-agent.sqlite")
@@ -9852,7 +9855,7 @@ final class SessionParserTests: XCTestCase {
         var replacementError: Error?
         OpenClawSqliteReader.setListSessionsBeforeMaterializationHookForTesting {
             do {
-                try fm.removeItem(at: database)
+                try moveStoreAside(database)
                 try fm.moveItem(at: replacement, to: database)
             } catch {
                 replacementLock.lock()
@@ -9879,7 +9882,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawSqliteReaderFailsClosedForCompressedEvents() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Compressed-(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: dbURL, compressed: true)
@@ -9895,7 +9898,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawSqliteReaderAcceptsNullableSessionMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-NullableMetadata-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: dbURL)
@@ -9933,7 +9936,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawSqliteReaderFailsClosedForColdStoredTranscript() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-ColdStorage-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: dbURL)
@@ -9971,7 +9974,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawSqliteSessionRevisionSeesWALPayloadChanges() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-WALRevision-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         let dbURL = root.appendingPathComponent("agents/main/agent/openclaw-agent.sqlite")
         try fm.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try createOpenClawSQLiteFixture(at: dbURL)
@@ -9995,7 +9998,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawUsageIsPricedThroughTheEngineForJSONLAndSQLite() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Priced-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let jsonlURL = root.appendingPathComponent("openclaw-priced.jsonl")
@@ -10032,7 +10035,7 @@ final class SessionParserTests: XCTestCase {
     func testOpenClawCLIBackendTurnShowsTokensButNoCost() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-CLI-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         func price(api: String) async throws -> SessionTelemetry {
@@ -10273,7 +10276,7 @@ final class SessionParserTests: XCTestCase {
     func testClaudeDesktopMetadataPrefersWorktreePathForProjectDisplay() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopWorktree-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let localDir = root
             .appendingPathComponent("local_abc", isDirectory: true)
@@ -10796,7 +10799,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesParserPreservesRecordedCwdWhenPresent() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let repoDir = root.appendingPathComponent("repo", isDirectory: true)
@@ -10831,7 +10834,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesFullParsePreservesRecordedCwdWhenEventsLoaded() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let nestedDir = root.appendingPathComponent("repo/Sources/App", isDirectory: true)
@@ -10867,7 +10870,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesStateDBReaderLoadsCurrentDatabaseLayout() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-StateDB-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -10912,7 +10915,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryReadsModelUsageWithoutTitleGenerationDoubleCount() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -10945,7 +10948,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesRollupBelowLongContextThresholdIsPricedThroughTheEngine() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Luna-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let dbURL = root.appendingPathComponent("state.db")
         try createHermesStateDBFixture(at: dbURL, model: "gpt-6-luna")
@@ -10964,7 +10967,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesModelUsageIsPricedThroughTheEngine() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Priced-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let dbURL = root.appendingPathComponent("state.db")
         try createHermesStateDBFixture(at: dbURL, model: "gpt-5.4-mini")
@@ -10986,7 +10989,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesRollupNeverSelectsALongContextTier() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-LongCtx-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let dbURL = root.appendingPathComponent("state.db")
         try createHermesStateDBFixture(at: dbURL)
@@ -11015,7 +11018,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryKeepsAuxiliaryUsageSeparateFromSessionAggregate() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Auxiliary-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11039,7 +11042,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryDoesNotFallbackWhenRollupContainsOnlyBookkeepingRows() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Bookkeeping-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11057,7 +11060,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryLabelsAuxiliaryOnlyRollupWithoutClaimingBookkeeping() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Auxiliary-Only-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11081,7 +11084,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryLegacyAggregateFallbackIsUnattributed() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Legacy-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11100,7 +11103,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryFailsClosedWhenCombinedTopLineOverflows() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Overflow-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11127,7 +11130,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesLegacyAggregateOverflowKeepsSessionProvenance() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Legacy-Overflow-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11149,7 +11152,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryKeepsKnownFirstObservationAheadOfUnknownTimestamp() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Ordering-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11175,7 +11178,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryDoesNotInferInitialModelWhenAllFirstObservationsAreUnknown() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Unknown-Ordering-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11195,7 +11198,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryDoesNotInventModelChangesFromPerModelRollup() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-ModelHistory-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11229,7 +11232,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryRevisionIsSessionScopedAndLogical() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Revision-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11266,7 +11269,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryFailsClosedForMalformedSQLiteStorageClasses() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Malformed-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let taskRoot = root.appendingPathComponent("task", isDirectory: true)
@@ -11291,7 +11294,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryFailsClosedForEmbeddedNULInSQLiteText() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Embedded-NUL-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11306,7 +11309,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesTelemetryRevisionDistinguishesNullAndLiteralNullText() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-Telemetry-Revision-Null-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let dbURL = root.appendingPathComponent("state.db")
@@ -11322,7 +11325,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesParserKeepsOfflinePathMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let nonRepoDir = root.appendingPathComponent("plain-folder", isDirectory: true)
@@ -11356,7 +11359,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesParserPreservesDeepNestedPathsWithoutFilesystemProbe() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let repoDir = root.appendingPathComponent("repo", isDirectory: true)
@@ -11392,7 +11395,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesParserUsesPlatformAsProjectOrigin() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("session_hermes_telegram.json")
@@ -11423,7 +11426,7 @@ final class SessionParserTests: XCTestCase {
     func testHermesParserFallsBackWhenPlatformMissing() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("session_hermes_no_platform.json")
@@ -11457,7 +11460,7 @@ final class SessionParserTests: XCTestCase {
         // hierarchy joins must use the OWN id.
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexOwnID-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
@@ -12171,7 +12174,7 @@ final class SessionParserTests: XCTestCase {
     func testProjectIdentityBaseCheckoutPlusRealAndEmbeddedWorktreesEqual() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AS531Identity-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeTestRoot(root) }
 
         let base = root.appendingPathComponent("app", isDirectory: true)
         try fm.createDirectory(at: base.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)

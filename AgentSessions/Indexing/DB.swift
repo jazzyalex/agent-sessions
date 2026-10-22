@@ -8,6 +8,59 @@ enum IndexDBTestHooks {
     /// SQL `LIMIT` really reaches SQLite on the filtered search path.
     static var filteredSearchScanSlack: Int?
 
+    // MARK: Test folder lifetime
+    //
+    // Deleting a database SQLite still has open makes it log "vnode unlinked while in
+    // use" and invalidate the open file handles; that was the last thing logged before
+    // a CI segfault (run 39694494967). Each `IndexDB` opened in a provider folder is
+    // counted here, and a test asks for its folder to go once all of them have closed.
+
+    private static let folderLock = NSLock()
+    private static var openDatabasesByFolder: [String: Int] = [:]
+    private static var foldersAwaitingRemoval: Set<String> = []
+
+    /// Measured, not guessed: deleting the instant the last connection closed still
+    /// tripped the warning (7 in SessionProviderCatalogTests); 0.5s later it did not.
+    /// The system's per-file deletion watch appears to be torn down after
+    /// `sqlite3_close` returns.
+    static let removalGrace: TimeInterval = 0.5
+
+    /// Removes `directory` once no `IndexDB` opened in it is open, after
+    /// `removalGrace`. A database reopened during the grace keeps the folder.
+    static func removeWhenDatabasesClose(_ directory: URL) {
+        let path = directory.standardizedFileURL.path
+        folderLock.lock()
+        foldersAwaitingRemoval.insert(path)
+        let idle = openDatabasesByFolder[path, default: 0] == 0
+        folderLock.unlock()
+        if idle { scheduleRemoval(path) }
+    }
+
+    static func databaseOpened(inFolder path: String) {
+        folderLock.lock()
+        openDatabasesByFolder[path, default: 0] += 1
+        folderLock.unlock()
+    }
+
+    static func databaseClosed(inFolder path: String) {
+        folderLock.lock()
+        let remaining = max(0, openDatabasesByFolder[path, default: 0] - 1)
+        openDatabasesByFolder[path] = remaining == 0 ? nil : remaining
+        let idleAndAwaited = remaining == 0 && foldersAwaitingRemoval.contains(path)
+        folderLock.unlock()
+        if idleAndAwaited { scheduleRemoval(path) }
+    }
+
+    private static func scheduleRemoval(_ path: String) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + removalGrace) {
+            folderLock.lock()
+            let ready = openDatabasesByFolder[path, default: 0] == 0
+                && foldersAwaitingRemoval.remove(path) != nil
+            folderLock.unlock()
+            if ready { try? FileManager.default.removeItem(atPath: path) }
+        }
+    }
+
     /// True while this process is hosting an XCTest run.
     ///
     /// `xcodebuild test` hosts the test bundle in `AgentSessions.app`, so the app's own
@@ -70,9 +123,20 @@ actor IndexDB {
     enum DBError: Error { case openFailed(String), execFailed(String), prepareFailed(String) }
 
     private var handle: OpaquePointer?
+    #if DEBUG
+    /// The test provider folder this database lives in; nil outside tests.
+    private let testFolderPath: String?
+    #endif
 
     // MARK: - Init / Open
     init() throws {
+        #if DEBUG
+        let testFolderPath = IndexDBTestHooks.applicationSupportDirectoryProvider?()?.standardizedFileURL.path
+        self.testFolderPath = testFolderPath
+        // Before the file is opened: a background indexer can still be bootstrapping
+        // when its test asks for the folder to go.
+        if let testFolderPath { IndexDBTestHooks.databaseOpened(inFolder: testFolderPath) }
+        #endif
         let fm = FileManager.default
         guard let appSupport = Self.resolveApplicationSupportDirectoryURL(fileManager: fm) else {
             throw DBError.openFailed("Application Support directory unavailable")
@@ -97,6 +161,11 @@ actor IndexDB {
 
     deinit {
         if let db = handle { sqlite3_close(db) }
+        #if DEBUG
+        // Also runs when `init` threw after registering: every stored property was
+        // already initialized, so Swift still calls `deinit`.
+        if let testFolderPath { IndexDBTestHooks.databaseClosed(inFolder: testFolderPath) }
+        #endif
     }
 
     private static func resolveApplicationSupportDirectoryURL(fileManager: FileManager) -> URL? {

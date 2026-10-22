@@ -17,7 +17,7 @@ final class OpenClawSqliteStoreTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        if let root { try? FileManager.default.removeItem(at: root) }
+        if let root { removeTestRoot(root) }
     }
 
     private func makeFixtureDatabase() throws -> URL {

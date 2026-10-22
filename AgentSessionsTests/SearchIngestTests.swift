@@ -332,6 +332,29 @@ final class SearchIngestTests: XCTestCase {
                        "a current (fresh FTS) session must not be scanned")
     }
 
+    // MARK: - Test database lifetime
+
+    /// CI crashed once (segv, run 39694494967) right after SQLite logged "BUG IN CLIENT
+    /// OF libsqlite3.dylib: vnode unlinked while in use". The helper's cleanup deleted
+    /// the database folder while the test's `IndexDB` still held it open, and the
+    /// connection then closed on invalidated file handles. Cleanup must wait for close.
+    func testTestDatabaseFolderOutlivesTheOpenConnection() async throws {
+        var (db, cleanup, directory): (IndexDB?, () -> Void, URL) = try makeTestIndexDBWithDirectory()
+        _ = try await db?.hasSearchData(sources: ["codex"])
+
+        cleanup()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path),
+                      "cleanup must not delete files SQLite still has open")
+
+        db = nil
+        let deadline = Date().addingTimeInterval(IndexDBTestHooks.removalGrace + 3)
+        while FileManager.default.fileExists(atPath: directory.path), Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path),
+                       "the folder goes once the connection has closed")
+    }
+
     // MARK: - SearchIngestService
 
     private var ingestTempDir: URL!

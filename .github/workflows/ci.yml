@@ -84,3 +84,22 @@ jobs:
           bundle=$(ls -d .deriveddata-tests/Logs/Test/*.xcresult 2>/dev/null | tail -1)
           if [ -z "$bundle" ]; then echo "no result bundle produced"; exit 0; fi
           xcrun xcresulttool get test-results summary --path "$bundle"
+      # A crashed test leaves only "Test crashed with signal segv" in the summary
+      # (run 39694494967). Keep the crash reports and the result bundle so the next
+      # crash has a stack trace.
+      - name: Collect crash reports
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p ci-diagnostics
+          cp ~/Library/Logs/DiagnosticReports/AgentSessions* ci-diagnostics/ 2>/dev/null || true
+          cp -R .deriveddata-tests/Logs/Test/*.xcresult ci-diagnostics/ 2>/dev/null || true
+          ls -la ci-diagnostics
+      - name: Upload crash reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-diagnostics-${{ github.run_id }}
+          path: ci-diagnostics
+          retention-days: 14
+          if-no-files-found: ignore

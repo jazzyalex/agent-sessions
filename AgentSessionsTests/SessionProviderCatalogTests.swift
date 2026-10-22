@@ -291,7 +291,9 @@ final class SessionProviderCatalogTests: XCTestCase {
             else { defaults.removeObject(forKey: overrideKey) }
             if let previousEnabled { defaults.set(previousEnabled, forKey: enabledKey) }
             else { defaults.removeObject(forKey: enabledKey) }
-            try? FileManager.default.removeItem(at: sandbox)
+            // The indexers' IndexDBs can outlive `body`; deleting their open database
+            // makes SQLite invalidate its file handles.
+            IndexDBTestHooks.removeWhenDatabasesClose(sandbox)
         }
 
         body(sandbox)
