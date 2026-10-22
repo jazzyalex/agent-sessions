@@ -2308,6 +2308,36 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## QM / Runway
 
+### Notch wings show only Codex and Claude, so OpenCode is invisible in the collapsed strip
+> **open** · sev: med · urg: low · verified 2026-10-22
+
+- **What:** running OpenCode sessions show in the expanded drawer (the OpenCode group,
+  `5d542c9b`), but not in the collapsed notch. The wings have two slots, filled only from
+  the Codex and Claude quota models. Two setups are not covered:
+  - **OpenCode only:** both wings are empty (`(nil, nil)`), so the collapsed strip shows
+    no sign that sessions are running.
+  - **OpenCode + Claude:** Claude takes both wings (5h left, weekly right), and the
+    OpenCode sessions have no mark.
+  Owner reported 2026-10-22.
+- **Where:** [QuotaStripView.swift](../AgentSessions/QuotaStrip/QuotaStripView.swift)
+  `QuotaStripWings.cells` (switches on Codex/Claude `QuotaData` only) and
+  `sessionActivity` (counts presences per quota provider);
+  [QuotaStripCell.swift](../AgentSessions/QuotaStrip/QuotaStripCell.swift)
+  `QuotaStripWingCell` (names only Codex or Claude);
+  [AgentCockpitHUDView.swift](../AgentSessions/Views/AgentCockpitHUDView.swift)
+  `OpenCodeHUDGroup.make` (the drawer's filter to reuse).
+- **Fix shape:** OpenCode has no quota windows, so it needs a wing cell of its own kind:
+  OpenCode logo, running count, and the same working dot / your-turn ring as the other
+  wings. Slot rules to decide: OpenCode only → one wing or both; OpenCode + one quota
+  provider → provider keeps one wing (which window?), OpenCode takes the other; all three
+  → OpenCode adds its mark to a wing or stays drawer-only.
+- **Why deferred:** needs a layout decision from the owner; the drawer group shipped first.
+- **Risk if wrong:** a wing that shows OpenCode when no session runs looks broken.
+  Gate it the same way as the drawer (detection on, agent on, at least one row).
+- **To close:** with only OpenCode enabled and a session running, the collapsed strip
+  shows it; with OpenCode + Claude, both are visible; with no OpenCode session, the wings
+  look as they do now.
+
 ### Menu bar strip cannot tell "waiting on a permission prompt" from "finished its turn"
 > **open** · sev: med · urg: low · verified 2026-10-19
 
