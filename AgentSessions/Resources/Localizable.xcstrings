@@ -2501,6 +2501,47 @@
         }
       }
     },
+    "%lld running": {
+      "comment": "Quota Meter OpenCode group header: number of detected running OpenCode sessions.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld running"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld running"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个运行中"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个运行中"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld sessions": {
       "comment": "Footer count of sessions.",
       "localizations": {
@@ -2776,6 +2817,47 @@
         }
       },
       "comment": "User-visible copy from AnalyticsView. Preserve runtime placeholders and allow value reordering for grammar."
+    },
+    "+%lld more": {
+      "comment": "Quota Meter OpenCode group: number of running sessions not listed above.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "+%lld more"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "另有 %lld 个"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "另有 %lld 个"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "0% remaining.": {
       "comment": "Notification body shown for an exhausted usage window without a reset estimate.",
@@ -3724,18 +3806,19 @@
         }
       }
     },
-    "Agents shown": {
+    "Usage sections shown": {
+      "comment": "Heading for the Quota Meter usage-section visibility checkboxes (Codex, Claude).",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Agents shown"
+            "value": "Usage sections shown"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示的智能体"
+            "value": "显示的用量部分"
           }
         }
       }
@@ -24818,6 +24901,23 @@
         }
       }
     },
+    "idle": {
+      "comment": "Quota Meter OpenCode group: the session is open but not processing.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "idle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空闲"
+          }
+        }
+      }
+    },
     "jazzyalex.github.io/agent-sessions": {
       "localizations": {
         "en": {
@@ -25157,6 +25257,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已用"
+          }
+        }
+      }
+    },
+    "working": {
+      "comment": "Quota Meter OpenCode group: the session is processing a turn.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "working"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作中"
           }
         }
       }

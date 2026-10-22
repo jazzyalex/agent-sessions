@@ -175,7 +175,7 @@ extension PreferencesView {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                labeledRow("Agents shown") {
+                labeledRow("Usage sections shown") {
                     HStack(spacing: 16) {
                         ForEach(QuotaMeterProvider.allCases) { provider in
                             Toggle(provider.displayName, isOn: quotaMeterProviderVisibilityBinding(provider))

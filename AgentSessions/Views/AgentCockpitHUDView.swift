@@ -224,10 +224,74 @@ struct SessionLookupIndexes {
     let byWorkspace: [String: Session]
 }
 
-private struct HUDRowsSnapshot: Equatable {
+struct HUDRowsSnapshot: Equatable {
     let rows: [HUDRow]
     let activeCount: Int
     let idleCount: Int
+}
+
+/// The Quota Meter's OpenCode sessions group: running OpenCode sessions and their
+/// count, with no quota, subscription or runway data.
+///
+/// "Running" means every eligible detected live OpenCode session, working or idle.
+/// The group is a pure filter over the HUD's `rowsForDisplay`, so it inherits every
+/// row rule `makeRowsSnapshot` applies: the probe-directory filter (source-independent,
+/// so it also drops OpenCode presences in a Codex or Claude probe directory), the
+/// unresolved-placeholder rule (unresolved subagents always hidden; other unresolved
+/// presences kept only with a session ID, log path, focus target or workspace match),
+/// and resolved-session dedup. It adds no rule of its own, and its count is always the
+/// size of the exact row list it shows. Detection limits are upstream: headless
+/// candidates are not proven to be real conversations, and OpenCode log matching does
+/// not cover every SQLite-store session.
+struct OpenCodeHUDGroupModel: Equatable {
+    /// OpenCode rows from `rowsForDisplay`, deduplicated by id, in incoming order.
+    let rows: [HUDRow]
+    let visibleRows: [HUDRow]
+    let overflowCount: Int
+
+    var totalCount: Int { rows.count }
+}
+
+enum OpenCodeHUDGroup {
+    /// Session rows shown before the "+N more" line. The group's own budget; it is
+    /// deliberately not the runway's burn-attribution row budget.
+    static let maxVisibleSessions = 4
+
+    /// `nil` hides the group: live detection off, the OpenCode agent disabled, or no
+    /// running OpenCode session (owner decision 2026-10-21: no empty state).
+    static func make(rows: [HUDRow],
+                     detectionEnabled: Bool,
+                     openCodeEnabled: Bool) -> OpenCodeHUDGroupModel? {
+        guard detectionEnabled, openCodeEnabled else { return nil }
+        var seen: Set<String> = []
+        // Incoming order is kept on purpose: `rowsForDisplay` already applies the
+        // HUD's priority order and its hidden-window churn rules.
+        let openCodeRows = rows.filter { $0.source == .opencode && seen.insert($0.id).inserted }
+        guard !openCodeRows.isEmpty else { return nil }
+        let visible = Array(openCodeRows.prefix(maxVisibleSessions))
+        return OpenCodeHUDGroupModel(
+            rows: openCodeRows,
+            visibleRows: visible,
+            overflowCount: openCodeRows.count - visible.count
+        )
+    }
+
+    /// Idle reasons are heuristic, so a long-idle session reads "idle", never "Stuck".
+    static func stateLabel(for row: HUDRow) -> LocalizedStringResource {
+        row.liveState == .active
+            ? LocalizedStringResource("working", comment: "Quota Meter OpenCode group: the session is processing a turn.")
+            : LocalizedStringResource("idle", comment: "Quota Meter OpenCode group: the session is open but not processing.")
+    }
+
+    static func runningText(count: Int) -> LocalizedStringResource {
+        LocalizedStringResource("\(count) running",
+                                comment: "Quota Meter OpenCode group header: number of detected running OpenCode sessions.")
+    }
+
+    static func overflowText(count: Int) -> LocalizedStringResource {
+        LocalizedStringResource("+\(count) more",
+                                comment: "Quota Meter OpenCode group: number of running sessions not listed above.")
+    }
 }
 
 private struct HUDWaitingCounts {
@@ -1070,6 +1134,7 @@ struct AgentCockpitHUDView: View {
 
             HUDLimitsRowsPanel(
                 activeRows: displayState.rowsForDisplay,
+                detectionEnabled: activeEnabled,
                 // The strip has no toolbar to reveal, so its extra lines always show.
                 showsChrome: surface == .strip ? true : showsCompactToolbar,
                 hiddenProvidersRaw: $quotaMeterHiddenProvidersRaw
@@ -1789,7 +1854,7 @@ struct AgentCockpitHUDView: View {
         return existing
     }
 
-    fileprivate static func makeRowsSnapshot(codexSessions: [Session],
+    static func makeRowsSnapshot(codexSessions: [Session],
                                              claudeSessions: [Session],
                                              opencodeSessions: [Session],
                                              presences: [CodexActivePresence],
@@ -3808,6 +3873,9 @@ private struct HUDLimitsRowsPanel: View {
 
 
     let activeRows: [HUDRow]
+    /// Live session detection (Settings → Quota Meter). Off hides the OpenCode
+    /// group; the parent's disabled callout explains why.
+    let detectionEnabled: Bool
     /// The reset-credits line is part of the chrome layer, revealed and hidden
     /// with the toolbar rather than on its own hover.
     let showsChrome: Bool
@@ -3872,6 +3940,10 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
+    /// Read here, after the cached snapshot, so toggling OpenCode updates the group
+    /// immediately without a HUD rebuild. Fallback `true` matches the descriptor's
+    /// `.always` default for an unset key.
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
@@ -4095,8 +4167,15 @@ private struct HUDLimitsRowsPanel: View {
     var body: some View {
         let rows = entries
         let layout = rowLayout(for: rows)
+        let openCodeGroup = OpenCodeHUDGroup.make(
+            rows: activeRows,
+            detectionEnabled: detectionEnabled,
+            openCodeEnabled: openCodeAgentEnabled
+        )
         Group {
-            if rows.isEmpty {
+            // OpenCode-only: the group renders alone. "Usage tracking is off" is about
+            // quota sections, which the OpenCode group does not need.
+            if rows.isEmpty && openCodeGroup == nil {
                 emptyRow
             } else {
                 VStack(spacing: 0) {
@@ -4149,6 +4228,11 @@ private struct HUDLimitsRowsPanel: View {
                             .transition(.opacity)
                         }
                         runwayBlock(for: entry.source)
+                    }
+                    // Last, and inside the measured region, so its height reaches
+                    // `limitsWindowHeight`.
+                    if let openCodeGroup {
+                        HUDOpenCodeSessionsGroup(model: openCodeGroup, showsGroupSeparator: !rows.isEmpty)
                     }
                 }
             }
@@ -4499,7 +4583,7 @@ private struct HUDProviderVisibilityPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Agents shown")
+            Text("Usage sections shown")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
@@ -4598,6 +4682,99 @@ private final class RunwayShimmerTicker: ObservableObject {
     }
 
     deinit { timer?.invalidate() }
+}
+
+#if DEBUG
+/// Test-only host for the real (file-private) Quota Meter panel, so tests can
+/// mount it with the shared usage models and measure what it renders.
+enum HUDLimitsRowsPanelTestHost {
+    static func view(activeRows: [HUDRow], detectionEnabled: Bool) -> AnyView {
+        AnyView(
+            HUDLimitsRowsPanel(
+                activeRows: activeRows,
+                detectionEnabled: detectionEnabled,
+                showsChrome: false,
+                hiddenProvidersRaw: .constant(QuotaMeterProviderVisibility.defaultRawValue)
+            )
+            .environmentObject(CodexUsageModel.shared)
+            .environmentObject(ClaudeUsageModel.shared)
+        )
+    }
+}
+#endif
+
+/// OpenCode running sessions under the quota sections. Session presence only: it
+/// reuses the provider-row and runway type, spacing and separators, but draws no
+/// rate cell or load bar, because OpenCode has no usage data here.
+private struct HUDOpenCodeSessionsGroup: View {
+    let model: OpenCodeHUDGroupModel
+    /// The full-bleed rule between agent groups; off when nothing sits above.
+    let showsGroupSeparator: Bool
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if showsGroupSeparator {
+                Color.clear.frame(height: 7)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.18))
+                    .frame(height: 1)
+            }
+            header
+            sessions
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text(verbatim: HUDAgentType.opencode.label)
+                .foregroundStyle(HUDAgentType.opencode.standardTextColor)
+            Text(verbatim: "·")
+                .foregroundStyle(.secondary)
+            Text(OpenCodeHUDGroup.runningText(count: model.totalCount))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: quotaMeterEnlarged), weight: .medium, design: .monospaced))
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .frame(height: QuotaMeterTextMetrics.providerRowHeight(enlarged: quotaMeterEnlarged))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var sessions: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(model.visibleRows) { row in
+                HStack(spacing: HUDRunwayLayout.columnSpacing) {
+                    Text(verbatim: row.displayName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Text(OpenCodeHUDGroup.stateLabel(for: row))
+                        .lineLimit(1)
+                        .foregroundStyle(row.liveState == .active ? Color.primary : Color.secondary)
+                }
+                .frame(height: QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged))
+                .accessibilityElement(children: .combine)
+            }
+            if model.overflowCount > 0 {
+                Text(OpenCodeHUDGroup.overflowText(count: model.overflowCount))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(height: QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged))
+            }
+        }
+        .font(.system(size: QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged), weight: .medium, design: .monospaced))
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
+        }
+    }
 }
 
 private struct HUDRunwayPanel: View {

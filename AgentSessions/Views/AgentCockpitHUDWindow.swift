@@ -22,6 +22,19 @@ enum HUDLimitsResizeAnchor {
     }
 }
 
+/// How much measured panel content the fixed-size Quota Meter window shows. The
+/// window sets `minSize == maxSize` and clips, so anything past the maximum is
+/// cut off. It was 270 pt (9 × 30), which clipped the OpenCode group rendered
+/// last; owner decision 2026-10-21 raised it to 500 pt instead of scrolling.
+enum HUDLimitsContentHeight {
+    static let minimum: CGFloat = 30
+    static let maximum: CGFloat = 500
+
+    static func clamped(_ contentHeight: CGFloat) -> CGFloat {
+        max(minimum, min(contentHeight, maximum))
+    }
+}
+
 struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
     let limitsContentHeight: CGFloat
@@ -120,8 +133,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let limitsAutosaveName = "AgentCockpitHUDWindow.limits"
         private let limitsMinimumWidth: CGFloat = 220
         private let limitsDefaultFrameWidth: CGFloat = 380
-        private let limitsRowHeight: CGFloat = 30
-        private let limitsMaximumRows: CGFloat = 9
         private let compactHeaderHeight: CGFloat = 44.5
         private let compactDisabledCalloutHeight: CGFloat = 56
         /// Which edge the last Quota Meter *growth* pinned, so the matching
@@ -340,7 +351,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                         includesToolbar: Bool) -> CGFloat {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
-            let clampedContentHeight = max(limitsRowHeight, min(contentHeight, limitsRowHeight * limitsMaximumRows))
+            let clampedContentHeight = HUDLimitsContentHeight.clamped(contentHeight)
             return (includesToolbar ? compactHeaderHeight + 0.5 : 0)
                 + clampedContentHeight
                 + calloutHeight

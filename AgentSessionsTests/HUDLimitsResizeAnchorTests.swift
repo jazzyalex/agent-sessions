@@ -78,4 +78,14 @@ final class HUDLimitsResizeAnchorTests: XCTestCase {
             XCTAssertEqual(y, originY, "growsDown=\(growsDown): the window must land where it started.")
         }
     }
+
+    /// The floating window is fixed-size and clips its content, so the clamp is
+    /// the most content it can show. 270 pt clipped the OpenCode group, which
+    /// renders last; the owner raised it to 500 pt (no scrolling).
+    func testContentHeightClampsTo500Points() {
+        XCTAssertEqual(HUDLimitsContentHeight.maximum, 500)
+        XCTAssertEqual(HUDLimitsContentHeight.clamped(420), 420, "content between 270 and 500 pt must no longer be cut")
+        XCTAssertEqual(HUDLimitsContentHeight.clamped(800), 500)
+        XCTAssertEqual(HUDLimitsContentHeight.clamped(10), 30, "the 30 pt minimum is unchanged")
+    }
 }
