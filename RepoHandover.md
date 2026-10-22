@@ -1,3 +1,61 @@
+## 2026-10-21 16:39 · format-check-6.0.1 · 6.0.1 released and verified; real-app smoke owed
+status: in-progress
+
+**State:** Agent Sessions 6.0.1 (build 83) is published and verified. `main` = `origin/main` = `67d1af54`. Only the manual real-app check of the new readers remains.
+
+**Verified:**
+- Release `v6.0.1`: GitHub release (DMG + sha256), appcast item 6.0.1/83 with EdDSA signature, Homebrew cask 6.0.1. `deploy verify 6.0.1` 0 errors after re-running the Pages deploy (run 39693832828; first attempt was a GitHub 500).
+- Release QA on the release HEAD: 3802 passed, 0 failed, 3 skipped; pytest 555.
+- Commits this release: `9e71cf12` (changelog, README, site links), `2ef2906c` (bump), `27ba9967` (baseline = passed count 3802), `4570ac46` (appcast), `67d1af54` (prices-v2.released = sequence 2026102101, fingerprint `653bb5c9…d7ec`). Live site serves prices sequence 2026102101.
+
+**Decided / don't redo:**
+- 6.0.1, not 6.1: the user asked to keep 6.0's notes and intro and only add format updates. The intro keys on major.minor; the notes generator appends "Reminder: What You Got in 6.0". `WhatsNewCatalog.swift` untouched.
+- `test-count-baseline.txt` is the passed count, not the total with skips.
+- Review-hardening fixes to code new in 6.0.1 are listed under Maintenance, not Bug Fixes.
+- Host changes and Repo MCP run IDs from earlier today: see the superseded 15:59 entry below.
+
+**Recovery:**
+- `~/.hermes/config.yaml.bak-20261020-as-prebump` — Hermes config before the model change; drop once Hermes runs fine.
+
+**Uncommitted / ownership:**
+- `RepoHandover.md` — these entries; uncommitted.
+- `docs/PROMPT_QUOTA_METER_OPENCODE_RUNNING_SESSIONS.md` — untracked, owned by another session; leave alone.
+
+**Next:**
+1. Owner runs 6.0.1: OpenClaw SQLite sessions list, Claude transcripts without repeats, first-launch Claude re-index v2 and `openclaw_preview_digest` migration on the live index.
+2. fx schema 4 waits for a steward's real 0.0.8+ session (issue #83).
+3. Repo MCP task `agent-sessions-pricing-review-20261014` is still in coding phase; finish or move it.
+
+## 2026-10-21 15:59 · format-check-6.0.1 · All-agent format and pricing pass after 6.0; shipped as 6.0.1
+status: superseded-by:2026-10-21 16:39
+
+**State:** 6.0.1 (build 83) is released and verified. `main` at `67d1af54` (pushed). Release notes = 6.0.1 format/fix section + the generator's "Reminder: What You Got in 6.0"; the 6.0 intro and What's New are unchanged (keyed on major.minor).
+
+**Verified:**
+- Release: tag `v6.0.1`, GitHub release with DMG + sha256, appcast item 6.0.1/83 with EdDSA signature, Homebrew cask 6.0.1; `deploy verify 6.0.1` 0 errors after a re-run of the Pages deploy (first attempt hit a GitHub 500).
+- Release QA: 3802 passed, 0 failed, 3 skipped; pytest 555. Test baseline is the passed count: 3802 (`27ba9967`).
+- `docs/prices-v2.released.json` = sequence 2026102101, fingerprint `653bb5c9…d7ec` (`67d1af54`); live site serves 2026102101. Fingerprint computed with Swift JSONSerialization sortedKeys + SHA-256; the same method reproduced the 6.0 value.
+- On `3a8f51c8`: full Xcode suite 3805 total, 0 failed, 3 skipped; pytest 555 passed. Mutation checks failed each new or changed test on mutated code.
+- Weekly verdicts supports_latest: codex 0.163.0, claude 2.1.306, opencode 2.1.2, hermes 0.22.4, copilot 1.0.102, openclaw 2026.10.5, cursor 2026.10.19, pi 1.3.0, kimi 2.3.0, grok 1.0.62, cline 3.0.73 (desktop 0.0.48), deepseek_harness 0.2.1-rc.2.
+- Held: antigravity 1.1.27 (weekly says 1.4.4 works, weak evidence); qwen 0.14.3 (source-reviewed through 0.25.3). Steward-owned: devin 3000.6.7 (upstream 3000.11.92), fx 0.0.7 (upstream 0.0.14); requests on jazzyalex/agent-sessions#83 (comments 6323434978, 6324278186).
+- Repo MCP runs, all completed and archived: reviews `cc1240f3`, `9cfc2dad`; coding `ff848169`, `29e2fc7c`. Task `agent-sessions-pricing-review-20261014` left in **coding** phase; workspace `6b10c45c…` revoked.
+
+**Recovery:**
+- `~/.hermes/config.yaml.bak-20261020-as-prebump` — Hermes config before model change (gpt-5.5→gpt-6-luna, fallback gpt-5-mini→claude-haiku-5.5). Drop once Hermes runs fine.
+- `hermes update` stashed local edits in `~/.hermes/hermes-agent`; re-apply command was in the update output.
+
+**Decided / don't redo:**
+- Stewards may open PRs for their agents, monthly, unprompted — preferred, not mandatory; they may opt out and do only format updates (STEWARDS.md, `243eb191`).
+- Other host changes this session: `~/.local/bin/grok` → grok-1.0.62; `openclaw doctor --fix` run; Cline Desktop provider = Cline Usage-Billing; OpenCode desktop model = DeepSeek V4.1 Flash Free.
+- Review/coding notes: scratchpad `repo-mcp-review-2026-10-21.md`, `…-fixes.md`, `repo-mcp-coding-2026-10-21.md` (session-temporary).
+
+**Uncommitted / ownership:**
+- `docs/PROMPT_QUOTA_METER_OPENCODE_RUNNING_SESSIONS.md` — untracked, owned by another session; not part of this release.
+
+**Next:**
+1. Real-app smoke of 6.0.1 is still owed: OpenClaw SQLite sessions, Claude re-index v2 on the live index, `openclaw_preview_digest` migration. fx schema 4 needs a steward's real 0.0.8+ session.
+2. Move the Repo MCP task out of coding phase or finish it.
+
 ## 2026-10-14 · format-checks-10-09-to-10-14 + codex-zst · Compressed Codex rollouts supported and reviewed to SHIP; 5.6.1 QA next
 status: in-progress
 
