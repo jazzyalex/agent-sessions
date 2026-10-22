@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1] - 2026-10-22
+
 ### Highlights
 
 - **OpenCode in the Quota Meter.** Running OpenCode sessions now appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate are not there yet. OpenCode Go users who want to help add them: [open an issue](https://github.com/jazzyalex/agent-sessions/issues).
