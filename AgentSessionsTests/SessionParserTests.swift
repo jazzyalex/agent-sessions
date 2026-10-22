@@ -3155,12 +3155,93 @@ final class SessionParserTests: XCTestCase {
 
         XCTAssertFalse(full.events.contains { $0.kind == .user && $0.text?.contains("REFUSAL_NOTICE") == true })
         XCTAssertEqual(full.events.filter { $0.kind == .user }.count, 1, "only the real (image) prompt is a user message")
-        XCTAssertEqual(full.eventCount, 4, "user + tool_call + tool_result + assistant; the notice is not counted")
+        let stops = full.events.filter { $0.kind == .error && $0.messageID == "a1" }
+        XCTAssertEqual(stops.compactMap(\.text), ["Response stopped by a safety classifier"],
+                       "the stopped reply must be visibly marked while the notices stay meta")
+        XCTAssertFalse(full.events.contains { $0.kind == .error && $0.messageID == "a2" },
+                       "a reply that ended normally is not marked")
+        XCTAssertEqual(full.eventCount, 5, "user + tool_call + stop marker + tool_result + assistant; the notice is not counted")
         XCTAssertFalse(full.title.contains("REFUSAL_NOTICE"), "the notice must not title the session: \(full.title)")
         XCTAssertFalse(full.listTitle.contains("REFUSAL_NOTICE"))
 
         let preview = try XCTUnwrap(ClaudeSessionParser.parseFile(at: url))
         XCTAssertFalse(preview.listTitle.contains("REFUSAL_NOTICE"), "lightweight title: \(preview.listTitle)")
+    }
+
+    // `stop_details.category` names why the reply was stopped; the marker carries it.
+    func testClaudeClassifierStopMarkerNamesCategory() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeRefusalCategory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_refusal_category.jsonl")
+        let lines = [
+            #"{"type":"user","sessionId":"ses_cat","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":"Explain it"},"uuid":"u1","timestamp":"2026-10-21T05:44:40.000Z"}"#,
+            #"{"type":"assistant","sessionId":"ses_cat","version":"2.1.306","message":{"id":"msg_r","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","stop_details":{"category":"cyber","explanation":"policy copy"},"content":[{"type":"text","text":"Partial answer"}]},"uuid":"a1","parentUuid":"u1","timestamp":"2026-10-21T05:44:45.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.events.filter { $0.kind == .assistant }.compactMap(\.text), ["Partial answer"])
+        XCTAssertEqual(full.events.filter { $0.kind == .error }.compactMap(\.text),
+                       ["Response stopped by a safety classifier (cyber)"])
+        XCTAssertEqual(full.events.last?.kind, .error, "the marker follows the stopped reply")
+    }
+
+    // Claude splits one reply over several lines that share `message.id`, and each
+    // repeats `stop_reason:"refusal"` (seen in a real 2.1.30x subagent file). One
+    // marker, after the reply's last block.
+    func testClaudeClassifierStopMarkerOncePerSplitReply() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeRefusalSplit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_refusal_split.jsonl")
+        let lines = [
+            #"{"type":"user","sessionId":"ses_split","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":"Go"},"uuid":"u1","timestamp":"2026-10-21T05:44:40.000Z"}"#,
+            #"{"type":"assistant","sessionId":"ses_split","version":"2.1.306","message":{"id":"msg_split","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","content":[{"type":"thinking","thinking":"plan"}]},"uuid":"a1","parentUuid":"u1","timestamp":"2026-10-21T05:44:45.000Z"}"#,
+            #"{"type":"assistant","sessionId":"ses_split","version":"2.1.306","message":{"id":"msg_split","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"uuid":"a2","parentUuid":"a1","timestamp":"2026-10-21T05:44:46.000Z"}"#,
+            #"{"type":"user","sessionId":"ses_split","version":"2.1.306","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Not run"}]},"uuid":"u2","parentUuid":"a2","timestamp":"2026-10-21T05:44:47.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        let stops = full.events.filter { $0.kind == .error }
+        XCTAssertEqual(stops.count, 1, "one marker per stopped reply, not per line")
+        XCTAssertEqual(stops.first?.messageID, "a2", "the marker sits on the reply's last line")
+        let kinds = full.events.map(\.kind)
+        let toolCall = try XCTUnwrap(kinds.firstIndex(of: .tool_call))
+        let marker = try XCTUnwrap(kinds.firstIndex(of: .error))
+        let toolResult = try XCTUnwrap(kinds.firstIndex(of: .tool_result))
+        XCTAssertLessThan(toolCall, marker, "the marker follows the last block of the reply")
+        XCTAssertLessThan(marker, toolResult)
+    }
+
+    // Parallel tool calls in a stopped reply: Claude writes tool_use A, result A,
+    // tool_use B, result B, and both tool_use lines repeat the reply's `message.id`
+    // and `stop_reason`. Still one marker, after the reply's last line (tool_use B).
+    func testClaudeClassifierStopMarkerOnceAcrossInterleavedToolResults() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeRefusalParallel-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_refusal_parallel.jsonl")
+        let lines = [
+            #"{"type":"user","sessionId":"ses_par","version":"2.1.306","cwd":"/tmp","message":{"role":"user","content":"Go"},"uuid":"u1","timestamp":"2026-10-21T05:44:40.000Z"}"#,
+            #"{"type":"assistant","sessionId":"ses_par","version":"2.1.306","message":{"id":"msg_par","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","content":[{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"ls"}}]},"uuid":"a1","parentUuid":"u1","timestamp":"2026-10-21T05:44:45.000Z"}"#,
+            #"{"type":"user","sessionId":"ses_par","version":"2.1.306","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"Not run"}]},"uuid":"u2","parentUuid":"a1","timestamp":"2026-10-21T05:44:46.000Z"}"#,
+            #"{"type":"assistant","sessionId":"ses_par","version":"2.1.306","message":{"id":"msg_par","role":"assistant","model":"claude-opus-5-5","stop_reason":"refusal","content":[{"type":"tool_use","id":"toolu_b","name":"Read","input":{"file_path":"/tmp/x"}}]},"uuid":"a2","parentUuid":"u2","timestamp":"2026-10-21T05:44:46.500Z"}"#,
+            #"{"type":"user","sessionId":"ses_par","version":"2.1.306","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"Not run"}]},"uuid":"u3","parentUuid":"a2","timestamp":"2026-10-21T05:44:47.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.events.filter { $0.kind == .error }.count, 1, "one marker per stopped reply")
+        XCTAssertEqual(full.events.map(\.kind), [.user, .tool_call, .tool_result, .tool_call, .error, .tool_result])
+        XCTAssertEqual(full.events.first { $0.kind == .error }?.messageID, "a2")
     }
 
     // A real user prompt that happens to share the notice's wording stays a prompt:

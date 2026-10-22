@@ -47,6 +47,8 @@ final class ClaudeSessionParser {
         var aiTitle: String?
         var hasExplicitCustomTitle = false
         var entrypoint: String?
+        var keyedStopMarkers: [String: (position: Int, event: SessionEvent)] = [:]
+        var unkeyedStopMarkers: [(position: Int, event: SessionEvent)] = []
         var idx = 0
 
         // Detect subagent from file path
@@ -118,6 +120,20 @@ final class ClaudeSessionParser {
                 let baseID = eventID(for: url, index: idx)
                 let parsed = parseLineEvents(obj, baseEventID: baseID)
                 events.append(contentsOf: parsed)
+                if let marker = classifierStopMarker(obj, baseEventID: baseID) {
+                    // Tool results of parallel calls interleave with the reply's lines,
+                    // so the reply's last line is only known at end of file.
+                    if let apiMessageID = marker.apiMessageID {
+                        keyedStopMarkers[apiMessageID] = (events.count, marker.event)
+                    } else {
+                        unkeyedStopMarkers.append((events.count, marker.event))
+                    }
+                }
+            }
+            let stopMarkers = (Array(keyedStopMarkers.values) + unkeyedStopMarkers)
+                .sorted { $0.position > $1.position }
+            for marker in stopMarkers {
+                events.insert(marker.event, at: marker.position)
             }
         } catch {
             #if DEBUG
@@ -298,7 +314,7 @@ final class ClaudeSessionParser {
     /// The 0-based file line an event was parsed from, decoded from its id.
     ///
     /// Full-parse event ids are `<sha256 of path>-<line>` with an optional block suffix
-    /// (`-p01`, `-m01`, `-t01`, `-r01`), where `<line>` is 1-based and counts the
+    /// (`-p01`, `-m01`, `-t01`, `-r01`, `-s01`), where `<line>` is 1-based and counts the
     /// non-blank lines `JSONLReader` delivers. `ClaudeBase64ImageScanner` counts lines
     /// the same way (blank lines skipped), so the two agree. The one known mismatch is a
     /// line that is not valid UTF-8, which the reader drops and the scanner counts; none
@@ -321,6 +337,35 @@ final class ClaudeSessionParser {
         guard (obj["type"] as? String)?.lowercased() == "user",
               let refused = obj["refusedMessageId"] as? String else { return false }
         return !refused.isEmpty
+    }
+
+    /// A reply a safety classifier stopped ends with `stop_reason:"refusal"`. The harness
+    /// notices about it are meta (hidden by default), so without a marker the transcript
+    /// shows a cut-off reply with no reason. Claude splits one reply over several lines
+    /// that share `message.id` and repeat `stop_reason` (tool results can sit between
+    /// them), so the caller emits one marker per `message.id`, after the reply's last line.
+    static func classifierStopMarker(_ obj: [String: Any], baseEventID: String) -> (apiMessageID: String?, event: SessionEvent)? {
+        guard (obj["type"] as? String)?.lowercased() == "assistant",
+              let message = obj["message"] as? [String: Any],
+              (message["stop_reason"] as? String) == "refusal" else { return nil }
+        let category = (message["stop_details"] as? [String: Any])?["category"] as? String
+        var notice = "Response stopped by a safety classifier"
+        if let category, !category.isEmpty { notice += " (\(category))" }
+        let event = SessionEvent(
+            id: baseEventID + "-s01",
+            timestamp: extractTimestamp(from: obj),
+            kind: .error,
+            role: "system",
+            text: notice,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: obj["uuid"] as? String,
+            parentID: obj["parentUuid"] as? String,
+            isDelta: false,
+            rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+        )
+        return (message["id"] as? String, event)
     }
 
     private static func parseLine(_ obj: [String: Any], eventID: String) -> SessionEvent {
