@@ -146,9 +146,34 @@ struct CrashReportDetector {
         return squashed(name) == squashed(appName)
     }
 
-    private func isAppBundleIdentifier(_ identifier: String?) -> Bool {
-        guard let identifier else { return false }
-        return identifier.caseInsensitiveCompare(bundleIdentifier) == .orderedSame
+    /// A bundle id, when the report has one, is authoritative: another app can
+    /// share the executable name. The process name decides only without one.
+    private func isAppIdentity(bundleID: String?, processName: String?) -> Bool {
+        if let bundleID, !bundleID.isEmpty {
+            return bundleID.caseInsensitiveCompare(bundleIdentifier) == .orderedSame
+        }
+        return isAppProcessName(processName)
+    }
+
+    /// Only 309 (and the legacy 109) are crash reports. Stackshots (288) and
+    /// other diagnostics share the folder and the .ips extension. A 309 report
+    /// can still describe a process that kept running: user faults are marked
+    /// simulated, and some conditions non-fatal.
+    private func isIPSCrashReport(headerJSON: [String: Any]?, payloadJSON: [String: Any]?) -> Bool {
+        let survivedMarkers = [headerJSON?["is_simulated"], payloadJSON?["isSimulated"], payloadJSON?["isNonFatal"]]
+        if survivedMarkers.contains(where: isTruthy) { return false }
+        guard let bugType = headerJSON?["bug_type"] ?? payloadJSON?["bug_type"] else { return true }
+        return ["109", "309"].contains("\(bugType)")
+    }
+
+    /// Apple documents these flags as strings; macOS writes integers.
+    private func isTruthy(_ value: Any?) -> Bool {
+        switch value {
+        case let bool as Bool: return bool
+        case let number as NSNumber: return number.boolValue
+        case let string as String: return ["1", "true", "yes"].contains(string.lowercased())
+        default: return false
+        }
     }
 
     private func nonEmptyString(_ value: Any?) -> String? {
@@ -170,7 +195,13 @@ struct CrashReportDetector {
         let processName = firstValue(after: "Process:", in: lines)?
             .replacingOccurrences(of: #"\s*\[\d+\]$"#, with: "", options: .regularExpression)
         let identifier = firstValue(after: "Identifier:", in: lines)
-        guard isAppProcessName(processName) || isAppBundleIdentifier(identifier) else {
+        guard isAppIdentity(bundleID: identifier, processName: processName) else {
+            return nil
+        }
+        // "SIMULATED (this is NOT a crash)" or "NON-FATAL CONDITION": the
+        // process kept running.
+        if let note = firstValue(after: "Exception Note:", in: lines)?.uppercased(),
+           note.contains("SIMULATED") || note.contains("NON-FATAL") {
             return nil
         }
 
@@ -220,19 +251,23 @@ struct CrashReportDetector {
         let payloadText = lines.dropFirst().joined(separator: "\n")
         let payloadJSON = parseJSONObject(payloadText) ?? firstJSONObject(in: lines.dropFirst())
 
+        guard isIPSCrashReport(headerJSON: headerJSON, payloadJSON: payloadJSON) else { return nil }
+
         // Match only the crashed process itself. Child processes this app
         // launches carry its bundle id as `coalitionName`, so a plain text
-        // search would report their crashes as ours.
+        // search would report their crashes as ours. Fields are ranked by how
+        // directly they name the crashed process; the first one present decides.
         let procName = nonEmptyString(payloadJSON?["procName"]) ?? (headerJSON?["procName"] as? String) ?? ""
         let bundleInfo = payloadJSON?["bundleInfo"] as? [String: Any]
         let bundleID = nonEmptyString(headerJSON?["bundleID"])
             ?? nonEmptyString(headerJSON?["bundleIdentifier"])
             ?? nonEmptyString(bundleInfo?["CFBundleIdentifier"])
             ?? ""
-        let processNames = [procName, headerJSON?["app_name"] as? String, headerJSON?["name"] as? String]
-        let appMatch = processNames.contains(where: isAppProcessName) || isAppBundleIdentifier(bundleID)
+        let processName = nonEmptyString(procName)
+            ?? nonEmptyString(headerJSON?["name"])
+            ?? nonEmptyString(headerJSON?["app_name"])
 
-        guard appMatch else { return nil }
+        guard isAppIdentity(bundleID: bundleID, processName: processName) else { return nil }
 
         let crashTimestamp = parseIPSTimestamp(headerJSON: headerJSON, payloadJSON: payloadJSON)
         let parsedVersionBuild = parseIPSVersionBuild(headerJSON: headerJSON, payloadJSON: payloadJSON)

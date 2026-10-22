@@ -565,26 +565,201 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
     }
 
-    // Real app .ips files name the process by its executable ("AgentSessions"),
-    // with procName and bundleInfo only in the payload.
-    func testDetectMatchesAppIPSIdentifiedOnlyInPayload() throws {
+    // Real app .ips files name the process by its executable ("AgentSessions").
+    // The header here carries no process name or bundle id, so only the
+    // payload procName can identify the app.
+    func testDetectMatchesAppIPSIdentifiedOnlyByPayloadProcName() throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let text = """
-        {"app_name":"AgentSessions","app_version":"6.1","build_version":"84","bug_type":"309","name":"AgentSessions","timestamp":"2026-10-22 11:37:12.00 -0700"}
-        {
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), payloadFields: """
           "procName" : "AgentSessions",
-          "bundleInfo" : {"CFBundleShortVersionString" : "6.1", "CFBundleVersion" : "84", "CFBundleIdentifier" : "com.triada.AgentSessions"},
           "coalitionName" : "com.triada.AgentSessions",
-          "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
-        }
-        """
-        try text.write(to: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), atomically: true, encoding: .utf8)
+        """)
 
         let report = try XCTUnwrap(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().first)
         XCTAssertEqual(report.rawMetadata["procName"], "AgentSessions")
         XCTAssertEqual(report.terminationSummary, "EXC_CRASH | SIGABRT")
+    }
+
+    // A renamed executable still carries the app's bundle id in bundleInfo.
+    func testDetectMatchesAppIPSIdentifiedOnlyByPayloadBundleID() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessionsDev-2026-10-22-113712.ips"), payloadFields: """
+          "procName" : "AgentSessionsDev",
+          "bundleInfo" : {"CFBundleIdentifier" : "com.triada.AgentSessions"},
+        """)
+
+        let report = try XCTUnwrap(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().first)
+        XCTAssertEqual(report.rawMetadata["bundleID"], "com.triada.AgentSessions")
+    }
+
+    // An explicit bundle id is authoritative: another app whose executable
+    // happens to be named AgentSessions is not this app.
+    func testDetectIgnoresCrashTextWithAppProcessNameButOtherIdentifier() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        Process:               AgentSessions [1234]
+        Identifier:            com.example.Unrelated
+        Date/Time:             2026-10-22 11:37:12.000 -0700
+        Exception Type:        EXC_CRASH (SIGABRT)
+        """
+        try text.write(to: tempRoot.appendingPathComponent("AgentSessions_2026-10-22-113712.crash"), atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    // procName names the crashed executable; a header app_name must not
+    // override it.
+    func testDetectIgnoresIPSWhoseProcNameIsAnotherProcess() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        {"app_name":"Agent Sessions","bug_type":"309","timestamp":"2026-10-22 11:37:12.00 -0700"}
+        {
+          "procName" : "cc-status",
+          "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
+        }
+        """
+        try text.write(to: tempRoot.appendingPathComponent("cc-status-2026-10-22-113712.ips"), atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    func testDetectIgnoresIPSWithAppProcNameButOtherBundleID() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"),
+                     headerFields: #""bundleID":"com.example.Unrelated","#, payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    // A user fault (ExcUserFault_*.ips) is a 309 report for a process that
+    // kept running. macOS writes integer is_simulated/isSimulated; Apple
+    // documents the payload flags as strings. Each marker is tested alone.
+    func testDetectIgnoresIPSWithHeaderSimulatedMarker() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("ExcUserFault_AgentSessions-2026-10-22-120937.ips"),
+                     headerFields: #""is_simulated":1,"bundleID":"com.triada.AgentSessions","#, payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    func testDetectIgnoresIPSWithPayloadSimulatedMarkerAsString() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("ExcUserFault_AgentSessions-2026-10-22-120937.ips"), payloadFields: """
+          "procName" : "AgentSessions",
+          "isSimulated" : "true",
+        """)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    func testDetectReportsAppIPSWhoseSimulatedMarkersAreZero() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"),
+                     headerFields: #""is_simulated":0,"#, payloadFields: """
+          "procName" : "AgentSessions",
+          "isSimulated" : 0,
+          "isNonFatal" : "false",
+        """)
+
+        XCTAssertEqual(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().count, 1)
+    }
+
+    func testDetectReportsLegacyBugType109AppIPS() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), bugType: "109", payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        XCTAssertEqual(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().count, 1)
+    }
+
+    // Without a payload procName, the header name identifies the process.
+    func testDetectMatchesAppIPSIdentifiedOnlyByHeaderName() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"),
+                     headerFields: #""name":"AgentSessions","#, payloadFields: "")
+
+        XCTAssertEqual(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().count, 1)
+    }
+
+    // Without an Identifier line, the Process line (minus its [pid]) decides.
+    func testDetectMatchesCrashTextIdentifiedOnlyByProcessLine() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        Process:               AgentSessions [1234]
+        Date/Time:             2026-10-22 11:37:12.000 -0700
+        Exception Type:        EXC_CRASH (SIGABRT)
+        """
+        try text.write(to: tempRoot.appendingPathComponent("AgentSessions_2026-10-22-113712.crash"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().count, 1)
+    }
+
+    func testDetectIgnoresSimulatedCrashText() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        Process:               AgentSessions [1234]
+        Identifier:            com.triada.AgentSessions
+        Date/Time:             2026-10-22 11:37:12.000 -0700
+        Exception Type:        EXC_GUARD
+        Exception Note:        SIMULATED (this is NOT a crash)
+        """
+        try text.write(to: tempRoot.appendingPathComponent("AgentSessions_2026-10-22-113712.crash"), atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    // Stackshots (bug_type 288) and other diagnostics share the folder and the
+    // .ips extension but are not crashes.
+    func testDetectIgnoresAppIPSThatIsNotACrashReport() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), bugType: "288", payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    func testDetectIgnoresAppIPSMarkedNonFatal() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), payloadFields: """
+          "procName" : "AgentSessions",
+          "isNonFatal" : true,
+        """)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
     }
 
     func testDetectCapturesUncaughtExceptionReasonAndBacktrace() throws {
@@ -676,6 +851,19 @@ final class CrashReportingServiceTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+
+    /// Writes an .ips whose header names no process, so only `payloadFields`
+    /// can identify it.
+    private func writeIPS(at url: URL, bugType: String = "309", headerFields: String = "", payloadFields: String) throws {
+        let text = """
+        {\(headerFields)"app_version":"6.1","build_version":"84","bug_type":"\(bugType)","timestamp":"2026-10-22 11:37:12.00 -0700"}
+        {
+        \(payloadFields)
+          "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
+        }
+        """
+        try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func makeDetector(reportsRootURL: URL) -> CrashReportDetector {
