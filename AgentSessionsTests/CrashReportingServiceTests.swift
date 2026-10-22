@@ -525,6 +525,68 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(detector.detectRecentCrashes().isEmpty)
     }
 
+    // A helper the app launches (e.g. a Claude Code hook) shares the app's
+    // coalition, so its .ips names the app only as coalition/responsible process.
+    func testDetectIgnoresChildProcessIPSThatOnlyNamesAppAsCoalition() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        {"app_name":"cc-status","app_version":"","build_version":"","bug_type":"309","name":"cc-status","timestamp":"2026-10-22 11:37:12.00 -0700"}
+        {
+          "procName" : "cc-status",
+          "procPath" : "\\/Applications\\/iTerm.app\\/Contents\\/Resources\\/utilities\\/cc-status",
+          "parentProc" : "launchd",
+          "coalitionName" : "com.triada.AgentSessions",
+          "responsibleProc" : "AgentSessions",
+          "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
+        }
+        """
+        try text.write(to: tempRoot.appendingPathComponent("cc-status-2026-10-22-113712.ips"), atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    func testDetectIgnoresChildProcessCrashTextThatOnlyNamesAppAsCoalition() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        Process:               cc-status [30524]
+        Identifier:            cc-status
+        Version:               ???
+        Responsible:           AgentSessions [25568]
+        Coalition:             com.triada.AgentSessions [470752]
+        Date/Time:             2026-10-22 11:37:12.000 -0700
+        Exception Type:        EXC_CRASH (SIGABRT)
+        """
+        try text.write(to: tempRoot.appendingPathComponent("cc-status_2026-10-22-113712.crash"), atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
+    }
+
+    // Real app .ips files name the process by its executable ("AgentSessions"),
+    // with procName and bundleInfo only in the payload.
+    func testDetectMatchesAppIPSIdentifiedOnlyInPayload() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let text = """
+        {"app_name":"AgentSessions","app_version":"6.1","build_version":"84","bug_type":"309","name":"AgentSessions","timestamp":"2026-10-22 11:37:12.00 -0700"}
+        {
+          "procName" : "AgentSessions",
+          "bundleInfo" : {"CFBundleShortVersionString" : "6.1", "CFBundleVersion" : "84", "CFBundleIdentifier" : "com.triada.AgentSessions"},
+          "coalitionName" : "com.triada.AgentSessions",
+          "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
+        }
+        """
+        try text.write(to: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), atomically: true, encoding: .utf8)
+
+        let report = try XCTUnwrap(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().first)
+        XCTAssertEqual(report.rawMetadata["procName"], "AgentSessions")
+        XCTAssertEqual(report.terminationSummary, "EXC_CRASH | SIGABRT")
+    }
+
     func testDetectCapturesUncaughtExceptionReasonAndBacktrace() throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -614,6 +676,20 @@ final class CrashReportingServiceTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+
+    private func makeDetector(reportsRootURL: URL) -> CrashReportDetector {
+        CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: reportsRootURL,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "6.1",
+            appBuild: "84",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
     }
 
     private func testDefaults(_ name: String) -> UserDefaults {

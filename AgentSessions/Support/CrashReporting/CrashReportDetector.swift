@@ -138,6 +138,24 @@ struct CrashReportDetector {
         )
     }
 
+    /// Compares without spaces: reports name the executable ("AgentSessions"),
+    /// while `appName` is the display name ("Agent Sessions").
+    private func isAppProcessName(_ name: String?) -> Bool {
+        guard let name, !name.isEmpty else { return false }
+        let squashed = { (value: String) in value.replacingOccurrences(of: " ", with: "").lowercased() }
+        return squashed(name) == squashed(appName)
+    }
+
+    private func isAppBundleIdentifier(_ identifier: String?) -> Bool {
+        guard let identifier else { return false }
+        return identifier.caseInsensitiveCompare(bundleIdentifier) == .orderedSame
+    }
+
+    private func nonEmptyString(_ value: Any?) -> String? {
+        guard let string = value as? String, !string.isEmpty else { return nil }
+        return string
+    }
+
     private func isXCTestInjectedReport(_ text: String) -> Bool {
         let lowercased = text.lowercased()
         return lowercased.contains("libxctestbundleinject")
@@ -146,14 +164,16 @@ struct CrashReportDetector {
     }
 
     private func parseCrashText(_ text: String) -> ParsedCrash? {
-        let lower = text.lowercased()
-        guard lower.contains(bundleIdentifier.lowercased()) ||
-                lower.contains("process: \(appName.lowercased())") ||
-                lower.contains("identifier: \(bundleIdentifier.lowercased())") else {
+        let lines = text.components(separatedBy: .newlines)
+        // Match only the crashed process itself. Child processes this app
+        // launches also name it under "Responsible:" and "Coalition:".
+        let processName = firstValue(after: "Process:", in: lines)?
+            .replacingOccurrences(of: #"\s*\[\d+\]$"#, with: "", options: .regularExpression)
+        let identifier = firstValue(after: "Identifier:", in: lines)
+        guard isAppProcessName(processName) || isAppBundleIdentifier(identifier) else {
             return nil
         }
 
-        let lines = text.components(separatedBy: .newlines)
         let crashTimestamp = parseCrashTimestamp(from: lines)
         let rawVersion = firstValue(after: "Version:", in: lines)
         let parsedVersionBuild = parseVersionAndBuild(from: rawVersion)
@@ -200,12 +220,17 @@ struct CrashReportDetector {
         let payloadText = lines.dropFirst().joined(separator: "\n")
         let payloadJSON = parseJSONObject(payloadText) ?? firstJSONObject(in: lines.dropFirst())
 
-        let procName = (headerJSON?["procName"] as? String) ?? ""
-        let bundleID = (headerJSON?["bundleID"] as? String) ?? (headerJSON?["bundleIdentifier"] as? String) ?? ""
-        let textLower = text.lowercased()
-        let appMatch = procName.caseInsensitiveCompare(appName) == .orderedSame
-            || bundleID.caseInsensitiveCompare(bundleIdentifier) == .orderedSame
-            || textLower.contains(bundleIdentifier.lowercased())
+        // Match only the crashed process itself. Child processes this app
+        // launches carry its bundle id as `coalitionName`, so a plain text
+        // search would report their crashes as ours.
+        let procName = nonEmptyString(payloadJSON?["procName"]) ?? (headerJSON?["procName"] as? String) ?? ""
+        let bundleInfo = payloadJSON?["bundleInfo"] as? [String: Any]
+        let bundleID = nonEmptyString(headerJSON?["bundleID"])
+            ?? nonEmptyString(headerJSON?["bundleIdentifier"])
+            ?? nonEmptyString(bundleInfo?["CFBundleIdentifier"])
+            ?? ""
+        let processNames = [procName, headerJSON?["app_name"] as? String, headerJSON?["name"] as? String]
+        let appMatch = processNames.contains(where: isAppProcessName) || isAppBundleIdentifier(bundleID)
 
         guard appMatch else { return nil }
 
