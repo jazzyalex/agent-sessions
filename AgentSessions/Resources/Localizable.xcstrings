@@ -816,6 +816,57 @@
         }
       }
     },
+    "Running OpenCode sessions now appear in the Quota Meter.": {
+      "comment": "One-line teaser for the Agent Sessions 6.1 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running OpenCode sessions now appear in the Quota Meter."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行的 OpenCode 会话现在会显示在额度监视器中。"
+          }
+        }
+      }
+    },
+    "OpenCode in the Quota Meter": {
+      "comment": "Title for the Agent Sessions 6.1 What's New highlight about running OpenCode sessions in the Quota Meter.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode in the Quota Meter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器中的 OpenCode"
+          }
+        }
+      }
+    },
+    "Running OpenCode sessions appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate come later; OpenCode Go users can help add them on GitHub.": {
+      "comment": "Body for the Agent Sessions 6.1 What's New highlight. OpenCode Go is a subscription plan name; GitHub is the project host.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running OpenCode sessions appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate come later; OpenCode Go users can help add them on GitHub."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行的 OpenCode 会话显示在 OpenCode 标志下方、Codex 和 Claude 之下，并标记为工作中或空闲。额度和消耗速率将在之后加入；OpenCode Go 用户可以在 GitHub 上帮助添加。"
+          }
+        }
+      }
+    },
     "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.": {
       "comment": "One-line teaser for the Agent Sessions 5.7 What's New card. Session Info is the product feature name.",
       "localizations": {

@@ -117,10 +117,27 @@ enum WhatsNewCatalog {
         "5.5": "DeepSeek joins the lineup, with local browse and search for supported v0–v3 plain or Zstandard histories.",
         "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.",
         "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.",
-        "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list."
+        "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list.",
+        "6.1": "Running OpenCode sessions now appear in the Quota Meter."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.1": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "gauge.with.dots.needle.33percent",
+                title: "OpenCode in the Quota Meter",
+                body: "Running OpenCode sessions appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate come later; OpenCode Go users can help add them on GitHub."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.0": [
             WhatsNewItem(
                 kind: .highlight,

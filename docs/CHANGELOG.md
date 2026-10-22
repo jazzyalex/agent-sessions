@@ -4,9 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **OpenCode in the Quota Meter.** Running OpenCode sessions now appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate are not there yet. OpenCode Go users who want to help add them: [open an issue](https://github.com/jazzyalex/agent-sessions/issues).
+
 ### Improvements
 
-- **Running OpenCode sessions in the Quota Meter.** Working and idle OpenCode sessions are listed under their logo, below the Codex and Claude sections. There is no OpenCode usage or cost data. The floating Quota Meter can now grow to 500 pt before content is cut off.
+- **Better crash reports.** A crash report you choose to send now includes the exception message and where it was thrown, so crashes that showed only system frames can be fixed.
 
 ### Bug Fixes
 
