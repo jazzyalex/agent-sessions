@@ -31,6 +31,9 @@
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
 <li><strong>OpenCode in the Quota Meter.</strong> Running OpenCode sessions now appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate are not there yet. OpenCode Go users who want to help add them: <a href="https://github.com/jazzyalex/agent-sessions/issues">open an issue</a>.</li>
+<li><strong>Quota Meter in the notch (new in 6.0).</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on other displays. Hover to open the full meter with live session burn. Pick Notch, Desktop or Automatic in Settings.</li>
+<li><strong>OpenCode 2.x sessions (new in 6.0).</strong> Sessions from OpenCode 2.0 and later reach the list, and sessions carried over from 1.x keep their full history.</li>
+<li><strong>Every agent&#x27;s latest format (new in 6.0.1).</strong> Fresh sessions from twelve agents, Codex 0.163 and Claude Code 2.1.306 among them, read cleanly. OpenClaw 2026.10.5 and DeepSeek Harness 0.2.1 sessions are back, Antigravity desktop and Cline Desktop sessions appear, fx 0.0.8 sessions open, and Claude transcripts no longer repeat each turn.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
