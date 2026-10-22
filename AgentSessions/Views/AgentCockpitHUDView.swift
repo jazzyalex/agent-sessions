@@ -2321,12 +2321,16 @@ struct AgentCockpitHUDView: View {
             return session
         }
 
+        // Parent/child matching serves real projects (session at the repo root,
+        // agent in a subfolder). A shared root is not a project: everything sits
+        // under it, so a fresh agent in /tmp/x took an old /tmp session's title.
+        guard !isSharedRootDirectory(normalizedWorkspace) else { return nil }
         let sourcePrefix = "\(source.rawValue)|cwd:"
         var best: (session: Session, score: Int)?
         for (key, session) in lookupIndexes.byWorkspace {
             guard key.hasPrefix(sourcePrefix) else { continue }
             let sessionPath = String(key.dropFirst(sourcePrefix.count))
-            guard !sessionPath.isEmpty else { continue }
+            guard !sessionPath.isEmpty, !isSharedRootDirectory(sessionPath) else { continue }
             let hasRelation =
                 normalizedWorkspace == sessionPath
                 || normalizedWorkspace.hasPrefix(sessionPath + "/")
@@ -2339,6 +2343,21 @@ struct AgentCockpitHUDView: View {
             best = candidate
         }
         return best?.session
+    }
+
+    /// Folders that hold many unrelated projects. They still match exactly, but never
+    /// as a parent or child in `resolveByWorkspace`.
+    private static let sharedRootDirectories: Set<String> = {
+        let home = CodexActiveSessionsModel.normalizePath(NSHomeDirectory())
+        var roots: Set<String> = ["/", "/Users", "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp",
+                                  "/var/folders", "/private/var/folders", home]
+        roots.insert((home as NSString).deletingLastPathComponent)
+        roots.insert(CodexActiveSessionsModel.normalizePath(NSTemporaryDirectory()))
+        return roots
+    }()
+
+    private static func isSharedRootDirectory(_ normalizedPath: String) -> Bool {
+        sharedRootDirectories.contains(normalizedPath)
     }
 
     static func projectLabel(resolvedSession: Session?, presence: CodexActivePresence) -> String {

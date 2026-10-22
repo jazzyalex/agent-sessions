@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Running OpenCode sessions in the Quota Meter.** Working and idle OpenCode sessions are listed under their logo, below the Codex and Claude sections. There is no OpenCode usage or cost data. The floating Quota Meter can now grow to 500 pt before content is cut off.
+
+### Bug Fixes
+
+- **Live sessions keep their own title.** An agent started in a folder inside your home folder or a temp folder, with no conversation yet, could show the title of an old session started in that parent folder.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- Quota Meter OpenCode group (`OpenCodeHUDGroup`): a filter over `rowsForDisplay` with its own 4-row cap, hidden when no OpenCode session runs, when `AgentEnabledOpenCode` is off or when live detection is off. Plan and Repo MCP review (NO-SHIP, all findings applied) in `docs/superpowers/plans/2026-10-21-qm-opencode-running-sessions*.md`. The floating window content cap moves from 270 to 500 pt (`HUDLimitsContentHeight`); the chooser heading is now "Usage sections shown"; the localization key baseline is 1503.
+- `resolveByWorkspace` no longer treats a shared root (`/`, `/Users`, home, `/tmp`, `/private/tmp`, the temp folders) as a parent or child match; exact matches still work.
+
 ## [6.0.1] - 2026-10-21
 
 ### Highlights

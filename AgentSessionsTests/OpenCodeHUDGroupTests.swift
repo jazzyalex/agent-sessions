@@ -313,6 +313,41 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         XCTAssertEqual(Set(rows.compactMap(\.resolvedSessionID)).count, 2, "each presence claims its own session")
     }
 
+    private func focusablePresence(workspace: String) -> CodexActivePresence {
+        var p = presence(workspace: workspace, tty: "/dev/ttys017", pid: 36725, termProgram: "iTerm.app")
+        p.terminal?.itermSessionId = "w0t0p0:12345678-1234-1234-1234-123456789abc"
+        return p
+    }
+
+    /// Found in the 2026-10-21 end-to-end run: a fresh `opencode` started in
+    /// `/private/tmp/…/gamma`, with no conversation yet, showed the title of an old
+    /// session started in `/private/tmp`. The workspace resolver accepted any
+    /// parent folder, including shared roots.
+    func testNewSessionDoesNotBorrowASessionFromASharedParentFolder() throws {
+        for (index, root) in ["/private/tmp", "/tmp", NSHomeDirectory()].enumerated() {
+            let old = session("ses_root_\(index)", cwd: root)
+            let rows = snapshotRows(sessions: [old],
+                                    presences: [focusablePresence(workspace: root + "/opencode-hud-tests/fresh")])
+            let row = try XCTUnwrap(rows.first, "\(root): a focusable new session is still listed")
+            XCTAssertNil(row.resolvedSessionID, "\(root): a session in a shared root must not claim a deeper folder")
+        }
+    }
+
+    func testPresenceInASharedRootDoesNotClaimADeeperSession() {
+        let deeper = session("ses_deeper", cwd: NSHomeDirectory() + "/opencode-hud-tests/project")
+        let rows = snapshotRows(sessions: [deeper], presences: [focusablePresence(workspace: NSHomeDirectory())])
+        XCTAssertNil(rows.first?.resolvedSessionID)
+    }
+
+    func testProjectParentFolderStillMatches() {
+        // The parent/child rule exists for real projects: a session at the repo
+        // root, the agent running in a subfolder.
+        let repo = session("ses_repo", cwd: "/tmp/opencode-hud-tests/repo")
+        let rows = snapshotRows(sessions: [repo],
+                                presences: [focusablePresence(workspace: "/tmp/opencode-hud-tests/repo/sub")])
+        XCTAssertEqual(rows.first?.resolvedSessionID, "ses_repo")
+    }
+
     func testHeadlessPresenceWithSessionIDIsShown() {
         // Mapper behaviour only: a synthetic no-TTY presence. This is not proof that
         // PresenceEngine discovers real headless processes.
