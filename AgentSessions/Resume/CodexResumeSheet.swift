@@ -24,8 +24,6 @@ struct CodexResumeSheet: View {
     @State private var healthOutput: String = ""
     @State private var initialSelectionApplied: Bool = false
 
-    private let commandBuilder = CodexResumeCommandBuilder()
-
     init(initialSelection: String?, context: Context = .sheet) {
         self.initialSelection = initialSelection
         self.context = context
@@ -372,71 +370,6 @@ struct CodexResumeSheet: View {
     private var visibleLaunchModes: [CodexLaunchMode] {
         // Embedded mode disabled to simplify UX
         return [.terminal, .iterm, .warp, .warpPreview]
-    }
-
-    /// NOTE: currently unreferenced — a project-wide search finds no callers.
-    /// Kept (and carried through the async launcher change) rather than deleted
-    /// in a commit about launcher signatures; worth removing or re-wiring.
-    @MainActor
-    private func launch(session: Session) async {
-        guard let package = buildCommand(session: session) else { return }
-
-        switch settings.launchMode {
-        case .embedded, .terminal:
-            do {
-                try await launcher.launchInTerminal(package)
-            } catch {
-                launcher.lastError = error.localizedDescription
-            }
-        case .iterm:
-            do {
-                try launcher.launchInITerm(package)
-            } catch {
-                launcher.lastError = error.localizedDescription
-            }
-        case .warp:
-            do {
-                try await launcher.launchInWarp(package)
-            } catch {
-                launcher.lastError = error.localizedDescription
-            }
-        case .warpPreview:
-            do {
-                try await launcher.launchInWarpPreview(package)
-            } catch {
-                launcher.lastError = error.localizedDescription
-            }
-        }
-    }
-
-    @MainActor
-    private func buildCommand(session: Session) -> CodexResumeCommandBuilder.CommandPackage? {
-        guard let binary = codexBinary else {
-            probeError = "Codex binary not found"
-            return nil
-        }
-        guard !fileMissing else { return nil }
-        do {
-            let fallbackURL: URL?
-            // Only a plain `.jsonl` can be an explicit resume path. A rollout Codex
-            // compressed resumes by id; Codex restores the plain file itself.
-            if FileManager.default.fileExists(atPath: session.filePath) {
-                fallbackURL = URL(fileURLWithPath: session.filePath)
-            } else {
-                fallbackURL = nil
-            }
-
-            let attemptResumeFirst = !shouldUseFallback
-
-            return try commandBuilder.makeCommand(for: session,
-                                                  settings: settings,
-                                                  binaryURL: binary,
-                                                  fallbackPath: fallbackURL,
-                                                  attemptResumeFirst: attemptResumeFirst)
-        } catch {
-            probeError = error.localizedDescription
-            return nil
-        }
     }
 
     @MainActor
