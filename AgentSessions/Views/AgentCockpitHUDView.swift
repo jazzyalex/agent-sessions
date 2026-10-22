@@ -4726,11 +4726,11 @@ private struct HUDOpenCodeSessionsGroup: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(verbatim: HUDAgentType.opencode.label)
-                .foregroundStyle(HUDAgentType.opencode.standardTextColor)
-            Text(verbatim: "·")
-                .foregroundStyle(.secondary)
+        // Logo in place of a name, like the Codex and Claude rows; the name stays
+        // for VoiceOver.
+        HStack(spacing: 8) {
+            HUDMonochromeAgentIcon(assetName: "FooterIconOpenCode")
+                .accessibilityLabel(Text(verbatim: HUDAgentType.opencode.label))
             Text(OpenCodeHUDGroup.runningText(count: model.totalCount))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -5584,7 +5584,6 @@ private struct HUDLimitsRateLimitedCell: View {
 /// icon chrome exactly (14pt, Claude full-color / Codex template).
 private struct HUDLimitsProviderIcon: View {
     let source: UsageTrackingSource
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if source == .claude {
@@ -5594,13 +5593,24 @@ private struct HUDLimitsProviderIcon: View {
                 .scaledToFit()
                 .frame(width: 14, height: 14)
         } else {
-            Image("FooterIconCodex")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 14, height: 14)
-                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            HUDMonochromeAgentIcon(assetName: "FooterIconCodex")
         }
+    }
+}
+
+/// A one-colour agent logo (Codex, OpenCode), drawn black or white to match the
+/// appearance, at the provider-row icon size.
+private struct HUDMonochromeAgentIcon: View {
+    let assetName: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Image(assetName)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 14, height: 14)
+            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
     }
 }
 
