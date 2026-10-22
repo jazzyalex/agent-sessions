@@ -762,6 +762,171 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().isEmpty)
     }
 
+    // macOS moves reports into Retired/ within days, often before the next launch.
+    func testDetectFindsAppCrashAlreadyMovedIntoRetired() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let retired = tempRoot.appendingPathComponent("Retired", isDirectory: true)
+        try FileManager.default.createDirectory(at: retired, withIntermediateDirectories: true)
+        try writeIPS(at: retired.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        XCTAssertEqual(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().count, 1)
+    }
+
+    // Seen and dismissed history stores report ids, so the move into Retired/
+    // must not change them.
+    func testRetiringAReportKeepsItsID() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips")
+        try writeIPS(at: reportURL, payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+        let detector = makeDetector(reportsRootURL: tempRoot)
+        let beforeRetire = try XCTUnwrap(detector.detectRecentCrashes().first)
+
+        let retired = tempRoot.appendingPathComponent("Retired", isDirectory: true)
+        try FileManager.default.createDirectory(at: retired, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: reportURL, to: retired.appendingPathComponent(reportURL.lastPathComponent))
+        let afterRetire = detector.detectRecentCrashes()
+
+        XCTAssertEqual(afterRetire.count, 1)
+        XCTAssertEqual(afterRetire.first?.id, beforeRetire.id)
+        XCTAssertEqual(afterRetire.first?.reportSourcePathHash, beforeRetire.reportSourcePathHash)
+    }
+
+    func testLaterStillSuppressesCrashAfterMacOSRetiresIt() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportsRoot = tempRoot.appendingPathComponent("DiagnosticReports", isDirectory: true)
+        try FileManager.default.createDirectory(at: reportsRoot, withIntermediateDirectories: true)
+        let reportURL = reportsRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips")
+        try writeIPS(at: reportURL, payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        let store = CrashReportStore(fileManager: .default,
+                                     pendingFileURL: tempRoot.appendingPathComponent("pending.json"),
+                                     maxPendingCount: 1)
+        let detector = makeDetector(reportsRootURL: reportsRoot)
+        let defaults = testDefaults("CrashReportingServiceTests.retiredAfterLater")
+
+        let firstLaunch = CrashReportingService(store: store, detector: detector, userDefaults: defaults, nowProvider: Date.init)
+        let firstDetected = await firstLaunch.detectAndQueueOnLaunch()
+        XCTAssertEqual(firstDetected, 1)
+        await firstLaunch.deferPendingReports()
+
+        let retired = reportsRoot.appendingPathComponent("Retired", isDirectory: true)
+        try FileManager.default.createDirectory(at: retired, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: reportURL, to: retired.appendingPathComponent(reportURL.lastPathComponent))
+
+        let secondLaunch = CrashReportingService(store: store, detector: detector, userDefaults: defaults, nowProvider: Date.init)
+        let secondDetected = await secondLaunch.detectAndQueueOnLaunch()
+        XCTAssertEqual(secondDetected, 0)
+        let pendingCount = await store.pendingCount()
+        XCTAssertEqual(pendingCount, 1)
+    }
+
+    // Real .ips headers write "2026-10-22 11:37:12.00 -0700", not ISO 8601.
+    func testDetectParsesRealIPSHeaderTimestamp() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try writeIPS(at: tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips"), payloadFields: """
+          "procName" : "AgentSessions",
+        """)
+
+        let report = try XCTUnwrap(makeDetector(reportsRootURL: tempRoot).detectRecentCrashes().first)
+        XCTAssertEqual(report.crashTimestamp, ISO8601DateFormatter().date(from: "2026-10-22T18:37:12Z"))
+    }
+
+    // Older builds could not parse that header timestamp, so they seeded the id
+    // without it. Parsing it now must not re-prompt crashes the user dismissed.
+    func testParsedIPSHeaderTimestampDoesNotChangeReportID() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips")
+        let detector = makeDetector(reportsRootURL: tempRoot)
+        let payload = """
+          "procName" : "AgentSessions",
+        """
+
+        try writeIPS(at: reportURL, timestamp: nil, payloadFields: payload)
+        let withoutTimestamp = try XCTUnwrap(detector.detectRecentCrashes().first)
+        try writeIPS(at: reportURL, payloadFields: payload)
+        let withTimestamp = try XCTUnwrap(detector.detectRecentCrashes().first)
+
+        XCTAssertNil(withoutTimestamp.crashTimestamp)
+        XCTAssertNotNil(withTimestamp.crashTimestamp)
+        XCTAssertEqual(withTimestamp.id, withoutTimestamp.id)
+    }
+
+    // Older builds did parse ISO 8601 timestamps and seeded the id with them,
+    // so those ids must keep the timestamp.
+    func testISOTimestampStillSeedsReportID() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-2026-10-22-113712.ips")
+        let detector = makeDetector(reportsRootURL: tempRoot)
+        let payload = """
+          "procName" : "AgentSessions",
+        """
+
+        try writeIPS(at: reportURL, timestamp: nil, payloadFields: payload)
+        let withoutTimestamp = try XCTUnwrap(detector.detectRecentCrashes().first)
+        try writeIPS(at: reportURL, timestamp: "2026-10-22T18:37:12Z", payloadFields: payload)
+        let withISOTimestamp = try XCTUnwrap(detector.detectRecentCrashes().first)
+
+        XCTAssertNotEqual(withISOTimestamp.id, withoutTimestamp.id)
+    }
+
+    // Builds before the identity fix queued crashes of child processes (for
+    // example iTerm2's cc-status hook) as app crashes. They read procName from
+    // the .ips header only, which real headers lack, so only the filename names
+    // the process. A user who chose "Later" still has those reports pending.
+    func testLaunchDropsPendingReportsOfOtherProcesses() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let store = CrashReportStore(fileManager: .default,
+                                     pendingFileURL: tempRoot.appendingPathComponent("pending.json"),
+                                     maxPendingCount: 10)
+        await store.enqueue(contentsOf: [
+            makeEnvelope(id: "child-by-filename", reportFilename: "cc-status-2026-10-22-113712.ips",
+                         rawMetadata: ["format": "ips", "procName": ""]),
+            makeEnvelope(id: "child-by-procname", reportFilename: "x.ips",
+                         rawMetadata: ["format": "ips", "procName": "cc-status"]),
+            makeEnvelope(id: "other-bundle", reportFilename: "AgentSessions-2026-10-22-113712.ips",
+                         rawMetadata: ["format": "ips", "procName": "AgentSessions", "bundleID": "com.example.Unrelated"]),
+            makeEnvelope(id: "child-crash-text", reportFilename: "cc-status_2026-10-22-113712_Mac.crash"),
+            makeEnvelope(id: "user-fault", reportFilename: "ExcUserFault_AgentSessions-2026-10-22-120937.ips",
+                         rawMetadata: ["format": "ips", "procName": ""]),
+            makeEnvelope(id: "app-by-bundle", reportFilename: "cc-status-2026-10-22-113712.ips",
+                         rawMetadata: ["format": "ips", "procName": "", "bundleID": "com.triada.AgentSessions"]),
+            makeEnvelope(id: "app-by-filename", reportFilename: "AgentSessions-2026-10-21-234329.ips",
+                         rawMetadata: ["format": "ips", "procName": ""]),
+            makeEnvelope(id: "app-crash-text", reportFilename: "Agent Sessions_2026-02-10-120000.crash"),
+            makeEnvelope(id: "unidentifiable", reportFilename: "report.crash")
+        ])
+
+        let service = CrashReportingService(store: store,
+                                            detector: makeDetector(reportsRootURL: tempRoot),
+                                            userDefaults: testDefaults("CrashReportingServiceTests.dropStalePending"),
+                                            nowProvider: Date.init)
+        let detected = await service.detectAndQueueOnLaunch()
+
+        XCTAssertEqual(detected, 0)
+        let remainingIDs = Set(await store.pending().map(\.id))
+        XCTAssertEqual(remainingIDs, ["app-by-bundle", "app-by-filename", "app-crash-text", "unidentifiable"])
+    }
+
     func testDetectCapturesUncaughtExceptionReasonAndBacktrace() throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -855,9 +1020,11 @@ final class CrashReportingServiceTests: XCTestCase {
 
     /// Writes an .ips whose header names no process, so only `payloadFields`
     /// can identify it.
-    private func writeIPS(at url: URL, bugType: String = "309", headerFields: String = "", payloadFields: String) throws {
+    private func writeIPS(at url: URL, bugType: String = "309", headerFields: String = "",
+                          timestamp: String? = "2026-10-22 11:37:12.00 -0700", payloadFields: String) throws {
+        let timestampField = timestamp.map { #","timestamp":"\#($0)""# } ?? ""
         let text = """
-        {\(headerFields)"app_version":"6.1","build_version":"84","bug_type":"\(bugType)","timestamp":"2026-10-22 11:37:12.00 -0700"}
+        {\(headerFields)"app_version":"6.1","build_version":"84","bug_type":"\(bugType)"\(timestampField)}
         {
         \(payloadFields)
           "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"}
@@ -988,12 +1155,14 @@ final class CrashReportingServiceTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
     }
 
-    private func makeEnvelope(id: String) -> CrashReportEnvelope {
+    private func makeEnvelope(id: String,
+                              reportFilename: String? = nil,
+                              rawMetadata: [String: String] = ["format": "crash"]) -> CrashReportEnvelope {
         CrashReportEnvelope(
             id: id,
             detectedAt: Date(timeIntervalSince1970: 2_000_000_000),
             reportSourcePathHash: "hash-\(id)",
-            reportFilename: "\(id).crash",
+            reportFilename: reportFilename ?? "\(id).crash",
             crashTimestamp: Date(timeIntervalSince1970: 2_000_000_000),
             appVersion: "2.11.2",
             appBuild: "21",
@@ -1004,7 +1173,7 @@ final class CrashReportingServiceTests: XCTestCase {
             exceptionReason: nil,
             exceptionBacktrace: nil,
             breadcrumbs: ["launch.diagnostics_scan"],
-            rawMetadata: ["format": "crash"]
+            rawMetadata: rawMetadata
         )
     }
 }

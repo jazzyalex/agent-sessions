@@ -37,19 +37,17 @@ struct CrashReportDetector {
         self.maxReports = maxReports
     }
 
+    /// macOS moves reports here within a few days, often before the next launch.
+    private static let retiredFolderName = "Retired"
+
     func detectRecentCrashes() -> [CrashReportEnvelope] {
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: reportsRootURL.path, isDirectory: &isDir), isDir.boolValue else {
             return []
         }
 
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: reportsRootURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
+        let retiredURL = reportsRootURL.appendingPathComponent(Self.retiredFolderName, isDirectory: true)
+        let files = reportFiles(in: reportsRootURL) + reportFiles(in: retiredURL)
 
         let cutoff = nowProvider().addingTimeInterval(-lookbackWindow)
 
@@ -74,6 +72,50 @@ struct CrashReportDetector {
         }
 
         return detected.sorted { $0.detectedAt > $1.detectedAt }
+    }
+
+    /// Re-checks a queued report against the identity rule. Builds before that
+    /// rule queued crashes of child processes, and they read procName from the
+    /// .ips header only, which real headers lack. The report filename then names
+    /// the process. A report with no identity at all is kept.
+    func isAppReport(_ envelope: CrashReportEnvelope) -> Bool {
+        let filenameProcess = processName(fromReportFilename: envelope.reportFilename)
+        // A user fault is a report for a process that kept running.
+        if filenameProcess?.isUserFault == true { return false }
+
+        let bundleID = nonEmptyString(envelope.rawMetadata["bundleID"])
+        let processName = nonEmptyString(envelope.rawMetadata["procName"]) ?? filenameProcess?.name
+        guard bundleID != nil || processName != nil else { return true }
+        return isAppIdentity(bundleID: bundleID, processName: processName)
+    }
+
+    /// Reports are named "<process>-2026-10-22-113712.ips" or
+    /// "<process>_2026-10-22-113712[_host].crash"; user faults add an
+    /// "ExcUserFault_" prefix.
+    private func processName(fromReportFilename filename: String) -> (name: String, isUserFault: Bool)? {
+        let pattern = #"^(ExcUserFault_)?(.+?)[-_]\d{4}-\d{2}-\d{2}-\d{6}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)),
+              let nameRange = Range(match.range(at: 2), in: filename) else {
+            return nil
+        }
+        return (String(filename[nameRange]), match.range(at: 1).location != NSNotFound)
+    }
+
+    private func reportFiles(in directory: URL) -> [URL] {
+        (try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+    }
+
+    /// Seen and dismissed history stores report ids, and the id hashes the
+    /// report path. Hash the path the report had before macOS retired it.
+    private func identityPath(of url: URL) -> String {
+        let folder = url.deletingLastPathComponent()
+        guard folder.lastPathComponent == Self.retiredFolderName else { return url.path }
+        return folder.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent).path
     }
 
     private func makeEnvelope(from url: URL, fallbackDetectedAt: Date) -> CrashReportEnvelope? {
@@ -111,9 +153,9 @@ struct CrashReportDetector {
             "detected:\(AppDateFormatting.dateTimeMedium(fallbackDetectedAt))"
         ]
 
-        let sourceHash = stableHash(url.path)
+        let sourceHash = stableHash(identityPath(of: url))
         let crashTime = parsed.crashTimestamp
-        let idSeed = "\(sourceHash)|\(crashTime?.timeIntervalSince1970 ?? 0)|\(parsed.terminationSummary)|\(topFrames.first ?? "")"
+        let idSeed = "\(sourceHash)|\(parsed.idTimestamp?.timeIntervalSince1970 ?? 0)|\(parsed.terminationSummary)|\(topFrames.first ?? "")"
 
         return CrashReportEnvelope(
             id: stableHash(idSeed),
@@ -234,6 +276,7 @@ struct CrashReportDetector {
         }
 
         return ParsedCrash(crashTimestamp: crashTimestamp,
+                           idTimestamp: crashTimestamp,
                            terminationSummary: summary,
                            topFrames: topFrames,
                            exceptionReason: nil,
@@ -269,7 +312,12 @@ struct CrashReportDetector {
 
         guard isAppIdentity(bundleID: bundleID, processName: processName) else { return nil }
 
-        let crashTimestamp = parseIPSTimestamp(headerJSON: headerJSON, payloadJSON: payloadJSON)
+        // Real headers write "2026-10-22 11:37:12.00 -0700". Older builds parsed
+        // only ISO 8601 and seeded the report id with that result, so the id
+        // keeps it: seen and dismissed history stores ids.
+        let rawTimestamp = headerJSON?["timestamp"] as? String ?? payloadJSON?["timestamp"] as? String
+        let isoTimestamp = rawTimestamp.flatMap(parseISOTimestamp)
+        let crashTimestamp = isoTimestamp ?? rawTimestamp.flatMap(parseIPSHeaderTimestamp)
         let parsedVersionBuild = parseIPSVersionBuild(headerJSON: headerJSON, payloadJSON: payloadJSON)
 
         var summaryParts: [String] = []
@@ -299,6 +347,7 @@ struct CrashReportDetector {
         if let appBuild = parsedVersionBuild.build { metadata["reportAppBuild"] = appBuild }
 
         return ParsedCrash(crashTimestamp: crashTimestamp,
+                           idTimestamp: isoTimestamp,
                            terminationSummary: summaryParts.joined(separator: " | "),
                            topFrames: topFrames,
                            exceptionReason: parseIPSApplicationSpecificInfo(payloadJSON?["asi"]),
@@ -420,15 +469,20 @@ struct CrashReportDetector {
         return nil
     }
 
-    private func parseIPSTimestamp(headerJSON: [String: Any]?, payloadJSON: [String: Any]?) -> Date? {
-        if let timestamp = headerJSON?["timestamp"] as? String ?? payloadJSON?["timestamp"] as? String {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = iso.date(from: timestamp) { return date }
-            let fallback = ISO8601DateFormatter()
-            if let date = fallback.date(from: timestamp) { return date }
-        }
-        return nil
+    private func parseISOTimestamp(_ timestamp: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: timestamp) { return date }
+        return ISO8601DateFormatter().date(from: timestamp)
+    }
+
+    private func parseIPSHeaderTimestamp(_ timestamp: String) -> Date? {
+        let formatters = [
+            dateFormatter("yyyy-MM-dd HH:mm:ss.SS Z"),
+            dateFormatter("yyyy-MM-dd HH:mm:ss.SSS Z"),
+            dateFormatter("yyyy-MM-dd HH:mm:ss Z")
+        ]
+        return formatters.lazy.compactMap { $0.date(from: timestamp) }.first
     }
 
     private func firstValue(after prefix: String, in lines: [String]) -> String? {
@@ -527,6 +581,8 @@ struct CrashReportDetector {
 
 private struct ParsedCrash {
     let crashTimestamp: Date?
+    /// The timestamp the report id hashes; see parseIPS.
+    let idTimestamp: Date?
     let terminationSummary: String
     let topFrames: [String]
     let exceptionReason: String?

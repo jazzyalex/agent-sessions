@@ -31,6 +31,11 @@ actor CrashReportingService {
         guard !didRunLaunchScan else { return 0 }
         didRunLaunchScan = true
 
+        // Older builds queued crashes of child processes as app crashes. Drop
+        // them so a deferred one never reaches the support email.
+        let staleIDs = (await store.pending()).filter { !detector.isAppReport($0) }.map(\.id)
+        await store.remove(ids: Set(staleIDs))
+
         let detected = detector.detectRecentCrashes()
         guard !detected.isEmpty else { return 0 }
 
