@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Stopped Claude replies say why.** When a safety classifier stops a Claude reply, the transcript now marks it, with the category when Claude records one. Before, the reply just ended.
+
+### Bug Fixes
+
+- **Crash reports name only Agent Sessions crashes.** A crash in a tool the app starts, such as a Claude Code hook, no longer shows up as an Agent Sessions crash. Reports macOS has already moved aside are found, and each report shows its crash time.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- Crash detection trusts the report's bundle id, falls back to the process name only when there is none, and skips simulated and non-fatal reports; the launch scan also reads `DiagnosticReports/Retired` and drops queued reports that fail the identity rule.
+- Removed the unused `CodexResumeSheet.launch(session:)` and the two Warp launcher methods only it called.
+- Credit for the Cursor ACP research from [#74](https://github.com/jazzyalex/agent-sessions/pull/74) is recorded in the 5.5.1 notes and the monitoring guide.
+
 ## [6.1] - 2026-10-22
 
 ### Highlights
@@ -141,7 +156,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 - **Continue existing Codex Desktop conversations.** Find local desktop sessions in history and open an eligible conversation in Codex Desktop from the row or toolbar. Work, desktop, CLI, and VS Code badges remain distinct; side chats keep their relationship labels. The action needs a valid local thread ID and the same Codex session store.
-- **Search supported Cursor ACP conversations.** Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable.
+- **Search supported Cursor ACP conversations.** Agent Sessions reads their local SQLite/protobuf history and preserves it through reload and local archives. This surface supports browsing and search; Cursor CLI resume remains unavailable. The store location, format evidence, read-only boundary and first fixtures came from @yicone's research in [#74](https://github.com/jazzyalex/agent-sessions/pull/74); my thanks.
 
 ### Improvements
 - **Weekly Quota Meter rates use more of your local history.** Calibration includes native archived Codex sessions and refines estimates as quota movement is observed. Active sessions show plain `%/h` rates; local estimates explain their limits and do not claim a run-out time.

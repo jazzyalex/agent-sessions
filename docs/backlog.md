@@ -225,21 +225,6 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
-### Credit PR #74 for the Cursor ACP format research
-> **open** · sev: low · urg: high · verified 2026-10-11
-
-- **What:** [PR #74](https://github.com/jazzyalex/agent-sessions/pull/74) was closed in
-  favor of our own ACP implementation. Its author asked on 2026-09-27 that the project
-  history keep the research visible: the persisted-store location and format evidence, the
-  read-only and no-resume boundary, and the first fixtures. We agreed in the PR on
-  2026-10-11.
-- **Where:** the Cursor ACP line in [CHANGELOG.md](../CHANGELOG.md) ("Search supported
-  Cursor ACP conversations") and the Cursor ACP documentation.
-- **Fix shape:** one acknowledgement sentence with a link to #74 in each place, in the
-  style used for #51 and #52. No merged-code credit.
-- **Why deferred:** found during a mail triage, not during a docs pass.
-- **Risk if wrong:** a public promise to a contributor stays unkept.
-
 ### Check the DeepSeek Harness reader against the v3→v4 notes from the DSH discussion
 > **open** · sev: med · urg: low · verified —
 
@@ -711,29 +696,6 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   sessions, so any UI must show nothing rather than zero. Only `accept` decisions were
   observed; the shape of a denial is unknown.
 - **To close:** both values are shown, or each is declared noise with a reason.
-
-### Claude safety-classifier stops are hidden in the transcript
-> **open** · sev: low · urg: low · verified 2026-10-21
-
-- **What:** when a safety classifier stops a Claude reply, 2.1.304+ writes three things:
-  the assistant record with `message.stop_reason: "refusal"` and `stop_details`
-  (`category`, `explanation`); a `system`/`informational` notice ("safeguards stopped the
-  response above"); and a harness `type:"user"` notice (`isMeta`, `turnCompanion`,
-  `refusedMessageId` = the stopped reply's `message.id`). Both notices now parse as `.meta`,
-  so with meta hidden (the default) the transcript shows a cut-off reply and "Not run"
-  tool results with no reason. 1 record in 2,033 local files on 2026-10-21.
-- **Where:** [ClaudeSessionParser.swift](../AgentSessions/Services/ClaudeSessionParser.swift)
-  `isClassifierStopNotice` (notice → system `.meta`); no code reads `stop_reason` or
-  `stop_details` for the transcript.
-- **Fix shape:** mark the stopped assistant reply (match `refusedMessageId` to the
-  assistant's `message.id`, or read `stop_reason == "refusal"` directly) with a visible
-  one-line notice and the category. Keep the harness notice out of user prompts.
-- **Why deferred:** found by the 2026-10-21 follow-up weekly; the fix kept scope to
-  stopping the notice from posing as a user prompt.
-- **Risk if wrong:** refusals are rare, so a heavy UI treatment is not worth it; the
-  `explanation` text is vendor policy copy and may change.
-- **To close:** a stopped reply is visibly marked in the default transcript view, or the
-  hidden state is declared acceptable.
 
 ### Claude `isMeta` user records still render as user prompts
 > **open** · sev: low · urg: low · verified 2026-10-21
@@ -1669,7 +1631,12 @@ the latter is tracked separately above until its lifecycle semantics are known.
   and a transcript outside `agents/<id>/sessions`.
 
 ### Four Sendable warnings, one of them new in 5.1.1
-> **open** · sev: low · urg: low · verified 2026-08-31
+> **partial** · sev: low · urg: low · verified 2026-10-22
+- **Review 2026-10-22:** the Release build no longer warns at `WeeklyQuotaCalibration` (the
+  runner is now a closure). The three indexer captures remain, now at
+  `UnifiedSessionIndexer.swift:1013`, `:1019`, `:1027`. The same build also warns at
+  `AgentSessionsApp.swift:941`, `QuotaStripController.swift:238` and six lock/unlock calls
+  in `OpenClawSessionIndexer.swift` (async context).
 
 - **What:** the Release build emits four concurrency warnings. Three are non-Sendable
   `self` captures in `@Sendable` notification closures
@@ -2553,35 +2520,6 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 - **Risk if wrong:** low blast radius, and the failure mode is the current one — a stalled
   UI, not incorrect behavior. The one thing to preserve is that the throw still carries
   osascript's stderr, which is what surfaces "Terminal got an error…" to the user.
-
-### Dead code: `CodexResumeSheet.launch(session:)`
-> **open** · sev: low · urg: low · verified 2026-08-04
-
-- **Where:** [CodexResumeSheet.swift:374](../AgentSessions/Resume/CodexResumeSheet.swift:374).
-- **What:** A ~30-line `@MainActor private func launch(session:)` that switches over
-  `settings.launchMode` and calls the four Codex launcher entry points. A project-wide
-  search across the app and test targets finds **no callers**.
-- **Verified 2026-08-04:** grepped `launch(session` across `AgentSessions/` and
-  `AgentSessionsTests/`; the only hit is the declaration. Swift is statically dispatched
-  here, so there is no dynamic-reference escape hatch.
-- **Why it is still there:** it was carried through the `async throws` launcher change in
-  `d4280354` (annotated in place) rather than deleted, to keep a commit about launcher
-  signatures from also containing an unrelated deletion.
-- **To close:** delete it, or re-wire it if the resume sheet is meant to have its own
-  launch action distinct from `UnifiedSessionsView.resume(_:)`. Deleting it also strands
-  two more methods — checked each one:
-  - `CodexResumeLauncher.launchInWarp` / `.launchInWarpPreview` — **would become dead.**
-    The sheet is their only caller; `CodexResumeCoordinator` reaches Warp through the
-    static `AgentTerminalLauncher.launchInWarp` instead
-    ([CodexResumeCoordinator.swift:77](../AgentSessions/Resume/CodexResumeCoordinator.swift:77)),
-    not through the launcher instance. Delete all three together.
-  - `CodexResumeLauncher.launchInITerm` — **survives.** Live caller at
-    [CodexResumeCoordinator.swift:75](../AgentSessions/Resume/CodexResumeCoordinator.swift:75),
-    on the real `quickLaunchInTerminal` path.
-  - `CodexResumeLauncher.launchInTerminal` — **survives.** It is the
-    `CodexTerminalLaunching` protocol requirement.
-- **Risk if wrong:** none to runtime behavior; the only cost of getting it wrong is
-  deleting a hook someone intended to wire up later.
 
 ## CLI / Automation
 

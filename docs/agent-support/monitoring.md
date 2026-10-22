@@ -246,7 +246,9 @@ Auth notes:
   stores against the app's sidecar, SQLite table/column, content-addressed blob,
   and protobuf wire contracts. Its output contains schema names, wire field/type
   pairs, and counts only; it does not emit paths, IDs, metadata values,
-  transcript text, or blob contents.
+  transcript text, or blob contents. The ACP store location, format evidence,
+  read-only and no-resume boundary, and first fixtures came from @yicone's
+  research in [#74](https://github.com/jazzyalex/agent-sessions/pull/74).
 - Pi prebump runs `pi --print --mode json` with sandboxed `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`, copying `~/.pi/agent/auth.json` and `settings.json` when env-var auth is not used. The fresh session must land under `.pi/agent/sessions/**/*.jsonl` and include `session` and `message` events.
 
 Exit 0 is required. Exit 2 means the fresh session does not match baseline.
