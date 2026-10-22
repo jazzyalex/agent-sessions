@@ -1,6 +1,6 @@
 # Plan: OpenCode running-sessions group in the Quota Meter
 
-Revision 3, 2026-10-21. Source prompt: `docs/PROMPT_QUOTA_METER_OPENCODE_RUNNING_SESSIONS.md` (Revision 2).
+Revision 3, 2026-10-21. Source prompt: `docs/superpowers/plans/2026-10-21-qm-opencode-running-sessions-prompt.md` (Revision 2; was `docs/PROMPT_QUOTA_METER_OPENCODE_RUNNING_SESSIONS.md`).
 Base commit: `9e71cf12` (main). Line numbers below are from this commit. `main` is now `67d1af54`; no Swift file changed in between.
 
 **Owner decisions (2026-10-21, after review 1):**
