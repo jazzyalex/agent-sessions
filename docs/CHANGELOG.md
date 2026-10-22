@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-10-22
+
 ### Improvements
 
 - **Stopped Claude replies say why.** When a safety classifier stops a Claude reply, the transcript now marks it, with the category when Claude records one. Before, the reply just ended.
