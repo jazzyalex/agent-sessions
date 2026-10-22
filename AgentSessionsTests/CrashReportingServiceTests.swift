@@ -525,6 +525,62 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(detector.detectRecentCrashes().isEmpty)
     }
 
+    func testDetectCapturesUncaughtExceptionReasonAndBacktrace() throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-2026-10-21-234329.ips")
+        try makeUncaughtExceptionIPSReportFile(at: reportURL)
+
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "6.0",
+            appBuild: "82",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        let report = try XCTUnwrap(detector.detectRecentCrashes().first)
+
+        // Real .ips frames carry imageIndex into usedImages, not imageName.
+        XCTAssertEqual(report.topFrames, [
+            "AppKit +[NSApplication _crashOnException:]",
+            "AppKit -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded]"
+        ])
+        XCTAssertEqual(
+            report.exceptionReason,
+            "AppKit: The window has been marked as needing another Update Constraints in Window pass. <path>"
+        )
+        // Stripped app frames keep their offset so they can be symbolicated with the dSYM.
+        XCTAssertEqual(report.exceptionBacktrace, [
+            "CoreFoundation __exceptionPreprocess",
+            "libobjc.A.dylib objc_exception_throw",
+            "AgentSessions +0x1a2b3c",
+            "<image> <symbol>"
+        ])
+
+        let redacted = report.redactedForUpload()
+        XCTAssertEqual(redacted.exceptionReason, report.exceptionReason)
+        XCTAssertEqual(redacted.exceptionBacktrace, report.exceptionBacktrace)
+    }
+
+    func testPendingEnvelopeWithoutExceptionFieldsStillDecodes() throws {
+        let json = """
+        {"id":"a","detectedAt":"2026-10-14T14:57:49Z","reportSourcePathHash":"h","reportFilename":"x.ips",
+         "appVersion":"5.6","appBuild":"80","macOSVersion":"27","architecture":"arm64",
+         "terminationSummary":"EXC_BREAKPOINT","topFrames":[],"breadcrumbs":[],"rawMetadata":{}}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(CrashReportEnvelope.self, from: Data(json.utf8))
+        XCTAssertNil(envelope.exceptionReason)
+        XCTAssertNil(envelope.exceptionBacktrace)
+    }
+
     func testSupportEmailDraftWithoutPendingReportsHasTemplateBody() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -619,6 +675,40 @@ final class CrashReportingServiceTests: XCTestCase {
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    private func makeUncaughtExceptionIPSReportFile(at url: URL) throws {
+        let text = """
+        {"bundleID":"com.triada.AgentSessions","procName":"","app_version":"6.0","build_version":"82","timestamp":"2026-10-21T23:43:29Z"}
+        {
+          "exception" : {"type" : "EXC_BREAKPOINT", "signal" : "SIGTRAP"},
+          "asi" : {
+            "AppKit" : ["The window has been marked as needing another Update Constraints in Window pass. /Users/robert/Projects/secret"]
+          },
+          "faultingThread" : 0,
+          "threads" : [
+            {
+              "frames" : [
+                {"imageIndex" : 0, "imageOffset" : 100, "symbol" : "+[NSApplication _crashOnException:]"},
+                {"imageIndex" : 0, "imageOffset" : 200, "symbol" : "-[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded]"}
+              ]
+            }
+          ],
+          "lastExceptionBacktrace" : [
+            {"imageIndex" : 1, "imageOffset" : 975780, "symbol" : "__exceptionPreprocess", "symbolLocation" : 164},
+            {"imageIndex" : 2, "imageOffset" : 1000, "symbol" : "objc_exception_throw"},
+            {"imageIndex" : 3, "imageOffset" : 1715004},
+            {"imageIndex" : 99}
+          ],
+          "usedImages" : [
+            {"name" : "AppKit", "path" : "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"},
+            {"name" : "CoreFoundation"},
+            {"path" : "/usr/lib/libobjc.A.dylib"},
+            {"name" : "AgentSessions", "path" : "/Applications/Agent Sessions.app/Contents/MacOS/AgentSessions"}
+          ]
+        }
+        """
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     private func makeNonAgentCrashReportFile(at url: URL) throws {
         let text = """
         Process:               Other App [200]
@@ -647,6 +737,8 @@ final class CrashReportingServiceTests: XCTestCase {
             architecture: "arm64",
             terminationSummary: "EXC_BAD_ACCESS",
             topFrames: ["0 libswiftCore.dylib swift_unknownObjectRelease"],
+            exceptionReason: nil,
+            exceptionBacktrace: nil,
             breadcrumbs: ["launch.diagnostics_scan"],
             rawMetadata: ["format": "crash"]
         )

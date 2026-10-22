@@ -58,6 +58,8 @@ final class CrashReportStoreTests: XCTestCase {
             architecture: "arm64",
             terminationSummary: "EXC_BAD_ACCESS",
             topFrames: ["0 libswiftCore.dylib swift_unknownObjectRelease"],
+            exceptionReason: nil,
+            exceptionBacktrace: nil,
             breadcrumbs: ["launch.diagnostics_scan"],
             rawMetadata: ["format": "crash"]
         )

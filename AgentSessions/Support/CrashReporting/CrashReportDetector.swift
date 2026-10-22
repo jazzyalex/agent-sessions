@@ -127,6 +127,12 @@ struct CrashReportDetector {
             architecture: machineArchitecture(),
             terminationSummary: CrashReportSanitizer.truncate(parsed.terminationSummary, limit: 400),
             topFrames: topFrames,
+            exceptionReason: parsed.exceptionReason.map {
+                CrashReportSanitizer.sanitizeText($0, limit: CrashReportSanitizer.exceptionReasonLimit)
+            },
+            exceptionBacktrace: parsed.exceptionBacktrace.map { frames in
+                frames.prefix(CrashReportSanitizer.exceptionBacktraceLimit).map { CrashReportSanitizer.sanitizeFrame($0) }
+            },
             breadcrumbs: breadcrumbs,
             rawMetadata: metadata
         )
@@ -179,6 +185,8 @@ struct CrashReportDetector {
         return ParsedCrash(crashTimestamp: crashTimestamp,
                            terminationSummary: summary,
                            topFrames: topFrames,
+                           exceptionReason: nil,
+                           exceptionBacktrace: nil,
                            metadata: meta,
                            appVersion: parsedVersionBuild.version,
                            appBuild: parsedVersionBuild.build)
@@ -218,6 +226,9 @@ struct CrashReportDetector {
         }
 
         let topFrames = parseTopFramesFromIPSPayload(payloadJSON, fallbackText: text)
+        let usedImages = payloadJSON?["usedImages"] as? [[String: Any]] ?? []
+        let exceptionBacktrace = (payloadJSON?["lastExceptionBacktrace"] as? [[String: Any]])
+            .map { frames in frames.prefix(CrashReportSanitizer.exceptionBacktraceLimit).map { describeIPSFrame($0, usedImages: usedImages) } }
 
         var metadata: [String: String] = [:]
         metadata["format"] = "ips"
@@ -230,6 +241,8 @@ struct CrashReportDetector {
         return ParsedCrash(crashTimestamp: crashTimestamp,
                            terminationSummary: summaryParts.joined(separator: " | "),
                            topFrames: topFrames,
+                           exceptionReason: parseIPSApplicationSpecificInfo(payloadJSON?["asi"]),
+                           exceptionBacktrace: exceptionBacktrace,
                            metadata: metadata,
                            appVersion: parsedVersionBuild.version,
                            appBuild: parsedVersionBuild.build)
@@ -270,11 +283,42 @@ struct CrashReportDetector {
             return fallbackFrames(from: fallbackText)
         }
 
-        return frames.prefix(10).map { frame in
-            let image = (frame["imageName"] as? String) ?? "<image>"
-            let symbol = (frame["symbol"] as? String) ?? (frame["symbolLocation"] as? String) ?? "<symbol>"
-            return "\(image) \(symbol)"
+        let usedImages = payloadJSON["usedImages"] as? [[String: Any]] ?? []
+        return frames.prefix(10).map { describeIPSFrame($0, usedImages: usedImages) }
+    }
+
+    /// Formats one .ips frame as "image symbol". Frames name their image through
+    /// `imageIndex` into `usedImages`; a frame without a symbol (stripped app code)
+    /// keeps its image offset so it can be symbolicated with the release dSYM.
+    private func describeIPSFrame(_ frame: [String: Any], usedImages: [[String: Any]]) -> String {
+        var image = frame["imageName"] as? String
+        if image == nil, let index = frame["imageIndex"] as? Int, usedImages.indices.contains(index) {
+            let entry = usedImages[index]
+            image = (entry["name"] as? String)
+                ?? (entry["path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }
         }
+
+        let symbol: String
+        if let name = frame["symbol"] as? String {
+            symbol = name
+        } else if let offset = frame["imageOffset"] as? Int {
+            symbol = "+0x" + String(offset, radix: 16)
+        } else {
+            symbol = "<symbol>"
+        }
+        return "\(image ?? "<image>") \(symbol)"
+    }
+
+    /// Joins the .ips `asi` map (image name -> messages) into one line per image.
+    /// For an uncaught NSException this holds the exception reason.
+    private func parseIPSApplicationSpecificInfo(_ value: Any?) -> String? {
+        guard let asi = value as? [String: Any] else { return nil }
+        let lines = asi.keys.sorted().compactMap { key -> String? in
+            let messages = (asi[key] as? [String]) ?? (asi[key] as? String).map { [$0] } ?? []
+            let text = messages.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : "\(key): \(text)"
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: " | ")
     }
 
     private func fallbackFrames(from text: String) -> [String] {
@@ -425,6 +469,8 @@ private struct ParsedCrash {
     let crashTimestamp: Date?
     let terminationSummary: String
     let topFrames: [String]
+    let exceptionReason: String?
+    let exceptionBacktrace: [String]?
     let metadata: [String: String]
     let appVersion: String?
     let appBuild: String?

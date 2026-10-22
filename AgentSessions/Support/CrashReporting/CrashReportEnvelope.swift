@@ -12,6 +12,10 @@ struct CrashReportEnvelope: Codable, Identifiable, Equatable, Sendable {
     let architecture: String
     let terminationSummary: String
     let topFrames: [String]
+    // Uncaught-exception detail from the .ips `asi` and `lastExceptionBacktrace`.
+    // Optional so pending reports saved by older builds still decode.
+    let exceptionReason: String?
+    let exceptionBacktrace: [String]?
     let breadcrumbs: [String]
     let rawMetadata: [String: String]
 
@@ -33,6 +37,10 @@ struct CrashReportEnvelope: Codable, Identifiable, Equatable, Sendable {
             architecture: architecture,
             terminationSummary: CrashReportSanitizer.truncate(terminationSummary, limit: 400),
             topFrames: topFrames.prefix(10).map { CrashReportSanitizer.sanitizeFrame($0) },
+            exceptionReason: exceptionReason.map { CrashReportSanitizer.sanitizeText($0, limit: CrashReportSanitizer.exceptionReasonLimit) },
+            exceptionBacktrace: exceptionBacktrace.map { frames in
+                frames.prefix(CrashReportSanitizer.exceptionBacktraceLimit).map { CrashReportSanitizer.sanitizeFrame($0) }
+            },
             breadcrumbs: breadcrumbs.prefix(20).map { CrashReportSanitizer.truncate($0, limit: 180) },
             rawMetadata: rawMetadata.reduce(into: [:]) { partial, entry in
                 partial[entry.key] = CrashReportSanitizer.truncate(entry.value, limit: 220)
@@ -42,11 +50,18 @@ struct CrashReportEnvelope: Codable, Identifiable, Equatable, Sendable {
 }
 
 enum CrashReportSanitizer {
+    static let exceptionReasonLimit = 1000
+    static let exceptionBacktraceLimit = 30
+
     static func sanitizeFrame(_ frame: String) -> String {
         let trimmed = frame.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "<unknown frame>" }
+        return sanitizeText(trimmed, limit: 240)
+    }
 
-        let components = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+    /// Replaces path-like tokens with `<path>` so user folder names do not leave the Mac.
+    static func sanitizeText(_ text: String, limit: Int) -> String {
+        let components = text.split(whereSeparator: \.isWhitespace)
         let cleaned = components.map { token -> String in
             let value = String(token)
             if value.hasPrefix("/") || value.contains("/Users/") || value.contains("/private/") || value.contains("/var/") {
@@ -54,7 +69,7 @@ enum CrashReportSanitizer {
             }
             return value
         }
-        return truncate(cleaned.joined(separator: " "), limit: 240)
+        return truncate(cleaned.joined(separator: " "), limit: limit)
     }
 
     static func truncate(_ value: String, limit: Int) -> String {
