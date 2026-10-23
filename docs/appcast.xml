@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.1</title>
-            <pubDate>Thu, 22 Oct 2026 13:10:27 -0700</pubDate>
+            <title>6.1.1</title>
+            <pubDate>Thu, 22 Oct 2026 17:58:29 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,29 +27,29 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.1</h2>
-<h3 class="hl">Highlights</h3>
-<ul class="highlights">
+<h2>What&#x27;s New in 6.1.1</h2>
+<h3>Improvements</h3>
+<ul>
+<li><strong>Stopped Claude replies say why.</strong> When a safety classifier stops a Claude reply, the transcript now marks it, with the category when Claude records one. Before, the reply just ended.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li><strong>Crash reports name only Agent Sessions crashes.</strong> A crash in a tool the app starts, such as a Claude Code hook, no longer shows up as an Agent Sessions crash. Reports macOS has already moved aside are found, and each report shows its crash time.</li>
+</ul>
+<h3>Reminder: What You Got in 6.1</h3>
+<ul>
 <li><strong>OpenCode in the Quota Meter.</strong> Running OpenCode sessions now appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate are not there yet. OpenCode Go users who want to help add them: <a href="https://github.com/jazzyalex/agent-sessions/issues">open an issue</a>.</li>
 <li><strong>Quota Meter in the notch (new in 6.0).</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on other displays. Hover to open the full meter with live session burn. Pick Notch, Desktop or Automatic in Settings.</li>
 <li><strong>OpenCode 2.x sessions (new in 6.0).</strong> Sessions from OpenCode 2.0 and later reach the list, and sessions carried over from 1.x keep their full history.</li>
 <li><strong>Every agent&#x27;s latest format (new in 6.0.1).</strong> Fresh sessions from twelve agents, Codex 0.163 and Claude Code 2.1.306 among them, read cleanly. OpenClaw 2026.10.5 and DeepSeek Harness 0.2.1 sessions are back, Antigravity desktop and Cline Desktop sessions appear, fx 0.0.8 sessions open, and Claude transcripts no longer repeat each turn.</li>
 </ul>
-<h3>Improvements</h3>
-<ul>
-<li><strong>Better crash reports.</strong> A crash report you choose to send now includes the exception message and where it was thrown, so crashes that showed only system frames can be fixed.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li><strong>Live sessions keep their own title.</strong> An agent started in a folder inside your home folder or a temp folder, with no conversation yet, could show the title of an old session started in that parent folder.</li>
-</ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>84</sparkle:version>
-            <sparkle:shortVersionString>6.1</sparkle:shortVersionString>
+            <sparkle:version>85</sparkle:version>
+            <sparkle:shortVersionString>6.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.1/AgentSessions-6.1.dmg" length="29795061" type="application/octet-stream" sparkle:edSignature="Egk5Ava2dLXCUhXT5jTjV6GZ034ecYDL5iPuPxLOOT1LVfBFcBYBQpdZnvcFumhqcGuYp1EYxx1/yVyiankBDg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.1.1/AgentSessions-6.1.1.dmg" length="29728607" type="application/octet-stream" sparkle:edSignature="ImeFxD1+nABuSWEzJPx50C0qDarnRRSq3UJMYT3E4DyonoeMUNO5nojmsPwjI8ATOwZeT2bzXOKUN+W/n+cTAw=="/>
         </item>
     </channel>
 </rss>
