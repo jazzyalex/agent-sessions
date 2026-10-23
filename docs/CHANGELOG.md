@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Old sessions keep the price they were run at.** When a provider changes its prices, Session Info now applies the new rate only to usage after the change. Gemini 3.6 Flash and 3.8 Flash double on January 1, 2027, and sessions from 2026 keep their 2026 cost.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- Price manifest rows take an optional `periods` list (`from` is a UTC day). Usage is priced at the period in force at its `observedAt`. Usage with no time, and events with no request context (which may be session totals stamped with their last time), use the session's start–end span instead, and are unpriced (`<model>:pricePeriod`) when that span crosses a change. Older clients ignore `periods` and keep the row's own rates. Manifest sequence 2026102201.
+- Cleared the remaining Release-build concurrency warnings in `UnifiedSessionIndexer` (Combine sinks instead of `@Sendable` observer blocks) and `OpenClawSessionIndexer` (`NSLock.withLock` in async code).
+
 ## [6.1.1] - 2026-10-22
 
 ### Improvements

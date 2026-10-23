@@ -990,21 +990,6 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Session Info, startup and crash diagnostics
 
-### Price rows have no effective date, so a vendor price change re-prices old sessions
-> **open** · sev: med · urg: high · verified 2026-10-15
-
-- **What:** a price row holds one rate set with no effective date, and any manifest change
-  re-prices every cached session. The pricing spec
-  ([2026-10-13 design](superpowers/specs/2026-10-13-session-info-prices-all-agents-design.md))
-  says to edit the `gemini-3.6-flash` and `gemini-3.8-flash` rows to $1.50/$0.15/$7.50 on
-  2027-01-01. That edit shows every 2026 Gemini session at 2x its cost; leaving it shows
-  2027 sessions at half.
-- **Fix options:** optional dated rate periods per schema-2 row, chosen by the usage
-  event's `observedAt`; or separate dated keys; or Session Info help text saying rates are
-  current list prices, not the price at session time.
-- **Why deferred:** a schema change, found by the 2026-10-14 review of changes since 5.6.
-  Must land before 2027-01-01.
-
 ### Runway burn does not apply long-context tiers to Claude rows
 > **open** · sev: low · urg: low · verified 2026-10-15
 
@@ -1630,38 +1615,16 @@ the latter is tracked separately above until its lifecycle semantics are known.
 - **To close:** tests cover simultaneous canonical/legacy roots, an environment override,
   and a transcript outside `agents/<id>/sessions`.
 
-### Four Sendable warnings, one of them new in 5.1.1
-> **partial** · sev: low · urg: low · verified 2026-10-22
-- **Review 2026-10-22:** the Release build no longer warns at `WeeklyQuotaCalibration` (the
-  runner is now a closure). The three indexer captures remain, now at
-  `UnifiedSessionIndexer.swift:1013`, `:1019`, `:1027`. The same build also warns at
-  `AgentSessionsApp.swift:941`, `QuotaStripController.swift:238` and six lock/unlock calls
-  in `OpenClawSessionIndexer.swift` (async context).
+### Two Release-build concurrency warnings remain
+> **open** · sev: low · urg: low · verified 2026-10-22
 
-- **What:** the Release build emits four concurrency warnings. Three are non-Sendable
-  `self` captures in `@Sendable` notification closures
-  ([UnifiedSessionIndexer.swift:889](../AgentSessions/Services/UnifiedSessionIndexer.swift:889),
-  `:895`, `:903`); one is a non-Sendable function conversion at
-  [WeeklyQuotaCalibration.swift:478](../AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift:478).
-- **Where they came from:** the three indexer captures are old — blame is `7f94577b`,
-  `99a61144`, `a844f690`, `0b6c9d34`, all shipped in v5.1 or earlier, so they have been
-  in released builds for several versions. The calibration one arrived with `74f57d91`
-  in the 5.1.1 cycle.
-- **Fix shape:** the calibration warning is `self.scanRunner = scanRunner ?? Self.runBootstrapScan`
-  assigning a `private static func` to a `@Sendable` typealias. A static method captures
-  nothing, so the conversion is sound and the fix is annotating the declaration at
-  `WeeklyQuotaCalibration.swift:567` `@Sendable` — one word, no design change. The three
-  indexer closures need the actual isolation decided, not an annotation.
-- **Why deferred:** filed during the 5.1.1 release. Warnings do not reach users and the
-  binary is identical with them present, so fixing them would have invalidated a written
-  QA stamp and added unrelated Swift churn to a release whose whole purpose was shipping
-  three silent failures.
-- **Risk if wrong:** low for the calibration one — verified by reading the callee, which
-  takes seven parameters and captures no state. The indexer three are the ones worth
-  actually checking rather than annotating away; a wrong `@Sendable` there would silence
-  a real race instead of fixing it.
-- **To close:** annotate `runBootstrapScan`, decide the isolation for the three closures,
-  and confirm a Release build emits none of the four.
+- **What:** the `UnifiedSessionIndexer` and `OpenClawSessionIndexer` warnings are fixed
+  (see CHANGELOG `[Unreleased]`). Left: a non-Sendable `UserDefaults` capture at
+  `AgentSessionsApp.swift:941` and an `NSEvent` Sendable conformance at
+  `QuotaStripController.swift:238`. The second becomes an error in Swift 6 mode.
+- **Why deferred:** not in the 2026-10-22 batch; each needs its isolation decided, not an
+  annotation.
+- **To close:** a Release build emits no concurrency warnings.
 
 ### Newest-5 sampling can still miss informative evidence in thin stores
 > **partial** · sev: low · urg: low · verified 2026-10-01
