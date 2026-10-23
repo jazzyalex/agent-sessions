@@ -737,9 +737,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             }
             let candidatesForFinalRefresh = finalStorageProof.candidates
             let observedSQLiteStorageVersions = finalStorageProof.versionsByIdentity
-            self.reloadLock.lock()
-            let finalStatsHook = self.refreshBeforeFinalStatsHookForTesting
-            self.reloadLock.unlock()
+            let finalStatsHook = self.reloadLock.withLock { self.refreshBeforeFinalStatsHookForTesting }
             finalStatsHook?()
             var previewTimes: [String: Date] = [:]
             var previewStats: [String: SessionFileStat] = [:]
@@ -781,9 +779,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                     baseEpochs: finalProofSnapshot.publicationEpochByID,
                     observedSQLiteStorageVersions: observedSQLiteStorageVersions)
             }
-            self.reloadLock.lock()
-            let handoffSnapshotHook = self.refreshAfterHandoffSnapshotHookForTesting
-            self.reloadLock.unlock()
+            let handoffSnapshotHook = self.reloadLock.withLock { self.refreshAfterHandoffSnapshotHookForTesting }
             handoffSnapshotHook?()
             let postHookHandoffSnapshot = await self.publishedSessionSnapshot(
                 for: candidatesForFinalRefresh.map(\.id))
@@ -1344,9 +1340,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                     if !isSQLite {
                         merged.sourceFileStat = validatedJSONLStatForPublication
                     }
-                    self.reloadLock.lock()
-                    let publicationCommitHook = self.reloadBeforePublicationCommitHookForTesting
-                    self.reloadLock.unlock()
+                    let publicationCommitHook = self.reloadLock.withLock { self.reloadBeforePublicationCommitHookForTesting }
                     publicationCommitHook?()
                     guard self.notePublishedStoragePaths(
                         [merged],

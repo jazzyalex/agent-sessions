@@ -235,6 +235,8 @@ enum ClaudeRunwayRecentSessionScanner {
     /// assistant message whose turn ended with `end_turn`/`stop_sequence`.
     /// Anything else (`tool_use`, `max_tokens`, `null`, or a non-assistant last
     /// line such as a tool result) means it is still working → not idle.
+    /// `refusal` stays "working" on purpose: after a safety-classifier stop Claude
+    /// Code switches model and continues the same turn (seen 2026-07, ~10 s later).
     private static func isIdleMarker(_ obj: [String: Any]) -> Bool {
         guard (obj["type"] as? String) == "assistant",
               let message = obj["message"] as? [String: Any],
