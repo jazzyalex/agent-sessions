@@ -101,6 +101,11 @@ enum UnifiedSessionListEmptyState: Equatable {
 }
 
 enum UnifiedSessionListEmptyStatePolicy {
+    static func indexingDetail(launchPhase: LaunchPhase) -> LocalizedStringResource? {
+        guard launchPhase < .ready else { return nil }
+        return launchPhase.statusDescription
+    }
+
     static func state(
         hasRows: Bool,
         isIndexing: Bool,
@@ -1485,9 +1490,12 @@ struct UnifiedSessionsView: View {
 	                    .controlSize(.small)
 	                Text("Indexing sessions…")
 	                    .font(.headline)
-	                Text(String(localized: unified.launchState.overallPhase.statusDescription))
-	                    .font(.callout)
-	                    .foregroundStyle(.secondary)
+	                if let detail = UnifiedSessionListEmptyStatePolicy.indexingDetail(
+                        launchPhase: unified.launchState.overallPhase) {
+	                    Text(String(localized: detail))
+	                        .font(.callout)
+	                        .foregroundStyle(.secondary)
+	                }
 	            case .updating:
 	                ProgressView()
 	                    .controlSize(.small)
@@ -1942,6 +1950,11 @@ struct UnifiedSessionsView: View {
                 .environmentObject(searchState)
                 .id("transcript-host")
                 .transaction { txn in txn.disablesAnimations = true }
+                // Keep provider views mounted, but let this pane alone own the
+                // empty-selection message instead of painting two placeholders.
+                .opacity(settledSelection == nil ? 0 : 1)
+                .allowsHitTesting(settledSelection != nil)
+                .accessibilityHidden(settledSelection == nil)
 
             if shouldShowLaunchOverlay {
                 launchBlockingTranscriptOverlay()

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- Startup no longer draws overlapping transcript selection prompts or shows “Ready” beneath “Indexing sessions…”.
+
 ### Improvements
 
 - **Old sessions keep the price they were run at.** When a provider changes its prices, Session Info now applies the new rate only to usage after the change. Gemini 3.6 Flash and 3.8 Flash double on January 1, 2027, and sessions from 2026 keep their 2026 cost.

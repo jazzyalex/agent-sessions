@@ -309,6 +309,15 @@ final class UnifiedRowsStabilityPolicyTests: XCTestCase {
 }
 
 final class UnifiedSessionListEmptyStatePolicyTests: XCTestCase {
+    func testIndexingDetailDoesNotClaimReadyWhileRowsArePending() {
+        XCTAssertNil(UnifiedSessionListEmptyStatePolicy.indexingDetail(launchPhase: .ready))
+        XCTAssertNil(UnifiedSessionListEmptyStatePolicy.indexingDetail(launchPhase: .error))
+        for phase: LaunchPhase in [.idle, .hydrating, .scanning, .transcripts] {
+            let detail = UnifiedSessionListEmptyStatePolicy.indexingDetail(launchPhase: phase)
+            XCTAssertEqual(detail.map { String(localized: $0) }, String(localized: phase.statusDescription))
+        }
+    }
+
     func testShowsIndexingBeforeTheFirstPublishedResult() {
         XCTAssertEqual(
             UnifiedSessionListEmptyStatePolicy.state(
