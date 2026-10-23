@@ -75,6 +75,26 @@ struct RunwayModelPrice: Equatable, Sendable {
     /// Regional inference multiplier published for this exact model generation.
     /// nil means the model is not subject to regional pricing.
     let inferenceGeoUSMultiplier: Double?
+    /// Dated rate changes, ascending by `from`. The row's own rates apply before the
+    /// first one. Empty for a row whose price never changed, which is every row a
+    /// manifest without `periods` produces.
+    var periods: [RunwayPricePeriod] = []
+
+    /// The price in force at `date`: the latest period that has started, else the
+    /// row's own rates. A vendor price change then re-prices only usage after it.
+    func effective(at date: Date) -> RunwayModelPrice {
+        periods.last(where: { $0.from <= date })?.price ?? self
+    }
+
+    /// The price for usage known only to fall inside `interval` (a rollup with no
+    /// per-request time). nil when the interval crosses a price change, because no
+    /// single rate set is right for all of it.
+    func effective(over interval: ClosedRange<Date>) -> RunwayModelPrice? {
+        let first = periods.lastIndex(where: { $0.from <= interval.lowerBound })
+        let last = periods.lastIndex(where: { $0.from <= interval.upperBound })
+        guard first == last else { return nil }
+        return effective(at: interval.lowerBound)
+    }
 
     /// Rates for one observed tier, or nil when that tier has no rate set here.
     func rates(for speed: RunwaySpeedTier,
@@ -114,6 +134,12 @@ struct RunwayModelPrice: Equatable, Sendable {
     var outputPerMTok: Double { standard.outputPerMTok }
     var cacheWritePerMTok: Double? { standard.cacheWritePerMTok }
     var cacheWrite1hPerMTok: Double? { standard.cacheWrite1hPerMTok }
+}
+
+/// One dated rate change for a model row. `price` carries no periods of its own.
+struct RunwayPricePeriod: Equatable, Sendable {
+    let from: Date
+    let price: RunwayModelPrice
 }
 
 struct RunwayLongContextPrice: Equatable, Sendable {
@@ -486,9 +512,56 @@ final class RunwayPriceTable: @unchecked Sendable {
                                    outputMultiplier: outputMultiplier)
         }
     }
-    /// `cacheWrite1hPerMTok` and `fast` are optional, so this still decodes a
-    /// row published before either existed; an older client simply ignores the
-    /// new keys.
+    /// A dated rate change. Standard rates are required; `fast`, `longContext` and
+    /// `inferenceGeoUSMultiplier` fall back to the row's own when absent.
+    private struct RawPeriod: Decodable {
+        let from: String
+        let inputPerMTok: Double
+        let cachedInputPerMTok: Double
+        let outputPerMTok: Double
+        let cacheWritePerMTok: Double?
+        let cacheWrite1hPerMTok: Double?
+        let fast: RawRates?
+        let longContext: RawLongContext?
+        let inferenceGeoUSMultiplier: Double?
+
+        /// `from` is a UTC calendar day (`YYYY-MM-DD`): the new rates apply from its
+        /// midnight UTC.
+        var fromDate: Date? {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.date(from: from)
+        }
+
+        var isValid: Bool {
+            fromDate != nil
+                && RawPrice.isRate(inputPerMTok) && RawPrice.isRate(cachedInputPerMTok)
+                && RawPrice.isRate(outputPerMTok)
+                && (cacheWritePerMTok.map(RawPrice.isRate) ?? true)
+                && (cacheWrite1hPerMTok.map(RawPrice.isRate) ?? true)
+                && (fast?.isValid ?? true)
+                && (longContext?.isValid ?? true)
+                && (inferenceGeoUSMultiplier.map(RawPrice.isMultiplier) ?? true)
+        }
+
+        func price(inheriting base: RunwayModelPrice) -> RunwayModelPrice {
+            RunwayModelPrice(standard: RunwayRateSet(inputPerMTok: inputPerMTok,
+                                                     cachedInputPerMTok: cachedInputPerMTok,
+                                                     outputPerMTok: outputPerMTok,
+                                                     cacheWritePerMTok: cacheWritePerMTok,
+                                                     cacheWrite1hPerMTok: cacheWrite1hPerMTok),
+                             fast: fast?.rateSet ?? base.fast,
+                             longContext: longContext?.price ?? base.longContext,
+                             inferenceGeoUSMultiplier: inferenceGeoUSMultiplier ?? base.inferenceGeoUSMultiplier)
+        }
+    }
+    /// `cacheWrite1hPerMTok`, `fast` and `periods` are optional, so this still
+    /// decodes a row published before any existed; an older client simply ignores
+    /// the new keys. That is why `periods` sits beside the row's own rates instead of
+    /// replacing them: an older client keeps pricing at the row's own rates.
     private struct RawPrice: Decodable {
         let inputPerMTok: Double
         let cachedInputPerMTok: Double
@@ -498,6 +571,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         let fast: RawRates?
         let longContext: RawLongContext?
         let inferenceGeoUSMultiplier: Double?
+        let periods: [RawPeriod]?
 
         var standardRateSet: RunwayRateSet {
             RunwayRateSet(inputPerMTok: inputPerMTok,
@@ -516,6 +590,27 @@ final class RunwayPriceTable: @unchecked Sendable {
                 && (fast?.isValid ?? true)
                 && (longContext?.isValid ?? true)
                 && (inferenceGeoUSMultiplier.map(Self.isMultiplier) ?? true)
+                && periodsAreValid
+        }
+
+        /// Every period valid, and `from` strictly ascending so the lookup is unambiguous.
+        private var periodsAreValid: Bool {
+            guard let periods else { return true }
+            guard periods.allSatisfy(\.isValid) else { return false }
+            let dates = periods.compactMap(\.fromDate)
+            return zip(dates, dates.dropFirst()).allSatisfy { $0 < $1 }
+        }
+
+        var modelPrice: RunwayModelPrice {
+            var price = RunwayModelPrice(standard: standardRateSet,
+                                         fast: fast?.rateSet,
+                                         longContext: longContext?.price,
+                                         inferenceGeoUSMultiplier: inferenceGeoUSMultiplier)
+            let base = price
+            price.periods = (periods ?? []).compactMap { period in
+                period.fromDate.map { RunwayPricePeriod(from: $0, price: period.price(inheriting: base)) }
+            }
+            return price
         }
 
         static func isRate(_ value: Double) -> Bool { value.isFinite && value >= 0 }
@@ -532,12 +627,7 @@ final class RunwayPriceTable: @unchecked Sendable {
               let sequence = manifest.sequence, sequence > 0,
               !manifest.models.isEmpty,
               manifest.models.values.allSatisfy(\.isValid) else { return nil }
-        let models = manifest.models.mapValues {
-            RunwayModelPrice(standard: $0.standardRateSet,
-                             fast: $0.fast?.rateSet,
-                             longContext: $0.longContext?.price,
-                             inferenceGeoUSMultiplier: $0.inferenceGeoUSMultiplier)
-        }
+        let models = manifest.models.mapValues(\.modelPrice)
         // An alias whose target row is missing is dropped rather than failing the
         // whole manifest; keys are compared lowercased by the resolver.
         let aliases = (manifest.aliases ?? [:]).reduce(into: [String: String]()) { out, pair in
@@ -563,18 +653,29 @@ final class RunwayPriceTable: @unchecked Sendable {
                     "cacheWrite": set.cacheWritePerMTok as Any? ?? NSNull(),
                     "cacheWrite1h": set.cacheWrite1hPerMTok as Any? ?? NSNull()] as [String: Any]
         }
+        func project(_ price: RunwayModelPrice) -> [String: Any] {
+            var projected: [String: Any] = [
+                "standard": rates(price.standard),
+                "fast": rates(price.fast),
+                "longContext": price.longContext.map {
+                    ["threshold": $0.thresholdInputTokens, "input": $0.inputMultiplier,
+                     "output": $0.outputMultiplier] as [String: Any]
+                } as Any? ?? NSNull(),
+                "geoUS": price.inferenceGeoUSMultiplier as Any? ?? NSNull()
+            ]
+            // Added only when present, so a row without periods hashes exactly as
+            // it did before periods existed and no calibration is discarded.
+            if !price.periods.isEmpty {
+                projected["periods"] = price.periods.map {
+                    ["from": $0.from.timeIntervalSince1970, "price": project($0.price)] as [String: Any]
+                }
+            }
+            return projected
+        }
         func revision(_ prefixes: [String]) -> Int {
             var projection: [String: Any] = [:]
             for (key, price) in models where prefixes.contains(where: { key.hasPrefix($0) }) {
-                projection[key] = [
-                    "standard": rates(price.standard),
-                    "fast": rates(price.fast),
-                    "longContext": price.longContext.map {
-                        ["threshold": $0.thresholdInputTokens, "input": $0.inputMultiplier,
-                         "output": $0.outputMultiplier] as [String: Any]
-                    } as Any? ?? NSNull(),
-                    "geoUS": price.inferenceGeoUSMultiplier as Any? ?? NSNull()
-                ] as [String: Any]
+                projection[key] = project(price)
             }
             return stableHash(projection) ?? 0
         }
@@ -654,10 +755,10 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 2,
-      "sequence": 2026102101,
-      "updated": "2026-10-21",
+      "sequence": 2026102201,
+      "updated": "2026-10-22",
       "aliases": { "claude sonnet 4.6": "claude-sonnet-4-6", "gemini 3.6 flash": "gemini-3.6-flash", "gemini 3.8 flash": "gemini-3.8-flash" },
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 is $2/$10 input/output, $0.10 cache reads (0.05x input), and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026 (Google publishes $1.50/$0.15/$7.50 from January 1, 2027); context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io; minimax-m3.1-flash ($0.15 input, $0.015 cached input, $0.60 output) verified 2026-10-21 there, with no published cache-write rate or long-context tier, and free routes (cline-free/minimax-m3.1-flash) price at this base-model row. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 is $2/$10 input/output, $0.10 cache reads (0.05x input), and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026; their periods entry carries the $1.50/$0.15/$7.50 Google publishes from January 1, 2027, so usage is priced at the rate in force when it happened. A periods entry starts at midnight UTC on its from date and keeps the row's fast, longContext and inferenceGeoUSMultiplier unless it sets its own; older clients ignore it and keep the row's own rates; context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io; minimax-m3.1-flash ($0.15 input, $0.015 cached input, $0.60 output) verified 2026-10-21 there, with no published cache-write rate or long-context tier, and free routes (cline-free/minimax-m3.1-flash) price at this base-model row. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
       "models": {
         "claude-opus-5-5": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 8.0, "inferenceGeoUSMultiplier": 1.1,
                             "fast": { "inputPerMTok": 8.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 40.0, "cacheWritePerMTok": 10.0, "cacheWrite1hPerMTok": 16.0 } },
@@ -712,8 +813,8 @@ final class RunwayPriceTable: @unchecked Sendable {
         "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
         "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
                                "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gemini-3.8-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null },
-        "gemini-3.6-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null },
+        "gemini-3.8-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null, "periods": [{ "from": "2027-01-01", "inputPerMTok": 1.5, "cachedInputPerMTok": 0.15, "outputPerMTok": 7.5, "cacheWritePerMTok": null }] },
+        "gemini-3.6-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null, "periods": [{ "from": "2027-01-01", "inputPerMTok": 1.5, "cachedInputPerMTok": 0.15, "outputPerMTok": 7.5, "cacheWritePerMTok": null }] },
         "glm-5.3-flash":   { "inputPerMTok": 0.15, "cachedInputPerMTok": 0.03,  "outputPerMTok": 0.5,  "cacheWritePerMTok": null },
         "glm-4.7":         { "inputPerMTok": 0.6,  "cachedInputPerMTok": 0.11,  "outputPerMTok": 2.2,  "cacheWritePerMTok": null },
         "minimax-m3.1-flash": { "inputPerMTok": 0.15, "cachedInputPerMTok": 0.015, "outputPerMTok": 0.6, "cacheWritePerMTok": null },

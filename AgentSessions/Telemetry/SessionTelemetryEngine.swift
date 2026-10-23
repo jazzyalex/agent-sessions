@@ -602,9 +602,15 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 bytesScanned: bytesScanned,
                 revisionChanged: false)
         }
+        let sessionInterval: ClosedRange<Date>? = {
+            guard let start = session.startTime ?? session.endTime,
+                  let end = session.endTime ?? session.startTime else { return nil }
+            return min(start, end)...max(start, end)
+        }()
         let priced = TelemetryCostCalculator.price(events: base.usageEvents,
                                                    fallbackSlices: base.usageSlices,
                                                    snapshot: priceSnapshot,
+                                                   sessionInterval: sessionInterval,
                                                    cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified,
                                                    recordsCacheWrites: capabilities.recordsCacheWrites)
         return TelemetryScanResult(

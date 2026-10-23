@@ -491,7 +491,7 @@ enum CodexWeeklyQuotaBootstrapScanner {
         guard volume > 0 else { return true }
 
         // Codex rows only: a Codex log on a third-party model is not Codex quota.
-        guard let price = priceSnapshot.price(forModel: currentModel, provider: "codex"),
+        guard let price = priceSnapshot.price(forModel: currentModel, provider: "codex")?.effective(at: timestamp),
               (cacheWrite == 0 || price.cacheWritePerMTok != nil),
               !(price.longContext.map {
                   delta.contextInput == nil && Double(delta.topLine - delta.output) > $0.thresholdInputTokens
@@ -635,7 +635,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                     // The request's prompt size selects a long-context tier (Haiku 5.5
                     // bills 5x above 100k), the same sum ClaudeTelemetryAccumulator uses.
                     let contextInput = input + cacheRead + writes.fiveMinute + writes.oneHour
-                    guard let price = priceSnapshot.price(forModel: model, provider: "claude"),
+                    guard let price = priceSnapshot.price(forModel: model, provider: "claude")?.effective(at: at),
                           let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"]),
                                                   contextInputTokens: Double(contextInput),
                                                   inferenceGeo: ClaudeRunwayLog.inferenceGeo(usage: usage)) else {

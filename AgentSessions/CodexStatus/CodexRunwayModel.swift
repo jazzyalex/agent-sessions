@@ -1414,7 +1414,7 @@ enum CodexRunwayCalculator {
             // the session rather than drop it honestly. That covers an unknown model
             // AND a slice served at a billing tier the model has no rates for — a
             // fast-mode record priced at standard would understate it by half.
-            guard let p = priceTable.price(forModel: component.modelSlug, provider: provider),
+            guard let p = priceTable.price(forModel: component.modelSlug, provider: provider)?.effective(at: Date()),
                   (component.cacheCreationPerSecond == 0 || p.cacheWritePerMTok != nil),
                   (component.cacheCreation1hPerSecond == 0 || p.cacheWrite1hPerMTok != nil),
                   let rates = p.rates(for: component.speed,

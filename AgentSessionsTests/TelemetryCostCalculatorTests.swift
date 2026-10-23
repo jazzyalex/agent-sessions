@@ -28,8 +28,8 @@ final class TelemetryCostCalculatorTests: XCTestCase {
                        speed: String = "standard",
                        ownership: TelemetryUsageOwnership = .session,
                        cacheRead: Int = 0, cacheWrite5m: Int = 0, cacheWrite1h: Int = 0,
-                       output: Int = 0) -> TelemetryUsageEvent {
-        TelemetryUsageEvent(recordID: UUID().uuidString, observedAt: Date(), anchorLine: 0,
+                       output: Int = 0, observedAt: Date? = Date()) -> TelemetryUsageEvent {
+        TelemetryUsageEvent(recordID: UUID().uuidString, observedAt: observedAt, anchorLine: 0,
                             usageFamily: "token_count", ownership: ownership,
                             model: model, reasoningEffort: "high", speed: speed,
                             freshInputTokens: input, cacheReadTokens: cacheRead,
@@ -459,5 +459,76 @@ final class TelemetryCostCalculatorTests: XCTestCase {
         let old = #"{"topLineTokens":1,"hasComponentBreakdown":true,"usageFamilies":[],"usageFamilyConflict":false}"#
         let decoded = try JSONDecoder().decode(TelemetryUsageSummary.self, from: Data(old.utf8))
         XCTAssertNil(decoded.costUnavailableReason)
+    }
+
+    // MARK: - Dated price periods
+
+    /// Gemini 3.8 Flash: $0.75/$3.75 through 2026, $1.50/$7.50 from 2027-01-01 UTC.
+    private func utc(_ text: String) -> Date {
+        ISO8601DateFormatter().date(from: text)!
+    }
+
+    func testEventIsPricedAtTheRateInForceWhenItHappened() throws {
+        let before = event("gemini-3.8-flash", input: oneMillion, context: oneMillion,
+                           output: oneMillion, observedAt: utc("2026-12-31T23:59:59Z"))
+        let after = event("gemini-3.8-flash", input: oneMillion, context: oneMillion,
+                          output: oneMillion, observedAt: utc("2027-01-01T00:00:00Z"))
+        let result = TelemetryCostCalculator.price(events: [before, after], fallbackSlices: [],
+                                                   priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.events[0].apiEquivalentUSD), 4.5, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(result.events[1].apiEquivalentUSD), 9.0, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 13.5, accuracy: 0.0001)
+    }
+
+    func testUntimedUsageUsesTheSessionIntervalWhenItStaysInOnePeriod() throws {
+        let untimed = event("gemini-3.8-flash", input: oneMillion, context: oneMillion,
+                            observedAt: nil)
+        let in2026 = TelemetryCostCalculator.price(
+            events: [untimed], fallbackSlices: [], priceTable: table(),
+            sessionInterval: utc("2026-11-01T10:00:00Z")...utc("2026-11-01T11:00:00Z"))
+        XCTAssertEqual(try XCTUnwrap(in2026.estimate.apiEquivalentUSD), 0.75, accuracy: 0.0001)
+
+        let slices = TelemetryCostCalculator.estimate(
+            slices: [slice("gemini-3.8-flash", fresh: oneMillion)], priceTable: table(),
+            sessionInterval: utc("2027-02-01T10:00:00Z")...utc("2027-02-01T11:00:00Z"))
+        XCTAssertEqual(try XCTUnwrap(slices.apiEquivalentUSD), 1.5, accuracy: 0.0001)
+    }
+
+    /// No time, or a session spanning the change: no single rate is right, so the
+    /// figure is unavailable instead of guessed.
+    func testUntimedUsageAcrossAPriceChangeIsUnavailable() {
+        let spanning = TelemetryCostCalculator.estimate(
+            slices: [slice("gemini-3.8-flash", fresh: oneMillion)], priceTable: table(),
+            sessionInterval: utc("2026-12-31T23:00:00Z")...utc("2027-01-01T01:00:00Z"))
+        XCTAssertNil(spanning.apiEquivalentUSD)
+        XCTAssertEqual(spanning.missingPriceComponents, ["gemini-3.8-flash:pricePeriod"])
+
+        let noTime = TelemetryCostCalculator.estimate(
+            slices: [slice("gemini-3.8-flash", fresh: oneMillion)], priceTable: table())
+        XCTAssertEqual(noTime.missingPriceComponents, ["gemini-3.8-flash:pricePeriod"])
+    }
+
+    /// A session total stamped with its last time (no per-request context) must not
+    /// be priced wholly at the rate of that last instant when the session spans a change.
+    func testRollupEventAcrossAPriceChangeIsUnavailable() throws {
+        let total = event("gemini-3.8-flash", input: oneMillion, context: nil,
+                          observedAt: utc("2027-01-01T00:30:00Z"))
+        let spanning = TelemetryCostCalculator.price(
+            events: [total], fallbackSlices: [], priceTable: table(),
+            sessionInterval: utc("2026-12-31T23:00:00Z")...utc("2027-01-01T00:30:00Z"))
+        XCTAssertNil(spanning.estimate.apiEquivalentUSD)
+        XCTAssertEqual(spanning.estimate.missingPriceComponents, ["gemini-3.8-flash:pricePeriod"])
+
+        let inside = TelemetryCostCalculator.price(
+            events: [total], fallbackSlices: [], priceTable: table(),
+            sessionInterval: utc("2027-01-01T00:10:00Z")...utc("2027-01-01T00:30:00Z"))
+        XCTAssertEqual(try XCTUnwrap(inside.estimate.apiEquivalentUSD), 1.5, accuracy: 0.0001)
+    }
+
+    /// A row without periods needs no time at all, as before.
+    func testRowWithoutPeriodsIgnoresTime() throws {
+        let result = TelemetryCostCalculator.estimate(
+            slices: [slice("claude-opus-5", fresh: oneMillion)], priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.apiEquivalentUSD), 5, accuracy: 0.0001)
     }
 }

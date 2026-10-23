@@ -477,4 +477,84 @@ final class PriceManifestV2Tests: XCTestCase {
         XCTAssertEqual(at.cachedInputPerMTok, 1.0)
         XCTAssertEqual(at.outputPerMTok, 12.0)
     }
+
+    // MARK: - Dated price periods
+
+    private func utc(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+
+    func testPeriodStartsAtUTCMidnightAndInheritsUnsetFields() throws {
+        let t = table(models: #""m":{"inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":4,"fast":{"inputPerMTok":2,"cachedInputPerMTok":0.2,"outputPerMTok":8},"longContext":{"thresholdInputTokens":1000,"inputMultiplier":2,"outputMultiplier":1.5},"periods":[{"from":"2027-01-01","inputPerMTok":3,"cachedInputPerMTok":0.3,"outputPerMTok":12},{"from":"2027-06-01","inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":20,"fast":{"inputPerMTok":9,"cachedInputPerMTok":0.9,"outputPerMTok":36}}]}"#)
+        let row = try XCTUnwrap(t.snapshot().price(forModel: "m"))
+        XCTAssertEqual(row.effective(at: utc("2026-12-31T23:59:59Z")).inputPerMTok, 1)
+        XCTAssertEqual(row.effective(at: utc("2027-01-01T00:00:00Z")).inputPerMTok, 3)
+        let june = row.effective(at: utc("2027-07-01T00:00:00Z"))
+        XCTAssertEqual(june.inputPerMTok, 5)
+        XCTAssertEqual(june.fast?.inputPerMTok, 9, "a period's own fast set wins")
+        let january = row.effective(at: utc("2027-02-01T00:00:00Z"))
+        XCTAssertEqual(january.fast?.inputPerMTok, 2, "an unset fast set is inherited from the row")
+        XCTAssertEqual(january.longContext?.thresholdInputTokens, 1000)
+        XCTAssertNil(row.effective(over: utc("2026-12-31T00:00:00Z")...utc("2027-01-02T00:00:00Z")),
+                     "an interval across a change has no single price")
+        XCTAssertEqual(row.effective(over: utc("2027-02-01T00:00:00Z")...utc("2027-03-01T00:00:00Z"))?.inputPerMTok, 3)
+    }
+
+    func testMalformedPeriodsRejectTheManifest() {
+        let base = #""inputPerMTok":1,"cachedInputPerMTok":0.1,"outputPerMTok":4"#
+        for periods in [
+            #"[{"from":"2027-13-01",\#(base)}]"#,
+            #"[{"from":"2027-01-01T00:00:00Z",\#(base)}]"#,
+            #"[{"from":"2027-06-01",\#(base)},{"from":"2027-01-01",\#(base)}]"#,
+            #"[{"from":"2027-01-01",\#(base)},{"from":"2027-01-01",\#(base)}]"#,
+            #"[{"from":"2027-01-01","inputPerMTok":-1,"cachedInputPerMTok":0.1,"outputPerMTok":4}]"#
+        ] {
+            let t = RunwayPriceTable.makeEmptyForTesting()
+            let json = #"{"version":2,"sequence":1,"updated":"2026-10-22","models":{"m":{\#(base),"periods":\#(periods)}}}"#
+            XCTAssertFalse(t.loadForTesting(json: Data(json.utf8)), periods)
+        }
+    }
+
+    func testPeriodsMoveOnlyTheirOwnProvidersRevision() {
+        let plain = table(models: claudeRow + "," + gptRow)
+        let dated = table(models: #""claude-opus":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":25,"periods":[{"from":"2027-01-01","inputPerMTok":6,"cachedInputPerMTok":0.6,"outputPerMTok":30}]},"# + gptRow)
+        XCTAssertNotEqual(plain.rateRevision(forProvider: "claude"), dated.rateRevision(forProvider: "claude"))
+        XCTAssertEqual(plain.rateRevision(forProvider: "codex"), dated.rateRevision(forProvider: "codex"))
+    }
+
+    /// The Gemini change Google published for 2027-01-01 is in both manifests.
+    func testBundledGeminiRowsChangePriceOnJanuaryFirst2027() throws {
+        let s = RunwayPriceTable.makeForTesting().snapshot()
+        for slug in ["gemini-3.6-flash", "gemini-3.8-flash"] {
+            let row = try XCTUnwrap(s.price(forModel: slug))
+            let old = row.effective(at: utc("2026-12-31T12:00:00Z"))
+            XCTAssertEqual([old.inputPerMTok, old.cachedInputPerMTok, old.outputPerMTok], [0.75, 0.075, 3.75], slug)
+            let new = row.effective(at: utc("2027-01-01T00:00:00Z"))
+            XCTAssertEqual([new.inputPerMTok, new.cachedInputPerMTok, new.outputPerMTok], [1.5, 0.15, 7.5], slug)
+        }
+    }
+
+    /// The row shape shipped in 6.1.1 and earlier, which knows nothing of `periods`.
+    /// JSONDecoder skips unknown keys, so those clients must still decode the served
+    /// manifest, accept every row, and keep the row's own (2026) Gemini rates.
+    private struct ShippedRawPrice: Decodable {
+        let inputPerMTok: Double
+        let cachedInputPerMTok: Double
+        let outputPerMTok: Double
+        let cacheWritePerMTok: Double?
+        let cacheWrite1hPerMTok: Double?
+    }
+    private struct ShippedManifest: Decodable {
+        let version: Int
+        let sequence: Int?
+        let models: [String: ShippedRawPrice]
+    }
+
+    func testOlderClientsStillDecodeTheServedManifest() throws {
+        let data = try Data(contentsOf: FixturePaths.repoRootURL().appendingPathComponent("docs/prices-v2.json"))
+        let manifest = try JSONDecoder().decode(ShippedManifest.self, from: data)
+        XCTAssertEqual(manifest.version, 2)
+        let gemini = try XCTUnwrap(manifest.models["gemini-3.8-flash"])
+        XCTAssertEqual(gemini.inputPerMTok, 0.75)
+        XCTAssertEqual(gemini.outputPerMTok, 3.75)
+        XCTAssertTrue(manifest.models.values.allSatisfy { $0.inputPerMTok >= 0 && $0.outputPerMTok >= 0 })
+    }
 }

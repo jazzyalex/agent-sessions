@@ -451,8 +451,9 @@ every alias target exists; `codex-auto-review` matching is pinned.
   - `grok-code`: not an xAI API id. Only `grok-code-fast-1` and its aliases
     exist.
 - Gemini 3.6 Flash and 3.8 Flash rates are published as valid through
-  2026-12-31. From 2027-01-01 they double to $1.50 / $0.15 / $7.50. On
-  2027-01-01, update both manifests and raise `sequence`.
+  2026-12-31. From 2027-01-01 they double to $1.50 / $0.15 / $7.50.
+  Superseded 2026-10-22: both rows carry the 2027 rates as a dated `periods`
+  entry, so no edit is needed on 2027-01-01.
 - Muse Spark contributor route, decided by the owner (2026-10-14): a free
   route is priced at its base model's list price. The base model of
   `muse-spark-1.3-contributor-free` and `cline-free/muse-spark-1.3-contributor`

@@ -15,9 +15,11 @@ enum TelemetryCostCalculator {
 
     static func estimate(slices: [TelemetryUsageSlice],
                          priceTable: RunwayPriceTable,
+                         sessionInterval: ClosedRange<Date>? = nil,
                          cacheWriteTTLVerified: Bool = true,
                          recordsCacheWrites: Bool = true) -> TelemetryCostEstimate {
         estimate(slices: slices, snapshot: priceTable.snapshot(),
+                 sessionInterval: sessionInterval,
                  cacheWriteTTLVerified: cacheWriteTTLVerified,
                  recordsCacheWrites: recordsCacheWrites)
     }
@@ -25,20 +27,28 @@ enum TelemetryCostCalculator {
     static func price(events: [TelemetryUsageEvent],
                       fallbackSlices: [TelemetryUsageSlice],
                       priceTable: RunwayPriceTable,
+                      sessionInterval: ClosedRange<Date>? = nil,
                       cacheWriteTTLVerified: Bool = true,
                       recordsCacheWrites: Bool = true) -> Result {
         price(events: events, fallbackSlices: fallbackSlices, snapshot: priceTable.snapshot(),
+              sessionInterval: sessionInterval,
               cacheWriteTTLVerified: cacheWriteTTLVerified,
               recordsCacheWrites: recordsCacheWrites)
     }
 
+    /// `sessionInterval` (the session's start...end) prices usage that carries no time
+    /// of its own against a model whose price changed: a slice, or an event without
+    /// `observedAt`. Without it, or when it crosses the change, that usage is
+    /// unpriced (`<model>:pricePeriod`) rather than priced at a guessed rate.
     static func price(events: [TelemetryUsageEvent],
                       fallbackSlices: [TelemetryUsageSlice],
                       snapshot: RunwayPriceSnapshot,
+                      sessionInterval: ClosedRange<Date>? = nil,
                       cacheWriteTTLVerified: Bool = true,
                       recordsCacheWrites: Bool = true) -> Result {
         guard !events.isEmpty else {
             return Result(estimate: estimate(slices: fallbackSlices, snapshot: snapshot,
+                                             sessionInterval: sessionInterval,
                                              cacheWriteTTLVerified: cacheWriteTTLVerified,
                                              recordsCacheWrites: recordsCacheWrites),
                           events: [])
@@ -55,6 +65,7 @@ enum TelemetryCostCalculator {
             var eventMissing: [String] = []
             var eventFreeRoute: [String] = []
             let usd = price(event: event, snapshot: snapshot,
+                            sessionInterval: sessionInterval,
                             cacheWriteTTLVerified: cacheWriteTTLVerified,
                             recordsCacheWrites: recordsCacheWrites,
                             unpricedModels: &eventUnpriced,
@@ -86,6 +97,7 @@ enum TelemetryCostCalculator {
 
     private static func estimate(slices: [TelemetryUsageSlice],
                                  snapshot: RunwayPriceSnapshot,
+                                 sessionInterval: ClosedRange<Date>?,
                                  cacheWriteTTLVerified: Bool,
                                  recordsCacheWrites: Bool) -> TelemetryCostEstimate {
         var total = 0.0
@@ -103,7 +115,11 @@ enum TelemetryCostCalculator {
                 appendOnce(slug, to: &unpricedModels)
                 continue
             }
-            let price = resolved.price
+            guard let price = periodPrice(resolved.price, at: nil, sessionInterval: sessionInterval,
+                                          mayBeRollup: true) else {
+                appendOnce("\(slug):pricePeriod", to: &missingComponents)
+                continue
+            }
 
             guard let tier = RunwaySpeedTier(rawValue: slice.speed) else {
                 appendOnce("\(slug):\(slice.speed)", to: &missingComponents)
@@ -181,6 +197,7 @@ enum TelemetryCostCalculator {
 
     private static func price(event: TelemetryUsageEvent,
                               snapshot: RunwayPriceSnapshot,
+                              sessionInterval: ClosedRange<Date>?,
                               cacheWriteTTLVerified: Bool,
                               recordsCacheWrites: Bool,
                               unpricedModels: inout [String],
@@ -192,7 +209,15 @@ enum TelemetryCostCalculator {
             appendOnce(slug, to: &unpricedModels)
             return nil
         }
-        let price = resolved.price
+        // nil context means the event may sum several requests (Copilot's shutdown
+        // metrics, Hermes rows), stamped with only its last time. Such a total is
+        // checked against the whole session span, not that one instant.
+        guard let price = periodPrice(resolved.price, at: event.observedAt,
+                                      sessionInterval: sessionInterval,
+                                      mayBeRollup: event.contextInputTokens == nil) else {
+            appendOnce("\(slug):pricePeriod", to: &missingComponents)
+            return nil
+        }
         guard let tier = RunwaySpeedTier(rawValue: event.speed) else {
             appendOnce("\(slug):\(event.speed)", to: &missingComponents)
             return nil
@@ -278,6 +303,19 @@ enum TelemetryCostCalculator {
 
     /// One cause is reported once however many slices hit it — the list names what
     /// to fix, not how often it occurred.
+    /// The rates in force for usage at `date`, or across `sessionInterval` when the
+    /// usage has no time of its own or may be a rollup. nil only for a model whose
+    /// price changed when neither pins one period.
+    private static func periodPrice(_ price: RunwayModelPrice,
+                                    at date: Date?,
+                                    sessionInterval: ClosedRange<Date>?,
+                                    mayBeRollup: Bool) -> RunwayModelPrice? {
+        guard !price.periods.isEmpty else { return price }
+        if mayBeRollup, let sessionInterval { return price.effective(over: sessionInterval) }
+        if let date { return price.effective(at: date) }
+        return sessionInterval.flatMap(price.effective(over:))
+    }
+
     private static func appendOnce(_ value: String, to list: inout [String]) {
         guard !list.contains(value) else { return }
         list.append(value)
