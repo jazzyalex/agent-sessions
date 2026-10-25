@@ -1,6 +1,132 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Agent Sessions could not find saved Codex credentials.": {
+      "comment": "Codex quota fetch warning detail: no saved Codex sign-in was found.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Agent Sessions could not find saved Codex credentials." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Agent Sessions 找不到已保存的 Codex 凭据。" } }
+      }
+    },
+    "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem.": {
+      "comment": "Codex quota fetch recovery step for HTTP 401/403. 'codex login' is a command and stays verbatim.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请确认 Codex 可以访问你的账户，然后选择“重试”。如果 Codex 也报告登录问题，请使用 codex login 重新登录。" } }
+      }
+    },
+    "Check your internet connection and VPN or proxy, then choose Retry. Agent Sessions also retries automatically within one minute while usage tracking is visible.": {
+      "comment": "Codex quota fetch recovery step for network and HTTP failures.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Check your internet connection and VPN or proxy, then choose Retry. Agent Sessions also retries automatically within one minute while usage tracking is visible." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请检查网络连接以及 VPN 或代理，然后选择“重试”。用量跟踪可见时，Agent Sessions 也会在一分钟内自动重试。" } }
+      }
+    },
+    "Codex rejected the saved credentials.": {
+      "comment": "Codex quota fetch warning detail: the server rejected the saved sign-in.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex rejected the saved credentials." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 拒绝了已保存的凭据。" } }
+      }
+    },
+    "Codex returned usage data Agent Sessions could not read.": {
+      "comment": "Codex quota fetch warning detail: the usage response had an unknown format.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex returned usage data Agent Sessions could not read." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 返回的用量数据无法被 Agent Sessions 读取。" } }
+      }
+    },
+    "Codex temporarily limited usage checks. Agent Sessions will retry after the server's waiting period.": {
+      "comment": "Codex quota fetch warning detail: the server rate-limited usage requests (HTTP 429).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex temporarily limited usage checks. Agent Sessions will retry after the server's waiting period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 暂时限制了用量检查。Agent Sessions 会在服务器的等待时间结束后重试。" } }
+      }
+    },
+    "Codex usage could not be refreshed because the connection failed.": {
+      "comment": "Codex quota fetch warning detail: network failure.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex usage could not be refreshed because the connection failed." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "连接失败，无法刷新 Codex 用量。" } }
+      }
+    },
+    "Codex usage returned HTTP %lld.": {
+      "comment": "Codex quota fetch warning detail. %lld is the HTTP status code.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex usage returned HTTP %lld." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 用量请求返回了 HTTP %lld。" } }
+      }
+    },
+    "Codex usage unavailable": {
+      "comment": "Quota Meter and footer warning label when the live Codex usage check fails.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex usage unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 用量不可用" } }
+      }
+    },
+    "Codex usage unavailable — Retry": {
+      "comment": "Menu bar menu item: Codex usage check failed; choosing it retries.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Codex usage unavailable — Retry" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Codex 用量不可用——重试" } }
+      }
+    },
+    "Retry": {
+      "comment": "Button: check Codex usage again now.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retry" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重试" } }
+      }
+    },
+    "Retry now": {
+      "comment": "Button in the Codex usage warning popover: check again now.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retry now" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "立即重试" } }
+      }
+    },
+    "Retrying…": {
+      "comment": "Button label while a Codex usage retry is running.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retrying…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在重试…" } }
+      }
+    },
+    "Run codex login in Terminal, then choose Retry.": {
+      "comment": "Codex quota fetch recovery step when credentials are missing or rejected. 'codex login' and 'Terminal' stay verbatim.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Run codex login in Terminal, then choose Retry." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请在 Terminal 中运行 codex login，然后选择“重试”。" } }
+      }
+    },
+    "Update Agent Sessions, then choose Retry. If this continues, report the problem with the app version.": {
+      "comment": "Codex quota fetch recovery step when the usage response format is unreadable.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Update Agent Sessions, then choose Retry. If this continues, report the problem with the app version." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请更新 Agent Sessions，然后选择“重试”。如果问题仍然存在，请报告问题并附上应用版本。" } }
+      }
+    },
+    "Wait for the server's retry period. Existing quota readings cannot be verified during this pause.": {
+      "comment": "Codex quota fetch recovery step during a server rate-limit wait (HTTP 429).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Wait for the server's retry period. Existing quota readings cannot be verified during this pause." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请等待服务器的重试等待时间结束。在此期间无法验证现有的额度读数。" } }
+      }
+    },
+    "Weekly usage and session burn cannot be verified until a live check succeeds.": {
+      "comment": "Codex usage warning popover: explains that weekly usage and per-session burn are unverified until a live check succeeds.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Weekly usage and session burn cannot be verified until a live check succeeds." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在实时检查成功之前，无法验证每周用量和会话消耗。" } }
+      }
+    },
+    "usage unavailable": {
+      "comment": "Lowercase footer caption for a provider whose live usage check failed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "usage unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量不可用" } }
+      }
+    },
     "Terminal sessions: exact selected conversation and working/idle state through the automatic TUI integration. Desktop: working sessions only; OpenCode does not expose its selected idle conversation.": {
       "comment": "OpenCode live-session coverage: the managed TUI integration supports selected idle sessions; the desktop app exposes working sessions only.",
       "localizations": {
