@@ -56,6 +56,15 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Risk if wrong:** a closed or unrelated conversation could receive a live indicator. No desktop idle conversation is inferred from dates, persisted tabs or window titles.
 - **To close:** implement the supported desktop lifecycle/session observer and verify idle selection, switching, Home, closing and multiple windows against the real desktop client.
 
+
+### CLI follow-ons after the macOS history interface
+> **open** · sev: low · urg: low · verified 2026-10-23
+
+- **What:** TUI delivery, additional CLI providers, stats/cost and Linux distribution remain planned after the first macOS CLI. Neither [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77) nor its [bounded-read companion](https://github.com/shurrman/agent-sessions/pull/1) is merged in the reviewed main (`3c5a3324`).
+- **Where:** [macOS CLI shipping plan](plans/2026-10-23-macos-cli-shipping-plan.md), especially phase two; the independent [Repo MCP architect report](plans/2026-10-23-macos-cli-architect-review.md) records the source findings and review limits.
+- **Why deferred:** establish strict reads, scoped cache/refresh rules and a qualified macOS JSON interface before adding another client or distribution promise. The phase-two TUI must fix stale previews, hidden index errors, negative widths, unbounded buffering/cache and terminal-control handling; no maintainer commitment is assumed.
+- **Risk if wrong:** scope or support claims could outrun actual lifecycle/platform qualification. **To close:** implement and qualify each follow-on under the plan, then collapse this entry when release history records the completed work. This entry authorizes no implementation or publication.
+
 ### Cursor Desktop conversations are never discovered
 > **partial** · sev: med · urg: low · verified 2026-10-01
 - **Review 2026-10-01:** The v5.5.1 release added supported Cursor ACP history, but a current source search still finds no state.vscdb reader in AgentSessions/. The original ItemTable/cursorDiskKV family and its join to ACP or ~/.cursor records remain unresolved. Recommendation: keep partial; map the storage families and prove ID joins before adding another reader.
