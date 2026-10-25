@@ -4,25 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **OpenCode in the Quota Meter shows the session you are in.** Each OpenCode terminal shows its open conversation by its real title, working or idle, and closed conversations no longer pose as live. Setup is automatic: a small plugin, with its status in Settings → OpenCode. OpenCode Desktop shows working sessions only, since it keeps its idle selection to itself.
+
 ### Bug Fixes
 
-- OpenCode working sessions use native shared-service IDs across terminals and Desktop. Agent Sessions automatically installs and manages its bundled TUI integration for exact selected working/idle conversations in any terminal, without manual setup or configuration edits. Preferences shows integration status. Desktop idle selection remains unavailable in OpenCode 2.1.2; closed or ambiguous conversations never receive a guessed live indicator.
+- **Codex limits come back after a connection drop.** A network failure could leave Codex quota out of date for up to an hour. Now it rechecks within a minute, and a warning with Retry replaces the old percentage.
 
-- OpenCode sessions refresh automatically as its database changes. Live matching uses native session IDs and no longer assigns closed conversations by terminal title, folder or recency.
-
-- Codex quota checks recover from temporary connection failures within one minute while visible, and Retry checks again immediately without restarting the app. Failed checks show an actionable warning instead of a stale weekly percentage; fallback probes preserve weekly burn calibration and cannot overwrite a recovered live reading. Server-directed rate-limit waits remain in force.
-
-- Startup no longer draws overlapping transcript selection prompts or shows “Ready” beneath “Indexing sessions…”.
-
-- A single failed Codex quota check no longer hides a reading from the last five minutes, so the meter does not flicker on an unstable connection. During a long outage or while signed out, Agent Sessions waits longer between automatic checks, up to 30 minutes, instead of checking every minute; Retry still checks at once. The menu's Retry item is now unavailable during a server rate-limit wait, and the Retry buttons recover within about a minute if a check runs long.
+- **Cleaner startup.** The app no longer shows two "Select a session" prompts at once, or "Ready" while sessions are still indexing.
 
 ### Improvements
 
-- **Old sessions keep the price they were run at.** When a provider changes its prices, Session Info now applies the new rate only to usage after the change. Gemini 3.6 Flash and 3.8 Flash double on January 1, 2027, and sessions from 2026 keep their 2026 cost.
+- **Old sessions keep the price they were run at.** A provider price change now applies only to usage after it. Gemini 3.6 and 3.8 Flash double on January 1, 2027; your 2026 sessions keep their 2026 cost.
 
 <!-- Development history for this release. The release-note generator drops this heading. -->
 ### Maintenance
 
+- OpenCode presence: working sessions come from the shared service's `api/session/active` (loopback only, no redirects); selected working/idle conversations in any terminal come from the bundled TUI plugin (`agent-sessions-presence`), which the app installs into each detected OpenCode config root and manages by hash manifest. Matching requires an exact session ID; workspace, terminal-title and recency fallbacks no longer apply to OpenCode. New sessions and titles refresh from `opencode.db` and its WAL. Desktop idle selection is not exposed by OpenCode 2.1.2.
+- Codex quota fetch health (`CodexQuotaFetchIssue`) is tracked separately from sign-in health. Fallback probes keep weekly burn calibration and cannot overwrite a recovered live reading; a live reading under five minutes old survives one failed poll; server-directed rate-limit waits stay in force.
 - Price manifest rows take an optional `periods` list (`from` is a UTC day). Usage is priced at the period in force at its `observedAt`. Usage with no time, and events with no request context (which may be session totals stamped with their last time), use the session's start–end span instead, and are unpriced (`<model>:pricePeriod`) when that span crosses a change. Older clients ignore `periods` and keep the row's own rates. Manifest sequence 2026102201.
 - Energy review fixes before release: Codex OAuth and CLI-RPC failure cooldowns back off 1→2→4…→30 min per consecutive failure (first retry stays at 60 s); the 60 s outage cadence no longer applies to the menu-bar-only background on battery; Retry keeps the CLI-RPC "unsupported" verdict. The OpenCode integration reconciles every 60 s (was 5 s) and skips `pgrep` discovery while disabled; retired package copies are pruned to the newest 2; abandoned TUI presence files (dead PID or silent >10 min) and stale `.json.tmp` files are removed. OpenCode WAL-triggered refreshes are capped at 10 s while the app is active and 60 s in the background, with a 30 s stat tick when inactive.
 - Cleared the remaining Release-build concurrency warnings in `UnifiedSessionIndexer` (Combine sinks instead of `@Sendable` observer blocks) and `OpenClawSessionIndexer` (`NSLock.withLock` in async code).
