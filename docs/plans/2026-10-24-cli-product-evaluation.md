@@ -12,6 +12,31 @@ Three findings drive this:
 2. **A larger free competitor already ships the proposed interface.** AgentsView (6,262 stars, macOS/Linux/Windows, 50+ agents) has `agentsview session search/list/messages --json` and a read-only MCP server with paginated message reads, semantic/hybrid search and recall. The plan does not mention it.
 3. **The phase-two premise has no owner.** The PR #77 contributor has not answered the maintenance question in 25 days, and the Linux console release assets show one download each.
 
+## Revision after the Repo MCP review (2026-10-24)
+
+An independent ChatGPT Pro pass through Repo MCP ([report](2026-10-24-cli-pmf-repo-mcp-review.md), run `a0a9face-223f-46ef-8e37-8f8e9099dd15`) also returned **VALIDATE FIRST**. It corrected this document in ways I accept. Where the sections below conflict with this list, this list wins.
+
+1. **The Codex export gap is smaller than stated.** `claude-code-log` 1.7.0 (released 2026-10-05) supports Codex in beta through `--provider codex --session-id <id>` (verified in its tagged README, lines 21-22). The #80 requester already uses that tool. The first step is therefore to test their exact "archive this Codex chat" workflow with it, not to assume Agent Sessions must fill a gap.
+2. **The first build, if any, is Codex-only, known-session Markdown export, capped at 2-4 days.** Not Codex plus Claude, and not export plus `read`. Gate 1 below is narrowed accordingly.
+3. **The app-index shortcut is a hypothesis, not a cheap design.** The normal `IndexDB` initializer creates directories, opens read-write and runs schema setup (`DB.swift:136-159`); the corpus is sampled; freshness depends on GUI ingest. "One schema-version check" understated this.
+4. **A headless boundary is needed even without Linux.** Source descriptors import SwiftUI/AppKit and carry appearance and telemetry factories (`SessionSourceDescriptor.swift:1-3,272-312`).
+5. **Export can reuse existing rendering.** `TranscriptMarkdownExporter.markdownContent` already renders Markdown (`TranscriptPlainView.swift:34`). The GUI save path suppresses write errors with `try?` (`:2797`) and depends on `NSSavePanel`, so a CLI needs its own destination and error handling.
+6. **Session IDs do not resolve themselves.** `CODEX_THREAD_ID` is a provider ID; the app's `Session.id` can be path-derived (`SessionIndexer.swift:2461-2478`). Resolution must fail on ambiguity, never pick the newest file.
+7. **"No demand" overstated the TUI evidence.** Correct wording: no demonstrated adoption and no maintenance commitment. The recommendation (no TUI now) is unchanged.
+
+Planning estimates from that review (not measurements): tool comparison 1-2 days; experimental Codex export 2-4 days; packaged "archive this Codex chat" 5-10 days; full three-provider CLI 20-40 days; TUI another 10-20 days.
+
+### Doing the macOS part of PR #77 without the contributor
+
+Feasible, but it is a new implementation on current main that borrows from the PR, not a conflict-resolution job. Facts checked 2026-10-24:
+
+- `git merge-tree` of PR head `4b546dcc` against HEAD `a3e3fb35` still reports 11 conflicting files. Main is 181 commits past the PR base; 36 of the PR's 73 app files changed on main since then.
+- PR size by area (`git diff --shortstat ad06d49c 4b546dcc`): app refactor 73 files +3,125/-2,589; Swift CLI `cli/` +886 plus `Package.swift` +145; Go TUI +1,860; Linux packaging +269; scripts +183.
+- Reuse map (from the review, agreed): port the patterns of `Package.swift`, `Drivers.swift` and `Commands.swift`; keep `Output.swift`'s stdout/stderr split but replace its `{}` fallback; reuse contract-test harnesses and selected fixtures; discard `Stats.swift`, the Go TUI and Linux packaging from scope; reuse the companion's UTF-8 truncation helper and read tests.
+- The PR's bare-tier Codex price alias (`12be59bb`) is not on main. If Codex still records bare tier names, it is a separate small fix, independent of any CLI.
+- License: the fork is MIT. Reuse is permitted with the notice retained. Etiquette: keep authorship when taking commits as-is; credit `shurrman`, PR #77 and the commits in ported work; do not imply they endorsed the new scope.
+- PR handling (owner action): thank the contributor, explain the narrow macOS export decision and that TUI/Linux are out of scope without a maintainer, then close #77 as a proposal or supersede it with the narrow PR if one is opened. Close companion PR #1 consistently.
+
 ## Part 1: Product findings
 
 ### Candidate jobs, reassessed
@@ -129,6 +154,7 @@ All actions below need the owner's go-ahead where marked. None reads or uploads 
 
 | Step | What | Owner action needed | Measures |
 | --- | --- | --- | --- |
+| V0 (first) | Run about ten "archive this Codex chat" cases with the GUI closed: GUI export versus `claude-code-log` 1.7.0 `--provider codex --session-id`, with cass as a second comparator. Cover current-session selection, concurrent sessions in one directory, resumed, long, Unicode, tool/error and compressed histories. | Owner installs the comparators and picks fixtures or real chats. | Correct session every time; no silent truncation; manual steps; hands-on time. If an existing tool does the job, do not build an exporter for #80. |
 | V1 | Incident diary. Owner logs each time they or an agent needed something from a past session: job (J1–J5), provider, how solved, minutes spent, whether the GUI sufficed. | Owner keeps the log. | Frequency of J2/J5 versus J1. |
 | V2 | Skill pilot, no code. A `SKILL.md` teaching an agent to (a) query the app index read-only with `sqlite3 "file:…/index.db?mode=ro"` over `session_search_fts` joined to `session_meta`, and (b) read raw session files with `rg`/`jq`/`zstd -dc`. Use in the owner's own Claude Code and Codex sessions. | Owner installs the skill locally and chooses tasks. | Retrieval success, failure types (compressed files, noise, huge lines, schema confusion, stale index), tokens and time. |
 | V3 | Baseline against AgentsView MCP on the same V2 tasks. | Owner installs AgentsView (not authorized for Claude). | Whether Agent Sessions has any real advantage. |
@@ -145,9 +171,11 @@ Draft #80 reply (for the owner to post or edit):
 - Consider agent search (Gate 2) only if V2 shows repeated failures that a structured `read`/`search` would fix, and V3 shows a concrete reason to prefer Agent Sessions over AgentsView.
 - Defer all CLI work if V2 succeeds with the skill alone (then publish the skill, not a CLI), or if V3 shows AgentsView fully covers the job.
 
-### Gate 1: narrow `export` and `read` (only after Gate 0 and owner approval to code)
+### Gate 1: narrow export (only after Gate 0 and owner approval to code)
 
-Scope: Codex and Claude Code. OpenCode only if V1/V2 show use.
+Revised scope: Codex only, known-session Markdown export, capped at 2-4 days; stop and reassess if identity resolution or packaging does not fit the cap. Claude Code and `read` follow only if that succeeds. The criteria below describe the later packaged feature; criteria 1, 2, 4, 5 and 6 apply to the capped experiment.
+
+Original scope: Codex and Claude Code. OpenCode only if V1/V2 show use.
 
 Acceptance criteria:
 
