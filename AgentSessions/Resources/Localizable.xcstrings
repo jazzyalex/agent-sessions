@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Terminal sessions: exact selected conversation and working/idle state through the automatic TUI integration. Desktop: working sessions only; OpenCode does not expose its selected idle conversation.": {
+      "comment": "OpenCode live-session coverage: the managed TUI integration supports selected idle sessions; the desktop app exposes working sessions only.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminal sessions: exact selected conversation and working/idle state through the automatic TUI integration. Desktop: working sessions only; OpenCode does not expose its selected idle conversation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminal 会话：通过自动管理的 TUI 集成显示当前选中的会话及其工作/空闲状态。桌面端：仅显示工作中的会话；OpenCode 不提供当前选中的空闲会话。"
+          }
+        }
+      }
+    },
     "A valid Codex session ID is required to continue this session in Codex Desktop.": {
       "comment": "Error when a local Codex thread has no valid UUID for a desktop deep link.",
       "localizations": {
