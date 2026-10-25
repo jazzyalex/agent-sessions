@@ -691,6 +691,8 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let foregroundNewSessionMonitorIntervalSeconds: UInt64 = 5 * 60
     private let backgroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
     private let foregroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 10 * 60
+    private let openCodeForegroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 10
+    private let openCodeBackgroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 60
     private var newSessionMonitorTask: Task<Void, Never>? = nil
     private var focusedSessionMonitorTask: Task<Void, Never>? = nil
     private var lastSeenCodexSnapshot: DirectorySignatureSnapshot? = nil
@@ -1292,15 +1294,15 @@ final class UnifiedSessionIndexer: ObservableObject {
         await checkForNewSessions(establishBaselineIfNeeded: true)
         var secondsSinceDirectoryScan: UInt64 = 0
         while !Task.isCancelled {
-            let intervalSeconds = await MainActor.run { [weak self] () -> UInt64 in
-                guard let self else { return 60 }
+            let (intervalSeconds, tickSeconds) = await MainActor.run { [weak self] () -> (UInt64, UInt64) in
+                guard let self else { return (60, 30) }
+                // OpenCode's small DB/WAL stat check keeps Quota Meter current without
+                // walking the Codex/Claude directory trees on the live cadence. In the
+                // background its refresh is capped at once a minute, so wake less often.
                 return self.appIsActive
-                    ? self.foregroundNewSessionMonitorIntervalSeconds
-                    : self.backgroundNewSessionMonitorIntervalSeconds
+                    ? (self.foregroundNewSessionMonitorIntervalSeconds, 10)
+                    : (self.backgroundNewSessionMonitorIntervalSeconds, 30)
             }
-            // OpenCode's small DB/WAL stat check keeps Quota Meter current without
-            // walking the Codex/Claude directory trees on the live cadence.
-            let tickSeconds: UInt64 = 10
             try? await Task.sleep(nanoseconds: tickSeconds * 1_000_000_000)
             if Task.isCancelled { break }
             await checkForNewOpenCodeSessions()
@@ -1396,9 +1398,15 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func shouldTriggerMonitorRefresh(source: SessionSource, now: Date) -> Bool {
-        let minimumInterval = source == .opencode ? 10 : (appIsActive
-            ? foregroundMonitorRefreshMinimumIntervalSeconds
-            : backgroundMonitorRefreshMinimumIntervalSeconds)
+        // OpenCode's WAL changes on every streamed write, and its refresh is not
+        // deferred while inactive (Quota Meter titles). Refresh it often only while
+        // the app is active; in the background once a minute is enough for titles.
+        let minimumInterval = source == .opencode
+            ? (appIsActive ? openCodeForegroundMonitorRefreshMinimumIntervalSeconds
+                : openCodeBackgroundMonitorRefreshMinimumIntervalSeconds)
+            : (appIsActive
+                ? foregroundMonitorRefreshMinimumIntervalSeconds
+                : backgroundMonitorRefreshMinimumIntervalSeconds)
         if let last = lastMonitorRefreshBySource[source],
            now.timeIntervalSince(last) < minimumInterval {
             return false

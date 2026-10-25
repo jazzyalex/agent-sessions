@@ -250,6 +250,7 @@ final class CodexUsageModel: ObservableObject {
     private let calibrationStore: WeeklyQuotaCalibrationStore
     private let calibrationDefaults: UserDefaults
     private var isEnabled: Bool = false
+    private var refreshGeneration: UInt64 = 0
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
     private var cockpitVisible: Bool = false
@@ -346,11 +347,20 @@ final class CodexUsageModel: ObservableObject {
         refreshResetCredits()
         if isUpdating { return }
         isUpdating = true
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        // The refresh can include a slow tmux /status probe. Never leave Retry
+        // disabled for longer than this, even if that probe is still running.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
+            guard let self, self.refreshGeneration == generation else { return }
+            self.isUpdating = false
+        }
         Task { [weak self] in
             guard let self = self else { return }
             if let svc = self.service {
                 await svc.refreshNow()
-                self.isUpdating = false
+                if self.refreshGeneration == generation { self.isUpdating = false }
                 return
             }
             // Fallback: one-shot refresh if the long-lived service isn't running.
@@ -362,7 +372,7 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             await svc.refreshNow()
-            self.isUpdating = false
+            if self.refreshGeneration == generation { self.isUpdating = false }
         }
     }
 
@@ -2746,6 +2756,12 @@ actor CodexStatusService {
            await codexRPCProbe.hasRecentSuccessfulRead(cooldown: oauthSuccessCooldown) {
             return nil
         }
+        // One failed poll does not make a reading from a few minutes ago wrong.
+        // Keep showing it until it is older than the grace window, so a flaky
+        // network does not flip the meter between a value and a warning.
+        if Self.liveReadingIsWithinFailureGrace(snapshot, now: Date()) {
+            return nil
+        }
         snapshot.quotaFetchIssue = issue ?? .network
         // Publish failure without manufacturing a new quota observation time.
         updateHandler(snapshot)
@@ -3600,6 +3616,16 @@ actor CodexStatusService {
         return (process.terminationStatus, stdout)
     }
 
+    /// How long a healthy live reading stays on screen after polls start failing.
+    nonisolated static let failureGraceSeconds: TimeInterval = 5 * 60
+
+    nonisolated static func liveReadingIsWithinFailureGrace(_ snapshot: CodexUsageSnapshot, now: Date) -> Bool {
+        guard snapshot.quotaFetchIssue == nil,
+              snapshot.limitsSource == .oauth || snapshot.limitsSource == .cliRPC,
+              let observedAt = snapshot.eventTimestamp else { return false }
+        return now.timeIntervalSince(observedAt) < failureGraceSeconds
+    }
+
     private func nextInterval() -> UInt64 {
         // Read Codex-specific polling interval. Visible limits surfaces are capped
         // at 3 minutes so pinned cockpits and menu-bar tracking stay current.
@@ -3614,9 +3640,11 @@ actor CodexStatusService {
             return 3600 * 1_000_000_000
         }
 
-        // A temporary outage must not inherit the three-minute battery cadence
-        // or a longer user polling interval while a usage surface is visible.
-        if visibilityMode != .hidden, snapshot.quotaFetchIssue != nil {
+        // A temporary outage must not inherit a longer user polling interval while
+        // a usage surface is visible. A background menu on battery keeps its
+        // three-minute cadence; the fetchers' own backoff spaces a long outage.
+        if snapshot.quotaFetchIssue != nil,
+           visibilityMode == .active || (visibilityMode == .menuBackground && Self.onACPower()) {
             return 60 * 1_000_000_000
         }
 

@@ -105,6 +105,19 @@ enum CodexQuotaFetchIssue: Equatable, Sendable {
     }
 }
 
+/// The first retry after a failure stays at `base` (one minute), so a brief outage
+/// recovers quickly. Each further consecutive failure doubles the wait up to 30
+/// minutes, so a long outage or a signed-out account does not retry every minute.
+enum CodexQuotaRetryBackoff {
+    static let maximum: TimeInterval = 30 * 60
+
+    static func cooldown(base: TimeInterval, consecutiveFailures: Int) -> TimeInterval {
+        guard consecutiveFailures > 1 else { return base }
+        let doublings = Double(min(consecutiveFailures - 1, 16))
+        return min(base * pow(2, doublings), max(base, maximum))
+    }
+}
+
 // MARK: - Fetcher
 
 actor CodexOAuthUsageFetcher {
@@ -115,6 +128,7 @@ actor CodexOAuthUsageFetcher {
     // Cooldown state
     private var lastFetchAt: Date? = nil
     private var lastFetchFailed: Bool = false
+    private var consecutiveFailures = 0
     private var rateLimitedUntil: Date? = nil
     private var lastCredentialSet: CodexTokenSet?
     private(set) var lastFailure: CodexQuotaFetchIssue?
@@ -135,6 +149,7 @@ actor CodexOAuthUsageFetcher {
         guard rateLimitedUntil.map({ $0 > clock() }) != true else { return }
         lastFetchAt = nil
         lastFetchFailed = false
+        consecutiveFailures = 0
     }
 
     /// Clears only in-memory retry state before an explicit user-initiated
@@ -145,6 +160,7 @@ actor CodexOAuthUsageFetcher {
     func resetForUserRecheck() async {
         lastFetchAt = nil
         lastFetchFailed = false
+        consecutiveFailures = 0
         await credentials.invalidateCache()
     }
 
@@ -190,7 +206,9 @@ actor CodexOAuthUsageFetcher {
 
         // Cooldown gate
         if let last = lastFetchAt {
-            let cd = lastFetchFailed ? cooldownFailure : cooldownSuccess
+            let cd = lastFetchFailed
+                ? CodexQuotaRetryBackoff.cooldown(base: cooldownFailure, consecutiveFailures: consecutiveFailures)
+                : cooldownSuccess
             if now.timeIntervalSince(last) < cd { return .skippedCooldown }
         }
 
@@ -202,8 +220,7 @@ actor CodexOAuthUsageFetcher {
             // the CLI-RPC probe — which spawns a `codex app-server` process. On a
             // background tick that is a process spawn per minute, indefinitely.
             lastFetchAt = now
-            lastFetchFailed = true
-            lastFailure = .noCredentials
+            recordFailure(.noCredentials)
             return .transient
         }
 
@@ -211,30 +228,28 @@ actor CodexOAuthUsageFetcher {
         do {
             let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
             guard var result = Self.normalizeResponse(raw) else {
-                lastFetchFailed = true  // nil normalize = response shape changed
-                lastFailure = .invalidResponse
+                recordFailure(.invalidResponse)  // nil normalize = response shape changed
                 return .transient
             }
             result.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount(tokenSet.accountId)
             lastFetchFailed = false
+            consecutiveFailures = 0
             lastFailure = nil
             return .ok(result)
         } catch CodexOAuthUsageError.unauthorized {
             os_log("CodexOAuth: 401 — token expired, invalidating", log: log, type: .info)
             await credentials.invalidateCache()
-            lastFetchFailed = true
-            lastFailure = .unauthorized
+            recordFailure(.unauthorized)
             return .unauthorized
         } catch CodexOAuthUsageError.rateLimited(let retryAfter) {
             rateLimitedUntil = clock().addingTimeInterval(retryAfter)
-            lastFetchFailed = true
-            lastFailure = .rateLimited
+            recordFailure(.rateLimited)
             return .transient
         } catch {
             switch error {
-            case CodexOAuthUsageError.httpError(let status): lastFailure = .http(status)
-            case CodexOAuthUsageError.decodingError: lastFailure = .invalidResponse
-            default: lastFailure = .network
+            case CodexOAuthUsageError.httpError(let status): recordFailure(.http(status))
+            case CodexOAuthUsageError.decodingError: recordFailure(.invalidResponse)
+            default: recordFailure(.network)
             }
             let cause: NSError
             if case CodexOAuthUsageError.networkError(let underlying) = error {
@@ -242,9 +257,14 @@ actor CodexOAuthUsageFetcher {
             } else { cause = error as NSError }
             os_log("CodexOAuth: fetch failed (%{public}@, code %ld)", log: log, type: .error,
                    cause.domain, cause.code)
-            lastFetchFailed = true
             return .transient
         }
+    }
+
+    private func recordFailure(_ issue: CodexQuotaFetchIssue) {
+        lastFetchFailed = true
+        consecutiveFailures += 1
+        lastFailure = issue
     }
 
     // MARK: - Private
@@ -254,6 +274,7 @@ actor CodexOAuthUsageFetcher {
         if current != lastCredentialSet {
             lastFetchAt = nil
             lastFetchFailed = false
+            consecutiveFailures = 0
             rateLimitedUntil = nil
             lastCredentialSet = current
         }

@@ -102,7 +102,9 @@ final class StatusItemController: NSObject {
                         title: String(localized: "Codex usage unavailable — Retry"),
                         action: #selector(retryCodexUsage))
                     warning.toolTip = String(localized: issue.detail) + " " + String(localized: issue.recovery)
-                    warning.isEnabled = issue != .rateLimited
+                    // The menu auto-enables any item with an action, so `isEnabled`
+                    // alone is ignored. No action is what disables it during a 429 wait.
+                    if issue == .rateLimited { warning.action = nil }
                     menu.addItem(warning)
                 }
                 menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasFiveHourRateLimit), action: #selector(openUsagePreferences)))

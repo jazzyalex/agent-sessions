@@ -272,6 +272,73 @@ final class CodexQuotaRecoveryTests: XCTestCase {
         XCTAssertEqual(scenario.rpcCount, 2)
     }
 
+    func testBackoffKeepsFirstRetryAtOneMinuteThenDoublesToThirtyMinutes() {
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 0), 60)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 1), 60)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 2), 120)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 3), 240)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 10), 30 * 60)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 60, consecutiveFailures: 1_000), 30 * 60)
+        XCTAssertEqual(CodexQuotaRetryBackoff.cooldown(base: 3_600, consecutiveFailures: 3), 3_600,
+                       "a caller's longer base is never shortened")
+    }
+
+    func testPersistentOutageStopsSpawningTheRPCProbeEveryMinute() async throws {
+        let service = service()
+        // Offline: OAuth and the RPC probe both fail on every attempt.
+        var minutes = 0
+        while minutes < 60 {
+            _ = await service.refreshLiveLimitsForTesting()
+            scenario.advance(60)
+            minutes += 1
+        }
+        // Without backoff this would be 60 spawns; with it, 60+120+240+480+960 s
+        // reach the 30-minute cap, then one more probe.
+        XCTAssertLessThanOrEqual(scenario.rpcCount, 7)
+        XCTAssertLessThanOrEqual(scenario.requestCount, 7)
+        XCTAssertGreaterThanOrEqual(scenario.rpcCount, 5)
+
+        // Retry still checks again at once, and the next failure starts over at one minute.
+        let before = scenario.rpcCount
+        _ = await service.refreshLiveLimitsForTesting(retry: true)
+        XCTAssertEqual(scenario.rpcCount, before + 1)
+        scenario.advance(60)
+        _ = await service.refreshLiveLimitsForTesting()
+        XCTAssertEqual(scenario.rpcCount, before + 2)
+    }
+
+    func testRetryDoesNotReEnableAnUnsupportedRPCProbe() async {
+        let fixture = scenario!
+        let probe = CodexCLIRPCProbe(clock: { fixture.now }, probe: {
+            _ = try? fixture.nextRPC()
+            throw CodexCLIRPCProbe.unsupportedErrorForTesting
+        })
+        _ = await probe.fetchRateLimits()
+        XCTAssertEqual(scenario.rpcCount, 1)
+        await probe.resetForUserRetry()
+        scenario.advance(3_600)
+        _ = await probe.fetchRateLimits()
+        XCTAssertEqual(scenario.rpcCount, 1, "an app-server that cannot serve the RPC is not respawned by Retry")
+    }
+
+    func testOneFailedPollKeepsARecentLiveReadingOnScreen() async throws {
+        scenario.responses = [.weekly(used: 2), .network, .network]
+        let service = service()
+        let healthy = await service.refreshLiveLimitsForTesting()
+        XCTAssertEqual(healthy.weekLimitsSource, .oauth)
+        scenario.advance(60)
+        let blip = await service.refreshLiveLimitsForTesting()
+        XCTAssertNil(blip.quotaFetchIssue, "a reading seconds old is still correct after one failure")
+        XCTAssertEqual(blip.weekRemainingPercent, 98)
+
+        var aged = blip
+        aged.eventTimestamp = Date().addingTimeInterval(-CodexStatusService.failureGraceSeconds - 1)
+        await service.setSnapshotForTesting(aged)
+        scenario.advance(60)
+        let expired = await service.refreshLiveLimitsForTesting()
+        XCTAssertEqual(expired.quotaFetchIssue, .network)
+    }
+
     func testManualRetryBypassesBothFailureCooldownsImmediately() async throws {
         scenario.responses = [.network, .network]
         scenario.rpcSucceedsAfter = 1

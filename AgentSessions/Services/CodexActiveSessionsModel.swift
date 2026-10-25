@@ -684,10 +684,13 @@ final class CodexActiveSessionsModel {
         }
 
         var out: [CodexActivePresence] = []
-        for url in items where url.pathExtension.lowercased() == "json" {
+        for url in items {
+            if removeAbandonedOpenCodeTemporaryFile(url, now: now) { continue }
+            guard url.pathExtension.lowercased() == "json" else { continue }
             guard let data = try? Data(contentsOf: url) else { continue }
             guard var p = try? decoder.decode(CodexActivePresence.self, from: data) else { continue }
             p.sourceFilePath = url.path
+            if removeAbandonedOpenCodeTUIFile(p, at: url, now: now) { continue }
             if p.isStale(now: now, ttl: ttl) { continue }
             if p.source == .opencode, p.publisher == "agent-sessions-opencode-tui" {
                 guard p.liveStateHint != nil, let lastSeenAt = p.lastSeenAt, now.timeIntervalSince(lastSeenAt) <= 5,
@@ -696,6 +699,37 @@ final class CodexActiveSessionsModel {
             out.append(p)
         }
         return out
+    }
+
+    /// The bundled TUI integration deletes its file on a clean exit only. A killed
+    /// or crashed client leaves it behind, so the reader removes files that are
+    /// provably abandoned: the publishing process is gone, or it stopped writing
+    /// long ago. Only that integration's own files are ever removed.
+    /// A live client rewrites its file every second, so after sleep it is recreated
+    /// at once even if this removed it.
+    nonisolated static let abandonedOpenCodeTUIFileAge: TimeInterval = 10 * 60
+
+    nonisolated static func removeAbandonedOpenCodeTUIFile(_ presence: CodexActivePresence,
+                                                           at url: URL, now: Date) -> Bool {
+        guard presence.source == .opencode, presence.publisher == "agent-sessions-opencode-tui",
+              url.lastPathComponent.hasPrefix("opencode-tui-") else { return false }
+        let processGone: Bool = {
+            guard let pid = presence.pid, pid > 1, pid <= Int(Int32.max) else { return true }
+            return kill(Int32(pid), 0) != 0 && errno == ESRCH
+        }()
+        let silent = presence.lastSeenAt.map { now.timeIntervalSince($0) > abandonedOpenCodeTUIFileAge } ?? true
+        guard processGone || silent else { return false }
+        try? FileManager.default.removeItem(at: url)
+        return true
+    }
+
+    nonisolated static func removeAbandonedOpenCodeTemporaryFile(_ url: URL, now: Date) -> Bool {
+        let name = url.lastPathComponent
+        guard name.hasPrefix("opencode-tui-"), name.hasSuffix(".json.tmp"),
+              let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+              now.timeIntervalSince(modifiedAt) > abandonedOpenCodeTUIFileAge else { return false }
+        try? FileManager.default.removeItem(at: url)
+        return true
     }
 
     // MARK: - Helpers

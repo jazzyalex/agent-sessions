@@ -168,9 +168,30 @@ struct OpenCodePresenceInstaller {
         try retire(destination)
     }
 
+    /// Retired copies kept for recovery. Older ones are removed.
+    static let retainedRetiredCopies = 2
+
     private func retire(_ directory: URL) throws {
         try fm.createDirectory(at: retiredRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try fm.moveItem(at: directory, to: retiredRoot.appendingPathComponent(UUID().uuidString))
+        let retired = retiredRoot.appendingPathComponent(UUID().uuidString)
+        try fm.moveItem(at: directory, to: retired)
+        // A rename keeps the old mtime; stamp the retirement time so pruning keeps
+        // the most recently retired copies.
+        try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: retired.path)
+        pruneRetired()
+    }
+
+    /// Only directories this installer retired live here, so pruning cannot touch
+    /// user files. A failure only leaves an extra copy behind.
+    private func pruneRetired() {
+        guard let entries = try? fm.contentsOfDirectory(
+            at: retiredRoot, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey]) else { return }
+        let dated = entries.compactMap { url -> (URL, Date)? in
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey]),
+                  values.isDirectory == true else { return nil }
+            return (url, values.contentModificationDate ?? .distantPast)
+        }.sorted { $0.1 > $1.1 }
+        for (url, _) in dated.dropFirst(Self.retainedRetiredCopies) { try? fm.removeItem(at: url) }
     }
 }
 
@@ -245,8 +266,14 @@ final class OpenCodePresenceIntegrationModel {
                 let support = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Application Support/AgentSessions")
                 let payload = Bundle.main.resourceURL?.appendingPathComponent("OpenCodePresence")
-                self?.status = await OpenCodePresenceIntegration.shared.reconcile(enabled: enabled, payload: payload, support: support)
-                try? await Task.sleep(for: .seconds(5))
+                // Disabled: only previously managed roots need removal, so skip the
+                // pgrep-based profile discovery entirely.
+                self?.status = await OpenCodePresenceIntegration.shared.reconcile(
+                    enabled: enabled, payload: payload, support: support,
+                    discoveredProfiles: enabled ? nil : [])
+                // Each pass spawns pgrep and hashes the package. A new install is
+                // picked up within a minute; OpenCode loads it on its next launch.
+                try? await Task.sleep(for: .seconds(60))
             }
         }
     }

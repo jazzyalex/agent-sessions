@@ -19,6 +19,7 @@ actor CodexCLIRPCProbe {
     private var permanentlyUnavailable = false
     private var lastProbeAt: Date? = nil
     private var lastProbeFailed = false
+    private var consecutiveFailures = 0
     private let clock: @Sendable () -> Date
     private let probe: (@Sendable () async throws -> CodexUsageSnapshot?)?
 
@@ -28,10 +29,12 @@ actor CodexCLIRPCProbe {
         self.probe = probe
     }
 
+    /// Clears failure cooldowns only. An app-server that reported the RPC as
+    /// unsupported stays disabled: retrying cannot change that binary's answer.
     func resetForUserRetry() {
         lastProbeAt = nil
         lastProbeFailed = false
-        permanentlyUnavailable = false
+        consecutiveFailures = 0
     }
 
     func hasRecentSuccessfulRead(cooldown: TimeInterval) -> Bool {
@@ -68,7 +71,11 @@ actor CodexCLIRPCProbe {
 
         let now = clock()
         if let last = lastProbeAt {
-            let cd = lastProbeFailed ? cooldownFailure : cooldownSuccess
+            // Each probe spawns `codex app-server`, so a persistent failure (offline,
+            // signed out) backs off instead of spawning once per minute indefinitely.
+            let cd = lastProbeFailed
+                ? CodexQuotaRetryBackoff.cooldown(base: cooldownFailure, consecutiveFailures: consecutiveFailures)
+                : cooldownSuccess
             if now.timeIntervalSince(last) < cd { return nil }
         }
 
@@ -81,7 +88,7 @@ actor CodexCLIRPCProbe {
             } else {
                 guard let codexBin = CodexCLIEnvironment().resolveBinary(customPath: nil) else {
                     os_log("CodexRPC: codex binary not found", log: log, type: .info)
-                    lastProbeFailed = true
+                    recordFailure()
                     return nil
                 }
                 response = try await runRPC(binary: codexBin)
@@ -91,7 +98,12 @@ actor CodexCLIRPCProbe {
             // app-server). Treating it as success applied only the 60s success
             // cooldown, so a permanently-unusable app-server was re-spawned every
             // minute forever.
-            lastProbeFailed = (response == nil)
+            if response == nil {
+                recordFailure()
+            } else {
+                lastProbeFailed = false
+                consecutiveFailures = 0
+            }
             return response
         } catch RPCError.unsupported {
             os_log("CodexRPC: app-server RPC not supported, disabling permanently", log: log, type: .info)
@@ -100,12 +112,19 @@ actor CodexCLIRPCProbe {
         } catch {
             os_log("CodexRPC: probe failed: %{public}@", log: log, type: .error,
                    error.localizedDescription)
-            lastProbeFailed = true
+            recordFailure()
             return nil
         }
     }
 
+    private func recordFailure() {
+        lastProbeFailed = true
+        consecutiveFailures += 1
+    }
+
 #if DEBUG
+    nonisolated static var unsupportedErrorForTesting: Error { RPCError.unsupported }
+
     nonisolated static var defaultSuccessCooldownForTesting: TimeInterval {
         defaultSuccessCooldown
     }

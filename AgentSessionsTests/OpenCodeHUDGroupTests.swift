@@ -414,6 +414,46 @@ final class OpenCodeServicePresenceTests: XCTestCase {
         XCTAssertTrue(CodexActiveSessionsModel.loadPresences(from: root, decoder: CodexActiveSessionsModel.makeDecoder(), now: now, ttl: 60).isEmpty)
     }
 
+    func testAbandonedNativeTUIFilesAreRemovedAndLiveOnesKept() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let now = Date()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        func write(_ name: String, pid: Int, lastSeenAt: Date, publisher: String = "agent-sessions-opencode-tui") throws -> URL {
+            var presence = CodexActivePresence()
+            presence.publisher = publisher
+            presence.source = .opencode
+            presence.sessionId = "ses_exact"
+            presence.pid = pid
+            presence.lastSeenAt = lastSeenAt
+            presence.liveStateHint = .openIdle
+            let file = root.appendingPathComponent(name)
+            try encoder.encode(presence).write(to: file)
+            return file
+        }
+        let live = try write("opencode-tui-live.json", pid: Int(getpid()), lastSeenAt: now)
+        let crashed = try write("opencode-tui-crashed.json", pid: Int(Int32.max), lastSeenAt: now)
+        let silent = try write("opencode-tui-silent.json", pid: Int(getpid()), lastSeenAt: now.addingTimeInterval(-11 * 60))
+        // Files this integration did not publish are never removed.
+        let foreign = try write("client.json", pid: Int(Int32.max), lastSeenAt: now)
+        let otherPublisher = try write("opencode-tui-other.json", pid: Int(Int32.max), lastSeenAt: now, publisher: "someone-else")
+        let oldTemporary = root.appendingPathComponent("opencode-tui-crashed.json.tmp")
+        let freshTemporary = root.appendingPathComponent("opencode-tui-live.json.tmp")
+        try Data("{}".utf8).write(to: oldTemporary)
+        try Data("{}".utf8).write(to: freshTemporary)
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-11 * 60)], ofItemAtPath: oldTemporary.path)
+
+        let loaded = CodexActiveSessionsModel.loadPresences(from: root, decoder: CodexActiveSessionsModel.makeDecoder(), now: now, ttl: 60)
+        let loadedNames = Set(loaded.compactMap { $0.sourceFilePath.map { URL(fileURLWithPath: $0).lastPathComponent } })
+        XCTAssertTrue(loadedNames.contains(live.lastPathComponent))
+        XCTAssertTrue(loadedNames.isDisjoint(with: [crashed.lastPathComponent, silent.lastPathComponent]))
+        for removed in [crashed, silent, oldTemporary] { XCTAssertFalse(fm.fileExists(atPath: removed.path), removed.lastPathComponent) }
+        for kept in [live, foreign, otherPublisher, freshTemporary] { XCTAssertTrue(fm.fileExists(atPath: kept.path), kept.lastPathComponent) }
+    }
+
     func testActiveServiceIDsIdentifySessionsWithoutTerminalMetadata() throws {
         let body = Data(#"{"data":{"ses_current":{"type":"running"},"ses_closed":{"type":"idle"}}}"#.utf8)
         let result = try XCTUnwrap(OpenCodeServicePresence.decode(body, registration: registration, now: Date()))

@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 - Startup no longer draws overlapping transcript selection prompts or shows “Ready” beneath “Indexing sessions…”.
 
+- A single failed Codex quota check no longer hides a reading from the last five minutes, so the meter does not flicker on an unstable connection. During a long outage or while signed out, Agent Sessions waits longer between automatic checks, up to 30 minutes, instead of checking every minute; Retry still checks at once. The menu's Retry item is now unavailable during a server rate-limit wait, and the Retry buttons recover within about a minute if a check runs long.
+
 ### Improvements
 
 - **Old sessions keep the price they were run at.** When a provider changes its prices, Session Info now applies the new rate only to usage after the change. Gemini 3.6 Flash and 3.8 Flash double on January 1, 2027, and sessions from 2026 keep their 2026 cost.
@@ -22,6 +24,7 @@ All notable changes to this project will be documented in this file.
 ### Maintenance
 
 - Price manifest rows take an optional `periods` list (`from` is a UTC day). Usage is priced at the period in force at its `observedAt`. Usage with no time, and events with no request context (which may be session totals stamped with their last time), use the session's start–end span instead, and are unpriced (`<model>:pricePeriod`) when that span crosses a change. Older clients ignore `periods` and keep the row's own rates. Manifest sequence 2026102201.
+- Energy review fixes before release: Codex OAuth and CLI-RPC failure cooldowns back off 1→2→4…→30 min per consecutive failure (first retry stays at 60 s); the 60 s outage cadence no longer applies to the menu-bar-only background on battery; Retry keeps the CLI-RPC "unsupported" verdict. The OpenCode integration reconciles every 60 s (was 5 s) and skips `pgrep` discovery while disabled; retired package copies are pruned to the newest 2; abandoned TUI presence files (dead PID or silent >10 min) and stale `.json.tmp` files are removed. OpenCode WAL-triggered refreshes are capped at 10 s while the app is active and 60 s in the background, with a 30 s stat tick when inactive.
 - Cleared the remaining Release-build concurrency warnings in `UnifiedSessionIndexer` (Combine sinks instead of `@Sendable` observer blocks) and `OpenClawSessionIndexer` (`NSLock.withLock` in async code).
 
 ## [6.1.1] - 2026-10-22

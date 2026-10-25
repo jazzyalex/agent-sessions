@@ -61,6 +61,21 @@ final class OpenCodePresenceIntegrationTests: XCTestCase {
         XCTAssertFalse(try installer.install(configRoot: config))
     }
 
+    func testRepeatedUpdatesKeepOnlyTheNewestRetiredCopies() throws {
+        try installer.install(configRoot: config)
+        var replaced: [Data] = []
+        for version in 1...4 {
+            replaced.append(try Data(contentsOf: installed.appendingPathComponent("tui.js")))
+            try Data("export default {id:'agent-sessions.presence', version: \(version), setup(){}};".utf8)
+                .write(to: payload.appendingPathComponent("tui.js"))
+            XCTAssertTrue(try installer.install(configRoot: config))
+        }
+        let kept = try fm.contentsOfDirectory(at: retired, includingPropertiesForKeys: nil)
+        XCTAssertEqual(kept.count, OpenCodePresenceInstaller.retainedRetiredCopies)
+        let keptScripts = Set(try kept.map { try Data(contentsOf: $0.appendingPathComponent("tui.js")) })
+        XCTAssertEqual(keptScripts, Set(replaced.suffix(OpenCodePresenceInstaller.retainedRetiredCopies)))
+    }
+
     func testUnrecognizedPackageIsNeverOverwrittenOrRemoved() throws {
         try fm.createDirectory(at: installed, withIntermediateDirectories: true)
         let file = installed.appendingPathComponent("tui.js")
