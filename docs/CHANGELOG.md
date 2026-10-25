@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 - OpenCode sessions refresh automatically as its database changes. Live matching uses native session IDs and no longer assigns closed conversations by terminal title, folder or recency.
 
+- Codex quota checks recover from temporary connection failures within one minute while visible, and Retry checks again immediately without restarting the app. Failed checks show an actionable warning instead of a stale weekly percentage; fallback probes preserve weekly burn calibration and cannot overwrite a recovered live reading. Server-directed rate-limit waits remain in force.
+
 - Startup no longer draws overlapping transcript selection prompts or shows “Ready” beneath “Indexing sessions…”.
 
 ### Improvements

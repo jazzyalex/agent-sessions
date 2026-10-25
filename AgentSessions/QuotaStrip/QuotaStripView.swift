@@ -229,6 +229,9 @@ struct QuotaStripWings: View {
     private func wing(_ entry: Entry?, mirrored: Bool) -> some View {
         if let entry {
             QuotaStripWingCell(quota: entry.quota, cell: entry.cell, mirrored: mirrored)
+                .help(entry.quota.quotaFetchIssue.map {
+                    String(localized: $0.detail) + " " + String(localized: $0.recovery)
+                } ?? "")
         } else {
             Text("—")
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))

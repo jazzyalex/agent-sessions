@@ -19,6 +19,25 @@ actor CodexCLIRPCProbe {
     private var permanentlyUnavailable = false
     private var lastProbeAt: Date? = nil
     private var lastProbeFailed = false
+    private let clock: @Sendable () -> Date
+    private let probe: (@Sendable () async throws -> CodexUsageSnapshot?)?
+
+    init(clock: @escaping @Sendable () -> Date = { Date() },
+         probe: (@Sendable () async throws -> CodexUsageSnapshot?)? = nil) {
+        self.clock = clock
+        self.probe = probe
+    }
+
+    func resetForUserRetry() {
+        lastProbeAt = nil
+        lastProbeFailed = false
+        permanentlyUnavailable = false
+    }
+
+    func hasRecentSuccessfulRead(cooldown: TimeInterval) -> Bool {
+        guard !permanentlyUnavailable, !lastProbeFailed, let lastProbeAt else { return false }
+        return clock().timeIntervalSince(lastProbeAt) < cooldown
+    }
 
     private final class ResponseReadState {
         private let lock = NSLock()
@@ -44,10 +63,10 @@ actor CodexCLIRPCProbe {
 
     /// Returns a snapshot on success, nil on failure (caller falls through).
     func fetchRateLimits(cooldownSuccess: TimeInterval = CodexCLIRPCProbe.defaultSuccessCooldown,
-                         cooldownFailure: TimeInterval = 60 * 60) async -> CodexUsageSnapshot? {
+                         cooldownFailure: TimeInterval = 60) async -> CodexUsageSnapshot? {
         guard !permanentlyUnavailable else { return nil }
 
-        let now = Date()
+        let now = clock()
         if let last = lastProbeAt {
             let cd = lastProbeFailed ? cooldownFailure : cooldownSuccess
             if now.timeIntervalSince(last) < cd { return nil }
@@ -55,14 +74,18 @@ actor CodexCLIRPCProbe {
 
         lastProbeAt = now
 
-        guard let codexBin = CodexCLIEnvironment().resolveBinary(customPath: nil) else {
-            os_log("CodexRPC: codex binary not found", log: log, type: .info)
-            lastProbeFailed = true
-            return nil
-        }
-
         do {
-            let response = try await runRPC(binary: codexBin)
+            let response: CodexUsageSnapshot?
+            if let probe {
+                response = try await probe()
+            } else {
+                guard let codexBin = CodexCLIEnvironment().resolveBinary(customPath: nil) else {
+                    os_log("CodexRPC: codex binary not found", log: log, type: .info)
+                    lastProbeFailed = true
+                    return nil
+                }
+                response = try await runRPC(binary: codexBin)
+            }
             // A nil response is a failure for cooldown purposes: the RPC completed
             // but carried nothing usable (e.g. an error object from a signed-out
             // app-server). Treating it as success applied only the 60s success

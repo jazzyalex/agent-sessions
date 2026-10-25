@@ -54,6 +54,7 @@ struct QuotaData: Equatable {
     var authStatus: UsageAuthStatus? = nil
     /// Calm caption for a transient (non-alarming) usage failure. (P2)
     var transientReason: String? = nil
+    var quotaFetchIssue: CodexQuotaFetchIssue? = nil
     /// Current usage data source; drives the "via CLI probe" fallback label. (P4)
     var currentSource: ClaudeUsageSource? = nil
     /// Served data is meaningfully stale (cache aged past freshness / degraded).
@@ -111,6 +112,7 @@ struct QuotaData: Equatable {
 
     var presentationState: PresentationState {
         if let auth = authStatus, auth.state.isAlarming { return .needsAction(auth) }
+        if quotaFetchIssue != nil { return .reconnecting }
         // A suspect verdict with nothing placeable means "can't read it right now",
         // not trustworthy live data — show the calm reconnecting cell rather than an
         // alarming "can't verify" (which misfired during the normal connect window).
@@ -147,6 +149,7 @@ struct QuotaData: Equatable {
     }
 
     var reconnectingCaption: LocalizedStringResource {
+        if quotaFetchIssue != nil { return "usage unavailable" }
         switch reconnectingCaptionKind {
         case .generic: return "reconnecting…"
         case .rateLimited: return "rate limited — retrying…"
@@ -162,7 +165,8 @@ struct QuotaData: Equatable {
     /// Meter uses this distinction to replace the endless spinner with a calm,
     /// actionable row while the provider-enforced retry window is in effect.
     var isRateLimited: Bool {
-        transientReason?.localizedCaseInsensitiveContains("rate limit") == true
+        quotaFetchIssue == .rateLimited
+            || transientReason?.localizedCaseInsensitiveContains("rate limit") == true
     }
 
     /// Live within the last 5 minutes. Mirrors the usage strip's freshness gate
@@ -194,6 +198,7 @@ struct QuotaData: Equatable {
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
             authStatus: model.authStatus,
+            quotaFetchIssue: model.quotaFetchIssue,
             hasFiveHourRateLimit: model.hasFiveHourRateLimit,
             hasWeekRateLimit: model.hasWeekRateLimit,
             usageFormatSuspect: model.usageFormatSuspect
@@ -218,6 +223,48 @@ struct QuotaData: Equatable {
             currentSource: model.currentSource,
             dataIsStale: model.dataIsStale
         )
+    }
+}
+
+/// A fetch failure must offer recovery even when the saved login is healthy.
+struct CodexQuotaFetchWarning: View {
+    @ObservedObject var model: CodexUsageModel
+    let issue: CodexQuotaFetchIssue
+    @State private var showingDetails = false
+
+    var body: some View {
+        HStack(spacing: LayoutTokens.sm) {
+            Button {
+                showingDetails.toggle()
+            } label: {
+                Label("Codex usage unavailable", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingDetails) {
+                VStack(alignment: .leading, spacing: LayoutTokens.md) {
+                    Text("Codex usage unavailable").font(.headline)
+                    Text(issue.detail)
+                    Text(issue.recovery).foregroundStyle(.secondary)
+                    Text("Weekly usage and session burn cannot be verified until a live check succeeds.")
+                        .foregroundStyle(.secondary)
+                    Button("Retry now") { model.refreshNow() }
+                        .disabled(model.isUpdating || issue == .rateLimited)
+                }
+                .padding(LayoutTokens.lg)
+                .frame(width: 320)
+            }
+            Button {
+                model.refreshNow()
+            } label: {
+                if model.isUpdating { Text("Retrying…") } else { Text("Retry") }
+            }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                .disabled(model.isUpdating || issue == .rateLimited)
+        }
+        .font(.caption)
+        .help(String(localized: issue.detail) + " " + String(localized: issue.recovery))
     }
 }
 
@@ -271,7 +318,11 @@ struct CockpitFooterView: View {
 		                        // Actively retrying: one compact line with spinning arrows,
 		                        // not a broken "-- ↻ Waiting" meter. Escalates to the chip
 		                        // above if the retries keep failing.
-		                        FooterRetryChip(provider: q.provider, caption: q.reconnectingCaption)
+                                if let issue = q.quotaFetchIssue {
+                                    CodexQuotaFetchWarning(model: .shared, issue: issue)
+                                } else {
+                                    FooterRetryChip(provider: q.provider, caption: q.reconnectingCaption)
+                                }
 		                    case .live:
 		                        // Laid out as a ROW, not a stack: this strip is a fixed
 		                        // single-line design (see .frame(minHeight:) below), so a

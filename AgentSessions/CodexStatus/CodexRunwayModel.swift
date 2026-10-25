@@ -502,9 +502,19 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
         self.recentSessionsRoot = recentSessionsRoot
         self.weeklyResetAt = weeklyResetAt
         self.expectedAccountHash = expectedAccountHash
-        self.weeklyCalibration = weeklyCalibration
+        let calibration = weeklyCalibration
             ?? weeklyPercentPointsPerDollar.map(WeeklyRunwayCalibration.estimated)
             ?? .measuring
+        // Retaining a conversion through a failed poll must not let an account
+        // switch borrow the previous account's weekly quota conversion.
+        if baseline.source == .codex, calibration.state.canDisplayRate,
+           let provenance = calibration.provenance,
+           provenance.accountHash != expectedAccountHash {
+            self.weeklyCalibration = WeeklyRunwayCalibration(
+                ratio: nil, state: .accountUnverified, provenance: nil)
+        } else {
+            self.weeklyCalibration = calibration
+        }
         self.weeklyWindowAvailable = weeklyWindowAvailable
         self.weeklyCalibrationAbandoned = weeklyCalibrationAbandoned
     }

@@ -68,6 +68,43 @@ enum CodexAuthRecheckOutcome: Equatable {
     case unavailable
 }
 
+/// Fetch health is separate from sign-in health: a valid token does not prove
+/// that the displayed quota is current. Never include tokens or response bodies.
+enum CodexQuotaFetchIssue: Equatable, Sendable {
+    case network
+    case http(Int)
+    case invalidResponse
+    case noCredentials
+    case unauthorized
+    case rateLimited
+
+    var detail: LocalizedStringResource {
+        switch self {
+        case .network: return "Codex usage could not be refreshed because the connection failed."
+        case .http(let status): return "Codex usage returned HTTP \(status)."
+        case .invalidResponse: return "Codex returned usage data Agent Sessions could not read."
+        case .noCredentials: return "Agent Sessions could not find saved Codex credentials."
+        case .unauthorized: return "Codex rejected the saved credentials."
+        case .rateLimited: return "Codex temporarily limited usage checks. Agent Sessions will retry after the server's waiting period."
+        }
+    }
+
+    var recovery: LocalizedStringResource {
+        switch self {
+        case .noCredentials, .unauthorized:
+            return "Run codex login in Terminal, then choose Retry."
+        case .rateLimited:
+            return "Wait for the server's retry period. Existing quota readings cannot be verified during this pause."
+        case .invalidResponse:
+            return "Update Agent Sessions, then choose Retry. If this continues, report the problem with the app version."
+        case .http(401), .http(403):
+            return "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem."
+        case .network, .http:
+            return "Check your internet connection and VPN or proxy, then choose Retry. Agent Sessions also retries automatically within one minute while usage tracking is visible."
+        }
+    }
+}
+
 // MARK: - Fetcher
 
 actor CodexOAuthUsageFetcher {
@@ -80,24 +117,34 @@ actor CodexOAuthUsageFetcher {
     private var lastFetchFailed: Bool = false
     private var rateLimitedUntil: Date? = nil
     private var lastCredentialSet: CodexTokenSet?
+    private(set) var lastFailure: CodexQuotaFetchIssue?
+    private let clock: @Sendable () -> Date
 
-    init(credentials: CodexOAuthCredentials) {
+    init(credentials: CodexOAuthCredentials, session: URLSession? = nil,
+         clock: @escaping @Sendable () -> Date = { Date() }) {
         self.credentials = credentials
+        self.clock = clock
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 12
-        self.session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
+    }
+
+    /// A Retry click bypasses local failure cooldowns, never a server's 429.
+    func resetForUserRetry() {
+        guard rateLimitedUntil.map({ $0 > clock() }) != true else { return }
+        lastFetchAt = nil
+        lastFetchFailed = false
     }
 
     /// Clears only in-memory retry state before an explicit user-initiated
     /// recovery check. A plan change can make the same saved login usable while
-    /// this actor is still holding a failure/rate-limit cooldown; relaunching the
-    /// app used to be the only way to clear that stale state.
+    /// this actor is still holding a failure cooldown. A server-directed 429
+    /// still applies to the same credentials; resolving changed credentials
+    /// below is what invalidates an old account's retry state.
     func resetForUserRecheck() async {
         lastFetchAt = nil
         lastFetchFailed = false
-        rateLimitedUntil = nil
-        lastCredentialSet = nil
         await credentials.invalidateCache()
     }
 
@@ -115,50 +162,12 @@ actor CodexOAuthUsageFetcher {
 
     /// Returns a snapshot on success, nil on any failure (caller falls through).
     func fetchUsage(cooldownSuccess: TimeInterval = 5 * 60,
-                    cooldownFailure: TimeInterval = 30 * 60) async -> CodexUsageSnapshot? {
-        let now = Date()
-        let tokenSet = await currentCredentialsResettingCooldownOnChange()
-
-        // Rate limit gate
-        if let until = rateLimitedUntil, until > now {
-            os_log("CodexOAuth: rate-limited until %{public}@", log: log, type: .debug,
-                   until.description)
-            return nil
+                    cooldownFailure: TimeInterval = 60) async -> CodexUsageSnapshot? {
+        if case .ok(let snapshot) = await fetchUsageResult(
+            cooldownSuccess: cooldownSuccess, cooldownFailure: cooldownFailure) {
+            return snapshot
         }
-
-        // Cooldown gate
-        if let last = lastFetchAt {
-            let cd = lastFetchFailed ? cooldownFailure : cooldownSuccess
-            if now.timeIntervalSince(last) < cd { return nil }
-        }
-
-        guard let tokenSet else {
-            os_log("CodexOAuth: no credentials available", log: log, type: .info)
-            return nil
-        }
-
-        lastFetchAt = now
-        do {
-            let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
-            var result = Self.normalizeResponse(raw)
-            result?.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount(tokenSet.accountId)
-            lastFetchFailed = (result == nil)  // nil normalize = response shape changed
-            return result
-        } catch CodexOAuthUsageError.unauthorized {
-            os_log("CodexOAuth: 401 — token expired, invalidating", log: log, type: .info)
-            await credentials.invalidateCache()
-            lastFetchFailed = true
-            return nil
-        } catch CodexOAuthUsageError.rateLimited(let retryAfter) {
-            rateLimitedUntil = Date().addingTimeInterval(retryAfter)
-            lastFetchFailed = true
-            return nil
-        } catch {
-            os_log("CodexOAuth: fetch failed: %{public}@", log: log, type: .error,
-                   error.localizedDescription)
-            lastFetchFailed = true
-            return nil
-        }
+        return nil
     }
 
     /// Result-typed sibling of `fetchUsage` that exposes *why* a fetch did
@@ -168,8 +177,8 @@ actor CodexOAuthUsageFetcher {
     /// `fetchUsage` (same actor instance), so callers of either API back
     /// off the same underlying endpoint.
     func fetchUsageResult(cooldownSuccess: TimeInterval = 5 * 60,
-                           cooldownFailure: TimeInterval = 30 * 60) async -> CodexUsageFetchResult {
-        let now = Date()
+                           cooldownFailure: TimeInterval = 60) async -> CodexUsageFetchResult {
+        let now = clock()
         let tokenSet = await currentCredentialsResettingCooldownOnChange()
 
         // Rate limit gate
@@ -194,6 +203,7 @@ actor CodexOAuthUsageFetcher {
             // background tick that is a process spawn per minute, indefinitely.
             lastFetchAt = now
             lastFetchFailed = true
+            lastFailure = .noCredentials
             return .transient
         }
 
@@ -202,23 +212,36 @@ actor CodexOAuthUsageFetcher {
             let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
             guard var result = Self.normalizeResponse(raw) else {
                 lastFetchFailed = true  // nil normalize = response shape changed
+                lastFailure = .invalidResponse
                 return .transient
             }
             result.limitsAccountHash = WeeklyQuotaCalibrationScope.hashAccount(tokenSet.accountId)
             lastFetchFailed = false
+            lastFailure = nil
             return .ok(result)
         } catch CodexOAuthUsageError.unauthorized {
             os_log("CodexOAuth: 401 — token expired, invalidating", log: log, type: .info)
             await credentials.invalidateCache()
             lastFetchFailed = true
+            lastFailure = .unauthorized
             return .unauthorized
         } catch CodexOAuthUsageError.rateLimited(let retryAfter) {
-            rateLimitedUntil = Date().addingTimeInterval(retryAfter)
+            rateLimitedUntil = clock().addingTimeInterval(retryAfter)
             lastFetchFailed = true
+            lastFailure = .rateLimited
             return .transient
         } catch {
-            os_log("CodexOAuth: fetch failed: %{public}@", log: log, type: .error,
-                   error.localizedDescription)
+            switch error {
+            case CodexOAuthUsageError.httpError(let status): lastFailure = .http(status)
+            case CodexOAuthUsageError.decodingError: lastFailure = .invalidResponse
+            default: lastFailure = .network
+            }
+            let cause: NSError
+            if case CodexOAuthUsageError.networkError(let underlying) = error {
+                cause = underlying as NSError
+            } else { cause = error as NSError }
+            os_log("CodexOAuth: fetch failed (%{public}@, code %ld)", log: log, type: .error,
+                   cause.domain, cause.code)
             lastFetchFailed = true
             return .transient
         }

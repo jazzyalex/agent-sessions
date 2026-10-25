@@ -96,6 +96,15 @@ final class StatusItemController: NSObject {
             // Reset lines open Usage Tracking preferences because they control probes and refresh details.
             if codexTrackingEnabled && (source == .codex || source == .both) {
                 menu.addItem(makeTitleItem("Codex"))
+                if let issue = codexStatus.quotaFetchIssue,
+                   codexStatus.authStatus?.state.isAlarming != true {
+                    let warning = makeActionItem(
+                        title: String(localized: "Codex usage unavailable — Retry"),
+                        action: #selector(retryCodexUsage))
+                    warning.toolTip = String(localized: issue.detail) + " " + String(localized: issue.recovery)
+                    warning.isEnabled = issue != .rateLimited
+                    menu.addItem(warning)
+                }
                 menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasFiveHourRateLimit), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasWeekRateLimit), action: #selector(openUsagePreferences)))
                 // Reset credits (free "reset your usage now" grants), shown only when present.
@@ -307,6 +316,9 @@ final class StatusItemController: NSObject {
     /// instead of a dead "0%" line. Before the first successful poll we show a
     /// neutral "—" rather than falsely asserting "no limit".
     private func codexResetMenuTitle(label: String, percent: Int, reset: String, has: Bool) -> String {
+        if codexStatus.quotaFetchIssue != nil {
+            return String(localized: "\(label) --  Usage unavailable")
+        }
         if has {
             return resetLine(label: label, percent: percent, reset: reset)
         } else if codexStatus.lastUpdate == nil {
@@ -314,6 +326,10 @@ final class StatusItemController: NSObject {
         } else {
             return String(localized: "\(label) \(UsageLimitAbsenceCopy.localizedLabel(suspect: codexStatus.usageFormatSuspect))", comment: "Menu bar quota row for an absent or unverifiable limit; the quota label remains verbatim.")
         }
+    }
+
+    @objc private func retryCodexUsage() {
+        codexStatus.refreshNow()
     }
 
     private func claudeResetLine(label: String, percent: Int, reset: String) -> String {

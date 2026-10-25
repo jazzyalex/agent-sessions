@@ -75,6 +75,7 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "CodexS
 
 // Snapshot of parsed values from Codex /status or banner
 struct CodexUsageSnapshot: Equatable {
+    var quotaFetchIssue: CodexQuotaFetchIssue? = nil
     var fiveHourRemainingPercent: Int = 0
     var fiveHourResetText: String = ""
     var hasFiveHourRateLimit: Bool = false
@@ -175,6 +176,7 @@ final class CodexUsageModel: ObservableObject {
     @Published var activeLimitWindowMinutes: Int = 300
     @Published var hasActiveLimit: Bool = false
     @Published var limitsSource: CodexLimitsSource? = nil
+    @Published var quotaFetchIssue: CodexQuotaFetchIssue? = nil
     @Published var usageLine: String? = nil
     @Published var accountLine: String? = nil
     @Published var modelLine: String? = nil
@@ -245,6 +247,8 @@ final class CodexUsageModel: ObservableObject {
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var weeklyBurnRateTracker = UsageLimitBurnRateTracker()
     private var weeklyBurnRateSource: CodexLimitsSource?
+    private let calibrationStore: WeeklyQuotaCalibrationStore
+    private let calibrationDefaults: UserDefaults
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -253,6 +257,12 @@ final class CodexUsageModel: ObservableObject {
     // Avoid touching NSApp during singleton initialization at app launch.
     // NSApp is an IUO and can be nil this early in startup.
     private var appIsActive: Bool = false
+
+    init(calibrationStore: WeeklyQuotaCalibrationStore = .shared,
+         calibrationDefaults: UserDefaults = .standard) {
+        self.calibrationStore = calibrationStore
+        self.calibrationDefaults = calibrationDefaults
+    }
 
 #if DEBUG
     static var projectionDiagnosticsDefaultsForTesting: UserDefaults?
@@ -340,11 +350,7 @@ final class CodexUsageModel: ObservableObject {
             guard let self = self else { return }
             if let svc = self.service {
                 await svc.refreshNow()
-                // Fallback timeout guard
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
-                    if self.isUpdating { self.isUpdating = false }
-                }
+                self.isUpdating = false
                 return
             }
             // Fallback: one-shot refresh if the long-lived service isn't running.
@@ -356,10 +362,7 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             await svc.refreshNow()
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
-                if self.isUpdating { self.isUpdating = false }
-            }
+            self.isUpdating = false
         }
     }
 
@@ -587,9 +590,12 @@ final class CodexUsageModel: ObservableObject {
 
     private func apply(_ s: CodexUsageSnapshot) {
         let now = Date()
+        quotaFetchIssue = s.quotaFetchIssue
         let observedAt = s.eventTimestamp ?? now
-        let fiveHourFreshness = Self.alertFreshness(source: s.fiveHourLimitsSource, eventTimestamp: s.eventTimestamp, now: now)
-        let weeklyFreshness = Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: s.eventTimestamp, now: now)
+        let fiveHourFreshness = s.quotaFetchIssue == nil
+            ? Self.alertFreshness(source: s.fiveHourLimitsSource, eventTimestamp: s.eventTimestamp, now: now) : .stale
+        let weeklyFreshness = s.quotaFetchIssue == nil
+            ? Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: s.eventTimestamp, now: now) : .stale
         fiveHourRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekRemainingPercent = clampPercent(s.weekRemainingPercent)
         fiveHourResetText = s.fiveHourResetText
@@ -659,6 +665,8 @@ final class CodexUsageModel: ObservableObject {
             currentAccountID: currentAccountID
         )
         if s.hasWeekRateLimit,
+           s.quotaFetchIssue == nil,
+           Self.canCalibrateWeeklyQuota(source: s.weekLimitsSource),
            weeklyFreshness.allowsProjectedDisplay,
            // Anchor, not display — same rule as the Claude path. Codex's OAuth text
            // is ISO-8601 today, but a legacy or fallback source supplying a relative
@@ -673,7 +681,7 @@ final class CodexUsageModel: ObservableObject {
             // attribution. Runway's displayed rate uses an observed live interval.
             // Scan once per anchor off the main thread.
             CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource?.rawValue ?? "none")")
-            WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
+            calibrationStore.ensureBootstrap(
                 provider: "codex",
                 root: CodexRunwayRecentSessionScanner.defaultRoot(),
                 resetsAt: weekResetAt,
@@ -682,9 +690,10 @@ final class CodexUsageModel: ObservableObject {
                 accountHash: weeklyAccountHash,
                 limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                 sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
-                now: now
+                now: now,
+                defaults: calibrationDefaults
             )
-            WeeklyQuotaCalibrationStore.shared.observeQuota(
+            calibrationStore.observeQuota(
                 provider: "codex",
                 remainingPercent: Double(s.weekRemainingPercent),
                 // Codex supplies only an integer percent, so a 1pp quantum is the
@@ -699,7 +708,8 @@ final class CodexUsageModel: ObservableObject {
                     limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                     priceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "codex")
                 ),
-                now: now
+                now: now,
+                defaults: calibrationDefaults
             )
         }
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
@@ -737,6 +747,10 @@ final class CodexUsageModel: ObservableObject {
         guard snapshot.weekLimitsSource == .oauth else { return current }
         guard let observed = snapshot.limitsAccountHash, observed == current else { return nil }
         return observed
+    }
+
+    nonisolated static func canCalibrateWeeklyQuota(source: CodexLimitsSource?) -> Bool {
+        source == .oauth || source == .cliRPC
     }
 
     nonisolated static func oauthSnapshotMatchesCurrentAccount(
@@ -2046,6 +2060,12 @@ actor CodexStatusService {
         self.snapshot = snapshot
     }
 
+    func refreshLiveLimitsForTesting(retry: Bool = false) async -> CodexUsageSnapshot {
+        if retry { await resetForUserRetry() }
+        _ = await refreshPreferredLiveLimits(visibleFastPath: true)
+        return snapshot
+    }
+
     func mergeRateLimitSnapshotForTesting(_ source: CodexUsageSnapshot, requirePositivePercent: Bool = false, replacesMissingWindows: Bool = false) -> CodexUsageSnapshot {
         var merged = snapshot
         mergeRateLimitSnapshot(source, into: &merged, requirePositivePercent: requirePositivePercent, replacesMissingWindows: replacesMissingWindows)
@@ -2110,10 +2130,11 @@ actor CodexStatusService {
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
     private var deferredTmuxCleanupTask: Task<Void, Never>?
-    private let codexOAuthFetcher: CodexOAuthUsageFetcher = {
-        CodexOAuthUsageFetcher(credentials: CodexOAuthCredentials())
-    }()
-    private let codexRPCProbe = CodexCLIRPCProbe()
+    private let codexOAuthFetcher: CodexOAuthUsageFetcher
+    private let codexRPCProbe: CodexCLIRPCProbe
+    private var preferredFetchGeneration: UInt64 = 0
+    private var preferredFetchInFlight = false
+    private var authRecheckInFlight = false
     private var lastStatusProbe: Date? = nil
 
     /// Current Codex auth verdict (fed by Task 9). Gates the /status tmux probe
@@ -2187,10 +2208,14 @@ actor CodexStatusService {
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (Bool) -> Void,
-         authFetchResultHandler: @escaping @Sendable (CodexUsageFetchResult) -> Void = { _ in }) {
+         authFetchResultHandler: @escaping @Sendable (CodexUsageFetchResult) -> Void = { _ in },
+         oauthFetcher: CodexOAuthUsageFetcher = CodexOAuthUsageFetcher(credentials: CodexOAuthCredentials()),
+         rpcProbe: CodexCLIRPCProbe = CodexCLIRPCProbe()) {
         self.updateHandler = updateHandler
         self.availabilityHandler = availabilityHandler
         self.authFetchResultHandler = authFetchResultHandler
+        self.codexOAuthFetcher = oauthFetcher
+        self.codexRPCProbe = rpcProbe
     }
 
     static func cleanupOrphansOnLaunch() async {
@@ -2290,24 +2315,34 @@ actor CodexStatusService {
         }
     }
 
-    func refreshNow() {
-        // Manual refresh from strip/menu uses the same stale-only probe rule.
-        Task { [weak self] in
-            guard let self else { return }
-            await self.ensureOrphanCleanupIfNeeded()
-            await self.refreshTick(userInitiated: true)
-        }
+    func refreshNow() async {
+        await resetForUserRetry()
+        await ensureOrphanCleanupIfNeeded()
+        await refreshTick(userInitiated: true)
+    }
+
+    private func resetForUserRetry() async {
+        await codexOAuthFetcher.resetForUserRetry()
+        await codexRPCProbe.resetForUserRetry()
     }
 
     /// Rechecks Codex after clearing the same process-local OAuth retry state
     /// that an app relaunch discards. This is reserved for the explicit Fix flow;
     /// normal refreshes continue to respect endpoint cooldowns.
     func recheckAuthNow() async -> CodexUsageFetchResult {
+        guard !authRecheckInFlight else { return .skippedCooldown }
+        authRecheckInFlight = true
+        defer { authRecheckInFlight = false }
+        preferredFetchGeneration &+= 1
+        let generation = preferredFetchGeneration
         cliLoginStatusCache = nil
         await codexOAuthFetcher.resetForUserRecheck()
+        await codexRPCProbe.resetForUserRetry()
         availabilityHandler(false)
 
         let result = await codexOAuthFetcher.fetchUsageResult()
+        guard generation == preferredFetchGeneration else { return .skippedCooldown }
+        let issue = await codexOAuthFetcher.lastFailure
         if case .ok(let preferredSnap) = result {
             guard CodexUsageModel.oauthSnapshotMatchesCurrentAccount(
                 preferredSnap,
@@ -2316,11 +2351,16 @@ actor CodexStatusService {
             var merged = snapshot
             mergeRateLimitSnapshot(preferredSnap, into: &merged, replacesMissingWindows: true)
             return result
-        } else if let rpcSnap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: 0) {
+        } else if issue != .rateLimited,
+                  let rpcSnap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: 0) {
+            guard generation == preferredFetchGeneration else { return .skippedCooldown }
             var merged = snapshot
             mergeRateLimitSnapshot(rpcSnap, into: &merged, replacesMissingWindows: true)
             return .ok(rpcSnap)
         }
+        guard generation == preferredFetchGeneration else { return .skippedCooldown }
+        snapshot.quotaFetchIssue = issue ?? .network
+        updateHandler(snapshot)
         return result
     }
 
@@ -2673,18 +2713,42 @@ actor CodexStatusService {
     /// Primary chain for authoritative limits. JSONL is deliberately excluded here and
     /// remains a fallback-only source handled by the log parsing path.
     private func fetchPreferredRateLimits(oauthSuccessCooldown: TimeInterval) async -> CodexUsageSnapshot? {
+        // Visibility changes and Retry can arrive while a poll is awaiting IO.
+        // Keep the first request alive instead of treating its in-flight cooldown
+        // as a newer completed poll and discarding the eventual successful read.
+        guard !preferredFetchInFlight, !authRecheckInFlight else { return nil }
+        preferredFetchInFlight = true
+        defer { preferredFetchInFlight = false }
+        preferredFetchGeneration &+= 1
+        let generation = preferredFetchGeneration
         // Exactly ONE OAuth fetch per poll. `fetchUsageResult` shares cooldown
         // state with the old `fetchUsage`, so this is the single call: the
         // classifier gets the typed result, and non-`.ok` cases fall through to
         // the CLI-RPC probe exactly like the old `nil` return did.
         let fetchResult = await codexOAuthFetcher.fetchUsageResult(cooldownSuccess: oauthSuccessCooldown)
+        guard generation == preferredFetchGeneration else { return nil }
         authFetchResultHandler(fetchResult)
         if case .ok(let snap) = fetchResult {
             return snap
         }
-        if let snap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: oauthSuccessCooldown) {
+        // A successful OAuth poll's cooldown is not a failure. Do not spawn an
+        // RPC fallback (and change calibration provenance) just to fill this gap.
+        let issue = await codexOAuthFetcher.lastFailure
+        if case .skippedCooldown = fetchResult, issue == nil { return nil }
+        if issue != .rateLimited,
+           let snap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: oauthSuccessCooldown) {
+            guard generation == preferredFetchGeneration else { return nil }
             return snap
         }
+        guard generation == preferredFetchGeneration else { return nil }
+        if issue != .rateLimited, snapshot.limitsSource == .cliRPC,
+           snapshot.quotaFetchIssue == nil,
+           await codexRPCProbe.hasRecentSuccessfulRead(cooldown: oauthSuccessCooldown) {
+            return nil
+        }
+        snapshot.quotaFetchIssue = issue ?? .network
+        // Publish failure without manufacturing a new quota observation time.
+        updateHandler(snapshot)
         return nil
     }
 
@@ -2711,6 +2775,14 @@ actor CodexStatusService {
     /// and notifies the UI. 0% remains valid for exhausted buckets when the probe
     /// actually returned a percentage, but reset-only probe fragments are ignored.
     private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false, replacesMissingWindows: Bool = false) {
+        // A probe launched during an outage may finish after live recovery.
+        if source.limitsSource == .statusProbe, dest.quotaFetchIssue == nil,
+           dest.limitsSource == .oauth || dest.limitsSource == .cliRPC {
+            return
+        }
+        if source.limitsSource == .oauth || source.limitsSource == .cliRPC {
+            dest.quotaFetchIssue = nil
+        }
         let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent >= 0)
         if shouldMergeFiveHour {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
@@ -2827,6 +2899,12 @@ actor CodexStatusService {
 
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
+        // A provider intentionally omitting 5h is not a missing quota reading.
+        // Never overwrite a healthy live weekly reading with a /status probe.
+        if snapshot.quotaFetchIssue == nil,
+           snapshot.limitsSource == .oauth || snapshot.limitsSource == .cliRPC {
+            return
+        }
         if Self.shouldSuppressStatusProbe(currentAuthState) {
             os_log("Codex: suppressing /status tmux probe (auth state %{public}@)",
                    log: log, type: .info, String(describing: currentAuthState))
@@ -3534,6 +3612,12 @@ actor CodexStatusService {
         if visibilityMode == .hidden && !urgent {
             // When hidden and not urgent: don't poll at all (1 hour = effectively disabled)
             return 3600 * 1_000_000_000
+        }
+
+        // A temporary outage must not inherit the three-minute battery cadence
+        // or a longer user polling interval while a usage surface is visible.
+        if visibilityMode != .hidden, snapshot.quotaFetchIssue != nil {
+            return 60 * 1_000_000_000
         }
 
         // Energy optimization: Menu-bar background visibility should tick rarely and cheaply.

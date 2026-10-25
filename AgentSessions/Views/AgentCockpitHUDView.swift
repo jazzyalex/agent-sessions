@@ -4296,7 +4296,9 @@ private struct HUDLimitsRowsPanel: View {
             case .idle(let auth):
                 HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
-                if entry.isRateLimited {
+                if entry.source == .codex, let issue = codexUsageModel.quotaFetchIssue {
+                    CodexQuotaFetchWarning(model: codexUsageModel, issue: issue)
+                } else if entry.isRateLimited {
                     HUDLimitsRateLimitedCell(
                         source: entry.source,
                         enlarged: quotaMeterEnlarged,
