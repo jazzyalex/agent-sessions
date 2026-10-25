@@ -1058,7 +1058,13 @@ actor PresenceEngine {
             return nil
         }
 
+        // Runtime IDs from the shared service cover TUI clients in any terminal
+        // and desktop windows. Offline tests must never touch the user's service.
         var out: [CodexActivePresence] = []
+        if !AppRuntime.isRunningTests, AgentEnablement.isEnabled(.opencode) {
+            out = await OpenCodeServicePresence.read(now: now)
+        }
+        guard isCurrentRefreshGeneration(generation) else { return nil }
         var itermPresences: [CodexActivePresence] = []
         var itermTabTitleByTTY: [String: String] = [:]
         var itermTabTitleBySessionGuid: [String: String] = [:]
@@ -1658,6 +1664,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
             candidates.append(sessionsURL.deletingLastPathComponent().appendingPathComponent("active"))
         }
         candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/active"))
+        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AgentSessions/Presence"))
         return PresenceEngine.dedupRoots(candidates)
     }
 

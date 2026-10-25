@@ -179,19 +179,20 @@ final class OpenCodeHUDGroupTests: XCTestCase {
 
     // MARK: - End to end through makeRowsSnapshot
 
-    private func session(_ id: String, cwd: String? = nil) -> Session {
+    private func session(_ id: String, cwd: String? = nil, title: String? = nil, now: Date = Date()) -> Session {
         Session(
             id: id,
             source: .opencode,
-            startTime: Date().addingTimeInterval(-60),
-            endTime: Date(),
+            startTime: now.addingTimeInterval(-60),
+            endTime: now,
             model: nil,
             filePath: "/tmp/opencode-hud-tests/\(id).json",
             eventCount: 0,
             events: [],
             cwd: cwd,
             repoName: nil,
-            lightweightTitle: nil
+            lightweightTitle: nil,
+            customTitle: title
         )
     }
 
@@ -287,30 +288,51 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         XCTAssertEqual(snapshotRows(sessions: [], presences: [presence(sessionId: "ses_x", pid: 1)]).count, 1)
         // A subagent with no resolved session is hidden even with a session ID.
         XCTAssertTrue(snapshotRows(sessions: [], presences: [presence(sessionId: "ses_y", pid: 2, kind: "subagent")]).isEmpty)
-        // A focusable (iTerm) presence is kept.
-        XCTAssertEqual(snapshotRows(sessions: [], presences: [presence(tty: "/dev/ttys009", pid: 3, termProgram: "iTerm.app")]).count, 1)
+        // Terminal focusability alone does not identify an OpenCode conversation.
+        XCTAssertTrue(snapshotRows(sessions: [], presences: [presence(tty: "/dev/ttys009", pid: 3, termProgram: "iTerm.app")]).isEmpty)
         // A non-iTerm TTY-only presence with no workspace match is hidden.
         XCTAssertTrue(snapshotRows(sessions: [], presences: [presence(tty: "/dev/ttys010", pid: 4, termProgram: "Apple_Terminal")]).isEmpty)
     }
 
-    func testWorkspaceMatchResolvesOtherwiseHiddenPresence() {
+    func testWorkspaceAloneDoesNotIdentifyOpenCodeConversation() {
         let s = session("ses_ws", cwd: "/tmp/opencode-hud-tests/project")
         let rows = snapshotRows(sessions: [s], presences: [
             presence(workspace: "/tmp/opencode-hud-tests/project", tty: "/dev/ttys011", pid: 5, termProgram: "Apple_Terminal")
         ])
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?.resolvedSessionID, s.id)
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertTrue(SessionRowsBuilder.buildFallbackPresenceMap(sessions: [s], presences: [presence(workspace: s.cwd, pid: 5)], directJoinSessionKeys: []).isEmpty)
     }
 
     func testCompetingWorkspaceMatchesTakeDistinctSessions() {
-        let older = session("ses_old", cwd: "/tmp/opencode-hud-tests/shared")
-        let newer = session("ses_new", cwd: "/tmp/opencode-hud-tests/shared")
-        let rows = snapshotRows(sessions: [older, newer], presences: [
-            presence(workspace: "/tmp/opencode-hud-tests/shared", tty: "/dev/ttys012", pid: 6, termProgram: "Apple_Terminal"),
-            presence(workspace: "/tmp/opencode-hud-tests/shared", tty: "/dev/ttys013", pid: 7, termProgram: "Apple_Terminal")
-        ])
+        let older = session("ses_old", cwd: "/tmp/opencode-hud-tests/shared", title: "Older conversation")
+        let newer = session("ses_new", cwd: "/tmp/opencode-hud-tests/shared", title: "Newer conversation")
+        let first = presence(sessionId: older.id, workspace: older.cwd, tty: "/dev/ttys012", pid: 6, termProgram: "Apple_Terminal")
+        let second = presence(sessionId: newer.id, workspace: newer.cwd, tty: "/dev/ttys013", pid: 7, termProgram: "Apple_Terminal")
+        let rows = snapshotRows(sessions: [older, newer], presences: [first, second])
         XCTAssertEqual(rows.count, 2)
         XCTAssertEqual(Set(rows.compactMap(\.resolvedSessionID)).count, 2, "each presence claims its own session")
+    }
+
+    func testOpenCodeHomeAndMissingTitlesDoNotBorrowClosedConversation() throws {
+        let cwd = "/tmp/opencode-hud-tests/shared"
+        let old = session("ses_old", cwd: cwd, title: "Closed")
+        var live = focusablePresence(workspace: cwd)
+        for title in [nil, "OpenCode", "Research", "OC | Unknown"] as [String?] {
+            live.terminal?.tabTitle = title
+            XCTAssertTrue(snapshotRows(sessions: [old], presences: [live]).isEmpty)
+            XCTAssertTrue(SessionRowsBuilder.buildFallbackPresenceMap(sessions: [old], presences: [live], directJoinSessionKeys: []).isEmpty)
+        }
+    }
+
+    func testNativeOpenCodeIDSelectsOlderConversationWithDuplicateTitles() throws {
+        let cwd = "/tmp/opencode-hud-tests/shared"
+        let older = session("ses_older", cwd: cwd, title: "Same title", now: Date(timeIntervalSince1970: 100))
+        let newer = session("ses_newer", cwd: cwd, title: "Same title", now: Date(timeIntervalSince1970: 200))
+        let live = presence(sessionId: older.id, workspace: cwd, pid: 42)
+        let rows = snapshotRows(sessions: [older, newer], presences: [live])
+        XCTAssertEqual(try XCTUnwrap(rows.first).resolvedSessionID, older.id)
+        XCTAssertEqual(rows.first?.displayName, "Same title")
+        XCTAssertEqual(rows.count, 1)
     }
 
     private func focusablePresence(workspace: String) -> CodexActivePresence {
@@ -328,8 +350,7 @@ final class OpenCodeHUDGroupTests: XCTestCase {
             let old = session("ses_root_\(index)", cwd: root)
             let rows = snapshotRows(sessions: [old],
                                     presences: [focusablePresence(workspace: root + "/opencode-hud-tests/fresh")])
-            let row = try XCTUnwrap(rows.first, "\(root): a focusable new session is still listed")
-            XCTAssertNil(row.resolvedSessionID, "\(root): a session in a shared root must not claim a deeper folder")
+            XCTAssertTrue(rows.isEmpty, "\(root): an unidentified process must not claim an old conversation")
         }
     }
 
@@ -339,13 +360,12 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         XCTAssertNil(rows.first?.resolvedSessionID)
     }
 
-    func testProjectParentFolderStillMatches() {
-        // The parent/child rule exists for real projects: a session at the repo
-        // root, the agent running in a subfolder.
+    func testProjectParentFolderDoesNotIdentifyOpenCodeConversation() {
+        // A project parent is still not proof of the client's selected session.
         let repo = session("ses_repo", cwd: "/tmp/opencode-hud-tests/repo")
         let rows = snapshotRows(sessions: [repo],
                                 presences: [focusablePresence(workspace: "/tmp/opencode-hud-tests/repo/sub")])
-        XCTAssertEqual(rows.first?.resolvedSessionID, "ses_repo")
+        XCTAssertTrue(rows.isEmpty)
     }
 
     func testHeadlessPresenceWithSessionIDIsShown() {
@@ -354,5 +374,74 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         let rows = snapshotRows(sessions: [], presences: [presence(sessionId: "ses_headless", pid: 42)])
         XCTAssertEqual(rows.count, 1)
         XCTAssertNil(rows.first?.tty)
+    }
+}
+
+final class OpenCodeServicePresenceTests: XCTestCase {
+    private var registration: OpenCodeServicePresence.Registration {
+        .init(id: "service-test", url: URL(string: "http://127.0.0.1:12345")!, pid: 123, password: "test-password")
+    }
+
+    func testNativeTUIRegistryStateDistinguishesIdleFromFreshHeartbeat() throws {
+        for state in ["openIdle", "activeWorking"] {
+            let data = Data("{\"publisher\":\"agent-sessions-opencode-tui\",\"source\":\"opencode\",\"sessionId\":\"ses_exact\",\"activityState\":\"\(state)\"}".utf8)
+            let presence = try CodexActiveSessionsModel.makeDecoder().decode(CodexActivePresence.self, from: data)
+            XCTAssertEqual(presence.sessionId, "ses_exact")
+            XCTAssertEqual(presence.liveStateHint?.rawValue, state)
+        }
+    }
+
+    func testNativeTUIRegistryRejectsDeadAndExpiredClients() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        var presence = CodexActivePresence()
+        presence.publisher = "agent-sessions-opencode-tui"
+        presence.source = .opencode
+        presence.sessionId = "ses_exact"
+        presence.pid = Int(getpid())
+        presence.lastSeenAt = now
+        presence.liveStateHint = .openIdle
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let file = root.appendingPathComponent("client.json")
+        try encoder.encode(presence).write(to: file)
+        XCTAssertEqual(CodexActiveSessionsModel.loadPresences(from: root, decoder: CodexActiveSessionsModel.makeDecoder(), now: now, ttl: 60).count, 1)
+        XCTAssertTrue(CodexActiveSessionsModel.loadPresences(from: root, decoder: CodexActiveSessionsModel.makeDecoder(), now: now.addingTimeInterval(6), ttl: 60).isEmpty)
+        presence.pid = Int(Int32.max)
+        try encoder.encode(presence).write(to: file)
+        XCTAssertTrue(CodexActiveSessionsModel.loadPresences(from: root, decoder: CodexActiveSessionsModel.makeDecoder(), now: now, ttl: 60).isEmpty)
+    }
+
+    func testActiveServiceIDsIdentifySessionsWithoutTerminalMetadata() throws {
+        let body = Data(#"{"data":{"ses_current":{"type":"running"},"ses_closed":{"type":"idle"}}}"#.utf8)
+        let result = try XCTUnwrap(OpenCodeServicePresence.decode(body, registration: registration, now: Date()))
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.sessionId, "ses_current")
+        XCTAssertEqual(result.first?.liveStateHint, .activeWorking)
+        XCTAssertNil(result.first?.tty)
+        XCTAssertNil(result.first?.terminal)
+    }
+
+    func testIdleResponseDoesNotInventAnOpenConversation() throws {
+        XCTAssertTrue(try XCTUnwrap(OpenCodeServicePresence.decode(Data(#"{"data":{}}"#.utf8), registration: registration, now: Date())).isEmpty)
+        XCTAssertNil(OpenCodeServicePresence.decode(Data("not JSON".utf8), registration: registration, now: Date()))
+    }
+
+    func testServiceRequestUsesAdvertisedLoopbackPortAndNativeAuthentication() throws {
+        let request = try XCTUnwrap(OpenCodeServicePresence.request(for: registration))
+        XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:12345/api/session/active")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic " + Data("opencode:test-password".utf8).base64EncodedString())
+        XCTAssertEqual(request.timeoutInterval, 1)
+    }
+
+    func testServiceRequestRejectsRemoteAndMalformedRegistrations() {
+        for address in ["http://example.com:12345", "https://127.0.0.1:12345", "http://127.0.0.1:12345/foreign", "http://user@127.0.0.1:12345"] {
+            let remote = OpenCodeServicePresence.Registration(id: "service-test", url: URL(string: address)!, pid: 123, password: "test-password")
+            XCTAssertNil(OpenCodeServicePresence.request(for: remote))
+        }
+        let invalidPID = OpenCodeServicePresence.Registration(id: "service-test", url: registration.url, pid: Int.max, password: "test-password")
+        XCTAssertNil(OpenCodeServicePresence.request(for: invalidPID))
     }
 }

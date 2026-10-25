@@ -1923,15 +1923,16 @@ struct AgentCockpitHUDView: View {
                 lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: normalized)]
             } ?? Self.resolveBySessionID(presence.sessionId, source: presence.source, lookupIndexes: lookupIndexes)
             let isDefinitiveMatch = resolvedByLogOrID != nil
+            let requiresOpenCodeIdentity = presence.source == .opencode
             let candidate = resolvedByLogOrID
-                ?? Self.resolveByWorkspace(presence.workspaceRoot, source: presence.source, lookupIndexes: lookupIndexes)
+                ?? (requiresOpenCodeIdentity ? nil : Self.resolveByWorkspace(presence.workspaceRoot, source: presence.source, lookupIndexes: lookupIndexes))
                 ?? fallbackSessionByPresenceKey[presenceKey]
 
             // Prevent multiple workspace-only matches from claiming the same session.
             // When the first-choice workspace match is already claimed, try to find
             // another unclaimed session in the same workspace from the pool.
             let session: Session?
-            if let candidate, !isDefinitiveMatch {
+            if let candidate, !isDefinitiveMatch, !requiresOpenCodeIdentity {
                 if claimedSessionIDs.contains(candidate.id) {
                     // First choice taken — find another session in the same workspace
                     if let workspace = Self.normalizedWorkingDirectory(presence.workspaceRoot), !workspace.isEmpty {
@@ -2427,6 +2428,7 @@ struct AgentCockpitHUDView: View {
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }
+        if presence.source == .opencode { return true }
 
         if presence.source == .codex { return !hasWorkspaceMatch }
 

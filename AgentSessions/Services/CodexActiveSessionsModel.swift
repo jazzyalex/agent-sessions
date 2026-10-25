@@ -88,6 +88,7 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
         case startedAt
         case lastSeenAt
         case terminal
+        case activityState
     }
 
     init() {}
@@ -106,6 +107,9 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
         startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
         lastSeenAt = try c.decodeIfPresent(Date.self, forKey: .lastSeenAt)
         terminal = try c.decodeIfPresent(Terminal.self, forKey: .terminal)
+        if source == .opencode, publisher == "agent-sessions-opencode-tui" {
+            liveStateHint = try c.decodeIfPresent(String.self, forKey: .activityState).flatMap(CodexLiveState.init(rawValue:))
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -122,6 +126,9 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
         try c.encodeIfPresent(startedAt, forKey: .startedAt)
         try c.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
         try c.encodeIfPresent(terminal, forKey: .terminal)
+        if source == .opencode, publisher == "agent-sessions-opencode-tui" {
+            try c.encodeIfPresent(liveStateHint?.rawValue, forKey: .activityState)
+        }
     }
 }
 
@@ -682,6 +689,10 @@ final class CodexActiveSessionsModel {
             guard var p = try? decoder.decode(CodexActivePresence.self, from: data) else { continue }
             p.sourceFilePath = url.path
             if p.isStale(now: now, ttl: ttl) { continue }
+            if p.source == .opencode, p.publisher == "agent-sessions-opencode-tui" {
+                guard p.liveStateHint != nil, let lastSeenAt = p.lastSeenAt, now.timeIntervalSince(lastSeenAt) <= 5,
+                      let pid = p.pid, pid > 1, pid <= Int(Int32.max), kill(Int32(pid), 0) == 0 else { continue }
+            }
             out.append(p)
         }
         return out

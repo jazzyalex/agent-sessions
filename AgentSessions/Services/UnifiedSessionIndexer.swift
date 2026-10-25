@@ -695,6 +695,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var focusedSessionMonitorTask: Task<Void, Never>? = nil
     private var lastSeenCodexSnapshot: DirectorySignatureSnapshot? = nil
     private var lastSeenClaudeSnapshot: DirectorySignatureSnapshot? = nil
+    private var lastSeenOpenCodeSnapshot: DirectorySignatureSnapshot? = nil
     private var focusedSessionContext: FocusedSessionContext? = nil
     private var lastFocusedSignatureBySource: [SessionSource: FileSignature] = [:]
     private var consecutiveMissingFocusedSignatureCountBySource: [SessionSource: Int] = [:]
@@ -1289,6 +1290,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func runNewSessionMonitorLoop() async {
         await checkForNewSessions(establishBaselineIfNeeded: true)
+        var secondsSinceDirectoryScan: UInt64 = 0
         while !Task.isCancelled {
             let intervalSeconds = await MainActor.run { [weak self] () -> UInt64 in
                 guard let self else { return 60 }
@@ -1296,9 +1298,28 @@ final class UnifiedSessionIndexer: ObservableObject {
                     ? self.foregroundNewSessionMonitorIntervalSeconds
                     : self.backgroundNewSessionMonitorIntervalSeconds
             }
-            try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
+            // OpenCode's small DB/WAL stat check keeps Quota Meter current without
+            // walking the Codex/Claude directory trees on the live cadence.
+            let tickSeconds: UInt64 = 10
+            try? await Task.sleep(nanoseconds: tickSeconds * 1_000_000_000)
             if Task.isCancelled { break }
-            await checkForNewSessions()
+            await checkForNewOpenCodeSessions()
+            secondsSinceDirectoryScan += tickSeconds
+            if secondsSinceDirectoryScan >= intervalSeconds {
+                await checkForNewSessions()
+                secondsSinceDirectoryScan = 0
+            }
+        }
+    }
+
+    private func checkForNewOpenCodeSessions() async {
+        let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+        let snapshot = Self.openCodeDirectorySnapshot(customRoot: customRoot?.isEmpty == false ? customRoot : nil)
+        guard !Task.isCancelled else { return }
+        await MainActor.run { [weak self] in
+            guard let self else { return }
+            self.processSnapshotDelta(source: .opencode, snapshot: snapshot,
+                                      lastSnapshot: &self.lastSeenOpenCodeSnapshot)
         }
     }
 
@@ -1323,11 +1344,15 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func checkForNewSessions(establishBaselineIfNeeded: Bool = false) async {
         let codexSnapshot = detectCodexDirectorySnapshot()
         let claudeSnapshot = detectClaudeDirectorySnapshot()
+        let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+        let openCodeSnapshot = Self.openCodeDirectorySnapshot(customRoot: customRoot?.isEmpty == false ? customRoot : nil)
         await MainActor.run { [weak self] in
             guard let self else { return }
             if establishBaselineIfNeeded && !self.hasInitializedNewSessionMonitorBaseline {
                 self.lastSeenCodexSnapshot = codexSnapshot
                 self.lastSeenClaudeSnapshot = claudeSnapshot
+                self.lastSeenOpenCodeSnapshot = openCodeSnapshot
+                self.pendingMonitorRefreshSnapshotBySource[.opencode] = nil
                 self.pendingMonitorRefreshSnapshotBySource[.codex] = nil
                 self.pendingMonitorRefreshSnapshotBySource[.claude] = nil
                 self.hasInitializedNewSessionMonitorBaseline = true
@@ -1341,6 +1366,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       lastSnapshot: &self.lastSeenCodexSnapshot)
             self.processSnapshotDelta(source: .claude, snapshot: claudeSnapshot,
                                       lastSnapshot: &self.lastSeenClaudeSnapshot)
+            self.processSnapshotDelta(source: .opencode, snapshot: openCodeSnapshot,
+                                      lastSnapshot: &self.lastSeenOpenCodeSnapshot)
         }
     }
 
@@ -1369,9 +1396,9 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func shouldTriggerMonitorRefresh(source: SessionSource, now: Date) -> Bool {
-        let minimumInterval = appIsActive
+        let minimumInterval = source == .opencode ? 10 : (appIsActive
             ? foregroundMonitorRefreshMinimumIntervalSeconds
-            : backgroundMonitorRefreshMinimumIntervalSeconds
+            : backgroundMonitorRefreshMinimumIntervalSeconds)
         if let last = lastMonitorRefreshBySource[source],
            now.timeIntervalSince(last) < minimumInterval {
             return false
@@ -1429,6 +1456,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
 
         return DirectorySignatureSnapshot.from(allSignatures)
+    }
+
+    /// Watch SQLite's WAL as well as the database: live writes need not checkpoint.
+    static func openCodeDirectorySnapshot(customRoot: String?) -> DirectorySignatureSnapshot {
+        let discovery = OpenCodeSessionDiscovery(customRoot: customRoot)
+        if let database = discovery.databaseURL() {
+            let signatures = ["", "-wal"].compactMap { suffix -> (path: String, modifiedAt: Date)? in
+                let url = URL(fileURLWithPath: database.path + suffix)
+                guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                      values.isRegularFile == true, let modifiedAt = values.contentModificationDate else { return nil }
+                return (url.path, modifiedAt)
+            }
+            return DirectorySignatureSnapshot.from(signatures)
+        }
+        return DirectorySignatureSnapshot.from(discovery.discoverSessionFiles().compactMap { url in
+            guard let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
+            return (url.path, modifiedAt)
+        })
     }
 
     private static func fileSignature(atPath path: String) -> FileSignature? {
@@ -1723,7 +1768,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         let didTrigger = await MainActor.run { [weak self] in
             guard let self else { return false }
             guard self.shouldRefreshSource(source) else { return false }
-            if !self.appIsActive && trigger != .manual && trigger != .launch {
+            // Quota Meter remains visible while the terminal is foreground. Its
+            // OpenCode titles need the newly discovered sessions in that state too.
+            if !self.appIsActive && source != .opencode && trigger != .manual && trigger != .launch {
                 self.pendingRefreshSourcesWhileInactive.insert(source)
                 LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: deferred (inactive, trigger=\(trigger.rawValue))")
                 return false

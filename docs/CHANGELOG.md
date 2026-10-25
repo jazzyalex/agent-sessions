@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- OpenCode working sessions use native shared-service IDs across terminals and Desktop. Agent Sessions automatically installs and manages its bundled TUI integration for exact selected working/idle conversations in any terminal, without manual setup or configuration edits. Preferences shows integration status. Desktop idle selection remains unavailable in OpenCode 2.1.2; closed or ambiguous conversations never receive a guessed live indicator.
+
+- OpenCode sessions refresh automatically as its database changes. Live matching uses native session IDs and no longer assigns closed conversations by terminal title, folder or recency.
+
 - Startup no longer draws overlapping transcript selection prompts or shows “Ready” beneath “Indexing sessions…”.
 
 ### Improvements

@@ -448,7 +448,9 @@ enum SessionRowsBuilder {
     static func buildFallbackPresenceMap(sessions: [Session],
                                          presences: [CodexActivePresence],
                                          directJoinSessionKeys: Set<String>) -> [String: CodexActivePresence] {
-        let supportedSources: Set<SessionSource> = [.claude, .opencode]
+        // OpenCode publishes exact IDs through its native TUI/service integration.
+        // Cwd and source-wide ordering cannot identify its selected conversation.
+        let supportedSources: Set<SessionSource> = [.claude]
         var fallbackBySessionKey: [String: CodexActivePresence] = [:]
         var fallbackEligibleBySource: [SessionSource: [Session]] = [:]
         var fallbackEligibleByWorkspace: [String: [Session]] = [:]
@@ -643,6 +645,9 @@ enum SessionRowsBuilder {
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }
+        // An unidentified OpenCode process can be a server, a Home screen, or
+        // another client. It must not count as a named running conversation.
+        if presence.source == .opencode { return true }
 
         let hasRevealURL = presence.revealURL != nil
         let hasITermGuid = CodexActiveSessionsModel.itermSessionGuid(from: presence.terminal?.itermSessionId)?.isEmpty == false

@@ -112,6 +112,16 @@ extension PreferencesView {
             }
 
             // Storage backend indicator
+            sectionHeader("Live Sessions")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(OpenCodePresenceIntegrationModel.shared.status)
+                    .font(.caption)
+                Text("Terminal sessions: exact selected conversation and working/idle state through the automatic TUI integration. Desktop: working sessions only; OpenCode does not expose its selected idle conversation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             sectionHeader("Session Storage")
             openCodeStorageBackendRow
 

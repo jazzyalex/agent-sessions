@@ -47,6 +47,15 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Cross-Surface Session Storage
 
+### OpenCode Desktop selected-but-idle presence
+> **partial** · sev: med · urg: low · verified 2026-10-23
+
+- **What:** exact working session IDs are read from the shared OpenCode service. The app bundles and automatically manages a TUI drop-in for exact selected IDs and native idle/working state in any terminal. Desktop selected-but-idle identity remains unavailable in stock OpenCode 2.1.2 and is stated in OpenCode preferences.
+- **Where:** `AgentSessions/OpenCode/OpenCodeServicePresence.swift`; `integrations/opencode-presence/README.md`. Upstream [active-session API](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/protocol/src/groups/session.ts#L210-L219) reports foreground execution drains. The [desktop renderer host](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/app/src/runtime/extension/root.tsx#L39-L44) loads only built-in renderer extensions; installed main extensions cannot observe `ctx.sessions.current()`.
+- **Why deferred:** desktop needs a supported selected-session observer or third-party renderer bundle support. Private recovery storage does not prove which still-live window owns a selection.
+- **Risk if wrong:** a closed or unrelated conversation could receive a live indicator. No desktop idle conversation is inferred from dates, persisted tabs or window titles.
+- **To close:** implement the supported desktop lifecycle/session observer and verify idle selection, switching, Home, closing and multiple windows against the real desktop client.
+
 ### Cursor Desktop conversations are never discovered
 > **partial** · sev: med · urg: low · verified 2026-10-01
 - **Review 2026-10-01:** The v5.5.1 release added supported Cursor ACP history, but a current source search still finds no state.vscdb reader in AgentSessions/. The original ItemTable/cursorDiskKV family and its join to ACP or ~/.cursor records remain unresolved. Recommendation: keep partial; map the storage families and prove ID joins before adding another reader.

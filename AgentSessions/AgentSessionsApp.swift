@@ -655,6 +655,7 @@ final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !AppRuntime.isRunningTests else { return }
         Task { @MainActor in ClaudeCloudLiveModel.shared.startIfNeeded() }
+        OpenCodePresenceIntegrationModel.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -407,7 +407,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let claudeKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: sharedID)
         let openCodeKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: sharedID)
         XCTAssertEqual(map[claudeKey]?.source, .claude)
-        XCTAssertEqual(map[openCodeKey]?.source, .opencode)
+        XCTAssertNil(map[openCodeKey], "OpenCode needs session selection evidence, not source-wide ordinal matching")
     }
 
     func testParseLsofMachineOutput_matchesClaudeSessionFilesAndSkipsHistory() {

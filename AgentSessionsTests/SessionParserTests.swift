@@ -4903,6 +4903,23 @@ final class SessionParserTests: XCTestCase {
 
     // MARK: - DirectorySignatureSnapshot
 
+    func testOpenCodeMonitorDetectsWALWritesAndCheckpoint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let db = root.appendingPathComponent("opencode.db")
+        let wal = root.appendingPathComponent("opencode.db-wal")
+        try Data().write(to: db)
+        let baseline = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
+        try Data([1]).write(to: wal)
+        let withWAL = UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path)
+        XCTAssertNotEqual(baseline, withWAL)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(20)], ofItemAtPath: wal.path)
+        XCTAssertNotEqual(withWAL, UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path))
+        try FileManager.default.removeItem(at: wal)
+        XCTAssertEqual(baseline, UnifiedSessionIndexer.openCodeDirectorySnapshot(customRoot: root.path))
+    }
+
     func testDirectorySignatureSnapshot_emptyInputProducesEmpty() {
         let snapshot = DirectorySignatureSnapshot.from([])
         XCTAssertEqual(snapshot, DirectorySignatureSnapshot.empty)
