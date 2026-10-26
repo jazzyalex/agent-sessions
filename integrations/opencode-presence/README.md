@@ -8,7 +8,7 @@ requests. One private JSON heartbeat per client is written atomically under
 cleanup removes that client's file. Agent Sessions rejects dead or expired clients.
 
 Agent Sessions bundles the complete ESM package in `Contents/Resources/OpenCodePresence`.
-At app launch and every five seconds, its integration manager installs or updates
+At app launch and every 60 seconds, its integration manager installs or updates
 `<OpenCode config>/plugins/agent-sessions-presence/`. No separate installation,
 Node/Python runtime, download or `cli.json` edit is needed. OpenCode 2.1.2 discovers
 and reloads the package in running standard TUI clients. An explicit OpenCode plugin
@@ -26,8 +26,8 @@ The session catalog retains its existing Sessions Directory setting for alternat
 data stores; configuration/service discovery does not merge unrelated databases.
 
 Each managed package has an ownership/hash manifest. Updates exchange complete
-directories atomically; previous packages are retained in Agent Sessions' application
-support directory. Modified packages, symlinks and unrelated files are preserved and
+directories atomically; the two most recently replaced packages are retained in Agent
+Sessions' application support directory. Modified packages, symlinks and unrelated files are preserved and
 reported. Turning off OpenCode or live-session detection moves only the unmodified,
 owned package out of discovery; turning it back on reinstalls it automatically.
 Deleting Agent Sessions from Finder does not run an uninstaller: disable OpenCode
