@@ -58,11 +58,11 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 
 ### CLI follow-ons after the macOS history interface
-> **open** · sev: low · urg: low · verified 2026-10-23
+> **open** · sev: low · urg: low · verified 2026-10-24
 
-- **What:** TUI delivery, additional CLI providers, stats/cost and Linux distribution remain planned after the first macOS CLI. Neither [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77) nor its [bounded-read companion](https://github.com/shurrman/agent-sessions/pull/1) is merged in the reviewed main (`3c5a3324`).
-- **Where:** [macOS CLI shipping plan](plans/2026-10-23-macos-cli-shipping-plan.md), especially phase two; the independent [Repo MCP architect report](plans/2026-10-23-macos-cli-architect-review.md) records the source findings and review limits.
-- **Why deferred:** establish strict reads, scoped cache/refresh rules and a qualified macOS JSON interface before adding another client or distribution promise. The phase-two TUI must fix stale previews, hidden index errors, negative widths, unbounded buffering/cache and terminal-control handling; no maintainer commitment is assumed.
+- **What:** no CLI work is approved. A TUI is dropped. Neither [PR #77](https://github.com/jazzyalex/agent-sessions/pull/77) nor its [bounded-read companion](https://github.com/shurrman/agent-sessions/pull/1) is merged.
+- **Where:** planning and product evaluation notes are kept in the owner's private notes, not in this repository.
+- **Why deferred:** the only outside request (#80) is transcript export, and existing tools may already cover it. Validate that job before building any command.
 - **Risk if wrong:** scope or support claims could outrun actual lifecycle/platform qualification. **To close:** implement and qualify each follow-on under the plan, then collapse this entry when release history records the completed work. This entry authorizes no implementation or publication.
 
 ### Cursor Desktop conversations are never discovered
