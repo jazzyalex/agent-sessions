@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.1.2] - 2026-10-25
+
 ### Highlights
 
 - **OpenCode in the Quota Meter shows the session you are in.** Each OpenCode terminal shows its open conversation by its real title, working or idle, and closed conversations no longer pose as live. Setup is automatic: a small plugin, with its status in Settings → OpenCode. OpenCode Desktop shows working sessions only, since it keeps its idle selection to itself.
