@@ -1,4 +1,4 @@
-# OpenCode Session Rates in the Quota Meter — Implementation Plan (rev 4)
+# OpenCode Session Rates in the Quota Meter — Implementation Plan (rev 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -25,8 +25,10 @@
 | 1 | 21252ba2 | NO-SHIP, 11 findings |
 | 2 | e0a53360 | NO-SHIP, 11 findings |
 | 3 | c6d1e009 | NO-SHIP, 6 blockers + 3 improvements |
+| 4 | c5281ed9 | NO-SHIP, 2 blockers + 5 implementation corrections |
+| 5 | this commit | Fixes rev 4's items. The owner accepted it as ready to implement without a fifth plan review (2026-10-26); the implementation gets its own review. |
 
-"Findings addressed" at the end maps each rev-3 item to its fix.
+"Findings addressed" at the end maps each rev-3 and rev-4 item to its fix.
 
 ## Global Constraints
 
@@ -36,7 +38,7 @@
 - `loadTelemetry(for:)` behavior and results are unchanged (`since: nil` keeps today's SQL).
 - New Swift files, production and test, are added with `scripts/xcode_add_file.rb` (4 `project.pbxproj` lines per file). Confirm the new test classes run.
 - New strings go into `Localizable.xcstrings` (en + zh-Hans), with the count/digest updated in `scripts/validate_localization_catalogs.py:42-45` and its unittest.
-- Visible behavior goes in **both** `docs/CHANGELOG.md` and `docs/summaries/2026-MM.md` (agents.md:134-136).
+- Visible behavior goes in **both** `docs/CHANGELOG.md` and the monthly `docs/summaries/2026-10.md` (or `2026-11.md` if it lands then) (agents.md:134-136).
 - Test-count baseline = the **passed** count (3905 at 21252ba2).
 - **Commits need the owner's go-ahead** (CLAUDE.md:12-16, agents.md:123-132). Each task's last step prepares a scoped Conventional Commits message with `Tool:`/`Model:`/`Why:` trailers and commits with `git commit -- <paths>` only after the owner approves.
 
@@ -71,6 +73,16 @@ These rules differ from Claude's on purpose (Claude: 30 s freshness, 10 s minimu
 | v1 step-finish part of an eligible message | usage invalid | window **unavailable** |
 | v1 assistant message with no step-finish part | — | in flight, ignored |
 | any | — | rows of other types are not requests |
+| v2 row of any type | `data` JSON cannot be decoded | window **unavailable** (the type of request cannot be ruled out) |
+| v2 `assistant` / `compaction` | completion field present but not a positive integer epoch-millisecond value | window **unavailable** |
+| v1 eligible message or its part | JSON cannot be decoded | window **unavailable** (it could hide step-finish evidence) |
+| v1 step-finish part | `time.end` present but not a positive integer epoch-millisecond value | window **unavailable** |
+
+**Only a successfully decoded row with no completion marker is "in flight".** Decode and timestamp failures use the reader's existing `malformedPayload` tracking (`OpenCodeSqliteReader.swift:273-286, 751-770, 784-827, 1695-1735`) and fail closed.
+
+**Which malformed rows count.** A row counts toward "unavailable" only if it could belong to the 30-minute completion window. For an undecodable row, or one whose completion is malformed, that means its row `time_updated` (v2 `session_message`, v1 `part`/`message`) is ≥ now − 30 min. A malformed row that was last written longer ago than that is outside the window and ignored. So an old broken request does not poison a new burst, and a recent one always does.
+
+**Timestamp parsing.** A completion value counts only if it is a positive `Int64` epoch-millisecond, or a JSON number that converts to one exactly. Anything else is "malformed", never "missing". The compaction and v1 fallbacks (`time_updated` columns) are SQL integers and are used only when the JSON field is absent.
 
 "Strict validation" is the reader's existing rule (`OpenCodeSqliteReader.swift:229-289, 460-501`): every component present, a finite non-negative integer, no addition overflow. Classification reads the raw v2 row **before** `OpenCodeV2MessageAdapter` transforms it, because the adapter drops tokenless compactions (`OpenCodeV2MessageAdapter.swift:120-126`).
 
@@ -115,8 +127,9 @@ These rules differ from Claude's on purpose (Claude: 30 s freshness, 10 s minimu
 static func adapt(rowID: String, type: String, timeCreatedMillis: Int64,
                   timeUpdatedMillis: Int64, data: [String: Any]) -> Adapted   // OpenCodeV2MessageAdapter.swift:26
 ```
-- `adaptedV2Row` (`OpenCodeSqliteReader.swift:1514-1519`) passes `row.timeUpdated` (`V2Row`, :1463-1469). `stepFinishPart` (:146-157) writes `"completedAt"`: `data.time.completed` for an assistant; for a completed compaction, `time.completed` ?? `timeUpdatedMillis`. The v1 part path reads `part.time.end` ?? the part row's `time_updated`. The private `OpenCodeTelemetryUsageRow` gains `completedAt`, and the event built at :478-501 sets it. Update every existing `adapt(` call site.
-- [ ] **Step 1: Failing tests:** `testCompletedAtFromV2AssistantTime`, `testCompactionWithoutTimeCompletedUsesRowUpdate`, `testV1PartTimeEndThenRowUpdate`, `testCompletedAtSurvivesPricing` (via `TelemetryCostCalculator.price(events:fallbackSlices:snapshot:…)`, :43-48), `testObservedAtStaysRequestStart`, `testDecodesEventWithoutCompletedAt`.
+- `adaptedV2Row` (`OpenCodeSqliteReader.swift:1514-1519`) passes `row.timeUpdated` (`V2Row`, :1463-1469). `stepFinishPart` (:146-157) writes `"completedAt"`: `data.time.completed` for an assistant; for a completed compaction, `time.completed` ?? `timeUpdatedMillis`. The v1 part path reads `part.time.end` ?? the part row's `time_updated`. The private `OpenCodeTelemetryUsageRow` gains `completedAt`, and the `TelemetryUsageEvent` constructed at `OpenCodeSqliteReader.swift:513-528` sets it (lines :478-501 are token validation). Update every existing `adapt(` call site.
+- **v1 `observedAt` check.** The current reader picks the part's `time_created` before the owning message's start (:264-275, :804-815). Confirm with a realistic v1 fixture, end-present and end-absent, that `observedAt` is the request start used for period pricing and burst spans. If it is not, use the owning message's `time_created` for the rate path only, and leave Session Info unchanged.
+- [ ] **Step 1: Failing tests:** `testCompletedAtFromV2AssistantTime`, `testCompactionWithoutTimeCompletedUsesRowUpdate`, `testV1PartTimeEndThenRowUpdate`, `testV1ObservedAtIsRequestStart` (realistic v1 fixture, end present and absent), `testCompletedAtSurvivesPricing` (via `TelemetryCostCalculator.price(events:fallbackSlices:snapshot:…)`, :43-48), `testObservedAtStaysRequestStart`, `testDecodesEventWithoutCompletedAt`.
 - [ ] **Step 2:** `xcodebuild … -only-testing:AgentSessionsTests/OpenCodeRecentUsageTests` → FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** focused tests + `OpenCodeV2StoreTests` + `SessionTelemetryEngineTests` → PASS (full-load results unchanged).
@@ -143,6 +156,11 @@ private static func recentWindow(db: OpaquePointer?, sessionID: String, now: Dat
   - `testInFlightOnlyWindowIsNoUsage`, `testUserOnlyWindowIsNoUsage`.
   - `testCompletedTokenlessCompactionIsUnavailable`, `testInFlightCompactionIgnored`, `testCompletedCompactionWithTokensIncluded`.
   - `testCompletedAssistantMissingTokensIsUnavailable`, `testMalformedComponentsAreUnavailable` (negative, fractional, overflow).
+  - `testUndecodableV2AssistantIsUnavailable`, `testUndecodableV2CompactionIsUnavailable`, `testUndecodableV1PartIsUnavailable`, `testUndecodableV1MessageIsUnavailable`.
+  - `testMalformedCompletionTimestampIsUnavailable` (string, negative, fractional, beyond `Int64`), for v2 `time.completed` and v1 `time.end`.
+  - `testDecodedRowWithoutCompletionIsInFlight` — the only path to "in flight".
+  - `testOldMalformedRowOutsideWindowIsIgnored` — `time_updated` 45 min ago, a valid burst now → `.usage`.
+  - `testRecentMalformedRowPoisonsWindow` — `time_updated` 5 min ago → `.unavailable`.
   - `testV1PartOfOldMessageExcluded`, `testV1LongRequestStartedInsideCutoffIncluded`, `testRequestStartedOverTwoHoursAgoExcluded`.
   - `testStoreSelectionMatchesFullLoad` (v1-only, equal-time migrated copy, newer v2 continuation), `testForkClonedRowsExcluded`.
   - `testWindowParityWithFullLoad` — on a fixture of **complete, valid rows only**, the normalized tuples `(recordID, model, fresh, cacheRead, cacheWrite5m, output, reasoning, completedAt)` match `loadTelemetry(for:)` filtered by the same start timestamp. `anchorLine` is excluded; `testAnchorLinesAreDenseInWindow` covers it. (On malformed data the full load fails the whole session closed while the window fails only itself; that difference is intended.)
@@ -208,11 +226,11 @@ enum OpenCodeSessionRate {
 ```
 - `burst`: events with `topLineTokens > 0`, sorted by `completedAt`; walk back while the gap rule holds; span must be ≥ `minimumSpan`.
 - `activity`: `TelemetryCostCalculator.price(events: burst, fallbackSlices: [], snapshot: prices)` on the **burst only**.
-  - `.unpriced(estimate.unpricedModels, estimate.missingPriceComponents)` when either list is non-empty or any priced event has `apiEquivalentUSD == nil`.
+  - `.unpriced(estimate.unpricedModels, estimate.missingPriceComponents)` when either list is non-empty or any priced event has `apiEquivalentUSD == nil`. Both lists are kept as returned (deduplicated, sorted). Both may be empty when only a nil event USD triggered it; the view then shows the generic reason.
   - `.allFreeRoute` when every burst event's model is in `estimate.freeRouteModels`.
   - Otherwise `.priced(sum USD ÷ span × 3600)`.
 - `value`: idle → `.idle`; window `.unavailable` → `.unavailable`; no activity or stale → `.working`; $ unit maps the pricing outcome to `.free`, `.unpriced` or `.rate`; tk unit → `.rate(tokensPerHour, .tokensPerHour)`.
-- [ ] **Step 1: Failing tests:** `testBurstSpanAndWeight` (24 000 weighted over 120 s → 720 000 tk/h), `testGapStartsNewBurst`, `testShortSpanHasNoBurst`, `testOldUnpricedOutsideBurstDoesNotHideRate`, `testMixedFreeAndPaidIsNotFree`, `testAllFreeIsFree`, `testUnknownModelReasonIsKept` (exact `unknownModels`), `testMissingWriteRateReasonIsKept` (exact `missingComponents`, e.g. `"<model>:cacheWrite"`), `testPeriodBoundaryPricesEachEventAtItsDate`, `testLongContextEventPricedAtItsTier`, `testDollarsMatchSessionInfoForSameEvents`, `testFreshnessAtValueTime`, `testIdleWins`, `testUnavailableWins`, `testLensMapping`.
+- [ ] **Step 1: Failing tests:** `testBurstSpanAndWeight` (24 000 weighted over 120 s → 720 000 tk/h), `testGapStartsNewBurst`, `testShortSpanHasNoBurst`, `testOldUnpricedOutsideBurstDoesNotHideRate`, `testMixedFreeAndPaidIsNotFree`, `testAllFreeIsFree`, `testUnknownModelReasonIsKept` (exact `unknownModels`), `testMissingWriteRateReasonIsKept` (exact `missingComponents`, e.g. `"<model>:cacheWrite"`), `testMixedReasonsBothKept` (one unknown model and one missing component in the same burst → both lists non-empty), `testNilUSDWithNoReasonsIsUnpricedWithEmptyLists`, `testPeriodBoundaryPricesEachEventAtItsDate`, `testLongContextEventPricedAtItsTier`, `testDollarsMatchSessionInfoForSameEvents`, `testFreshnessAtValueTime`, `testIdleWins`, `testUnavailableWins`, `testLensMapping`.
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** prepare commit `feat(opencode): per-session tk/h and $/h from the newest burst`; commit on owner approval.
 
@@ -238,6 +256,8 @@ struct OpenCodeRateSnapshot: Equatable, Sendable {
     /// Sampler-only. Accepts the snapshot only if its demandRevision == the current revision
     /// and its version is newer than the published one.
     func publish(_ snapshot: OpenCodeRateSnapshot)
+    /// Live demand state for the sampler's post-read checks (read on the main actor).
+    var currentDemandRevision: UInt64 { get }
 }
 protocol OpenCodeRecentUsageReading: Sendable {
     func recentUsage(databaseURL: URL, requests: [OpenCodeRecentUsageRequest], now: Date) -> [String: OpenCodeRecentUsageResult]?
@@ -254,7 +274,8 @@ actor OpenCodeRateSampler {
 - **Ordering:** the store owns the only `demandRevision` counter and one `AsyncStream` continuation. Every `setDemand` yields `(revision, union)` synchronously on the main actor, so the sampler sees updates in call order. A newer hide can never be overtaken by an older show.
 - **Union:** all distinct session IDs across surfaces, `isWorking` = OR. No cap (see Fixed values for the practical bound).
 - **One read at a time:** the loop is `await read; process; sleep`. A demand update during a read is applied **after** that read returns, and the stale result is then dropped. There are never two reads in flight. The GCD read in `withCheckedContinuation` (pattern `CodexRunwayModel.swift:606-608`) may finish after demand changes; its result is checked before use.
-- **Validity check after each read:** the result is used only if the demand revision and the database path are unchanged since the read started. Otherwise it is discarded **without** touching the cache. Then a snapshot is built with the current clock and passed to `store.publish` on the main actor.
+- **Validity check after each read:** the sampler records the store's revision and the DB path when the read starts. After the read it reads the **live** `await store.currentDemandRevision` (main actor) and the current DB path. It does **not** use the last revision it took from its mailbox, because newer updates may still be queued while a read is suspended. If either value changed, the result is discarded **without** touching the cache. Otherwise the cache is updated, a snapshot is built with the current clock, and `store.publish` makes the final check on the main actor.
+- **Single-flight invariant:** one actor-owned refresh task is the only code that calls the reader. The mailbox consumer only records demand and wakes that task. It never starts a read itself.
 - **Stop:** a nil union stops the loop after the in-flight read (if any) returns; no further reads.
 - **Path change:** clear the cache; publish an `.empty` snapshot carrying the new path.
 - **Demand source:** each `HUDLimitsRowsPanel` (3858) reports under its own UUID, the same per-surface pattern as `QuotaMeterPollingRegistry` (690-716). It reports non-nil only when the OpenCode group is shown, rate visibility is not `.alwaysOff`, and (for the strip) the strip is expanded. Add `@Environment(\.quotaStripExpanded) private var stripExpanded` to `HUDLimitsRowsPanel`; it is declared today only in other views (precedent :4814). Report on appear and on change; nil on disappear.
@@ -266,6 +287,9 @@ actor OpenCodeRateSampler {
   - `testCollapseExpandDuringBlockedRead`.
   - `testPathChangeDuringBlockedReadDiscardsResult`.
   - `testStorePublishRejectsStaleRevisionOrVersion`.
+  - `testStaleResultNeverEntersCache` — a blocked read, demand changes, the read returns; then the next cycle with an unchanged tail must re-read, not reuse the stale result. Assert on cache contents, not only on publish.
+  - `testLiveRevisionCheckedNotMailboxRevision` — a demand update queued but not yet consumed when the read returns → the result is discarded.
+  - `testOnlyRefreshTaskCallsReader` — mailbox bursts during a blocked read cause no extra reader calls.
   - `testCachedActivityExpiresAtFreshness`, `testPeriodicForceReloadAfterSixtySeconds`, `testUnreadableStoreGivesWorking`.
 - [ ] **Step 2: Benchmark** `testCycleWithinBudgetOnLargeStore`: real SQLite, vendor fixture, 50 000 `session_message` rows over 200 sessions with an active 2-hour tail, WAL writer, **8** sessions × 30 cycles, warm and changed-tail. p95 ≤ 25 ms, exactly 1 DB open per cycle. Runs with `AGENT_SESSIONS_PERF=1`; required in Task 7.
 - [ ] **Step 3–4:** FAIL → implement → PASS.
@@ -285,26 +309,33 @@ actor OpenCodeRateSampler {
 - **Values:**
   - `.rate(v, unit)` → `RunwayTimeFormatting.rate(v, unit:, confidence: .direct)` (:5161); `hudProjectionColor` when `v > 0`, else secondary.
   - `.free` → `"Free"`.
-  - `.unpriced(unknownModels, missingComponents)` → "—", with `.help("No API price for \(unknownModels.joined(separator: ", "))")` when models are unknown, else `.help("Missing API price component: \(missingComponents.joined(separator: ", "))")`.
+  - `.unpriced(unknownModels, missingComponents)` → "—" with one help text built from every non-empty part, joined by a newline:
+    - `"No API price for %@"` with the model list, when `unknownModels` is non-empty;
+    - `"Missing API price component: %@"` with the component list, when `missingComponents` is non-empty;
+    - `"No API price for this session's recent usage."` when both are empty.
+
+    The rule lives in `static func OpenCodeHUDGroup.unpricedHelp(unknownModels:missingComponents:) -> String`, a pure function that is tested directly.
   - `.unavailable` → "—" + `.help("Usage data for this session is incomplete.")`.
   - `.working` / `.idle` / missing → `stateLabel`.
   - Width `HUDRunwayLayout.rateWidth(for:)`.
-- **Toggle:** `runwayControlAvailable` = `controlAvailable(providersShown: <existing expression>, openCodeGroupVisible: group != nil)`.
+- **Toggle:** the OpenCode group is built inside `HUDLimitsRowsPanel.body` (:4188-4197), so its local `openCodeGroup` is out of scope at `runwayControlAvailable` (:1336). The parent recomputes visibility from its own inputs instead: `OpenCodeHUDGroup.make(rows: displayState.rowsForDisplay, detectionEnabled: <same flag passed to the panel at :1135-1140>, openCodeEnabled: <same>) != nil`, or a shared computed property both use. `runwayControlAvailable = controlAvailable(providersShown: <existing expression>, openCodeGroupVisible: that)`.
+- **Test seam:** `HUDLimitsRowsPanelTestHost` (:4712-4727) today accepts only `activeRows` / `detectionEnabled`. Extend it with an injected `OpenCodeRateStore` (or snapshot), `runwayVisibility`, `isStrip` and `stripExpanded`, so the mounted tests can drive those inputs.
 
-- [ ] **Step 1: Failing tests:** `testRowShowsOwnSessionRate`, `testParentAndChildRowsShowTheirOwnRates`, `testAlwaysOffHidesExistingRate` (mounted via `HUDLimitsRowsPanelTestHost` (4713) with a populated injected snapshot; switching visibility to `.alwaysOff` reverts to "working"), `testCollapsedStripHidesExistingRate`, `testSnapshotForOtherPresentationIgnored`, `testPositiveRateUsesProjectionColorEvenWhenQuiet`, `testUnpricedTooltipsDistinguishModelAndComponent`, `testMountedStripReportsDemandOnlyWhenExpanded`, `testAlwaysOffReportsNoDemand`, `testControlAvailableForOpenCodeOnly`, `testNewStringsHaveChineseTranslations` (all three tooltip keys).
+- [ ] **Step 1: Failing tests:** `testRowShowsOwnSessionRate`, `testParentAndChildRowsShowTheirOwnRates`, `testAlwaysOffHidesExistingRate` (mounted via `HUDLimitsRowsPanelTestHost` (4713) with a populated injected snapshot; switching visibility to `.alwaysOff` reverts to "working"), `testCollapsedStripHidesExistingRate`, `testSnapshotForOtherPresentationIgnored`, `testPositiveRateUsesProjectionColorEvenWhenQuiet`, `testUnpricedHelpModelOnly`, `testUnpricedHelpComponentOnly`, `testUnpricedHelpMixedShowsBoth`, `testUnpricedHelpGenericWhenEmpty`, `testToolbarControlUsesParentComputedGroupVisibility`, `testMountedStripReportsDemandOnlyWhenExpanded`, `testAlwaysOffReportsNoDemand`, `testControlAvailableForOpenCodeOnly`, `testNewStringsHaveChineseTranslations` (all four help keys: unknown model, missing component, generic unpriced, incomplete usage).
 - [ ] **Step 2–4:** FAIL → implement (catalog + validator count/digest; run the validator and its unittest) → PASS.
 - [ ] **Step 5:** prepare commit `feat(opencode): show per-session rates in the Quota Meter`; commit on owner approval.
 
 ### Task 7: Docs and required verification
 
-- [ ] **Step 1:** CHANGELOG `[Unreleased]` entry: OpenCode sessions in the Quota Meter show tk/h, or $/h in the $ lens; free routes read Free; no quota until Go data exists. Add the matching line in `docs/summaries/2026-MM.md`. Lint with `python3 tools/release/sparkle_release_notes.py --version 6.2 --changelog <copy, [Unreleased]→[6.2]> --lint --out-text <scratch>`.
+- [ ] **Step 1:** CHANGELOG `[Unreleased]` entry: OpenCode sessions in the Quota Meter show tk/h, or $/h in the $ lens; free routes read Free; no quota until Go data exists. Add the matching line in the monthly summary for the month the change lands: `docs/summaries/2026-10.md` if it lands in October, otherwise create `docs/summaries/2026-11.md` following that file's format. Lint with `python3 tools/release/sparkle_release_notes.py --version 6.2 --changelog <copy, [Unreleased]→[6.2]> --lint --out-text <scratch>`.
 - [ ] **Step 2:** `./scripts/xcode_test_stable.sh` → TEST SUCCEEDED. Set the baseline to the **passed** count from the result bundle.
 - [ ] **Step 3 (required):** `AGENT_SESSIONS_PERF=1 xcodebuild … -only-testing:AgentSessionsTests/OpenCodeSessionRateTests/testCycleWithinBudgetOnLargeStore` → PASS. Record p95 and DB opens per cycle.
 - [ ] **Step 4:** Owner manual check, real OpenCode 2.x TUI:
   - A rate appears after 60 s of completed requests; "working" before that.
   - The $ lens shows $/h or Free.
   - A long request keeps its rate for up to 5 min.
-  - Always Off and a collapsed strip both hide rates at once and stop DB reads (`fs_usage -f filesys | grep opencode.db`, 30 s).
+  - Always Off and a collapsed strip both hide rates at once.
+  - DB reads stop only when **no** surface shows OpenCode rates: Always Off, or the strip collapsed with the window closed. With the window open and the strip collapsed, sampling continues. Check that Agent Sessions' own reads stop with `sudo fs_usage -w -f filesys AgentSessions | grep opencode.db` for 30 s; OpenCode's own writes are not counted.
   - CPU stays calm with the Quota Meter open for 5 min.
 - [ ] **Step 5:** prepare commit `docs: record OpenCode session rates`; commit on owner approval.
 
@@ -323,3 +354,16 @@ actor OpenCodeRateSampler {
 | I1 | Row update time not threaded | `adapt(... timeUpdatedMillis:)` from `V2Row.timeUpdated`; v1 `time.end` ?? part `time_updated`; `observedAt` stays the start (Task 1). |
 | I2 | Unconditional commit steps | Every Step 5 prepares the commit and commits on owner approval; Global Constraints. |
 | I3 | Parity semantics; Task 2 size | Parity on complete, valid rows with the intended difference stated; old Task 2 split into Task 2 (eligibility and classification) and Task 3 (batch, tail, WAL, query plans). `@Environment(\.quotaStripExpanded)` is added to `HUDLimitsRowsPanel` explicitly. |
+
+## Findings addressed (rev 4 review)
+
+| # | Rev-4 item | Fix in rev 5 |
+|---|---|---|
+| Blocker 1 | Undecodable rows / malformed completion read as in-flight | Classification rows for decode and timestamp failures (fail closed via existing `malformedPayload`); only decoded rows without a completion marker are in flight; window attribution by `time_updated`; strict timestamp parsing; Task 2 tests. |
+| Blocker 2 | Mixed unpriced reasons lose one class in the view | Both lists kept; `unpricedHelp` joins every non-empty part, with a generic fallback; four help strings; mixed/empty tests (Tasks 4, 6). |
+| B6 note | Post-read check must use live store revision | `currentDemandRevision` read on the main actor after each read; stale results never cached; single-flight invariant; three tests (Task 5). |
+| C1 | `openCodeGroup` out of scope for the toolbar; test host lacks injection | Parent recomputes group visibility via `OpenCodeHUDGroup.make`; test host extended (Task 6). |
+| C2 | Event construction line | `:513-528`; v1 `observedAt` verified with a realistic fixture (Task 1). |
+| C3 | Manual "collapse stops reads" ignores the other surface | Reads stop only when no surface demands; `fs_usage` filtered to Agent Sessions (Task 7). |
+| C4 | Summary path placeholder | `docs/summaries/2026-10.md`, or a new `2026-11.md` if it lands then (Task 7). |
+| C5 | Task 5 size | Kept as one task, implemented in the order mailbox/revision → single-flight read lifecycle → cache → benchmark, each with its blocked-read tests passing before the next. |
