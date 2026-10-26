@@ -1,50 +1,59 @@
-# OpenCode Session Rates in the Quota Meter — Implementation Plan
+# OpenCode Session Rates in the Quota Meter — Implementation Plan (rev 2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Each running OpenCode 2.x session row in the Quota Meter shows its own token rate (tk/h), or its API-equivalent cost rate ($/h) when the $ lens is selected, without any OpenCode subscription data.
+**Goal:** Each running OpenCode 2.x session in the Quota Meter shows its token rate (tk/h), or its API-equivalent cost rate ($/h) in the $ lens, computed from local data only.
 
-**Architecture:** A read-only SQLite reader pulls the recent assistant requests of each running OpenCode session (and its child sessions) from `opencode.db`. A pure function turns those requests into a `RunwaySessionActivity` using the same burst rule and token weighting as Claude's tk/h. A small display model maps activity + the global `RunwayPresentation` to row text. `HUDLimitsRowsPanel` refreshes these rates every 5 s off the main thread and passes them to the existing OpenCode group. Rows join by OpenCode session ID; nothing goes through the Codex/Claude runway request, baseline or `UsageTrackingSource`.
+**Architecture:** Reuse the existing OpenCode telemetry reader instead of a parallel SQL reader. It already applies the v1/v2 store-selection contract, fork-clone attribution, compaction accounting and malformed-row rules. Add a **time-windowed** entry point to it, plus a cheap tail probe and a cycle-safe session-tree query. Price each usage event with the Session Info calculator (`TelemetryCostCalculator`), then turn the events of the newest burst into a rate. An actor loader runs this off the main thread on a 5 s cadence, only while the Quota Meter rate surface is on screen. The HUD shows one rate per OpenCode session tree, keyed by session ID.
 
 **Tech Stack:** Swift 5 / SwiftUI, SQLite3 C API (read-only), XCTest.
 
-**Spec:** This plan is the spec. Owner decisions from the 2026-10-26 session:
-- No weekly (Wk) or 5h quota for OpenCode until OpenCode Go subscription data exists. Only tk/h and $/h.
-- OpenCode 2.x only. 1.x sessions have no live presence, so they get no rate.
-- Desktop sessions get a rate only while working (the service reports them; idle Desktop selection is not exposed).
+**Spec:** This plan is the spec. Owner decisions (2026-10-26):
+- No 5h or weekly quota for OpenCode until OpenCode Go subscription data exists. Only tk/h and $/h.
+- OpenCode 2.x live sessions only (1.x has no live presence). Desktop sessions get a rate only while working.
+- **Compaction counts.** A token-bearing compaction is a billable model call. The Quota Meter rate includes it, so $/h reconciles with Session Info.
+- **Free routes read "Free"** in the $ lens, using the existing `"Free"` catalog key. API-equivalent cost of free-route sessions stays in Session Info.
 - Target release: 6.2.
+
+**Review history:** rev 1 (commit 21252ba2) got NO-SHIP from a ChatGPT Extra High Repo MCP review with 11 findings. Each is mapped to its fix in "Findings addressed" at the end.
 
 ## Global Constraints
 
-- Deployment target: macOS 14.0 (unchanged).
-- `UsageTrackingSource` stays `.codex` / `.claude`. Do not add `.opencode`: several exhaustive switches depend on it (`CodexRunwayModel.swift:1411`, `UsageStaleCheck.swift:77`, `UsageFreshness.swift:52`, `UsageDisplayFormatter.swift:478,498`).
-- `RunwayPresentation` keeps exactly four cases (`testRunwayPresentationDefaultsToFiveHour` asserts `allCases.count == 4`).
-- SQLite access is read-only: `sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)`, the pattern at `OpenCodeSqliteReader.swift:187-193`. Never write to `opencode.db`; never hold a transaction open between refreshes.
-- No network calls. No new background timers outside the visible Quota Meter.
-- New Swift files are added with `scripts/xcode_add_file.rb` (agents.md, "Adding New Swift Files"). A correct run adds exactly 4 `project.pbxproj` lines per file.
-- Every new user-facing string goes into `AgentSessions/Resources/Localizable.xcstrings` (en + zh-Hans) and the key count/digest in `scripts/validate_localization_catalogs.py` and `scripts/tests/test_validate_localization_catalogs.py` is updated, or release QA's localization gate fails. Reuse the existing `"Free"` key.
-- Commits: Conventional Commits with `Tool:` / `Model:` / `Why:` trailers, `git commit -- <paths>` only.
-- Tests run through `./scripts/xcode_test_stable.sh` (full) or `xcodebuild ... -only-testing:` (focused). Test counts are invariants; record the new total.
+- Deployment target macOS 14.0.
+- `UsageTrackingSource` stays `.codex` / `.claude` (exhaustive switches at `CodexRunwayModel.swift:1411`, `UsageStaleCheck.swift:77`, `UsageFreshness.swift:52`, `UsageDisplayFormatter.swift:478,498`).
+- `RunwayPresentation` keeps exactly four cases (`testRunwayPresentationDefaultsToFiveHour`).
+- `opencode.db` is read-only: `SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX`, the pattern at `OpenCodeSqliteReader.swift:187-193`. Never create indexes or write. One short read transaction per refresh cycle, never held across cycles.
+- No network. No polling while the rate surface is off screen or `QuotaMeterRunwayVisibility.alwaysOff`.
+- Every new Swift file, production **and test**, is added with `scripts/xcode_add_file.rb` (a correct run adds exactly 4 `project.pbxproj` lines per file). Verify the new test classes appear in the test run.
+- New user-facing strings go into `Localizable.xcstrings` (en + zh-Hans). Update the key count and digest in `scripts/validate_localization_catalogs.py:42-45` and `scripts/tests/test_validate_localization_catalogs.py`, or release QA fails.
+- Test-count baseline `tools/release/test-count-baseline.txt` holds the **passed** count (3905 at 21252ba2), not total-with-skips.
+- Commits: Conventional Commits + `Tool:`/`Model:`/`Why:` trailers, `git commit -- <paths>`.
 
 ## Fixed values
 
-| Name | Value | Why |
+| Name | Value | Note |
 |---|---|---|
-| Lookback for the SQL read | 30 min | Matches the Claude/Codex burst gap; bounds the query. |
-| Burst gap | 30 min | Same as Claude (`ClaudeRunwayTokenActivityParser` burst walk). |
-| Minimum burst span | 60 s | A single short request with a large cached prompt would read as millions of tk/h. Claude solves this with a provisional clamp; OpenCode shows "working" until a minute of evidence exists. |
-| Rate freshness while working | 5 min after the newest completed request | One OpenCode request can run for minutes with no new row; keep the last burst rate visible during it, then fall back to "working". |
-| Token weight | fresh input + output + reasoning + cache write + 0.10 × cache read | Same scale as Claude's tk/h (`ClaudeRunwayTokenActivityParser.weightedTokens`, cacheReadWeight 0.10). |
-| Refresh cadence | 5 s | Same as `runRunwayRefreshLoop`. |
-| Max sessions read per refresh | `OpenCodeHUDGroup.maxVisibleSessions` (4) | Only visible rows get a rate. |
+| Event window | events whose completion is within the last 30 min | Completion = `completedAt ?? observedAt`. |
+| SQL lower bound | `time_created >= now − 2 h` | Bounds the query; a request longer than 2 h is not shown. Post-filter by completion. |
+| Burst gap | 30 min between one event's completion and the next one's start | |
+| Minimum burst span | 60 s from the first event's start to the newest completion | A single short request with a big cached prompt would otherwise read as millions of tk/h. |
+| Freshness | the newest completion within 5 min of **now**, re-checked on every display tick, including cached activity | Covers one long request with no new row. |
+| Token weight | fresh input + output (incl. reasoning) + cache writes + 0.10 × cache read | Same scale as Claude's tk/h (`ClaudeRunwayTokenActivityParser.weightedTokens`, :555-564). |
+| Tail-probe cadence | every 5 s refresh | |
+| Full windowed reload | when the tail probe changes, or 60 s after the last full read | Catches in-place edits the tail probe cannot see. |
+| Session-tree depth cap | 8 levels, cycle-safe | |
+| Max rate owners per refresh | 4 (`OpenCodeHUDGroup.maxVisibleSessions`) | |
+| Performance budget | p95 ≤ 25 ms per refresh for 4 owners on the large fixture | Task 4 benchmark. |
+
+**These rules differ from Claude's on purpose.** Claude uses 30 s sample freshness, a 10 s minimum span and a provisional single-turn rate (`ClaudeRunwayTokenActivityParser.swift:42-60, 370-438`). OpenCode stores a request's tokens only when it completes, so it needs a longer freshness. It shows "working" rather than a provisional rate until 60 s of evidence exist. Only the token weighting is shared.
 
 ## Review Focus
 
-1. **A single long request.** OpenCode writes the assistant row's tokens only when the request completes; a 4-minute request shows no new data. Expect: the previous burst rate stays for up to 5 min, then the row reads "working", never "0 tk/h". (Task 2 test `testRateStaysDuringLongRequestThenFallsBackToWorking`.)
-2. **Compaction rows.** `session_message` rows with `type='compaction'` carry large token counts that are not interactive burn. Expect: excluded from the rate. (Task 1 test `testCompactionRowsAreExcluded`.)
-3. **Subagent child sessions.** OpenCode task tools run in child sessions (`session_v2.parent_id`); the TUI shows the parent. Expect: child requests in the window count toward the parent's rate. (Task 1 test `testChildSessionRequestsFoldIntoParent`.)
-4. **A store without `session_v2` / locked or missing DB.** OpenCode 1.x stores or a mid-migration DB. Expect: the reader returns nil, the row keeps its working/idle label, no crash, no log spam. (Task 1 test `testMissingV2TablesReturnsNil`.)
-5. **In-flight rows.** An assistant row exists before completion with no `data.time.completed` or no `data.tokens`. Expect: skipped, not counted as zero tokens. (Task 1 test `testInFlightRowsAreSkipped`.)
+1. **In-place edit of an older row with an unchanged tail.** Expect: picked up by the 60 s full reload. Test `testInPlaceEditIsPickedUpByPeriodicReload` (Task 4).
+2. **A cached rate going stale.** Expect: activity cached at minute 4 reads "working" at minute 6 with no new data. Test `testCachedActivityExpiresAtFreshness` (Task 4).
+3. **A visible child or grandchild whose root is not visible.** Expect: exactly one row shows the tree's rate, the visible row nearest the root. Test `testRateShownOnceOnNearestVisibleAncestor` (Task 5).
+4. **Database root swap with equal session IDs.** Expect: no cache hit across database paths. Test `testCacheIsKeyedByDatabasePath` (Task 4).
+5. **A slow stale read finishing after a newer one.** Expect: the stale result is never published. Test `testStaleReadIsNotPublished` (Task 4).
 
 ---
 
@@ -52,175 +61,201 @@
 
 | File | Responsibility |
 |---|---|
-| Create `AgentSessions/OpenCode/OpenCodeRunwayRequestReader.swift` | Read-only SQL: recent completed assistant requests for a session and its children. IO only. |
-| Create `AgentSessions/OpenCode/OpenCodeSessionRate.swift` | Pure: requests → `RunwaySessionActivity`; activity + presentation + prices → row display. |
-| Modify `AgentSessions/Views/AgentCockpitHUDView.swift` | Group model carries rates; row view renders them; panel refresh loop; toggle availability. |
-| Create `AgentSessionsTests/OpenCodeSessionRateTests.swift` | Reader (SQLite fixture) and pure-rate tests. |
-| Modify `AgentSessionsTests/OpenCodeHUDGroupTests.swift` | Group model + mounted panel with rates. |
-| Modify `AgentSessions/Resources/Localizable.xcstrings`, `scripts/validate_localization_catalogs.py`, `scripts/tests/test_validate_localization_catalogs.py` | New strings. |
-| Modify `docs/CHANGELOG.md` | Unreleased entry. |
+| Modify `AgentSessions/OpenCode/OpenCodeSqliteReader.swift` | Windowed telemetry entry point, tail probe, session-tree query. Reuse the existing private helpers. |
+| Modify `AgentSessions/Model/SessionTelemetry.swift` | `TelemetryUsageEvent.completedAt: Date?` (optional, decode-if-present). |
+| Create `AgentSessions/OpenCode/OpenCodeSessionRate.swift` | Pure: priced events → activity → display. |
+| Create `AgentSessions/OpenCode/OpenCodeRateLoader.swift` | Actor: cache, probe, reload, generation, off-main IO. |
+| Modify `AgentSessions/Views/AgentCockpitHUDView.swift` | Group model + rendering, owner mapping, refresh task, toggle availability, doc comments. |
+| Create `AgentSessionsTests/OpenCodeRecentTelemetryTests.swift` | Task 1–2 SQLite tests (vendor-schema fixture). |
+| Create `AgentSessionsTests/OpenCodeSessionRateTests.swift` | Task 3–4 tests. |
+| Modify `AgentSessionsTests/OpenCodeHUDGroupTests.swift` | Task 5 tests. |
+| Modify localization catalog + validator + its test, `docs/CHANGELOG.md`, baseline | Task 5–6. |
+
+**Vendor-schema fixture.** Task 1 adds `OpenCodeVendorSchemaFixture` in its test file. It holds the exact `CREATE TABLE` / `CREATE INDEX` DDL for `session`, `message`, `part`, `session_v2`, `session_message` as OpenCode 2.1.2 creates them. Capture it read-only from a real 2.1.2 `opencode.db` with `SELECT sql FROM sqlite_master` and paste it in verbatim, with the capture date. Do **not** rely on `OpenCodeV2StoreTests.createV2Tables()`: it lacks the `(session_id, time_created, id)` index.
 
 ---
 
-### Task 1: Read recent OpenCode requests from SQLite
+### Task 1: Windowed OpenCode telemetry in the existing reader
 
-**Files:**
-- Create: `AgentSessions/OpenCode/OpenCodeRunwayRequestReader.swift`
-- Test: `AgentSessionsTests/OpenCodeSessionRateTests.swift`
+**Files:** Modify `OpenCodeSqliteReader.swift`, `SessionTelemetry.swift`. Create `AgentSessionsTests/OpenCodeRecentTelemetryTests.swift`.
 
-**Interfaces:**
-- Produces:
-  ```swift
-  struct OpenCodeRunwayRequest: Equatable, Sendable {
-      let sessionID: String
-      let startedAt: Date        // session_message.time_created
-      let completedAt: Date      // data.time.completed (epoch ms)
-      let model: String?         // data.model.id
-      let freshInput: Int        // data.tokens.input
-      let output: Int            // data.tokens.output + data.tokens.reasoning
-      let cacheRead: Int         // data.tokens.cache.read
-      let cacheWrite: Int        // data.tokens.cache.write
-  }
-  enum OpenCodeRunwayRequestReader {
-      static let lookback: TimeInterval = 30 * 60
-      /// nil when the store cannot be read as OpenCode 2.x (no `session_v2` /
-      /// `session_message`, open failure, busy). Empty array = readable, no requests.
-      static func requests(databaseURL: URL, rootSessionID: String, now: Date) -> [OpenCodeRunwayRequest]?
-      /// Cheap change check: `session_v2.time_updated` of the root and its direct children, max.
-      static func latestUpdate(databaseURL: URL, rootSessionID: String) -> Date?
-  }
-  ```
+**Interfaces — Produces:**
+```swift
+// SessionTelemetry.swift — new optional field on TelemetryUsageEvent, init param default nil,
+// decoded with decodeIfPresent; no parserVersion bump (absent = unknown).
+public let completedAt: Date?
 
-- [ ] **Step 1: Write the failing tests** in `OpenCodeSessionRateTests` with a temp-file fixture (`session_v2` with `id`, `parent_id`, `time_updated`; `session_message` with `id`, `session_id`, `type`, `seq`, `time_created`, `time_updated`, `data`, plus the `(session_id, seq)` unique index and `(session_id, time_created, id)` index, copied from `OpenCodeV2StoreTests.createV2Tables()`):
-  - `testReadsCompletedAssistantRequestsInsideLookback` — 3 assistant rows at now−40 min, now−10 min, now−2 min → returns the 2 inside 30 min, with token fields mapped as in the struct comments (`output` includes `reasoning`).
-  - `testCompactionRowsAreExcluded` — a `type='compaction'` row with tokens inside the window → not returned.
-  - `testChildSessionRequestsFoldIntoParent` — child session (`parent_id` = root) with one row → returned with its own `sessionID`.
-  - `testInFlightRowsAreSkipped` — assistant rows lacking `data.time.completed` or `data.tokens` → skipped.
-  - `testMissingV2TablesReturnsNil` — DB with only v1 `session`/`message` tables → `nil`; nonexistent path → `nil`.
-  - `testLatestUpdateIsMaxOfRootAndChildren`.
+extension OpenCodeSqliteReader {
+    /// Same contract as `loadTelemetry(for:)` (store selection, fork boundary,
+    /// malformed handling, compaction adapter), restricted to rows whose request
+    /// started at or after `since`. nil = unreadable store.
+    static func loadRecentTelemetry(for session: Session, since: Date) -> SessionTelemetryProviderScan?
+}
+```
 
-- [ ] **Step 2: Run** `xcodebuild ... -only-testing:AgentSessionsTests/OpenCodeSessionRateTests` — expect FAIL (type not defined).
+- [ ] **Step 1: Failing tests** (vendor-schema fixture):
+  - `testRecentWindowMatchesFullLoadForWindowedRows` — for a mixed session, the events from `loadRecentTelemetry(since:)` equal the events from `loadTelemetry(for:)` filtered to `observedAt >= since`. This is the parity guarantee: one contract, two entry points.
+  - `testV1PreferredSessionReadsV1` / `testNewerV2ContinuationReadsV2` / `testEqualTimeMigratedCopyFollowsExistingPredicate` — mirror `OpenCodeV2StoreTests.swift:164-185`.
+  - `testForkClonedRowsBeforeForkCreationAreExcluded` — mirror the fork boundary at `OpenCodeSqliteReader.swift:292-310`, with `fork_session_id` / `fork_boundary` set.
+  - `testCompactionWithTokensIsIncluded` — mirrors `OpenCodeV2StoreTests.swift:255-269`.
+  - `testMalformedCompletedRowMarksUsageUnavailable` — missing component, negative, fractional and overflow values → the scan's usage-unavailable reason is set (the path at `OpenCodeSqliteReader.swift:253-289`). An in-flight row (no completion) is skipped, not flagged.
+  - `testCompletedAtComesFromDataTimeCompleted` — v2 `data.time.completed` (epoch ms); v1 step-finish part `time.end` when present; otherwise nil.
+  - `testRecentQueryUsesVendorIndex` — `EXPLAIN QUERY PLAN` on the v2 windowed statement contains `USING INDEX` on the `(session_id, time_created, id)` index, and no `SCAN session_message`.
+- [ ] **Step 2: Run** `xcodebuild … -only-testing:AgentSessionsTests/OpenCodeRecentTelemetryTests` → FAIL.
+- [ ] **Step 3: Implement.** Thread a `since: Date?` through the existing private query functions (`v2Rows` :1476, `queryTelemetryV2` :1697, `queryTelemetryMessages` :729, `queryTelemetryParts` :779). `nil` keeps today's SQL byte for byte. v2 adds `AND time_created >= ?`. v1 selects messages by `(session_id, time_created)` and then their parts by `message_id`. `loadTelemetry(for:)` calls the same path with `since: nil`. Populate `completedAt` where each event is built (v2 adapter `OpenCodeV2MessageAdapter.swift:111-127`, v1 at :515-530).
+- [ ] **Step 4: Run** focused tests plus `OpenCodeV2StoreTests` and `SessionTelemetryEngineTests` → PASS (the full-load contract is unchanged).
+- [ ] **Step 5: Commit** `feat(opencode): windowed telemetry read for live session rates`.
 
-- [ ] **Step 3: Implement** `OpenCodeRunwayRequestReader` in the new file (add it with `scripts/xcode_add_file.rb`). Query shape (index seek on `(session_id, time_created, id)`):
-  ```sql
-  SELECT session_id, time_created, data FROM session_message
-  WHERE (session_id = ?1 OR session_id IN (SELECT id FROM session_v2 WHERE parent_id = ?1))
-    AND type = 'assistant' AND time_created >= ?2
-  ```
-  Parse `data` with `JSONSerialization`; skip a row when `time.completed` or `tokens` is missing. `time_created` is epoch ms (match `OpenCodeSqliteReader.queryTelemetryV2`). Direct children only (one level), as `HUDRunwayIdentityReducer` folds one parent level.
+### Task 2: Tail probe and session tree
 
-- [ ] **Step 4: Run** the focused tests — expect PASS.
+**Files:** Modify `OpenCodeSqliteReader.swift`; tests in `OpenCodeRecentTelemetryTests.swift`.
 
-- [ ] **Step 5: Commit** `feat(opencode): read recent session requests for Quota Meter rates`.
+**Interfaces — Produces:**
+```swift
+extension OpenCodeSqliteReader {
+    /// Cheap change token for one session: the newest row's (seq, time_updated) for v2,
+    /// or (time_created, id, time_updated) for v1, plus the session row's time_updated.
+    /// Index seek only. nil = unreadable.
+    static func tailToken(databaseURL: URL, sessionID: String) -> String?
+    /// Cycle-safe root and descendants from session_v2.parent_id (and v1 session.parent_id),
+    /// depth ≤ 8. Unknown id → [id] with root = id.
+    static func sessionTree(databaseURL: URL, sessionID: String) -> (root: String, members: [String])?
+}
+```
+- [ ] **Step 1: Failing tests:** `testTailTokenChangesOnAppendAndOnCompletion`, `testTailTokenIgnoresOtherSessions`, `testSessionTreeFindsGrandchildren`, `testSessionTreeStopsOnCycle`, `testSessionTreeDepthCap`, `testTailProbeUsesIndexSeek` (`EXPLAIN QUERY PLAN` uses the `(session_id, seq)` unique index).
+- [ ] **Step 2–4:** run → FAIL, implement (recursive CTE with a visited set and depth column), run → PASS.
+- [ ] **Step 5: Commit** `feat(opencode): tail probe and session tree for live rates`.
 
----
+### Task 3: Rate and display from priced events
 
-### Task 2: Turn requests into a session rate and row text
-
-**Files:**
-- Create: `AgentSessions/OpenCode/OpenCodeSessionRate.swift`
-- Test: `AgentSessionsTests/OpenCodeSessionRateTests.swift`
+**Files:** Create `AgentSessions/OpenCode/OpenCodeSessionRate.swift` (add via `xcode_add_file.rb`); tests in `OpenCodeSessionRateTests.swift` (add via `xcode_add_file.rb`).
 
 **Interfaces:**
-- Consumes: `OpenCodeRunwayRequest` (Task 1); `RunwaySessionActivity`, `RunwayModelComponent`, `RunwaySessionIdentity` (`CodexRunwayModel.swift:233,291,336`); `RunwayPresentation` (`UsageDisplayMode.swift:369`); `RunwayPriceSnapshot.resolvedPrice(forModel:)` (`RunwayPriceTable.swift:258`), `RunwayModelPrice.effective(at:)`, `rates(for: .standardNormalized, contextInputTokens:inferenceGeo:)`; `RunwayTimeFormatting.rate(_:unit:confidence:)` (`AgentCockpitHUDView.swift:5164`).
+- Consumes: `TelemetryUsageEvent` (with `completedAt`, `apiEquivalentUSD`); `TelemetryCostCalculator.price(events:fallbackSlices:snapshot:sessionInterval:cacheWriteTTLVerified:recordsCacheWrites:)` → `Result { estimate: TelemetryCostEstimate, events }` (`TelemetryCostCalculator.swift:11-14, 35`), with `estimate.unpricedModels`, `missingPriceComponents`, `freeRouteModels`; `RunwayPresentation`; `RunwayTimeFormatting.rate(_:unit:confidence:)` (declared `AgentCockpitHUDView.swift:5161`).
 - Produces:
-  ```swift
-  enum OpenCodeSessionRate {
-      static let burstGap: TimeInterval = 30 * 60
-      static let minimumSpan: TimeInterval = 60
-      static let freshness: TimeInterval = 5 * 60
-      static let cacheReadWeight = 0.10
-      /// nil = not enough evidence (no requests, span < 60 s, or newest completion older than `freshness`).
-      static func activity(identity: RunwaySessionIdentity, requests: [OpenCodeRunwayRequest], now: Date) -> RunwaySessionActivity?
-      static func unit(for presentation: RunwayPresentation) -> RunwayRateUnit   // .dollar → .dollarsPerHour, else .tokensPerHour
-      static func display(activity: RunwaySessionActivity?, isWorking: Bool, unit: RunwayRateUnit,
-                          prices: RunwayPriceSnapshot, now: Date) -> OpenCodeRateDisplay
-  }
-  enum OpenCodeRateDisplay: Equatable, Sendable {
-      case rate(String)          // formatted by RunwayTimeFormatting.rate(..., confidence: .direct)
-      case free                  // every priced component resolved via a free route
-      case unpriced(model: String?)  // $ lens, at least one component has no price
-      case working               // no measurable rate yet
-      case idle
-  }
-  ```
+```swift
+struct OpenCodeTreeActivity: Equatable, Sendable {
+    let tokensPerSecond: Double
+    let dollarsPerSecond: Double?      // nil when any contributing event is unpriced
+    let allFreeRoute: Bool
+    let usageUnavailable: Bool
+    let burstStart: Date
+    let newestCompletion: Date
+}
+enum OpenCodeSessionRate {
+    static let burstGap: TimeInterval = 30 * 60
+    static let minimumSpan: TimeInterval = 60
+    static let freshness: TimeInterval = 5 * 60
+    static let cacheReadWeight = 0.10
+    /// Events already priced per event by TelemetryCostCalculator. nil = no burst ≥ minimumSpan.
+    static func activity(pricedEvents: [TelemetryUsageEvent], estimate: TelemetryCostEstimate,
+                         usageUnavailable: Bool) -> OpenCodeTreeActivity?
+    static func unit(for presentation: RunwayPresentation) -> RunwayRateUnit   // .dollar → .dollarsPerHour, else .tokensPerHour
+    static func display(activity: OpenCodeTreeActivity?, isWorking: Bool, unit: RunwayRateUnit, now: Date) -> OpenCodeRateDisplay
+}
+enum OpenCodeRateDisplay: Equatable, Sendable {
+    case rate(String)                 // RunwayTimeFormatting.rate(value * 3600, unit:, confidence: .direct)
+    case free
+    case unpriced(models: [String])   // $ lens only; never "$0/h"
+    case unavailable                  // malformed usage in the window
+    case working                      // no measurable or fresh rate
+    case idle
+}
+```
+- [ ] **Step 1: Failing tests:**
+  - `testBurstSpanAndTokenWeight` — two events, start-to-newest-completion 120 s, weighted 24 000 → 200 tk/s.
+  - `testLongRequestStartedBeforeWindowStillCounts` — `observedAt` = now−35 min, `completedAt` = now−2 min → included.
+  - `testGapOverThirtyMinutesStartsNewBurst`, `testSpanUnderSixtySecondsHasNoActivity`.
+  - `testFreshnessIsCheckedAtDisplayTime` — the same activity: `display(now: newest+4 min)` → `.rate`; `display(now: newest+6 min)` → `.working`.
+  - `testDollarsSumPerEventPrices` — two models plus one long-context event above the threshold. The sum equals the per-event `apiEquivalentUSD` total ÷ span, matching Session Info for the same events.
+  - `testPositiveUnpricedCacheWriteIsUnpriced` — a model with no published write rate and a positive cache write → `.unpriced`.
+  - `testPriceChangeBoundaryUsesEachEventsDate` — events straddling a dated period (`periods` in a test manifest) price at their own dates.
+  - `testAllFreeRouteReadsFree`, `testUnknownModelIsUnpricedNeverZero`, `testUsageUnavailableShowsUnavailable`, `testIdleWins`.
+  - `testTokenLensForFiveHourWeeklyAndToken` — `.fiveHour`, `.weekly` and `.token` all map to `.tokensPerHour`.
+- [ ] **Step 2–4:** FAIL → implement → PASS. Burst: sort by completion; walk back while `next.observedAt − prev.completion ≤ burstGap`. Only events with `topLineTokens > 0` contribute; zero-volume events are ignored.
+- [ ] **Step 5: Commit** `feat(opencode): per-tree tk/h and $/h from priced telemetry events`.
 
-- [ ] **Step 1: Write the failing tests:**
-  - `testBurstRateUsesClaudeTokenWeight` — two requests in one burst, span 120 s, tokens chosen so the weighted sum is 24 000 → `tokensPerSecond == 200`.
-  - `testGapOverThirtyMinutesStartsANewBurst` — only the newest burst counts.
-  - `testSpanUnderOneMinuteHasNoRate` — single 20 s request → `nil`.
-  - `testRateStaysDuringLongRequestThenFallsBackToWorking` — newest completion at now−4 min → activity non-nil; at now−6 min → `display(... isWorking: true ...) == .working`.
-  - `testIdlePresenceShowsIdle` — `isWorking: false` → `.idle` regardless of activity.
-  - `testTokenLensFormatsTokensPerHour` — `.token` and `.fiveHour` and `.weekly` presentations all give `.tokensPerHour`; text equals `RunwayTimeFormatting.rate(200 * 3600, unit: .tokensPerHour, confidence: .direct)`.
-  - `testDollarLensPricesEachModel` — two models in one burst, `RunwayPriceTable.makeForTesting().snapshot()` → `.rate("$…/h")` equal to the per-component sum computed from the test table's published rates.
-  - `testFreeRouteReadsFree` — model `deepseek-v4.1-flash-free` (resolves via free route) → `.free`.
-  - `testUnknownModelIsUnpricedNotZero` — `.unpriced(model: "made-up-model")`, never `$0/h`.
+### Task 4: Off-main loader with cache, probe and generations
 
-- [ ] **Step 2: Run** focused tests — FAIL.
+**Files:** Create `AgentSessions/OpenCode/OpenCodeRateLoader.swift` (via `xcode_add_file.rb`); tests in `OpenCodeSessionRateTests.swift`.
 
-- [ ] **Step 3: Implement** `OpenCodeSessionRate` (add file via `scripts/xcode_add_file.rb`). Burst: sort by `completedAt`; walk back from the newest while `next.startedAt − previous.completedAt <= burstGap`; `span = newest.completedAt − burstFirst.startedAt`. One `RunwayModelComponent` per model: each token field summed over the burst ÷ span, `speed: .standardNormalized`, `cacheCreation1hPerSecond: 0`, `contextInputTokens` = the newest request's `freshInput + cacheRead + cacheWrite` (long-context tier selection). `tokensPerSecond` = weighted sum ÷ span. Dollar: price every component via `resolvedPrice(forModel:)` + `effective(at: now)`; any nil → `.unpriced`; all `viaFreeRoute` → `.free`; otherwise sum `perSecond * 3600`.
+**Interfaces — Produces:**
+```swift
+struct OpenCodeRateOwner: Hashable, Sendable { let rootSessionID: String; let isWorking: Bool }
+actor OpenCodeRateLoader {
+    static let shared: OpenCodeRateLoader
+    init(reader: OpenCodeRateReading = OpenCodeSqliteRateReader(), clock: @escaping @Sendable () -> Date = { Date() })
+    /// Returns displays keyed by root session ID, or nil when `generation` was superseded.
+    func displays(owners: [OpenCodeRateOwner], presentation: RunwayPresentation,
+                  databaseURL: URL, generation: UInt64) async -> [String: OpenCodeRateDisplay]?
+}
+protocol OpenCodeRateReading: Sendable {   // seam for tests; production wraps Tasks 1–2
+    func tailToken(databaseURL: URL, sessionID: String) -> String?
+    func tree(databaseURL: URL, sessionID: String) -> (root: String, members: [String])?
+    func recentEvents(databaseURL: URL, sessionID: String, since: Date) -> (events: [TelemetryUsageEvent], usageUnavailable: Bool)?
+}
+```
+- Cache key: `(databaseURL.standardizedFileURL.path, rootSessionID)`. Value: member tail tokens, the last full-read time, and the cached `OpenCodeTreeActivity`.
+- Per call: for each owner, compare member tail tokens. Reload all members' recent events when any token changed or 60 s have passed. Price the events with the snapshot from `RunwayPriceTable.shared` (calls `refreshInBackground` lazily, as the runway does). Build the display with `display(now: clock())` **every** call.
+- IO runs inside `withCheckedContinuation` on `DispatchQueue.global(qos: .utility)`, as `CodexRunwaySnapshotLoader.snapshot` does (`CodexRunwayModel.swift:606-608`). Check `Task.isCancelled` and the latest generation after the IO; return nil if superseded.
+- [ ] **Step 1: Failing tests** (fake `OpenCodeRateReading`): `testInPlaceEditIsPickedUpByPeriodicReload`, `testCachedActivityExpiresAtFreshness`, `testCacheIsKeyedByDatabasePath`, `testStaleReadIsNotPublished` (a slow fake read for generation 1 finishes after generation 2 → returns nil), `testUnchangedTailSkipsReload` (fake counts reads), `testUnreadableStoreGivesWorkingNotZero`.
+- [ ] **Step 2: Benchmark test** `testRefreshStaysWithinBudgetOnLargeStore` (real SQLite, vendor fixture): 50 000 `session_message` rows across 200 sessions, a WAL-mode connection writing in the background, 4 owners with 3 descendants each. 20 refreshes; assert p95 ≤ 25 ms. Mark it `XCTSkip` unless `AGENT_SESSIONS_PERF=1`, and record the measured p95 in the commit message.
+- [ ] **Step 3–4:** FAIL → implement → PASS.
+- [ ] **Step 5: Commit** `feat(opencode): cached off-main rate loader for the Quota Meter`.
 
-- [ ] **Step 4: Run** focused tests — PASS.
+### Task 5: Quota Meter integration
 
-- [ ] **Step 5: Commit** `feat(opencode): compute per-session tk/h and $/h from recent requests`.
-
----
-
-### Task 3: Show rates in the Quota Meter OpenCode group
-
-**Files:**
-- Modify: `AgentSessions/Views/AgentCockpitHUDView.swift` — `OpenCodeHUDGroupModel` (246-253), `OpenCodeHUDGroup.make` (262), `HUDOpenCodeSessionsGroup` (4732), `HUDLimitsRowsPanel` (~3858, body ~4166, loops ~4269/4481), `runwayControlAvailable` (1336); doc comments at 233-245 and 4729-4731.
-- Modify: `AgentSessions/Resources/Localizable.xcstrings`, `scripts/validate_localization_catalogs.py`, `scripts/tests/test_validate_localization_catalogs.py`.
-- Test: `AgentSessionsTests/OpenCodeHUDGroupTests.swift`
+**Files:** Modify `AgentCockpitHUDView.swift` — `OpenCodeHUDGroupModel` (246-253), `OpenCodeHUDGroup.make` (262), `HUDOpenCodeSessionsGroup` (4732), `HUDLimitsRowsPanel` (~3858, body ~4166, refresh task ~4269/4481, `runwayRefreshConfigurationID` ~4368), `runwayControlAvailable` (1336), doc comments (233-245, 4729-4731). Modify the localization files. Tests in `OpenCodeHUDGroupTests.swift`.
 
 **Interfaces:**
-- Consumes: Task 1 reader, Task 2 `OpenCodeSessionRate` / `OpenCodeRateDisplay`; `OpenCodeBackendDetector.dbURL(customRoot:)` with `PreferencesKey.Paths.opencodeSessionsRootOverride`; `PreferencesKey.quotaMeterRunwayPresentation`; `QuotaMeterRunwayVisibility`.
+- Consumes: Tasks 3–4; `OpenCodeBackendDetector.dbURL(customRoot:)` with `PreferencesKey.Paths.opencodeSessionsRootOverride`.
 - Produces:
-  ```swift
-  // OpenCodeHUDGroupModel gains:
-  let rates: [String: OpenCodeRateDisplay]   // key: OpenCodeHUDGroup.rateKey(for:)
-  extension OpenCodeHUDGroup {
-      static func rateKey(for row: HUDRow) -> String?   // row.resolvedSessionID ?? row.runtimeSessionID; nil → no rate
-      static func make(rows:detectionEnabled:openCodeEnabled:rates:) -> OpenCodeHUDGroupModel?  // rates defaults to [:]
-  }
-  /// Off-main loader; caches activity per root session keyed by `latestUpdate`.
-  actor OpenCodeRateLoader {
-      static let shared: OpenCodeRateLoader
-      func displays(for rows: [HUDRow], presentation: RunwayPresentation,
-                    databaseURL: URL?, now: Date) async -> [String: OpenCodeRateDisplay]
-  }
-  ```
-
-- [ ] **Step 1: Write the failing tests:**
-  - `testGroupCarriesRatesBySessionID` — `make(... rates: ["ses_a": .rate("412K tk/h")])` with a row whose `resolvedSessionID == "ses_a"` → `model.rates["ses_a"]`.
-  - `testRowWithoutSessionIDGetsNoRate` — `rateKey(for:)` is nil when both IDs are nil.
-  - `testMountedRowShowsRateTextInsteadOfStateLabel` — mount via `HUDLimitsRowsPanelTestHost` (DEBUG, `AgentCockpitHUDView.swift:4713`), extended to accept `openCodeRates`; the row text contains "412K tk/h" and not "working".
-  - `testRunwayControlAvailableForOpenCodeOnly` — Codex/Claude usage off, OpenCode group non-nil → toolbar presentation control is available (expose the predicate as a `static func` for the test).
-  - `testAlwaysOffVisibilityShowsLabelsOnly` — `QuotaMeterRunwayVisibility.alwaysOff` → no loader call, rows show working/idle.
-
-- [ ] **Step 2: Run** focused tests — FAIL.
-
-- [ ] **Step 3: Implement.**
-  - Row view: right column shows `.rate(text)` in `hudProjectionColor` when the rate is above zero (match `HUDRunwayPanel.rateCell`, 4909-4924), `.free` → existing `"Free"` key, `.unpriced` → "—" with `.help("No API price for \(model)")` (new string), `.working`/`.idle` → current `stateLabel`. Width: `HUDRunwayLayout.rateWidth(for:)`.
-  - Panel: add `@State private var openCodeRates: [String: OpenCodeRateDisplay] = [:]` and a `.task(id:)` loop keyed by (visible OpenCode root IDs, presentation, visibility) that calls `OpenCodeRateLoader.shared.displays(...)` then sleeps 5 s. Skip when visibility is `.alwaysOff` or the group is nil.
-  - Loader: resolve the DB once per call via `OpenCodeBackendDetector.dbURL(customRoot:)`; for each visible row's root ID, call `latestUpdate`; reuse the cached activity when unchanged, else `requests` → `activity`. Run the SQLite work on a `DispatchQueue.global(qos: .utility)` continuation, as `CodexRunwaySnapshotLoader.snapshot` does (606-608). `isWorking = row.liveState == .active`.
-  - Child rows: the service also reports running child sessions, which can appear as their own HUD rows. A row whose session is a child (`row.parentSessionID != nil`, or a `session_v2.parent_id` hit in the reader) gets no rate of its own; its requests count only in the parent's rate. Test: `testChildRowShowsNoSeparateRate`.
-  - `runwayControlAvailable`: true when any Codex/Claude provider is shown **or** the OpenCode group is non-nil.
-  - Update both doc comments: OpenCode rows now show a rate; no quota.
-  - Localization: add the `"No API price for %@"` key (en + zh-Hans), update count/digest; run `python3 scripts/validate_localization_catalogs.py` and its unittest.
-
-- [ ] **Step 4: Run** focused tests + `OpenCodeHUDGroupTests` + localization validator — PASS.
-
+```swift
+// OpenCodeHUDGroupModel gains `let rates: [String: OpenCodeRateDisplay]`, keyed by HUDRow.id of the
+// single row that displays each tree's rate.
+extension OpenCodeHUDGroup {
+    static func sessionID(for row: HUDRow) -> String?          // row.resolvedSessionID ?? row.runtimeSessionID
+    /// Picks one display row per tree: the visible row whose session is the root, else the visible
+    /// row nearest the root. `trees` maps a session ID to its (root, members) from Task 2.
+    static func rateRows(visible: [HUDRow], trees: [String: (root: String, members: [String])]) -> [String: String] // rootID → HUDRow.id
+    static func make(rows:detectionEnabled:openCodeEnabled:rates:) -> OpenCodeHUDGroupModel?  // rates default [:]
+    static func controlAvailable(providersShown: Bool, openCodeGroupVisible: Bool) -> Bool
+}
+```
+- Ownership comes from the **database** tree (Task 2), not `HUDRow.parentSessionID`. Unresolved presences have no parent metadata (`AgentCockpitHUDView.swift:1922-1929, 1993-1996`). `HUDRunwayIdentityReducer` walks an arbitrary parent chain (`rootSessionID`, 3519-3530); the database tree does the same here.
+- Refresh task: `.task(id: OpenCodeRateTaskID(dbPath, rootIDs, presentation, visibility, rateSurfaceOnScreen))`. `rateSurfaceOnScreen` uses the same inputs that gate `runRunwayRefreshLoop` (`runwayRefreshConfigurationID`, ~4368), so the strip and window instances follow the existing runway visibility. Each loop iteration bumps a generation, calls the loader, publishes only non-nil results, then sleeps 5 s. Skip all IO when `alwaysOff`, off screen, or the group is nil.
+- Row view: `.rate` in `hudProjectionColor` when above zero (match `HUDRunwayPanel.rateCell`, 4909-4924); `.free` → `"Free"`; `.unpriced(models)` → "—" + `.help("No API price for \(models.joined(", "))")`; `.unavailable` → "—" + `.help("Usage data for this session is incomplete.")`; `.working` / `.idle` → the existing `stateLabel`. Width `HUDRunwayLayout.rateWidth(for:)`.
+- `runwayControlAvailable` = `controlAvailable(providersShown: <existing>, openCodeGroupVisible: group != nil)`.
+- [ ] **Step 1: Failing tests:** `testRateShownOnceOnNearestVisibleAncestor` (root not visible; child and grandchild visible → only the child row has a rate), `testParentAndChildVisibleOnlyParentHasRate`, `testUnresolvedChildPresenceUsesDatabaseTree`, `testMountedRowShowsRateTextInsteadOfStateLabel` (extend `HUDLimitsRowsPanelTestHost` at 4713 with `openCodeRates`), `testControlAvailableForOpenCodeOnly`, `testAlwaysOffAndOffscreenDoNoIO` (fake loader counts calls), `testNewStringsHaveChineseTranslations` (both tooltip keys have zh-Hans values in the catalog).
+- [ ] **Step 2–4:** FAIL → implement (catalog + validator count/digest, `python3 scripts/validate_localization_catalogs.py` and its unittest) → PASS.
 - [ ] **Step 5: Commit** `feat(opencode): show per-session rates in the Quota Meter`.
 
+### Task 6: Release notes and verification
+
+- [ ] **Step 1:** Add the CHANGELOG `[Unreleased]` entry: OpenCode sessions in the Quota Meter show tk/h, or $/h in the $ lens; free routes read Free; no quota until Go data exists. Lint it with `python3 tools/release/sparkle_release_notes.py --version 6.2 --changelog <copy with [Unreleased]→[6.2]> --lint --out-text <scratch>`.
+- [ ] **Step 2:** `./scripts/xcode_test_stable.sh` → TEST SUCCEEDED. Set `tools/release/test-count-baseline.txt` to the **passed** count from the result bundle.
+- [ ] **Step 3:** Owner manual check on a real OpenCode 2.x TUI:
+  - A working session shows a rate once it has at least 60 s of completed requests; before that it reads "working".
+  - The $ lens shows $/h or Free.
+  - A long request keeps its last rate for up to 5 min, then reads "working".
+  - Closing the TUI removes the row.
+  - CPU stays calm with the Quota Meter open for 5 min.
+- [ ] **Step 4: Commit** `docs: record OpenCode session rates`.
+
 ---
 
-### Task 4: Release notes and full verification
+## Findings addressed (rev 1 review)
 
-**Files:**
-- Modify: `docs/CHANGELOG.md` (`[Unreleased]` → `### Highlights` or `### Improvements`), `tools/release/test-count-baseline.txt`.
-
-- [ ] **Step 1:** Add the CHANGELOG entry, user-facing and short: OpenCode sessions in the Quota Meter show tk/h, or $/h in the $ lens, per session; free routes read Free; no quota until Go data exists. Preview with `python3 tools/release/sparkle_release_notes.py --version 6.2 --changelog <copy with [Unreleased] renamed> --lint --out-text <scratch>`.
-- [ ] **Step 2:** Run `./scripts/xcode_test_stable.sh`. Expected: TEST SUCCEEDED; record the passed count and set `tools/release/test-count-baseline.txt` to it.
-- [ ] **Step 3:** Manual check with a real OpenCode 2.x TUI session (owner): working session shows a tk/h rate within ~1 minute of activity; $ lens shows $/h or Free; closing the TUI removes the row; CPU stays calm with the Quota Meter open for 5 minutes.
-- [ ] **Step 4: Commit** `docs: record OpenCode session rates`.
+| # | Finding | Fix in rev 2 |
+|---|---|---|
+| 1 | Unsound cache key; cached rate bypasses freshness | Tail probe + 60 s full reload; freshness evaluated at display time on every call (Task 4 tests 1–2). |
+| 2 | Pricing per model at `now` misprices tiers, writes, periods | Per-event pricing through `TelemetryCostCalculator` (context tier, write-rate rule, `periods` by event date) (Task 3). |
+| 3 | Fork clones double-counted | Windowed path reuses the reader's fork boundary (Task 1 test). Members come from the database tree, each read through the same fork-safe path. |
+| 4 | v1/v2 selection contract ignored | Windowed path reuses `v2SessionExists` / `v2PreferredPredicate` (Task 1 tests). |
+| 5 | Malformed completed usage undercounted | Reuses the reader's usage-unavailable rule → `.unavailable` (Tasks 1, 3). |
+| 6 | Compaction exclusion contradicts Session Info | Decision: compaction counts; reconciliation via the shared pricing path (Task 3). |
+| 7 | Index claim unbacked; scan risk | Vendor-schema fixture from real 2.1.2 DDL; `EXPLAIN QUERY PLAN` tests; large-store benchmark with WAL writer (Tasks 1, 2, 4). |
+| 8 | Lookback by start excludes long requests | `completedAt` on events; SQL bound 2 h by start, filter by completion (Tasks 1, 3). |
+| 9 | Child depth and double reporting | Cycle-safe database tree; one display row per tree (Tasks 2, 5). |
+| 10 | UI lifecycle, keys, concurrency | Task identity includes the DB path and the on-screen gate; generations; cancellation before publish (Tasks 4, 5). |
+| 11 | References and tests | `rate` at :5161; arbitrary-depth reducer noted; Claude rule differences stated; both test files registered; passed-count baseline; zh-Hans test; manual check matches the 60 s floor. |
