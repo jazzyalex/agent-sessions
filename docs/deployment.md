@@ -801,6 +801,17 @@ security find-identity -v -p codesigning
 - Clean build folder: `rm -rf build/ dist/`
 - Verify project.pbxproj MARKETING_VERSION is correct
 
+### QA test host killed by Gatekeeper (transient)
+- **Symptom** (6.1.2 QA): the test run aborts with the host killed by
+  `OS_REASON_EXEC | Gatekeeper policy blocked execution`. It happened twice in a row; the
+  third run passed with no change.
+- **Diagnose:** `xcrun xcresulttool export diagnostics --path <bundle>.xcresult --output-path <dir>`,
+  then `/usr/bin/log show <dir>/…/*.logarchive --predicate 'process == "syspolicyd"'`
+  (use `/usr/bin/log`; the zsh `log` builtin shadows it). The 6.1.2 logs showed
+  `sandbox_register_app_bundle_exception failed … signing-id=(null)` and `scan failed`.
+- **Fix:** none needed in the project. Re-run QA. If it fails three times, check
+  `syspolicyd` health and free memory before suspecting the build.
+
 ### Notarization rejected
 - Review notary log: `xcrun notarytool log --keychain-profile AgentSessionsNotary {submission-id}`
 - Common issues: unsigned binaries, incorrect entitlements, missing hardened runtime

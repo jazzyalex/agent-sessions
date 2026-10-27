@@ -2256,6 +2256,51 @@ this. The entry sat `verified —` and read as open work for two weeks.
 
 ## QM / Runway
 
+### OpenCode session rates: minor findings deferred from the final review
+> **open** · sev: low · urg: low · verified 2026-10-26
+
+- **What:** the fresh whole-branch review of `b7b650e2` (OpenCode per-session tk/h and $/h)
+  graded these Minor. None changes a rate a user sees for more than one cycle.
+  1. No test for a completed COMPACTION whose tokens are present but invalid.
+  2. The performance gate measures cycle 0 (the full load) outside p95, and the 60 s
+     force reloads are co-scheduled, so a worst-case cycle is not measured.
+  3. The recent window ignores a malformed `tokens.total`; the full Session Info load
+     fails closed on it.
+  4. Window `observedAt` uses only `time_created`; the full load falls back to
+     `time_updated` when `time_created` is 0.
+  5. ~~A row that just went idle can show its old rate for about 5–10 s.~~ Superseded
+     2026-10-26 (owner): an idle row keeps the fresh rate for 5 min, marked idle. Left:
+     for up to one 5 s cycle after the switch, the rate keeps the color of the old state.
+  6. ~~The rate cell is not framed with `HUDRunwayLayout.rateWidth`.~~ Fixed 2026-10-26:
+     OpenCode rows use the runway's title/rate/bar columns and `HUDRunwayLoadBar`.
+  7. The sampler cache never evicts sessions that are no longer demanded.
+  8. Idle sessions are still read every cycle.
+  9. `v2SessionExists` treats `SQLITE_BUSY` as "not v2" (pre-existing helper), giving one
+     cycle of "working".
+  10. Demand reporting uses `onChange(initial:)` with no explicit `onAppear`.
+  11. v2 transcript raw JSON now carries the adapter's `completedAt` key.
+  12. Review Focus 3 (one-mount visibility flip) is pinned through pure helpers, not a
+      mounted view.
+- **Where:** [OpenCodeRateSampler.swift](../AgentSessions/OpenCode/OpenCodeRateSampler.swift),
+  [OpenCodeSqliteReader.swift](../AgentSessions/OpenCode/OpenCodeSqliteReader.swift) (recent
+  window section), [AgentCockpitHUDView.swift](../AgentSessions/Views/AgentCockpitHUDView.swift)
+  (`HUDOpenCodeSessionsGroup`).
+- **Implementation rulings** (not in the plan's Spec amendment, recorded here so they are
+  not re-litigated):
+  - The window uses its own classifier instead of threading `since` through the full
+    reducer, so Session Info's reducer stays unchanged.
+  - v1 has no tail limit; the 60 s force reload covers missed changes.
+  - A v1 request starts at its owning message's `time_created`: v1 step-finish parts
+    have no time field.
+  - `adapt(timeUpdatedMillis:)` defaults to 0, so existing callers are unchanged.
+  - The store bumps its demand revision on every `setDemand` call, even when the union
+    is unchanged. This costs one discarded read at most.
+  - DEBUG hooks (`databaseOpenCountForTesting`, `recentUsageAfterTailHookForTesting`,
+    `onPublishForTesting`, `demandUnionForTesting`) exist only for the sampler tests.
+- **Why deferred:** all Minor by effect; the owner accepted the feature with the two
+  data rulings in the plan's Spec amendment.
+- **To close:** fix 7 first (unbounded cache); the others as they are touched.
+
 ### Notch wings show only Codex and Claude, so OpenCode is invisible in the collapsed strip
 > **open** · sev: med · urg: low · verified 2026-10-22
 
