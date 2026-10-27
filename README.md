@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.1.2/AgentSessions-6.1.2.dmg"><b>Download Agent Sessions 6.1.2</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg"><b>Download Agent Sessions 6.2</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -30,9 +30,13 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
 - **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
-- **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
+- **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows, plus each OpenCode session's token or cost rate; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 6.2
+
+- **OpenCode sessions show their own burn rate.** Each running OpenCode 2.x session in the Quota Meter shows its token rate, or its API-equivalent cost in the $ lens; free routes read Free. A row keeps its last rate for 5 minutes after a turn ends, with the same load bar as Codex and Claude.
 
 ## What's New in 6.1.2
 
@@ -154,7 +158,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-6.1.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.1.2/AgentSessions-6.1.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-6.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 

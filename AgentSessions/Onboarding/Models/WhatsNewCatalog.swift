@@ -118,10 +118,27 @@ enum WhatsNewCatalog {
         "5.6": "Session Info now opens for every agent, with quick facts up front and deeper telemetry where the source records it.",
         "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.",
         "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list.",
-        "6.1": "Running OpenCode sessions now appear in the Quota Meter."
+        "6.1": "Running OpenCode sessions now appear in the Quota Meter.",
+        "6.2": "OpenCode sessions in the Quota Meter now show their own burn rate."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.2": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "gauge.with.dots.needle.67percent",
+                title: "OpenCode burn rate",
+                body: "Each running OpenCode session in the Quota Meter shows its token rate, or its API-equivalent cost in the $ lens, with the same load bar as Codex and Claude. A row keeps its last rate for 5 minutes after a turn ends."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.1": [
             WhatsNewItem(
                 kind: .highlight,
