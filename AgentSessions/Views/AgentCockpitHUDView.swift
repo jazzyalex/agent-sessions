@@ -230,8 +230,9 @@ struct HUDRowsSnapshot: Equatable {
     let idleCount: Int
 }
 
-/// The Quota Meter's OpenCode sessions group: running OpenCode sessions and their
-/// count, with no quota, subscription or runway data.
+/// The Quota Meter's OpenCode sessions group: running OpenCode sessions, their
+/// count, and each session's own token or API-equivalent cost rate. No quota or
+/// subscription data (there is none for OpenCode yet).
 ///
 /// "Running" means every eligible detected live OpenCode session, working or idle.
 /// The group is a pure filter over the HUD's `rowsForDisplay`, so it inherits every
@@ -248,8 +249,19 @@ struct OpenCodeHUDGroupModel: Equatable {
     let rows: [HUDRow]
     let visibleRows: [HUDRow]
     let overflowCount: Int
+    /// Each row's own session rate, keyed by `OpenCodeHUDGroup.sessionID(for:)`.
+    /// Empty when rates are off or not yet sampled.
+    var rates: [String: OpenCodeRateValue] = [:]
 
     var totalCount: Int { rows.count }
+}
+
+/// What a row's rate column shows, when it shows a rate rather than the state label.
+struct OpenCodeRateCell: Equatable {
+    let text: String
+    /// Drives the projection color; read from the number, never the formatted text.
+    let isPositive: Bool
+    let help: String?
 }
 
 enum OpenCodeHUDGroup {
@@ -261,7 +273,8 @@ enum OpenCodeHUDGroup {
     /// running OpenCode session (owner decision 2026-10-21: no empty state).
     static func make(rows: [HUDRow],
                      detectionEnabled: Bool,
-                     openCodeEnabled: Bool) -> OpenCodeHUDGroupModel? {
+                     openCodeEnabled: Bool,
+                     rates: [String: OpenCodeRateValue] = [:]) -> OpenCodeHUDGroupModel? {
         guard detectionEnabled, openCodeEnabled else { return nil }
         var seen: Set<String> = []
         // Incoming order is kept on purpose: `rowsForDisplay` already applies the
@@ -272,8 +285,91 @@ enum OpenCodeHUDGroup {
         return OpenCodeHUDGroupModel(
             rows: openCodeRows,
             visibleRows: visible,
-            overflowCount: openCodeRows.count - visible.count
+            overflowCount: openCodeRows.count - visible.count,
+            rates: rates
         )
+    }
+
+    /// The same visibility `make` decides, for callers that only need a Bool.
+    static func isVisible(rows: [HUDRow], detectionEnabled: Bool, openCodeEnabled: Bool) -> Bool {
+        make(rows: rows, detectionEnabled: detectionEnabled, openCodeEnabled: openCodeEnabled) != nil
+    }
+
+    /// The OpenCode session a row shows; its rate is keyed by this ID.
+    static func sessionID(for row: HUDRow) -> String? {
+        row.resolvedSessionID ?? row.runtimeSessionID
+    }
+
+    /// The toolbar's lens control applies to OpenCode rates too, so it is available
+    /// for an OpenCode-only Quota Meter.
+    static func controlAvailable(providersShown: Bool, openCodeGroupVisible: Bool) -> Bool {
+        providersShown || openCodeGroupVisible
+    }
+
+    /// Rates appear only where the runway would: not when it is set to Always Off,
+    /// and not in a collapsed strip.
+    static func showsRates(visibility: QuotaMeterRunwayVisibility, isStrip: Bool, stripExpanded: Bool) -> Bool {
+        visibility != .alwaysOff && (!isStrip || stripExpanded)
+    }
+
+    /// The values a view may draw: none when rates are hidden, and none from a
+    /// snapshot sampled for another lens.
+    static func displayedRates(snapshot: OpenCodeRateSnapshot, presentation: RunwayPresentation,
+                               showsRates: Bool) -> [String: OpenCodeRateValue] {
+        guard showsRates, snapshot.presentation == presentation else { return [:] }
+        return snapshot.values
+    }
+
+    /// What this surface asks the sampler for: its visible sessions and whether each
+    /// is working. nil when it shows no rates.
+    static func demand(group: OpenCodeHUDGroupModel?, showsRates: Bool) -> OpenCodeRateDemand? {
+        guard showsRates, let group else { return nil }
+        var sessions: [String: Bool] = [:]
+        for row in group.visibleRows {
+            guard let id = sessionID(for: row) else { continue }
+            sessions[id] = (sessions[id] ?? false) || row.liveState == .active
+        }
+        return sessions.isEmpty ? nil : OpenCodeRateDemand(sessions: sessions)
+    }
+
+    /// The rate column for a value, or nil to keep the working/idle label.
+    static func rateCell(for value: OpenCodeRateValue?) -> OpenCodeRateCell? {
+        switch value {
+        case .rate(let amount, let unit):
+            return OpenCodeRateCell(text: RunwayTimeFormatting.rate(amount, unit: unit, confidence: .direct),
+                                    isPositive: amount > 0, help: nil)
+        case .free:
+            return OpenCodeRateCell(text: String(localized: "Free"), isPositive: false, help: nil)
+        case .unpriced(let models, let components):
+            return OpenCodeRateCell(text: "—", isPositive: false,
+                                    help: unpricedHelp(unknownModels: models, missingComponents: components))
+        case .unavailable:
+            return OpenCodeRateCell(text: "—", isPositive: false,
+                                    help: String(localized: "Usage data for this session is incomplete.",
+                                                 comment: "Quota Meter OpenCode row tooltip: recent usage records are unreadable or invalid, so no rate is shown."))
+        case .working, .idle, .none:
+            return nil
+        }
+    }
+
+    /// Every unpriced reason the burst has, one line each.
+    static func unpricedHelp(unknownModels: [String], missingComponents: [String]) -> String {
+        var lines: [String] = []
+        if !unknownModels.isEmpty {
+            let list = unknownModels.joined(separator: ", ")
+            lines.append(String(localized: "No API price for \(list)",
+                                comment: "Quota Meter OpenCode row tooltip in the $ lens. %@ is a comma-separated list of model IDs."))
+        }
+        if !missingComponents.isEmpty {
+            let list = missingComponents.joined(separator: ", ")
+            lines.append(String(localized: "Missing API price component: \(list)",
+                                comment: "Quota Meter OpenCode row tooltip in the $ lens. %@ lists model:component pairs, e.g. gpt-5:cacheWrite5m."))
+        }
+        if lines.isEmpty {
+            lines.append(String(localized: "No API price for this session's recent usage.",
+                                comment: "Quota Meter OpenCode row tooltip in the $ lens when no specific reason is known."))
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Idle reasons are heuristic, so a long-idle session reads "idle", never "Stuck".
@@ -724,6 +820,9 @@ struct AgentCockpitHUDView: View {
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
+    /// Same key and fallback as `HUDLimitsRowsPanel`, so the toolbar's lens control
+    /// appears exactly when the panel shows the OpenCode group.
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled = true
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
     /// Defaults OFF, and must stay off until the compact height model accounts
     /// for the limits footer.
@@ -1117,7 +1216,10 @@ struct AgentCockpitHUDView: View {
                           showsCompactToolbar: Bool) -> some View {
         VStack(spacing: 0) {
             if showsCompactToolbar {
-                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
+                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount,
+                       openCodeGroupVisible: OpenCodeHUDGroup.isVisible(rows: displayState.rowsForDisplay,
+                                                                        detectionEnabled: activeEnabled,
+                                                                        openCodeEnabled: openCodeAgentEnabled))
                     .background(Color.primary.opacity(0.04))
                     .transition(.move(edge: .top).combined(with: .opacity))
                 Rectangle()
@@ -1241,7 +1343,10 @@ struct AgentCockpitHUDView: View {
     }
 
     @ViewBuilder
-    private func header(activeCount _: Int, idleCount _: Int) -> some View {
+    private func header(activeCount _: Int, idleCount _: Int, openCodeGroupVisible: Bool) -> some View {
+        let runwayControlAvailable = OpenCodeHUDGroup.controlAvailable(
+            providersShown: runwayProvidersShown, openCodeGroupVisible: openCodeGroupVisible)
+        return
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 // Destinations zone: both buttons leave the Quota Meter for
@@ -1333,7 +1438,7 @@ struct AgentCockpitHUDView: View {
         .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
     }
 
-    private var runwayControlAvailable: Bool {
+    private var runwayProvidersShown: Bool {
         QuotaMeterProvider.allCases.contains { quotaMeterProviderShown($0) }
     }
 
@@ -3903,6 +4008,28 @@ private struct HUDLimitsRowsPanel: View {
     /// Shared Quota Meter-only filter. The parent owns the `@AppStorage` binding
     /// so toolbar changes rebuild this panel immediately.
     @Binding var hiddenProvidersRaw: String
+    /// OpenCode session rates: this panel reports what it shows and draws the
+    /// sampler's snapshot. Injectable for tests.
+    var rateStore: OpenCodeRateStore = .shared
+    /// nil outside the menu bar strip; inside it, whether the strip is expanded.
+    @Environment(\.quotaStripExpanded) private var stripExpanded
+    /// This surface's identity in the rate store's demand.
+    @State private var rateSurfaceID = UUID()
+
+    /// Whether this surface draws OpenCode rates at all (Always Off, collapsed strip).
+    private var showsOpenCodeRates: Bool {
+        OpenCodeHUDGroup.showsRates(visibility: runwayVisibility,
+                                    isStrip: stripExpanded != nil,
+                                    stripExpanded: stripExpanded == true)
+    }
+
+    /// What this surface asks the sampler for; nil when it shows no OpenCode rates.
+    private var openCodeRateDemand: OpenCodeRateDemand? {
+        OpenCodeHUDGroup.demand(
+            group: OpenCodeHUDGroup.make(rows: activeRows, detectionEnabled: detectionEnabled,
+                                         openCodeEnabled: openCodeAgentEnabled),
+            showsRates: showsOpenCodeRates)
+    }
 
     private func providerConfigured(_ provider: QuotaMeterProvider) -> Bool {
         switch provider {
@@ -4191,7 +4318,12 @@ private struct HUDLimitsRowsPanel: View {
         let openCodeGroup = OpenCodeHUDGroup.make(
             rows: activeRows,
             detectionEnabled: detectionEnabled,
-            openCodeEnabled: openCodeAgentEnabled
+            openCodeEnabled: openCodeAgentEnabled,
+            // Gated here as well as in the demand: a populated snapshot must not
+            // stay on screen once rates are switched off or the strip collapses.
+            rates: OpenCodeHUDGroup.displayedRates(snapshot: rateStore.snapshot,
+                                                   presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
+                                                   showsRates: showsOpenCodeRates)
         )
         Group {
             // OpenCode-only: the group renders alone. "Usage tracking is off" is about
@@ -4269,6 +4401,12 @@ private struct HUDLimitsRowsPanel: View {
         .task(id: runwayRefreshConfigurationID) {
             await runRunwayRefreshLoop()
         }
+        // Report what this surface shows; the shared sampler reads only while some
+        // surface asks. Same per-surface UUID pattern as QuotaMeterPollingRegistry.
+        .onChange(of: openCodeRateDemand, initial: true) { _, demand in
+            rateStore.setDemand(rateSurfaceID, demand)
+        }
+        .onDisappear { rateStore.setDemand(rateSurfaceID, nil) }
     }
 
     @ViewBuilder
@@ -4723,17 +4861,36 @@ enum HUDLimitsRowsPanelTestHost {
             .environmentObject(ClaudeUsageModel.shared)
         )
     }
+
+    /// With an injected rate store and strip state (nil = a window surface).
+    static func view(activeRows: [HUDRow], detectionEnabled: Bool,
+                     rateStore: OpenCodeRateStore, stripExpanded: Bool?) -> AnyView {
+        AnyView(
+            HUDLimitsRowsPanel(
+                activeRows: activeRows,
+                detectionEnabled: detectionEnabled,
+                showsChrome: false,
+                hiddenProvidersRaw: .constant(QuotaMeterProviderVisibility.defaultRawValue),
+                rateStore: rateStore
+            )
+            .environment(\.quotaStripExpanded, stripExpanded)
+            .environmentObject(CodexUsageModel.shared)
+            .environmentObject(ClaudeUsageModel.shared)
+        )
+    }
 }
 #endif
 
-/// OpenCode running sessions under the quota sections. Session presence only: it
-/// reuses the provider-row and runway type, spacing and separators, but draws no
-/// rate cell or load bar, because OpenCode has no usage data here.
+/// OpenCode running sessions under the quota sections. It reuses the provider-row
+/// and runway type, spacing and separators. Each row shows its own session's rate
+/// (tk/h, or $/h in the $ lens) when one is measured, else working/idle. There is
+/// no load bar: OpenCode has no quota to measure against.
 private struct HUDOpenCodeSessionsGroup: View {
     let model: OpenCodeHUDGroupModel
     /// The full-bleed rule between agent groups; off when nothing sits above.
     let showsGroupSeparator: Bool
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -4773,9 +4930,17 @@ private struct HUDOpenCodeSessionsGroup: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    Text(OpenCodeHUDGroup.stateLabel(for: row))
-                        .lineLimit(1)
-                        .foregroundStyle(row.liveState == .active ? Color.primary : Color.secondary)
+                    if let cell = OpenCodeHUDGroup.rateCell(
+                        for: OpenCodeHUDGroup.sessionID(for: row).flatMap { model.rates[$0] }) {
+                        Text(verbatim: cell.text)
+                            .lineLimit(1)
+                            .foregroundStyle(cell.isPositive ? hudProjectionColor(colorScheme) : Color.secondary)
+                            .help(cell.help ?? "")
+                    } else {
+                        Text(OpenCodeHUDGroup.stateLabel(for: row))
+                            .lineLimit(1)
+                            .foregroundStyle(row.liveState == .active ? Color.primary : Color.secondary)
+                    }
                 }
                 .frame(height: QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged))
                 .accessibilityElement(children: .combine)

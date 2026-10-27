@@ -23,7 +23,8 @@ enum OpenCodeV2MessageAdapter {
     /// Row types that count as conversation messages in the session list.
     static let conversationTypes: Set<String> = ["user", "assistant", "shell"]
 
-    static func adapt(rowID: String, type: String, timeCreatedMillis: Int64, data: [String: Any]) -> Adapted {
+    static func adapt(rowID: String, type: String, timeCreatedMillis: Int64,
+                      timeUpdatedMillis: Int64 = 0, data: [String: Any]) -> Adapted {
         let time = data["time"] as? [String: Any] ?? [:]
         let created: Any? = time["created"] ?? (timeCreatedMillis > 0 ? NSNumber(value: timeCreatedMillis) : nil)
 
@@ -76,7 +77,8 @@ enum OpenCodeV2MessageAdapter {
             // when `tokens` is absent or malformed: the usage reducer then sees
             // an incomplete step-finish and reports the session total as
             // unavailable instead of publishing a partial sum as complete.
-            parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"])))
+            parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"],
+                                                                 timeUpdatedMillis: timeUpdatedMillis)))
             return Adapted(message: message, parts: parts)
 
         case "shell":
@@ -122,7 +124,8 @@ enum OpenCodeV2MessageAdapter {
             // ones carry none), so only a present `tokens` value counts; a
             // malformed one still fails the session total closed.
             if type == "compaction", data["tokens"] != nil {
-                parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: "compaction")))
+                parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: "compaction",
+                                                                     timeUpdatedMillis: timeUpdatedMillis)))
             }
             return Adapted(message: message, parts: parts)
         }
@@ -145,9 +148,19 @@ enum OpenCodeV2MessageAdapter {
 
     /// v1-shaped step-finish part. `tokens` is copied as stored, whatever its
     /// shape, so the reducer's strict token validation decides completeness.
-    private static func stepFinishPart(data: [String: Any], reason: Any?) -> [String: Any] {
+    /// `completedAt` is the raw completion value, also as stored: the row's own
+    /// `time.completed`, else the row's update time when the row carries usage
+    /// (an errored request or a completed compaction records no completion time).
+    private static func stepFinishPart(data: [String: Any], reason: Any?,
+                                       timeUpdatedMillis: Int64) -> [String: Any] {
         var part: [String: Any] = ["type": "step-finish"]
         if let tokens = data["tokens"] { part["tokens"] = tokens }
+        let time = data["time"] as? [String: Any] ?? [:]
+        if let completed = time["completed"] {
+            part["completedAt"] = completed
+        } else if data["tokens"] != nil, timeUpdatedMillis > 0 {
+            part["completedAt"] = NSNumber(value: timeUpdatedMillis)
+        }
         if let reason { part["reason"] = reason }
         if let cost = data["cost"] { part["cost"] = cost }
         if let model = data["model"] as? [String: Any] {

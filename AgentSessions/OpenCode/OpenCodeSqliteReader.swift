@@ -20,6 +20,10 @@ private struct OpenCodeTelemetryPartRow {
     let object: [String: Any]
     let malformedPayload: Bool
     let bytesScanned: UInt64
+    /// The v1 part row's `time_updated`. A v1 step-finish part is written when its
+    /// request finishes, so this is the completion fallback. nil for v2 rows, whose
+    /// adapter records completion in the part object.
+    var updatedAt: Date? = nil
 }
 
 private struct OpenCodeTelemetryUsageRow {
@@ -33,6 +37,7 @@ private struct OpenCodeTelemetryUsageRow {
     let reasoningEffort: String?
     let tokens: [String: Any]
     let usageFamily: String
+    var completedAt: Date? = nil
 }
 
 private struct OpenCodeTelemetryRows<Row> {
@@ -244,7 +249,8 @@ struct OpenCodeSqliteReader {
                 model: modelID(from: part.object) ?? message?.model,
                 reasoningEffort: reasoningEffort(from: part.object) ?? message?.reasoningEffort,
                 tokens: tokens,
-                usageFamily: "opencode.step-finish.tokens"))
+                usageFamily: "opencode.step-finish.tokens",
+                completedAt: completionDate(of: part)))
         }
         // v2 assistant rows carry their usage directly; the adapter turns each
         // into a step-finish row, so v2 behaves like a database with parts.
@@ -527,7 +533,8 @@ struct OpenCodeSqliteReader {
                 cacheWrite1hTokens: 0,
                 outputTokens: output,
                 reasoningOutputTokens: reasoning,
-                contextInputTokens: contextInput))
+                contextInputTokens: contextInput,
+                completedAt: row.completedAt))
 
             let key = SliceKey(model: model, reasoningEffort: row.reasoningEffort, speed: speed)
             var slice = slices[key] ?? TelemetryUsageSlice(
@@ -687,6 +694,30 @@ struct OpenCodeSqliteReader {
         value > 0 ? Date(timeIntervalSince1970: Double(value) / 1000.0) : nil
     }
 
+    /// A JSON completion value as a positive whole epoch-millisecond count, or nil.
+    /// Booleans, strings, fractions, non-positive and out-of-range values are nil:
+    /// callers treat a present-but-nil value as malformed, never as missing.
+    static func positiveEpochMillis(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let double = number.doubleValue
+        guard double.isFinite, double > 0, double.rounded() == double,
+              double < 9_000_000_000_000_000 else { return nil }
+        return Int64(double)
+    }
+
+    /// When a step-finish part's request finished. v2 parts carry the adapter's
+    /// `completedAt`; v1 parts use `time.end`, else the part row's update time.
+    private static func completionDate(of part: OpenCodeTelemetryPartRow) -> Date? {
+        if let raw = part.object["completedAt"] {
+            return positiveEpochMillis(raw).flatMap(dateFromMillis)
+        }
+        if let time = part.object["time"] as? [String: Any], let end = time["end"] {
+            return positiveEpochMillis(end).flatMap(dateFromMillis)
+        }
+        return part.updatedAt
+    }
+
     private static func queryTelemetrySessionMetadata(
         db: OpaquePointer?,
         sessionID: String
@@ -817,7 +848,8 @@ struct OpenCodeSqliteReader {
                     ?? dateFromMillis(sqlite3_column_int64(stmt, 3)),
                 object: object,
                 malformedPayload: malformedPayload,
-                bytesScanned: payloadByteCount(stmt, column: 4)))
+                bytesScanned: payloadByteCount(stmt, column: 4),
+                updatedAt: dateFromMillis(sqlite3_column_int64(stmt, 3))))
             step = sqlite3_step(stmt)
         }
         guard cancelled || step == SQLITE_DONE else { return nil }
@@ -1516,6 +1548,7 @@ struct OpenCodeSqliteReader {
         return OpenCodeV2MessageAdapter.adapt(rowID: row.id,
                                              type: row.type,
                                              timeCreatedMillis: row.timeCreated,
+                                             timeUpdatedMillis: row.timeUpdated,
                                              data: object)
     }
 
@@ -1823,5 +1856,366 @@ struct OpenCodeSqliteReader {
             return nil
         }
         return trimmed
+    }
+}
+
+// MARK: - Recent usage window (Quota Meter session rates)
+
+/// One session in a batch read. `previousTail` is the caller's cached tail token;
+/// `forceReload` re-reads the window even when the tail is unchanged.
+struct OpenCodeRecentUsageRequest: Sendable {
+    let sessionID: String
+    let previousTail: String?
+    let forceReload: Bool
+}
+
+enum OpenCodeRecentUsageResult: Equatable, Sendable {
+    case unchanged(tail: String)
+    case loaded(tail: String, window: OpenCodeRecentWindow)
+    case unreadable
+}
+
+/// What one session's recent window holds for the Quota Meter's live rate.
+enum OpenCodeRecentWindow: Equatable, Sendable {
+    /// Nothing completed in the window: empty, user-only, or in-flight requests only.
+    case noCompletedUsage
+    /// Completed requests, oldest first, each with `completedAt` set.
+    case usage([TelemetryUsageEvent])
+    /// A request that could belong to the window has unreadable or invalid usage.
+    case unavailable
+}
+
+extension OpenCodeSqliteReader {
+    /// Requests that started earlier than this are not shown (product rule).
+    static let recentStartBound: TimeInterval = 2 * 60 * 60
+    /// Only requests completed this recently feed a rate.
+    static let recentCompletionWindow: TimeInterval = 30 * 60
+
+    #if DEBUG
+    nonisolated(unsafe) static var databaseOpenCountForTesting = 0
+    /// Runs after a session's tail is read and before its window is read.
+    nonisolated(unsafe) static var recentUsageAfterTailHookForTesting: (() -> Void)?
+    #endif
+
+    /// Every requested session in one read-only connection and one read
+    /// transaction, so each tail and window come from the same snapshot even
+    /// while OpenCode writes. nil = the store could not be opened.
+    static func recentUsage(databaseURL: URL, requests: [OpenCodeRecentUsageRequest],
+                            now: Date) -> [String: OpenCodeRecentUsageResult]? {
+        var db: OpaquePointer?
+        #if DEBUG
+        databaseOpenCountForTesting += 1
+        #endif
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        guard beginReadTransaction(db) else { return nil }
+        defer { rollbackReadTransaction(db) }
+        var results: [String: OpenCodeRecentUsageResult] = [:]
+        for request in requests {
+            guard let tail = recentTail(db: db, sessionID: request.sessionID) else {
+                results[request.sessionID] = .unreadable
+                continue
+            }
+            #if DEBUG
+            recentUsageAfterTailHookForTesting?()
+            #endif
+            if tail == request.previousTail, !request.forceReload {
+                results[request.sessionID] = .unchanged(tail: tail)
+            } else if let window = recentWindow(db: db, sessionID: request.sessionID, now: now) {
+                results[request.sessionID] = .loaded(tail: tail, window: window)
+            } else {
+                results[request.sessionID] = .unreadable
+            }
+        }
+        return results
+    }
+
+    /// Cheap change token from index seeks only: the newest row of the selected
+    /// store plus the session row's update time. It misses an in-place edit of an
+    /// older row (and, in v1, a part added to an older message); the caller's
+    /// periodic forced reload covers those. nil = the store could not be queried.
+    private static func recentTail(db: OpaquePointer?, sessionID: String) -> String? {
+        func firstRow(_ sql: String, _ columns: Int32) -> [String]? {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                              unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            switch sqlite3_step(stmt) {
+            case SQLITE_ROW: return (0..<columns).map { text(stmt, $0) }
+            case SQLITE_DONE: return []
+            default: return nil
+            }
+        }
+        if v2SessionExists(db, sessionID: sessionID) {
+            guard let newest = firstRow(recentV2TailSQL, 2),
+                  let session = firstRow("SELECT time_updated FROM session_v2 WHERE id = ? LIMIT 1;", 1) else { return nil }
+            return (["v2"] + newest + ["|"] + session).joined(separator: ":")
+        }
+        guard tableExists(db, table: "message") else { return "none" }
+        guard let newest = firstRow(recentV1TailSQL, 3) else { return nil }
+        let session = tableExists(db, table: "session")
+            ? firstRow("SELECT time_updated FROM session WHERE id = ? LIMIT 1;", 1) ?? []
+            : []
+        return (["v1"] + newest + ["|"] + session).joined(separator: ":")
+    }
+
+    /// One session's window on its own read-only connection.
+    static func recentWindow(databaseURL: URL, sessionID: String, now: Date) -> OpenCodeRecentWindow? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        guard beginReadTransaction(db) else { return nil }
+        defer { rollbackReadTransaction(db) }
+        return recentWindow(db: db, sessionID: sessionID, now: now)
+    }
+
+    /// One session's window on an open connection, inside the caller's read
+    /// transaction. Uses the same store choice and fork boundary as
+    /// `loadTelemetry(for:)`, but classifies each raw request first: a decoded
+    /// request with no completion marker is in flight and ignored, while an
+    /// unreadable or invalid one makes the window unavailable when it was written
+    /// within the completion window. nil = the store could not be queried.
+    static func recentWindow(db: OpaquePointer?, sessionID: String, now: Date) -> OpenCodeRecentWindow? {
+        let nowMillis = Int64((now.timeIntervalSince1970 * 1000).rounded())
+        let bounds = RecentBounds(since: nowMillis - Int64(recentStartBound * 1000),
+                                  windowStart: nowMillis - Int64(recentCompletionWindow * 1000))
+        let scan: RecentScan?
+        let metadata: OpenCodeTelemetrySessionMetadata?
+        if v2SessionExists(db, sessionID: sessionID) {
+            metadata = queryTelemetrySessionMetadataV2(db: db, sessionID: sessionID)
+            scan = recentV2Scan(db: db, sessionID: sessionID, bounds: bounds)
+        } else if tableExists(db, table: "message"), tableExists(db, table: "part") {
+            metadata = queryTelemetrySessionMetadata(db: db, sessionID: sessionID)
+            scan = recentV1Scan(db: db, sessionID: sessionID, bounds: bounds)
+        } else {
+            return .noCompletedUsage
+        }
+        guard let metadata, let scan else { return nil }
+        if scan.poisoned { return .unavailable }
+
+        // Inherited fork history is not this session's usage (see loadTelemetry).
+        var rows = scan.rows
+        if let forkBoundary = metadata.createdAt {
+            if rows.contains(where: { $0.attributionAt == nil }) { return .unavailable }
+            rows = rows.filter { ($0.attributionAt ?? .distantPast) >= forkBoundary }
+        } else if metadata.parentID != nil, !rows.isEmpty {
+            return .unavailable
+        }
+
+        let windowStart = Date(timeIntervalSince1970: Double(bounds.windowStart) / 1000)
+        var events: [TelemetryUsageEvent] = []
+        for row in rows {
+            guard let completedAt = row.completedAt, completedAt >= windowStart else { continue }
+            let tokens = row.tokens
+            let cache = tokens["cache"] as? [String: Any] ?? [:]
+            guard let input = nonNegativeJSONInteger(tokens["input"]),
+                  let cacheRead = nonNegativeJSONInteger(cache["read"] ?? tokens["cacheRead"]),
+                  let cacheWrite = nonNegativeJSONInteger(cache["write"] ?? tokens["cacheWrite"]),
+                  let storedOutput = nonNegativeJSONInteger(tokens["output"]),
+                  let reasoning = nonNegativeJSONInteger(tokens["reasoning"]),
+                  let output = adding(storedOutput, reasoning),
+                  let baseContext = adding(input, cacheRead),
+                  let contextInput = adding(baseContext, cacheWrite),
+                  adding(contextInput, output) != nil else { return .unavailable }
+            events.append(TelemetryUsageEvent(
+                recordID: row.id,
+                observedAt: row.observedAt,
+                anchorLine: events.count,
+                usageFamily: "opencode.step-finish.tokens",
+                ownership: .session,
+                model: row.model,
+                reasoningEffort: row.reasoningEffort,
+                speed: "standard-normalized",
+                freshInputTokens: input,
+                cacheReadTokens: cacheRead,
+                cacheWrite5mTokens: cacheWrite,
+                cacheWrite1hTokens: 0,
+                outputTokens: output,
+                reasoningOutputTokens: reasoning,
+                contextInputTokens: contextInput,
+                completedAt: completedAt))
+        }
+        return events.isEmpty ? .noCompletedUsage : .usage(events)
+    }
+
+    private struct RecentBounds {
+        /// Epoch milliseconds: requests must start at or after this.
+        let since: Int64
+        /// Epoch milliseconds: start of the completion window.
+        let windowStart: Int64
+    }
+
+    private struct RecentScan {
+        var rows: [OpenCodeTelemetryUsageRow] = []
+        /// A request that could belong to the window is unreadable or invalid.
+        var poisoned = false
+    }
+
+    private static func decodedObject(_ data: String?) -> [String: Any]? {
+        guard let data, let bytes = data.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+    }
+
+    static let recentV2WindowSQL = "SELECT id, type, seq, time_created, time_updated, data FROM session_message WHERE session_id = ? AND time_created >= ?;"
+    static let recentV1MessageSQL = "SELECT id, time_created, time_updated, data FROM message WHERE session_id = ? AND time_created >= ?;"
+    static let recentV1PartSQL = """
+        SELECT id, message_id, time_created, time_updated, data FROM part
+        WHERE message_id IN (SELECT id FROM message WHERE session_id = ? AND time_created >= ?)
+        ORDER BY time_created IS NULL, time_created, id;
+        """
+    /// Newest row by the (session_id, seq) unique index.
+    static let recentV2TailSQL = "SELECT seq, time_updated FROM session_message WHERE session_id = ? ORDER BY seq DESC LIMIT 1;"
+    /// Newest message by the (session_id, time_created, id) index.
+    static let recentV1TailSQL = "SELECT id, time_created, time_updated FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1;"
+
+    private static func recentV2Scan(db: OpaquePointer?, sessionID: String, bounds: RecentBounds) -> RecentScan? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, recentV2WindowSQL, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 2, bounds.since)
+        var raw: [V2Row] = []
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            raw.append(V2Row(id: text(stmt, 0), type: text(stmt, 1), seq: sqlite3_column_int64(stmt, 2),
+                             timeCreated: sqlite3_column_int64(stmt, 3), timeUpdated: sqlite3_column_int64(stmt, 4),
+                             data: text(stmt, 5)))
+            step = sqlite3_step(stmt)
+        }
+        guard step == SQLITE_DONE else { return nil }
+        raw.sort { $0.seq < $1.seq }
+
+        var scan = RecentScan()
+        for row in raw {
+            let recent = row.timeUpdated >= bounds.windowStart
+            guard let object = decodedObject(row.data) else {
+                if recent { scan.poisoned = true }
+                continue
+            }
+            let time = object["time"] as? [String: Any] ?? [:]
+            let completed = time["completed"]
+            switch row.type {
+            case "assistant":
+                if completed != nil, positiveEpochMillis(completed) == nil {
+                    if recent { scan.poisoned = true }
+                    continue
+                }
+                if object["tokens"] == nil {
+                    // No usage and no completion: in flight. Completed without usage: invalid.
+                    if completed != nil, recent { scan.poisoned = true }
+                    continue
+                }
+            case "compaction":
+                guard stringValue(object["status"]) == "completed" else { continue }
+                if completed != nil, positiveEpochMillis(completed) == nil {
+                    if recent { scan.poisoned = true }
+                    continue
+                }
+                // A completed compaction without tokens used none (as in Session Info).
+                guard object["tokens"] != nil else { continue }
+            default:
+                continue
+            }
+            let adapted = OpenCodeV2MessageAdapter.adapt(rowID: row.id, type: row.type,
+                                                         timeCreatedMillis: row.timeCreated,
+                                                         timeUpdatedMillis: row.timeUpdated, data: object)
+            guard let part = adapted.parts.first(where: { ($0.dict["type"] as? String) == "step-finish" }) else { continue }
+            guard let tokens = completeStepFinishTokenObject(from: part.dict) else {
+                if recent { scan.poisoned = true }
+                continue
+            }
+            let start = dateFromMillis(row.timeCreated)
+            scan.rows.append(OpenCodeTelemetryUsageRow(
+                id: part.id,
+                observedAt: start,
+                attributionAt: start,
+                model: modelID(from: part.dict) ?? modelID(from: adapted.message),
+                reasoningEffort: reasoningEffort(from: part.dict) ?? reasoningEffort(from: adapted.message),
+                tokens: tokens,
+                usageFamily: "opencode.step-finish.tokens",
+                completedAt: positiveEpochMillis(part.dict["completedAt"]).flatMap(dateFromMillis)))
+        }
+        return scan
+    }
+
+    /// v1 eligibility follows the owning message's start, never a part's own time.
+    private static func recentV1Scan(db: OpaquePointer?, sessionID: String, bounds: RecentBounds) -> RecentScan? {
+        let messageSQL = recentV1MessageSQL
+        let partSQL = recentV1PartSQL
+        struct MessageInfo { let start: Date?; let model: String?; let reasoningEffort: String? }
+        var scan = RecentScan()
+        var messages: [String: MessageInfo] = [:]
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, messageSQL, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 2, bounds.since)
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            let id = text(stmt, 0)
+            let created = sqlite3_column_int64(stmt, 1)
+            let updated = sqlite3_column_int64(stmt, 2)
+            if let object = decodedObject(sqlite3_column_text(stmt, 3).map { String(cString: $0) }) {
+                messages[id] = MessageInfo(start: dateFromMillis(created), model: modelID(from: object),
+                                           reasoningEffort: reasoningEffort(from: object))
+            } else {
+                // An unreadable message could hide step-finish evidence.
+                if updated >= bounds.windowStart { scan.poisoned = true }
+                messages[id] = MessageInfo(start: dateFromMillis(created), model: nil, reasoningEffort: nil)
+            }
+            step = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+        guard step == SQLITE_DONE else { return nil }
+
+        stmt = nil
+        guard sqlite3_prepare_v2(db, partSQL, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1,
+                          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 2, bounds.since)
+        step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            defer { step = sqlite3_step(stmt) }
+            let id = text(stmt, 0)
+            let messageID = text(stmt, 1)
+            let updated = sqlite3_column_int64(stmt, 3)
+            let recent = updated >= bounds.windowStart
+            guard let object = decodedObject(sqlite3_column_text(stmt, 4).map { String(cString: $0) }) else {
+                if recent { scan.poisoned = true }
+                continue
+            }
+            guard stringValue(object["type"])?.lowercased() == "step-finish" else { continue }
+            let end = (object["time"] as? [String: Any])?["end"]
+            if end != nil, positiveEpochMillis(end) == nil {
+                if recent { scan.poisoned = true }
+                continue
+            }
+            guard let tokens = completeStepFinishTokenObject(from: object) else {
+                if recent { scan.poisoned = true }
+                continue
+            }
+            let message = messages[messageID]
+            scan.rows.append(OpenCodeTelemetryUsageRow(
+                id: id,
+                observedAt: message?.start,
+                attributionAt: message?.start,
+                model: modelID(from: object) ?? message?.model,
+                reasoningEffort: reasoningEffort(from: object) ?? message?.reasoningEffort,
+                tokens: tokens,
+                usageFamily: "opencode.step-finish.tokens",
+                completedAt: positiveEpochMillis(end).flatMap(dateFromMillis) ?? dateFromMillis(updated)))
+        }
+        guard step == SQLITE_DONE else { return nil }
+        return scan
     }
 }

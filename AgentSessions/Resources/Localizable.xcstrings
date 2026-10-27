@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Missing API price component: %@": {
+      "comment": "Quota Meter OpenCode row tooltip in the $ lens. %@ lists model:component pairs, e.g. gpt-5:cacheWrite5m.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Missing API price component: %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "缺少 API 价格组成部分：%@" } }
+      }
+    },
+    "No API price for %@": {
+      "comment": "Quota Meter OpenCode row tooltip in the $ lens. %@ is a comma-separated list of model IDs.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No API price for %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "没有 %@ 的 API 价格" } }
+      }
+    },
+    "No API price for this session's recent usage.": {
+      "comment": "Quota Meter OpenCode row tooltip in the $ lens when no specific reason is known.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No API price for this session's recent usage." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此会话最近的用量没有 API 价格。" } }
+      }
+    },
+    "Usage data for this session is incomplete.": {
+      "comment": "Quota Meter OpenCode row tooltip: recent usage records are unreadable or invalid, so no rate is shown.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage data for this session is incomplete." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此会话的用量数据不完整。" } }
+      }
+    },
     "Agent Sessions could not find saved Codex credentials.": {
       "comment": "Codex quota fetch warning detail: no saved Codex sign-in was found.",
       "localizations": {

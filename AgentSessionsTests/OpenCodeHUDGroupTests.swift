@@ -177,6 +177,172 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         XCTAssertGreaterThan(six, four, "the +N more line is inside the measured region")
     }
 
+    // MARK: - Session rates
+
+    private func rateRow(_ id: String, session: String, state: HUDLiveState = .active,
+                         resolved: Bool = true, parent: String? = nil) -> HUDRow {
+        HUDRow(id: id, source: .opencode, agentType: .opencode, projectName: "proj", displayName: id,
+               liveState: state, preview: id, elapsed: "", lastSeenAt: Date(), itermSessionId: nil,
+               revealURL: nil, tty: nil, termProgram: nil,
+               resolvedSessionID: resolved ? session : nil, runtimeSessionID: resolved ? nil : session,
+               parentSessionID: parent)
+    }
+
+    func testSessionIDPrefersResolvedThenRuntime() {
+        XCTAssertEqual(OpenCodeHUDGroup.sessionID(for: rateRow("r", session: "ses_a")), "ses_a")
+        XCTAssertEqual(OpenCodeHUDGroup.sessionID(for: rateRow("r", session: "ses_b", resolved: false)), "ses_b")
+        XCTAssertNil(OpenCodeHUDGroup.sessionID(for: row("plain")))
+    }
+
+    func testRowShowsOwnSessionRate() throws {
+        let group = try XCTUnwrap(OpenCodeHUDGroup.make(rows: [rateRow("r", session: "ses_a")], detectionEnabled: true,
+                                                        openCodeEnabled: true, rates: ["ses_a": .rate(412_000, .tokensPerHour)]))
+        XCTAssertEqual(group.rates["ses_a"], .rate(412_000, .tokensPerHour))
+    }
+
+    func testParentAndChildRowsShowTheirOwnRates() throws {
+        let rows = [rateRow("parent", session: "ses_p"), rateRow("child", session: "ses_c", parent: "ses_p")]
+        let rates: [String: OpenCodeRateValue] = ["ses_p": .rate(100, .tokensPerHour), "ses_c": .rate(50, .tokensPerHour)]
+        let group = try XCTUnwrap(OpenCodeHUDGroup.make(rows: rows, detectionEnabled: true, openCodeEnabled: true, rates: rates))
+        XCTAssertEqual(rows.compactMap { group.rates[OpenCodeHUDGroup.sessionID(for: $0) ?? ""] },
+                       [.rate(100, .tokensPerHour), .rate(50, .tokensPerHour)], "no aggregation, no double count")
+    }
+
+    func testAlwaysOffHidesExistingRate() {
+        XCTAssertFalse(OpenCodeHUDGroup.showsRates(visibility: .alwaysOff, isStrip: false, stripExpanded: false))
+        let snapshot = OpenCodeRateSnapshot(databasePath: "/x", presentation: .token, demandRevision: 1, version: 1,
+                                            values: ["ses_a": .rate(1, .tokensPerHour)])
+        XCTAssertEqual(OpenCodeHUDGroup.displayedRates(snapshot: snapshot, presentation: .token, showsRates: false), [:],
+                       "a populated snapshot is not shown once rates are off")
+    }
+
+    func testCollapsedStripHidesExistingRate() {
+        XCTAssertFalse(OpenCodeHUDGroup.showsRates(visibility: .automatic, isStrip: true, stripExpanded: false))
+        XCTAssertTrue(OpenCodeHUDGroup.showsRates(visibility: .automatic, isStrip: true, stripExpanded: true))
+        XCTAssertTrue(OpenCodeHUDGroup.showsRates(visibility: .alwaysOn, isStrip: false, stripExpanded: false))
+    }
+
+    func testSnapshotForOtherPresentationIgnored() {
+        let snapshot = OpenCodeRateSnapshot(databasePath: "/x", presentation: .token, demandRevision: 1, version: 1,
+                                            values: ["ses_a": .rate(1, .tokensPerHour)])
+        XCTAssertEqual(OpenCodeHUDGroup.displayedRates(snapshot: snapshot, presentation: .dollar, showsRates: true), [:])
+        XCTAssertEqual(OpenCodeHUDGroup.displayedRates(snapshot: snapshot, presentation: .token, showsRates: true).count, 1)
+    }
+
+    func testPositiveRateUsesProjectionColorEvenWhenQuiet() throws {
+        let cell = try XCTUnwrap(OpenCodeHUDGroup.rateCell(for: .rate(0.4, .tokensPerHour)))
+        XCTAssertEqual(cell.text, "quiet")
+        XCTAssertTrue(cell.isPositive, "color follows the number, not the formatted text")
+        XCTAssertFalse(try XCTUnwrap(OpenCodeHUDGroup.rateCell(for: .rate(0, .tokensPerHour))).isPositive)
+        XCTAssertNil(OpenCodeHUDGroup.rateCell(for: .working), "working and idle keep the state label")
+        XCTAssertNil(OpenCodeHUDGroup.rateCell(for: .idle))
+    }
+
+    func testUnpricedHelpModelOnly() {
+        XCTAssertEqual(OpenCodeHUDGroup.unpricedHelp(unknownModels: ["a", "b"], missingComponents: []),
+                       "No API price for a, b")
+    }
+
+    func testUnpricedHelpComponentOnly() {
+        XCTAssertEqual(OpenCodeHUDGroup.unpricedHelp(unknownModels: [], missingComponents: ["gpt-5:cacheWrite5m"]),
+                       "Missing API price component: gpt-5:cacheWrite5m")
+    }
+
+    func testUnpricedHelpMixedShowsBoth() {
+        XCTAssertEqual(OpenCodeHUDGroup.unpricedHelp(unknownModels: ["a"], missingComponents: ["gpt-5:cacheWrite5m"]),
+                       "No API price for a\nMissing API price component: gpt-5:cacheWrite5m")
+    }
+
+    func testUnpricedHelpGenericWhenEmpty() {
+        XCTAssertEqual(OpenCodeHUDGroup.unpricedHelp(unknownModels: [], missingComponents: []),
+                       "No API price for this session's recent usage.")
+    }
+
+    func testToolbarControlUsesParentComputedGroupVisibility() {
+        let rows = [rateRow("r", session: "ses_a")]
+        XCTAssertTrue(OpenCodeHUDGroup.isVisible(rows: rows, detectionEnabled: true, openCodeEnabled: true))
+        XCTAssertFalse(OpenCodeHUDGroup.isVisible(rows: rows, detectionEnabled: true, openCodeEnabled: false))
+        XCTAssertFalse(OpenCodeHUDGroup.isVisible(rows: [row("c", source: .codex)], detectionEnabled: true, openCodeEnabled: true))
+    }
+
+    func testControlAvailableForOpenCodeOnly() {
+        XCTAssertTrue(OpenCodeHUDGroup.controlAvailable(providersShown: false, openCodeGroupVisible: true))
+        XCTAssertTrue(OpenCodeHUDGroup.controlAvailable(providersShown: true, openCodeGroupVisible: false))
+        XCTAssertFalse(OpenCodeHUDGroup.controlAvailable(providersShown: false, openCodeGroupVisible: false))
+    }
+
+    func testDemandIsVisibleSessionsWithWorkingState() throws {
+        let rows = [rateRow("w", session: "ses_w", state: .active), rateRow("i", session: "ses_i", state: .idle), row("none")]
+        let group = try XCTUnwrap(make(rows))
+        XCTAssertEqual(OpenCodeHUDGroup.demand(group: group, showsRates: true),
+                       OpenCodeRateDemand(sessions: ["ses_w": true, "ses_i": false]))
+        XCTAssertNil(OpenCodeHUDGroup.demand(group: group, showsRates: false))
+    }
+
+    func testAlwaysOffReportsNoDemand() throws {
+        let rows = [rateRow("w", session: "ses_w")]
+        let on = mountForDemand(rows: rows, store: OpenCodeRateStore(), visibility: .automatic, stripExpanded: nil)
+        XCTAssertNotNil(on.mounted, "positive control: the same mount reports demand when rates are on")
+        let off = mountForDemand(rows: rows, store: OpenCodeRateStore(), visibility: .alwaysOff, stripExpanded: nil)
+        XCTAssertNil(off.mounted)
+    }
+
+    func testMountedStripReportsDemandOnlyWhenExpanded() throws {
+        let rows = [rateRow("w", session: "ses_w")]
+        let expected = OpenCodeRateDemand(sessions: ["ses_w": true])
+        XCTAssertNil(mountForDemand(rows: rows, store: OpenCodeRateStore(), visibility: .automatic, stripExpanded: false).mounted,
+                     "a collapsed strip shows no rates and asks for none")
+        let expanded = mountForDemand(rows: rows, store: OpenCodeRateStore(), visibility: .automatic, stripExpanded: true)
+        XCTAssertEqual(expanded.mounted, expected)
+        XCTAssertNil(expanded.removed, "removing the surface withdraws its demand")
+        XCTAssertEqual(mountForDemand(rows: rows, store: OpenCodeRateStore(), visibility: .automatic, stripExpanded: nil).mounted,
+                       expected)
+    }
+
+    func testNewStringsHaveChineseTranslations() throws {
+        let catalog = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("AgentSessions/Resources/Localizable.xcstrings")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: catalog)) as? [String: Any]
+        let strings = try XCTUnwrap(json?["strings"] as? [String: Any])
+        for key in ["No API price for %@", "Missing API price component: %@",
+                    "No API price for this session's recent usage.", "Usage data for this session is incomplete."] {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let zh = (entry["localizations"] as? [String: Any])?["zh-Hans"] as? [String: Any]
+            let value = (zh?["stringUnit"] as? [String: Any])?["value"] as? String
+            XCTAssertFalse(value?.isEmpty ?? true, "zh-Hans for \(key)")
+        }
+    }
+
+    /// Mounts the real panel in a window, so appear/change handlers run, and returns
+    /// the store's demand while it is mounted and after it is removed.
+    @discardableResult
+    private func mountForDemand(rows: [HUDRow], store: OpenCodeRateStore,
+                                visibility: QuotaMeterRunwayVisibility,
+                                stripExpanded: Bool?) -> (mounted: OpenCodeRateDemand?, removed: OpenCodeRateDemand?) {
+        let defaults = UserDefaults.standard
+        let keys = [PreferencesKey.Agents.openCodeEnabled, PreferencesKey.quotaMeterRunwayVisibility]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: PreferencesKey.Agents.openCodeEnabled)
+        defaults.set(visibility.rawValue, forKey: PreferencesKey.quotaMeterRunwayVisibility)
+        let host = NSHostingView(rootView: HUDLimitsRowsPanelTestHost.view(
+            activeRows: rows, detectionEnabled: true, rateStore: store, stripExpanded: stripExpanded)
+            .frame(width: 380))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        let mounted = store.demandUnionForTesting
+        window.contentView = nil
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        return (mounted, store.demandUnionForTesting)
+    }
+
     // MARK: - End to end through makeRowsSnapshot
 
     private func session(_ id: String, cwd: String? = nil, title: String? = nil, now: Date = Date()) -> Session {

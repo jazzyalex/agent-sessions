@@ -251,6 +251,10 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
     public let priceTableUpdated: String?
     /// Exact canonical manifest identity, including metadata.
     public let priceManifestFingerprint: String?
+    /// When the request finished, if the source records it. `observedAt` stays the
+    /// request start, which dated-price periods key on. nil means unknown; older
+    /// cached events decode without it.
+    public let completedAt: Date?
 
     public init(recordID: String?, observedAt: Date?, anchorLine: Int,
                 usageFamily: String, ownership: TelemetryUsageOwnership,
@@ -261,7 +265,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
                 outputTokens: Int, reasoningOutputTokens: Int = 0,
                 contextInputTokens: Int?, apiEquivalentUSD: Double? = nil,
                 priceTableRevision: Int? = nil, priceTableUpdated: String? = nil,
-                priceManifestFingerprint: String? = nil) {
+                priceManifestFingerprint: String? = nil, completedAt: Date? = nil) {
         self.recordID = recordID
         self.observedAt = observedAt
         self.anchorLine = anchorLine
@@ -282,6 +286,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
         self.priceTableRevision = priceTableRevision
         self.priceTableUpdated = priceTableUpdated
         self.priceManifestFingerprint = priceManifestFingerprint
+        self.completedAt = completedAt
     }
 
     public var topLineTokens: Int {
@@ -299,7 +304,7 @@ public struct TelemetryUsageEvent: Equatable, Codable, Sendable {
                             outputTokens: outputTokens, reasoningOutputTokens: reasoningOutputTokens,
                             contextInputTokens: contextInputTokens, apiEquivalentUSD: usd,
                             priceTableRevision: revision, priceTableUpdated: updated,
-                            priceManifestFingerprint: manifestFingerprint)
+                            priceManifestFingerprint: manifestFingerprint, completedAt: completedAt)
     }
 }
 
