@@ -4769,6 +4769,30 @@ final class CodexUsageParserTests: XCTestCase {
         }
     }
 
+    func testTerra61PricingUsesPublishedCacheFastAndLongContextRates() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        let price = try XCTUnwrap(table.price(forModel: "gpt-6.1-terra"))
+        XCTAssertEqual(table.price(forModel: "gpt-6.1-terra-2026-10-20"), price)
+        XCTAssertNil(table.price(forModel: "gpt-6.1-terra-preview"))
+        XCTAssertEqual(table.price(forModel: "gpt-6.1-sol")?.inputPerMTok, 2, "Terra must not shadow Sol")
+
+        let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))
+        XCTAssertEqual(standard.inputPerMTok, 1)
+        XCTAssertEqual(standard.cachedInputPerMTok, 0.05)
+        XCTAssertEqual(standard.outputPerMTok, 5)
+        XCTAssertEqual(standard.cacheWritePerMTok, 1.25)
+        let fast = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_000))
+        XCTAssertEqual(fast.inputPerMTok, 2)
+        XCTAssertEqual(fast.cachedInputPerMTok, 0.1)
+        XCTAssertEqual(fast.outputPerMTok, 10)
+        XCTAssertEqual(fast.cacheWritePerMTok, 2.5)
+
+        let long = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_001))
+        XCTAssertEqual(long.inputPerMTok, 2)
+        XCTAssertEqual(long.cachedInputPerMTok, 0.1)
+        XCTAssertEqual(long.outputPerMTok, 7.5)
+    }
+
     func testOpus55PricingUsesPublishedCacheAndFastRates() throws {
         let table = RunwayPriceTable.makeForTesting()
         let price = try XCTUnwrap(table.price(forModel: "claude-opus-5-5"))
