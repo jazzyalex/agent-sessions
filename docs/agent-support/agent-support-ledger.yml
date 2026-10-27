@@ -11,6 +11,47 @@
 entries:
   - agent_sessions_version: "6.1.2+unreleased"
     as_of_date_utc: "2026-10-27"
+    as_of_commit: "c246640c"
+    note: "Late sweep after updating the Codex, Antigravity, Hermes, Grok and Claude CLIs (Kimi rechecked). Weekly scripts/probe_scan_output/agent_watch/20261027-202605-435134Z-p38880/report.json: codex, claude, copilot, opencode, cline, kimi, pi, cursor, antigravity, hermes and grok supports_latest with no unknown types or keys."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.165.0"
+          scope: "latest; installed and upstream both 0.165.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202344-531294Z-p36366-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202358-136668Z-p36564/report.json"]
+          notes: "Fresh codex_exec session on 0.165.0 matches the baseline; codex_status_probe ok."
+      antigravity:
+        sessions:
+          max_verified_version: "1.4.8"
+          scope: "latest; installed and upstream both 1.4.8"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202033-017682Z-p33849-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202231-196774Z-p35248-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202358-136668Z-p36564/report.json"]
+          notes: "1.4.8 fixes the 1.4.4 hold (a tool call with no result): run_command is now followed by its GENERIC result and a final response. The prebump prompt now asks for a listing, a file read and a shell command; the fresh session (7 events) has no unknown types or keys, and the 40 newest real transcripts in both brain roots hold only fixture-known types and top-level keys. AntigravityTranscriptParser maps unknown types to meta."
+      hermes:
+        sessions:
+          max_verified_version: "0.22.5"
+          scope: "latest; installed and upstream both 0.22.5"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202228-211819Z-p35214-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202358-136668Z-p36564/report.json"]
+          notes: "Updated with hermes update (git checkout v0.22.4 -> v0.22.5). Fresh session (user, assistant tool call, terminal result, final reply) matches the baseline. The owner's old reasoning-effort fallback patch is not applied in 0.22.5; it stays in the checkout's stash (hermes-update-autostash-20261021-044848)."
+      kimi:
+        sessions:
+          max_verified_version: "2.3.3"
+          scope: "latest; rechecked, upstream still 2.3.3"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202050-819048Z-p34120-prebump/report.json"]
+          notes: "Fresh session matches the baseline; no change."
+      grok:
+        sessions:
+          max_verified_version: "1.0.70"
+          scope: "latest; installed and upstream both 1.0.70"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202056-343302Z-p34186-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202509-233586Z-p37789-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202605-435134Z-p38880/report.json"]
+          notes: "grok update installed 1.0.70 but left the ~/.local/bin/grok symlink on 1.0.62; repointed. The first runs failed 'Not signed in' (the stored OIDC session expired 2026-10-14 and 1.0.70 does not refresh it). After the owner ran grok login, a fresh session (9 events) matches the baseline with no unknown types or keys."
+      claude:
+        sessions:
+          max_verified_version: "2.1.312"
+          scope: "latest; installed and upstream both 2.1.312"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-202552-759788Z-p38653-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202605-435134Z-p38880/report.json"]
+          notes: "Released during the sweep; updated with claude update. Fresh Bash-tool session matches the baseline with no unknown types or keys."
+  - agent_sessions_version: "6.1.2+unreleased"
+    as_of_date_utc: "2026-10-27"
     as_of_commit: "ecac0dd3"
     note: "Same-day follow-up after updating the Claude and OpenCode CLIs. The OpenCode weekly now unions the newest 5 session_v2 sessions (it read only the newest, a one-line manual session, and reported blocked_thin_sample). Final weekly scripts/probe_scan_output/agent_watch/20261027-200629-406137Z-p26736/report.json: codex, claude, copilot and opencode supports_latest, no unknown types or keys."
     verified:

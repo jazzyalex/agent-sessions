@@ -94,17 +94,17 @@ is missing. See `scripts/steward_check.py::_issue_body` for the shared report fo
 
 | Agent | Steward | Last verified | Tier |
 |---|---|---|---|
-| Codex | @jazzyalex (maintainer) | 2026-10-27 · 0.164.0 | Maintained |
-| Claude Code | @jazzyalex (maintainer) | 2026-10-27 · 2.1.311 | Maintained |
+| Codex | @jazzyalex (maintainer) | 2026-10-27 · 0.165.0 | Maintained |
+| Claude Code | @jazzyalex (maintainer) | 2026-10-27 · 2.1.312 | Maintained |
 | Cursor Agent | steward wanted | 2026-10-27 · 2026.10.22 | Best-effort |
 | GitHub Copilot CLI | steward wanted | 2026-10-27 · 1.0.104 | Best-effort |
 | OpenCode | steward wanted | 2026-10-27 · 2.2.0 | Best-effort |
-| Antigravity CLI | steward wanted | 2026-08-13 · 1.1.12 | Best-effort |
+| Antigravity CLI | steward wanted | 2026-10-27 · 1.4.8 | Best-effort |
 | Pi | steward wanted | 2026-10-27 · 1.4.0 | Best-effort |
 | Kimi Code | steward wanted | 2026-10-27 · 2.3.3 | Best-effort |
-| Grok CLI | steward wanted | 2026-10-21 · 1.0.62 | Best-effort |
+| Grok CLI | steward wanted | 2026-10-27 · 1.0.70 | Best-effort |
 | OpenClaw | steward wanted | 2026-10-21 · 2026.10.5 | Best-effort |
-| Hermes | steward wanted | 2026-10-21 · 0.22.4 | Best-effort |
+| Hermes | steward wanted | 2026-10-27 · 0.22.5 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-09-07 · 0.0.7 (see note) | Steward-verified |

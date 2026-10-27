@@ -2123,8 +2123,11 @@ extension OpenCodeSqliteReader {
                 }
                 if OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage(object) { continue }
                 if object["tokens"] == nil {
-                    // No usage and no completion: in flight. Completed without usage: invalid.
-                    if completed != nil, recent { scan.poisoned = true }
+                    // No usage and no sign of an end: in flight. Ended without usage:
+                    // invalid. A `finish` or `error` ends the request even when
+                    // `time.completed` is missing.
+                    let ended = completed != nil || object["finish"] != nil || object["error"] != nil
+                    if ended, recent { scan.poisoned = true }
                     continue
                 }
             case "compaction":

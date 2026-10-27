@@ -287,7 +287,7 @@
       "prebump": {
         "driver": "antigravity_print",
         "sandbox": {"mode": "home_override", "subdir": "antigravity_sandbox"},
-        "prompt": "Say hi, then list the files in the current directory using your tools.",
+        "prompt": "Use your tools for each step: list the files in the current directory, read the first 20 lines of one of them, run the shell command `date`, then summarize what you found in two sentences.",
         "timeout_seconds": 180,
         "real_home_session": true,
         "env_vars": [],

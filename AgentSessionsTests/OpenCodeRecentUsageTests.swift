@@ -187,6 +187,25 @@ final class OpenCodeRecentUsageTests: XCTestCase {
         }
     }
 
+    func testEndedGenericErrorWithoutCompletionTimeIsUnavailable() throws {
+        // `finish`/`error` end a request even without `time.completed`; it is not in flight.
+        let generic = #"{"time":{"created":1},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"provider.error","status":500}}"#
+        try vendorV2Session("alone")
+        try insertV2Row("alone", id: "g", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1), data: generic)
+        XCTAssertEqual(try window("alone"), .unavailable)
+
+        try vendorV2Session("mixed")
+        try insertV2Row("mixed", id: "ok", type: "assistant", seq: 1, created: ago(minutes: 4), updated: ago(minutes: 3),
+                        data: completedAssistant(created: ago(minutes: 4), completed: ago(minutes: 3)))
+        try insertV2Row("mixed", id: "g2", type: "assistant", seq: 2, created: ago(minutes: 2), updated: ago(minutes: 1), data: generic)
+        XCTAssertEqual(try window("mixed"), .unavailable, "a partial rate must not be published as complete")
+
+        let errorOnly = #"{"time":{"created":1},"model":{"id":"m","providerID":"p"},"content":[],"error":{"type":"provider.error"}}"#
+        try vendorV2Session("erroronly")
+        try insertV2Row("erroronly", id: "e", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1), data: errorOnly)
+        XCTAssertEqual(try window("erroronly"), .unavailable)
+    }
+
     func testFailedRequestWithPartialContentButNoTokensIsUnavailable() throws {
         try vendorV2Session("ses")
         try insertV2Row("ses", id: "a", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1),
