@@ -428,6 +428,23 @@ final class OpenCodeV2StoreTests: XCTestCase {
         }
     }
 
+    func testFailedRequestRowKeepsTheSessionUsageTotal() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        let url = FixturePaths.stage0FixtureURL("agents/opencode/sqlite_v2/session_message/assistant-failed.json")
+        let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let data = try JSONSerialization.data(withJSONObject: try XCTUnwrap(row["data"]), options: [.sortedKeys])
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_failed', 'ses_native', 'assistant', 6, 9070, 9070,
+            \(sql(String(decoding: data, as: UTF8.self))));
+        """)
+
+        let usage = try await telemetry(for: "ses_native")
+        XCTAssertNil(usage.usageSummary?.unavailableReason, "a refused request used no tokens")
+        XCTAssertEqual(usage.usageEvents.count, 2)
+        XCTAssertEqual(usage.usageSummary?.topLineTokens, 171)
+    }
+
     func testReaderKeepsOctoberFixtureRowsAsMetaWithoutPromptsOrUsage() async throws {
         try createV2Tables()
         try insertNativeV2Session()

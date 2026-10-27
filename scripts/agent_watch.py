@@ -4834,13 +4834,18 @@ def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) 
             problems.append("assistant.content")
             content = []
         tokens = data.get("tokens")
-        for key in ("input", "output", "reasoning"):
-            if not number(tokens, key):
-                problems.append(f"assistant.tokens.{key}")
-        cache = tokens.get("cache") if isinstance(tokens, dict) else None
-        for key in ("read", "write"):
-            if not number(cache, key):
-                problems.append(f"assistant.tokens.cache.{key}")
+        # A request that failed before producing anything (error, no tokens, no
+        # content) used no tokens; the app counts it as no usage
+        # (OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage).
+        failed_without_usage = isinstance(data.get("error"), dict) and "tokens" not in data and content == []
+        if not failed_without_usage:
+            for key in ("input", "output", "reasoning"):
+                if not number(tokens, key):
+                    problems.append(f"assistant.tokens.{key}")
+            cache = tokens.get("cache") if isinstance(tokens, dict) else None
+            for key in ("read", "write"):
+                if not number(cache, key):
+                    problems.append(f"assistant.tokens.cache.{key}")
         for item in content:
             if not isinstance(item, dict) or item.get("type") != "tool":
                 continue
@@ -4856,7 +4861,11 @@ def _opencode_v2_store_fingerprint(
     conn: sqlite3.Connection, db_path: Path, *, max_messages: int
 ) -> dict[str, Any] | None:
     """
-    Fingerprint the newest OpenCode 2.x session from session_v2 + session_message.
+    Fingerprint the newest OpenCode 2.x sessions from session_v2 + session_message.
+
+    Unions the newest _LOCAL_SCHEMA_SAMPLE_COUNT unarchived sessions, as the
+    other agents' weekly samples do, so one short session (a one-line prompt)
+    cannot make the sample thin while richer recent sessions exist.
 
     Returns None when the database has no 2.x store, or when its newest v1
     session is at least as new as its newest 2.x session. OpenCode copies v1
@@ -4870,11 +4879,13 @@ def _opencode_v2_store_fingerprint(
     }
     if not {"session_v2", "session_message"} <= tables:
         return None
-    v2_row = conn.execute(
-        "SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT 1;"
-    ).fetchone()
-    if v2_row is None:
+    v2_rows = conn.execute(
+        "SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT ?;",
+        (_LOCAL_SCHEMA_SAMPLE_COUNT,),
+    ).fetchall()
+    if not v2_rows:
         return None
+    v2_row = v2_rows[0]
     if "session" in tables:
         v1_newest = conn.execute(
             "SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;"
@@ -4896,11 +4907,13 @@ def _opencode_v2_store_fingerprint(
             if v is not None:
                 ks.add(k)
 
-    _add("session_v2", {k: v2_row[k] for k in v2_row.keys()})
-    rows = conn.execute(
-        "SELECT type, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT ?;",
-        (v2_row["id"], max(0, int(max_messages))),
-    ).fetchall()
+    rows = []
+    for session in v2_rows:
+        _add("session_v2", {k: session[k] for k in session.keys()})
+        rows.extend(conn.execute(
+            "SELECT type, data FROM session_message WHERE session_id = ? ORDER BY seq LIMIT ?;",
+            (session["id"], max(0, int(max_messages))),
+        ).fetchall())
     for row in rows:
         try:
             data = json.loads(str(row["data"]))
@@ -4925,6 +4938,7 @@ def _opencode_v2_store_fingerprint(
         "file": str(db_path),
         "store": "session_v2",
         "session_version": v2_row["version"],
+        "sampled_sessions": len(v2_rows),
         "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "message_rows_parsed": rows_parsed,

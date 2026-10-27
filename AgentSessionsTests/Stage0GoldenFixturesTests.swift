@@ -136,6 +136,11 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         let sandboxedResult = full.events.filter { raw($0)?.contains("\"s-drift-u1\"") == true && raw($0)?.contains("\"sandboxed\"") == true }
         XCTAssertFalse(sandboxedResult.isEmpty)
         XCTAssertFalse(sandboxedResult.contains { $0.kind == .user }, "a sandboxed tool result is not a user prompt")
+
+        // Claude 2.1.311: a session-level `tools-used` summary listing tool names.
+        let toolsUsed = full.events.filter { raw($0)?.contains("\"type\":\"tools-used\"") == true }
+        XCTAssertEqual(toolsUsed.count, 1, "the tools-used record should survive parsing once")
+        XCTAssertEqual(toolsUsed.first?.kind, .meta, "tools-used is a summary, not a prompt or tool call")
     }
 
     func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
@@ -591,6 +596,13 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             let model = try XCTUnwrap(state?["model"] as? [String: Any], "state.model must stay an object")
             XCTAssertEqual(model["model"] as? String, "gpt-6.1-sol")
         }
+
+        // 2026-10-27, gpt-6.1-sol: a function_call can carry an opaque encrypted_content
+        // blob next to its readable name and arguments. The call must still render.
+        let encryptedCall = full.events.filter { raw($0).contains("\"call-enc-1\"") && $0.kind == .tool_call }
+        XCTAssertEqual(encryptedCall.count, 1, "a function_call with encrypted_content stays a tool call")
+        XCTAssertEqual(encryptedCall.first?.toolName, "send_message")
+        XCTAssertTrue((encryptedCall.first?.toolInput ?? "").contains("message"), "its arguments stay readable")
     }
 
     /// The invariant that matters most about these fixtures: they are committed, public

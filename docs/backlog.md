@@ -781,6 +781,18 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ### Watch list from the 2026-10-27 format sweep
 > **open** · sev: low · urg: low · verified 2026-10-27
 
+- **OpenCode refused requests** — assistant rows with `error` (`provider.free-limit`,
+  `status` 429, `retryAfterMs`), `finish: "error"`, empty `content` and no `tokens`.
+  They now count as no usage (`OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage`).
+  The error itself is not shown in the transcript; same candidate as the failed `idle`
+  rows below.
+- **Claude `tools-used`** (2.1.311) — `{type, tools: [tool names], sessionId}`, a
+  session-level list of the tools used. Meta today; could feed a per-session tool
+  summary without scanning the transcript.
+- **Codex `function_call.encrypted_content`** (gpt-6.1-sol, 0.164.0) — an opaque blob
+  on a collaboration `send_message` call, next to readable `name` and `arguments`.
+  Noise unless a future call drops `arguments`, in which case the tool row loses its input.
+
 - **OpenCode 2.1.4 failed turns** — `idle` rows with `outcome: "failed"` and an `error`
   object (`type` such as `provider.free-limit`, `message`, `status`, `response.body`).
   They adapt to a text-less meta row, so a turn that ended in a provider error shows

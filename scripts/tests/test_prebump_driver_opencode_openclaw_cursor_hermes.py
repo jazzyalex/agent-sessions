@@ -149,6 +149,38 @@ def test_opencode_2x_driver_runs_standalone_in_the_sandbox(tmp_path):
     assert seen["cwd"] == str(sb)
 
 
+def test_opencode_driver_pins_its_database_inside_the_sandbox(tmp_path):
+    # OPENCODE_DB wins over XDG_DATA_HOME, so an inherited value would point the
+    # probe (and its --version call) at the owner's live database.
+    sb = tmp_path / "sb"
+    sb.mkdir()
+    live = tmp_path / "live" / "opencode.db"
+    calls = []
+
+    def fake_run(argv, *, env=None, **kwargs):
+        calls.append((argv, dict(env)))
+        if argv == ["opencode", "--version"]:
+            return _opencode_version(argv, "2.2.0")
+        db = Path(env["OPENCODE_DB"])
+        db.parent.mkdir(parents=True, exist_ok=True)
+        db.write_bytes(b"SQLite format 3\x00")
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    env = {"HOME": str(sb), "OPENCODE_DB": str(live), "OPENCODE_CONFIG": str(tmp_path / "live.json")}
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        res = drv_mod.DRIVERS["opencode_run"].run(sb, env, "Say hi.", timeout=30)
+
+    assert res.ok is True
+    sandbox_db = sb / ".local" / "share" / "opencode" / "opencode.db"
+    assert len(calls) == 2
+    for argv, child_env in calls:
+        assert child_env["OPENCODE_DB"] == str(sandbox_db), argv
+        assert "OPENCODE_CONFIG" not in child_env, argv
+    assert res.session_path == sandbox_db
+    assert not live.exists()
+
+
 def test_openclaw_driver_runs_and_returns_session_jsonl(tmp_path):
     sb = tmp_path / "sb"
     sb.mkdir()

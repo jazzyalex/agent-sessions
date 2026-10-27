@@ -1,0 +1,26 @@
+{
+  "data": {
+    "agent": "redacted",
+    "content": [],
+    "error": {
+      "message": "redacted",
+      "response": {
+        "body": "redacted"
+      },
+      "retryAfterMs": 0,
+      "status": 0,
+      "type": "provider.error"
+    },
+    "finish": "error",
+    "model": {
+      "id": "redacted",
+      "providerID": "redacted",
+      "variant": "redacted"
+    },
+    "time": {
+      "completed": 0,
+      "created": 0
+    }
+  },
+  "type": "assistant"
+}

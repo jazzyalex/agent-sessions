@@ -163,6 +163,25 @@ final class OpenCodeRecentUsageTests: XCTestCase {
         XCTAssertEqual(try window("ses"), .unavailable)
     }
 
+    func testFailedRequestWithoutTokensIsNoUsage() throws {
+        // OpenCode 2.1.4 stores a refused request (provider.free-limit 429) as a
+        // completed assistant row with an error, no tokens and no content.
+        try vendorV2Session("ses")
+        try insertV2Row("ses", id: "a1", type: "assistant", seq: 1, created: ago(minutes: 4), updated: ago(minutes: 3),
+                        data: completedAssistant(created: ago(minutes: 4), completed: ago(minutes: 3)))
+        try insertV2Row("ses", id: "a2", type: "assistant", seq: 2, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: #"{"time":{"created":1,"completed":\#(ago(minutes: 1))},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"provider.free-limit","status":429,"retryAfterMs":1000}}"#)
+        guard case .usage(let events) = try window("ses") else { return XCTFail("a refused request must not blank the window") }
+        XCTAssertEqual(events.map(\.recordID), ["a1-step-finish"])
+    }
+
+    func testFailedRequestWithPartialContentButNoTokensIsUnavailable() throws {
+        try vendorV2Session("ses")
+        try insertV2Row("ses", id: "a", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: #"{"time":{"created":1,"completed":\#(ago(minutes: 1))},"model":{"id":"m","providerID":"p"},"content":[{"type":"text","text":"half"}],"finish":"error","error":{"type":"provider.error"}}"#)
+        XCTAssertEqual(try window("ses"), .unavailable, "a request that streamed content has unknown usage")
+    }
+
     func testAssistantWithTokensButNoCompletionCountsAtRowUpdate() throws {
         try vendorV2Session("ses")
         try insertV2Row("ses", id: "a", type: "assistant", seq: 1, created: ago(minutes: 3), updated: ago(minutes: 2),

@@ -247,8 +247,12 @@ def prepare_auth(
     2. If prebump_cfg["opencode_api_key"] names a provider, export that
        provider's API key as the named env var. A value the caller already
        exported wins. Otherwise the key comes from the provider's *active*
-       OpenCode 2.x credential (the `credential` table of opencode.db), chosen
-       the way OpenCode chooses it. If the active credential is OAuth, or the
+       OpenCode 2.x credential (the `credential` table of the owner's
+       opencode.db, located by OPENCODE_DB, then XDG_DATA_HOME, then the
+       default path), chosen the way OpenCode chooses it. In this mode no
+       credential file is copied (step 4 is skipped): OpenCode 2.x would import
+       a legacy auth.json into the sandbox, and its saved accounts would win
+       over the env key. If the active credential is OAuth, or the
        DB cannot be read, raise HygieneError: the probe must not run with no
        key or under another account. SQLite extracts the key, so only the
        selected `{"type": "key"}` value reaches this process and no OAuth
@@ -280,7 +284,7 @@ def prepare_auth(
         if not provider or not env_var:
             raise HygieneError("opencode_api_key needs both provider and env_var")
         if not os.environ.get(env_var):
-            env[env_var] = _opencode_active_api_key(real_home / ".local/share/opencode/opencode.db", provider)
+            env[env_var] = _opencode_active_api_key(_opencode_source_db(real_home), provider)
 
     env_vars = list(prebump_cfg.get("env_vars") or [])
     for var in env_vars:
@@ -289,7 +293,10 @@ def prepare_auth(
             env[var] = val
             return env, warnings
 
-    cred_specs = list(prebump_cfg.get("credential_files") or [])
+    # In API-key mode the key above is the probe's only credential. OpenCode 2.x
+    # imports a legacy auth.json into its fresh sandbox database, and a saved
+    # account there would win over the env key (and could be OAuth).
+    cred_specs = [] if isinstance(key_spec, dict) else list(prebump_cfg.get("credential_files") or [])
     for spec in cred_specs:
         # Expand ~ against real_home so the call site does not have to.
         if isinstance(spec, str) and spec.startswith("~/"):
@@ -340,6 +347,18 @@ _OPENCODE_ACTIVE_CREDENTIAL_SQL = (
     " FROM credential WHERE integration_id = ?"
     " ORDER BY active DESC, time_created DESC, id DESC LIMIT 1"
 )
+
+
+def _opencode_source_db(real_home: Path) -> Path:
+    """The owner's OpenCode database, found as OpenCode finds it: OPENCODE_DB,
+    then $XDG_DATA_HOME/opencode/opencode.db, then the default under real_home."""
+    explicit = os.environ.get("OPENCODE_DB")
+    if explicit:
+        return Path(explicit).expanduser()
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "opencode" / "opencode.db"
+    return real_home / ".local/share/opencode/opencode.db"
 
 
 def _opencode_active_api_key(db: Path, provider: str) -> str:
@@ -770,6 +789,12 @@ class OpenCodeRunDriver:
         env["XDG_DATA_HOME"] = str(data_home)
         env["XDG_CONFIG_HOME"] = str(config_home)
         env["XDG_STATE_HOME"] = str(state_home)
+        # An inherited OPENCODE_* variable can point OpenCode outside the
+        # sandbox (OPENCODE_DB wins over XDG_DATA_HOME), so drop them all and
+        # pin the database inside the sandbox. This also covers `--version`.
+        for key in [k for k in env if k.startswith("OPENCODE_")]:
+            del env[key]
+        env["OPENCODE_DB"] = str(data_home / "opencode" / "opencode.db")
         # Config `prebump.model` picks a provider whose sign-in works.
         model_args = ["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []
         if _opencode_major_version(env) >= 2:

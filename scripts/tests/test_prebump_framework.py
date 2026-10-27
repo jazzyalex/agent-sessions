@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
@@ -174,6 +176,13 @@ def test_prepare_auth_copies_credential_when_env_missing(tmp_path, monkeypatch):
 _MOONSHOT_SPEC = {"opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"}}
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_opencode_paths(monkeypatch):
+    # The owner's shell must not decide which database these tests read.
+    monkeypatch.delenv("OPENCODE_DB", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+
 def _opencode_credential_db(real_home: Path, rows: list[tuple[str, str, int | None, int]]) -> Path:
     """Rows are (integration_id, value, active, time_created), in OpenCode 2.x's schema."""
     import sqlite3
@@ -297,6 +306,66 @@ def test_opencode_api_key_failures_are_distinct_and_fatal(tmp_path, monkeypatch)
     finally:
         locker.execute("ROLLBACK")
         locker.close()
+
+
+def test_opencode_api_key_breaks_ties_like_opencode(tmp_path, monkeypatch):
+    # Same active flag and time_created: OpenCode's order falls back to id DESC.
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [
+        ("moonshotai", _key("sk-c0"), None, 5),
+        ("moonshotai", _key("sk-c1"), None, 5),
+    ])
+    env, _ = _moonshot_env(tmp_path, real_home)
+    assert env["MOONSHOT_API_KEY"] == "sk-c1"
+
+
+def test_opencode_api_key_reads_the_database_opencode_would_use(tmp_path, monkeypatch):
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [("moonshotai", _key("sk-default"), 1, 1)])
+
+    xdg = tmp_path / "xdg"
+    _opencode_credential_db(xdg / "x", [("moonshotai", _key("sk-xdg"), 1, 1)])
+    (xdg / "x" / ".local/share/opencode/opencode.db").rename(_mkparent(xdg / "opencode" / "opencode.db"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    assert _moonshot_env(tmp_path, real_home)[0]["MOONSHOT_API_KEY"] == "sk-xdg"
+
+    explicit = _opencode_credential_db(tmp_path / "elsewhere", [("moonshotai", _key("sk-explicit"), 1, 1)])
+    monkeypatch.setenv("OPENCODE_DB", str(explicit))
+    assert _moonshot_env(tmp_path, real_home)[0]["MOONSHOT_API_KEY"] == "sk-explicit", "OPENCODE_DB wins"
+
+
+def _mkparent(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_opencode_api_key_mode_never_copies_legacy_auth_json(tmp_path, monkeypatch):
+    # OpenCode 2.x imports auth.json into a fresh database, and a saved account
+    # there wins over MOONSHOT_API_KEY; auth.json also holds OAuth tokens.
+    from agent_watch_prebump_drivers import prepare_auth
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [("moonshotai", _key("sk-active"), 1, 1)])
+    auth = real_home / ".local/share/opencode/auth.json"
+    auth.write_text(json.dumps({"moonshotai": {"type": "api", "key": "sk-stale"},
+                                "openai": {"type": "oauth", "refresh": "r", "access": "a"}}))
+    os.chmod(auth, 0o600)
+    sb = tmp_path / "sb"
+    sb.mkdir()
+
+    env, _ = prepare_auth(prebump_cfg={**_MOONSHOT_SPEC, "credential_files": [str(auth)]},
+                          sandbox=sb, real_home=real_home)
+
+    assert env["MOONSHOT_API_KEY"] == "sk-active"
+    assert not (sb / ".local/share/opencode/auth.json").exists()
+    assert not any(p.name == "auth.json" for p in sb.rglob("*"))
+
+
+def test_real_opencode_config_copies_no_credential_file():
+    config = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
+    assert config["agents"]["opencode"]["prebump"]["credential_files"] == []
 
 
 def test_opencode_api_key_respects_an_exported_key(tmp_path, monkeypatch):

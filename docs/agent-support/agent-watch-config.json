@@ -177,9 +177,7 @@
           "GROQ_API_KEY",
           "OPENROUTER_API_KEY"
         ],
-        "credential_files": [
-          "~/.local/share/opencode/auth.json"
-        ],
+        "credential_files": [],
         "support_files": [
           "~/.config/opencode/config.json",
           "~/.config/opencode/opencode.json",

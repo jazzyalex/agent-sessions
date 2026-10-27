@@ -126,6 +126,45 @@ def test_v2_store_is_sampled_when_it_holds_the_newest_session(tmp_path):
     assert not any(k.startswith("message.") or k.startswith("part.") for k in keys), "v1 rows must not be mixed in"
 
 
+def test_v2_sample_unions_recent_sessions_so_a_short_newest_one_is_not_thin(tmp_path):
+    # 2026-10-27: a one-line manual session was the newest, and the weekly
+    # reported blocked_thin_sample although richer sessions from the day before existed.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO session_v2 VALUES ('ses_short','p',NULL,'s','/tmp','t','2.1.4',NULL,1,300,NULL)"
+    )
+    conn.execute(
+        "INSERT INTO session_message VALUES ('msg_short', 'ses_short', 'user', 0, 1, 1, ?)",
+        (json.dumps({"time": {"created": 1}, "text": "Reply with OK only", "files": [], "agents": []}),),
+    )
+    conn.commit()
+    conn.close()
+
+    fp = _fingerprint(db)
+
+    assert fp["sampled_sessions"] == 2
+    assert fp["session_version"] == "2.1.4", "the newest session still names the version"
+    assert fp["message_rows_parsed"] == 4
+    assert "session_message.assistant.content.tool" in fp["type_keys"], "the older rich session is in the union"
+
+
+def test_v2_sample_is_capped_at_the_shared_sample_count(tmp_path):
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)
+    conn = sqlite3.connect(db)
+    for i in range(agent_watch._LOCAL_SCHEMA_SAMPLE_COUNT + 2):
+        conn.execute(
+            "INSERT INTO session_v2 VALUES (?,'p',NULL,'s','/tmp','t','2.1.4',NULL,1,?,NULL)",
+            (f"ses_extra_{i}", 300 + i),
+        )
+    conn.commit()
+    conn.close()
+
+    assert _fingerprint(db)["sampled_sessions"] == agent_watch._LOCAL_SCHEMA_SAMPLE_COUNT
+
+
 def test_v1_store_is_sampled_when_a_1x_build_wrote_the_newest_session(tmp_path):
     db = tmp_path / "opencode.db"
     _write_db(db, v1_updated=300, v2_updated=200)
@@ -141,7 +180,7 @@ def test_committed_v2_fixture_matches_a_clean_v2_sample(tmp_path):
     db = tmp_path / "opencode.db"
     _write_db(db, v1_updated=100, v2_updated=200)
     fixtures = sorted(str(p) for p in FIXTURE_ROOT.rglob("*.json"))
-    assert len(fixtures) == 11
+    assert len(fixtures) == 12
 
     baseline = agent_watch._baseline_type_keys_for_agent("opencode", fixtures)
     sample = agent_watch._opencode_sqlite_latest_session_schema_fingerprint(db, max_messages=250, max_parts=2500)
@@ -471,6 +510,20 @@ def test_tool_item_without_status_fails_the_gates(tmp_path):
     assert _weekly(fp)[1] is False
 
 
+def test_failed_request_without_tokens_is_not_a_violation():
+    # 2026-10-27: provider.free-limit 429 rows (error, no tokens, empty content)
+    # made the weekly report six unreadable records.
+    failed = {"model": {"id": "m"}, "content": [], "finish": "error",
+              "error": {"type": "provider.free-limit", "status": 429, "retryAfterMs": 1}}
+    assert agent_watch._opencode_v2_required_field_violations("assistant", failed) == []
+
+    partial = dict(failed, content=[{"type": "text", "text": "half a reply"}])
+    assert "assistant.tokens.input" in agent_watch._opencode_v2_required_field_violations("assistant", partial), \
+        "content without tokens has unknown usage"
+    no_error = {k: v for k, v in failed.items() if k != "error"}
+    assert "assistant.tokens.input" in agent_watch._opencode_v2_required_field_violations("assistant", no_error)
+
+
 def test_clean_sample_has_no_required_field_violations(tmp_path):
     db = tmp_path / "opencode.db"
     _write_db(db, v1_updated=100, v2_updated=200)
@@ -747,7 +800,7 @@ _FIXTURE_DISCRIMINATOR_VALUES = {
     "status": {"completed", "error", "exited"},
     "reason": {"auto"},
     "outcome": {"succeeded", "failed"},
-    "finish": {"stop"},
+    "finish": {"stop", "error"},
     "name": {"todowrite", "fixture.png"},
 }
 # Every object key that may appear. Keys come from OpenCode's schema; an
@@ -764,6 +817,8 @@ _FIXTURE_KEYS = {
     "tokens_input", "tokens_output", "tokens_reasoning", "type", "variant", "version", "write", "xai",
     # shell rows
     "command", "cursor", "exit", "shellID", "size", "truncated",
+    # failed-request assistant rows
+    "retryAfterMs",
     # 2.1.4 rows: model-switched, failed idle error, synthetic background-job notice
     "body", "description", "jobID", "previous", "response",
     # session_v2 columns that are NULL on the owner's disk but exist in the schema
@@ -817,7 +872,7 @@ def _fixture_string_violations(value, key=None, path="$"):
 
 def test_v2_fixture_values_follow_the_redaction_policy():
     files = sorted(FIXTURE_ROOT.rglob("*.json"))
-    assert len(files) == 11
+    assert len(files) == 12
     violations = []
     for path in files:
         obj = json.loads(path.read_text(encoding="utf-8"))

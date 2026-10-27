@@ -23,6 +23,16 @@ enum OpenCodeV2MessageAdapter {
     /// Row types that count as conversation messages in the session list.
     static let conversationTypes: Set<String> = ["user", "assistant", "shell"]
 
+    /// An assistant row for a request that failed before producing anything
+    /// (for example a 429 with `retryAfterMs`): it has an `error`, no `tokens`
+    /// and no content. OpenCode records no usage for it, so it used none, as a
+    /// completed compaction without tokens does. A row with partial content
+    /// and no tokens is not this case; its usage is unknown.
+    static func isFailedRequestWithoutUsage(_ data: [String: Any]) -> Bool {
+        guard data["error"] is [String: Any], data["tokens"] == nil else { return false }
+        return (data["content"] as? [Any])?.isEmpty == true
+    }
+
     static func adapt(rowID: String, type: String, timeCreatedMillis: Int64,
                       timeUpdatedMillis: Int64 = 0, data: [String: Any]) -> Adapted {
         let time = data["time"] as? [String: Any] ?? [:]
@@ -77,8 +87,11 @@ enum OpenCodeV2MessageAdapter {
             // when `tokens` is absent or malformed: the usage reducer then sees
             // an incomplete step-finish and reports the session total as
             // unavailable instead of publishing a partial sum as complete.
-            parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"],
-                                                                 timeUpdatedMillis: timeUpdatedMillis)))
+            // The one exception is a request the provider refused outright.
+            if !isFailedRequestWithoutUsage(data) {
+                parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"],
+                                                                     timeUpdatedMillis: timeUpdatedMillis)))
+            }
             return Adapted(message: message, parts: parts)
 
         case "shell":

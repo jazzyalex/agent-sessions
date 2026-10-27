@@ -2108,6 +2108,7 @@ extension OpenCodeSqliteReader {
                     if recent { scan.poisoned = true }
                     continue
                 }
+                if OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage(object) { continue }
                 if object["tokens"] == nil {
                     // No usage and no completion: in flight. Completed without usage: invalid.
                     if completed != nil, recent { scan.poisoned = true }
