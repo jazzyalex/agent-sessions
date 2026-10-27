@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.2] - 2026-10-27
+
 ### Highlights
 
 - **OpenCode sessions in the Quota Meter show their own burn rate.** Each running OpenCode 2.x session shows its token rate, or its API-equivalent cost in the $ lens; free routes read Free. A row keeps its last rate for 5 minutes after a turn ends, marked idle, and has the same load bar as Codex and Claude. OpenCode has no quota or weekly figure yet.
