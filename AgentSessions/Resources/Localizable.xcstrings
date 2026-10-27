@@ -1021,6 +1021,57 @@
         }
       }
     },
+    "OpenCode sessions in the Quota Meter now show their own burn rate.": {
+      "comment": "One-line teaser for the Agent Sessions 6.2 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode sessions in the Quota Meter now show their own burn rate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器中的 OpenCode 会话现在会显示各自的消耗速度。"
+          }
+        }
+      }
+    },
+    "OpenCode burn rate": {
+      "comment": "Title for the Agent Sessions 6.2 What's New highlight about per-session OpenCode burn rates in the Quota Meter.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode burn rate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenCode 消耗速度"
+          }
+        }
+      }
+    },
+    "Each running OpenCode session in the Quota Meter shows its token rate, or its API-equivalent cost in the $ lens, with the same load bar as Codex and Claude. A row keeps its last rate for 5 minutes after a turn ends.": {
+      "comment": "Body for the Agent Sessions 6.2 What's New highlight. The $ lens is the Quota Meter view that shows API-equivalent cost.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each running OpenCode session in the Quota Meter shows its token rate, or its API-equivalent cost in the $ lens, with the same load bar as Codex and Claude. A row keeps its last rate for 5 minutes after a turn ends."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度监视器中每个正在运行的 OpenCode 会话都会显示其 token 速率，或在 $ 视图中显示等价的 API 费用，并使用与 Codex 和 Claude 相同的负载条。一轮对话结束后，该行会保留最后的速率 5 分钟。"
+          }
+        }
+      }
+    },
     "Running OpenCode sessions appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate come later; OpenCode Go users can help add them on GitHub.": {
       "comment": "Body for the Agent Sessions 6.1 What's New highlight. OpenCode Go is a subscription plan name; GitHub is the project host.",
       "localizations": {
