@@ -537,6 +537,9 @@ class AntigravityPrintDriver:
                 # the tool call is denied and the session holds three records with
                 # no tool turn (2026-10-12: permanent blocked_thin_sample).
                 ["agy", "-p", probe_prompt, "--dangerously-skip-permissions"],
+                # Its tools act on the working directory with no permission prompt,
+                # so run it in the sandbox, never in the caller's checkout.
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

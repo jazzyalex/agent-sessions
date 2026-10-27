@@ -2011,13 +2011,20 @@ extension OpenCodeSqliteReader {
             return .noCompletedUsage
         }
         guard let metadata, let scan else { return nil }
-        if scan.poisoned { return .unavailable }
 
         // Inherited fork history is not this session's usage (see loadTelemetry).
+        // That holds for invalid rows too; one with an unknown start still counts.
         var rows = scan.rows
         if let forkBoundary = metadata.createdAt {
+            let ownPoison = scan.poisonedStarts.contains { start in
+                guard let start, let at = dateFromMillis(start) else { return true }
+                return at >= forkBoundary
+            }
+            if ownPoison { return .unavailable }
             if rows.contains(where: { $0.attributionAt == nil }) { return .unavailable }
             rows = rows.filter { ($0.attributionAt ?? .distantPast) >= forkBoundary }
+        } else if scan.poisoned {
+            return .unavailable
         } else if metadata.parentID != nil, !rows.isEmpty {
             return .unavailable
         }
@@ -2067,8 +2074,13 @@ extension OpenCodeSqliteReader {
 
     private struct RecentScan {
         var rows: [OpenCodeTelemetryUsageRow] = []
-        /// A request that could belong to the window is unreadable or invalid.
-        var poisoned = false
+        /// Start times (epoch ms) of requests that could belong to the window but
+        /// are unreadable or invalid; nil when the start is unknown. Kept per row
+        /// so a fork can ignore invalid rows it inherited, as it ignores valid ones.
+        var poisonedStarts: [Int64?] = []
+        var poisoned: Bool { !poisonedStarts.isEmpty }
+
+        mutating func poison(start: Int64?) { poisonedStarts.append(start) }
     }
 
     private static func decodedObject(_ data: String?) -> [String: Any]? {
@@ -2110,7 +2122,7 @@ extension OpenCodeSqliteReader {
         for row in raw {
             let recent = row.timeUpdated >= bounds.windowStart
             guard let object = decodedObject(row.data) else {
-                if recent { scan.poisoned = true }
+                if recent { scan.poison(start: row.timeCreated) }
                 continue
             }
             let time = object["time"] as? [String: Any] ?? [:]
@@ -2118,7 +2130,7 @@ extension OpenCodeSqliteReader {
             switch row.type {
             case "assistant":
                 if completed != nil, positiveEpochMillis(completed) == nil {
-                    if recent { scan.poisoned = true }
+                    if recent { scan.poison(start: row.timeCreated) }
                     continue
                 }
                 if OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage(object) { continue }
@@ -2127,13 +2139,13 @@ extension OpenCodeSqliteReader {
                     // invalid. A `finish` or `error` ends the request even when
                     // `time.completed` is missing.
                     let ended = completed != nil || object["finish"] != nil || object["error"] != nil
-                    if ended, recent { scan.poisoned = true }
+                    if ended, recent { scan.poison(start: row.timeCreated) }
                     continue
                 }
             case "compaction":
                 guard stringValue(object["status"]) == "completed" else { continue }
                 if completed != nil, positiveEpochMillis(completed) == nil {
-                    if recent { scan.poisoned = true }
+                    if recent { scan.poison(start: row.timeCreated) }
                     continue
                 }
                 // A completed compaction without tokens used none (as in Session Info).
@@ -2146,7 +2158,7 @@ extension OpenCodeSqliteReader {
                                                          timeUpdatedMillis: row.timeUpdated, data: object)
             guard let part = adapted.parts.first(where: { ($0.dict["type"] as? String) == "step-finish" }) else { continue }
             guard let tokens = completeStepFinishTokenObject(from: part.dict) else {
-                if recent { scan.poisoned = true }
+                if recent { scan.poison(start: row.timeCreated) }
                 continue
             }
             let start = dateFromMillis(row.timeCreated)
@@ -2186,7 +2198,7 @@ extension OpenCodeSqliteReader {
                                            reasoningEffort: reasoningEffort(from: object))
             } else {
                 // An unreadable message could hide step-finish evidence.
-                if updated >= bounds.windowStart { scan.poisoned = true }
+                if updated >= bounds.windowStart { scan.poison(start: nil) }
                 messages[id] = MessageInfo(start: dateFromMillis(created), model: nil, reasoningEffort: nil)
             }
             step = sqlite3_step(stmt)
@@ -2208,17 +2220,17 @@ extension OpenCodeSqliteReader {
             let updated = sqlite3_column_int64(stmt, 3)
             let recent = updated >= bounds.windowStart
             guard let object = decodedObject(sqlite3_column_text(stmt, 4).map { String(cString: $0) }) else {
-                if recent { scan.poisoned = true }
+                if recent { scan.poison(start: nil) }
                 continue
             }
             guard stringValue(object["type"])?.lowercased() == "step-finish" else { continue }
             let end = (object["time"] as? [String: Any])?["end"]
             if end != nil, positiveEpochMillis(end) == nil {
-                if recent { scan.poisoned = true }
+                if recent { scan.poison(start: nil) }
                 continue
             }
             guard let tokens = completeStepFinishTokenObject(from: object) else {
-                if recent { scan.poisoned = true }
+                if recent { scan.poison(start: nil) }
                 continue
             }
             let message = messages[messageID]

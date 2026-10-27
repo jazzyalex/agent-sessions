@@ -12,7 +12,7 @@ entries:
   - agent_sessions_version: "6.1.2+unreleased"
     as_of_date_utc: "2026-10-27"
     as_of_commit: "c246640c"
-    note: "Late sweep after updating the Codex, Antigravity, Hermes, Grok and Claude CLIs (Kimi rechecked). Weekly scripts/probe_scan_output/agent_watch/20261027-202605-435134Z-p38880/report.json: codex, claude, copilot, opencode, cline, kimi, pi, cursor, antigravity, hermes and grok supports_latest with no unknown types or keys."
+    note: "Late sweep after updating the Codex, Antigravity, Hermes, Grok and Claude CLIs (Kimi rechecked). as_of_commit is the audited code baseline the evidence ran on; these records and the OpenCode fork-attribution fix land in the commits after it. Weekly scripts/probe_scan_output/agent_watch/20261027-202605-435134Z-p38880/report.json: codex, claude, copilot, opencode, cline, kimi, pi, cursor, antigravity, hermes and grok supports_latest with no unknown types or keys."
     verified:
       codex:
         sessions:
@@ -25,7 +25,7 @@ entries:
           max_verified_version: "1.4.8"
           scope: "latest; installed and upstream both 1.4.8"
           evidence: ["scripts/probe_scan_output/agent_watch/20261027-202033-017682Z-p33849-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202231-196774Z-p35248-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-202358-136668Z-p36564/report.json"]
-          notes: "1.4.8 fixes the 1.4.4 hold (a tool call with no result): run_command is now followed by its GENERIC result and a final response. The prebump prompt now asks for a listing, a file read and a shell command; the fresh session (7 events) has no unknown types or keys, and the 40 newest real transcripts in both brain roots hold only fixture-known types and top-level keys. AntigravityTranscriptParser maps unknown types to meta."
+          notes: "1.4.8 fixes the 1.4.4 hold (a tool call with no result): run_command is now followed by its GENERIC result and a final response. The prebump prompt now asks for fixed steps (write and read back probe.txt, run date, list files) so it never reads an arbitrary file, and the driver now runs agy with the sandbox as its working directory (a run before that fix wrote probe.txt into the checkout root; removed); the fresh sessions (7, then 10 events: scripts/probe_scan_output/agent_watch/20261027-204640-958197Z-p53228-prebump/report.json) have no unknown types or keys. The 40 newest real transcripts in both brain roots hold only fixture-known types and top-level keys, but Antigravity does not stamp a version in its transcripts (version_field not_logged), so they support the 1.4.8 verdict without proving which build wrote them. AntigravityTranscriptParser maps unknown types to meta."
       hermes:
         sessions:
           max_verified_version: "0.22.5"

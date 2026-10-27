@@ -287,7 +287,7 @@
       "prebump": {
         "driver": "antigravity_print",
         "sandbox": {"mode": "home_override", "subdir": "antigravity_sandbox"},
-        "prompt": "Use your tools for each step: list the files in the current directory, read the first 20 lines of one of them, run the shell command `date`, then summarize what you found in two sentences.",
+        "prompt": "Use your tools for each step: create a file named probe.txt containing the word hello, read probe.txt back, run the shell command `date`, list the files in the current directory, then reply in one sentence.",
         "timeout_seconds": 180,
         "real_home_session": true,
         "env_vars": [],

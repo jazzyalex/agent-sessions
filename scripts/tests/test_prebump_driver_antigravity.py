@@ -15,10 +15,13 @@ def test_antigravity_driver_runs_and_returns_transcript_artifact(tmp_path):
     sb = tmp_path / "sb"
     sb.mkdir()
 
-    def fake_run(argv, *, env=None, **kwargs):
+    def fake_run(argv, *, env=None, cwd=None, **kwargs):
         assert argv[:2] == ["agy", "-p"]
         assert env is not None
         assert env.get("HOME") == str(sb)
+        # Tools run without permission prompts: they must act on the sandbox,
+        # never on the checkout the harness was started from.
+        assert cwd == str(sb)
         marker = next(part for part in argv[2].split() if part.startswith("AGENT_WATCH_PREBUMP_"))
         home = Path(env["HOME"])
         convo = home / ".gemini" / "antigravity-cli" / "brain" / "conv-abc"

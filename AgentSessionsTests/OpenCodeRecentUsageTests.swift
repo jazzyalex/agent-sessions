@@ -380,6 +380,38 @@ final class OpenCodeRecentUsageTests: XCTestCase {
         XCTAssertEqual(events.map(\.recordID), ["own-step-finish"], "rows before the fork's creation are inherited")
     }
 
+    func testForkIgnoresAnInheritedInvalidRowButNotItsOwn() throws {
+        let generic = #"{"time":{"created":1},"content":[],"finish":"error","error":{"type":"provider.error","status":500}}"#
+        try createVendorSchema()
+        try insertV2SessionRow("fork", updated: ago(minutes: 1), created: ago(minutes: 10), parent: "root")
+        try insertV2Row("fork", id: "inherited", type: "assistant", seq: 1, created: ago(minutes: 20), updated: ago(minutes: 1),
+                        data: generic)
+        try insertV2Row("fork", id: "own", type: "assistant", seq: 2, created: ago(minutes: 5), updated: ago(minutes: 1),
+                        data: completedAssistant(created: ago(minutes: 5), completed: ago(minutes: 1)))
+        guard case .usage(let events) = try window("fork") else {
+            return XCTFail("an invalid row cloned from the parent must not blank the fork's own rate")
+        }
+        XCTAssertEqual(events.map(\.recordID), ["own-step-finish"])
+
+        try insertV2Row("fork", id: "ownbad", type: "assistant", seq: 3, created: ago(minutes: 3), updated: ago(minutes: 1),
+                        data: generic)
+        XCTAssertEqual(try window("fork"), .unavailable, "the fork's own invalid row still fails closed")
+    }
+
+    func testProvenRefusalWithoutCompletionTimeIsStillNoUsage() throws {
+        try vendorV2Session("ses")
+        try insertV2Row("ses", id: "a1", type: "assistant", seq: 1, created: ago(minutes: 4), updated: ago(minutes: 3),
+                        data: completedAssistant(created: ago(minutes: 4), completed: ago(minutes: 3)))
+        try insertV2Row("ses", id: "r", type: "assistant", seq: 2, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: #"{"time":{"created":1},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"provider.free-limit","status":429}}"#)
+        guard case .usage(let events) = try window("ses") else { return XCTFail("a proven refusal is exempt") }
+        XCTAssertEqual(events.map(\.recordID), ["a1-step-finish"])
+
+        try insertV2Row("ses", id: "f", type: "assistant", seq: 3, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: #"{"time":{"created":1},"model":{"id":"m","providerID":"p"},"content":[],"finish":"stop"}"#)
+        XCTAssertEqual(try window("ses"), .unavailable, "finish without tokens has ended without usage")
+    }
+
     func testWindowParityWithFullLoad() throws {
         try vendorV2Session("ses", created: ago(minutes: 200))
         try insertV2Row("ses", id: "old", type: "assistant", seq: 1, created: ago(minutes: 150), updated: ago(minutes: 149),
