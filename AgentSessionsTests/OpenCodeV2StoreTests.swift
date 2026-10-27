@@ -470,6 +470,26 @@ final class OpenCodeV2StoreTests: XCTestCase {
         XCTAssertNotNil(generic.usageSummary?.unavailableReason, "a generic error's usage is unknown")
     }
 
+    func testAbortedEmptyStepKeepsTheSessionUsageTotal() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        let before = try await telemetry(for: "ses_native")
+        try exec("""
+        INSERT INTO session_message VALUES ('msg_aborted', 'ses_native', 'assistant', 6, 9070, 9070,
+            '{"time":{"created":9070,"completed":9071},"agent":"build","model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"aborted","message":"Step interrupted"}}');
+        """)
+        let usage = try await telemetry(for: "ses_native")
+        XCTAssertNil(usage.usageSummary?.unavailableReason, "an interrupted step with no output recorded no usage")
+        XCTAssertEqual(usage.usageSummary?.topLineTokens, before.usageSummary?.topLineTokens)
+
+        try exec("""
+        UPDATE session_message SET data = replace(data, '"content":[]', '"content":[{"type":"text","text":"half"}]')
+            WHERE id = 'msg_aborted';
+        """)
+        let partial = try await telemetry(for: "ses_native")
+        XCTAssertNotNil(partial.usageSummary?.unavailableReason, "an interrupted step that streamed output has unknown usage")
+    }
+
     func testReaderKeepsOctoberFixtureRowsAsMetaWithoutPromptsOrUsage() async throws {
         try createV2Tables()
         try insertNativeV2Session()

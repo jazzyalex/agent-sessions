@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Pressing Esc in OpenCode no longer hides its rate.** An OpenCode step you interrupt before any output used to blank that session's rate in the Quota Meter for 30 minutes, and mark its Session Info token total as incomplete. It now counts as no usage, like a refused request.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- `OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage` also accepts `error.type == "aborted"` (OpenCode 2.2.0's "Step interrupted") with `finish: "error"`, no tokens and empty content. An aborted step that streamed content still makes usage unknown.
+
 ## [6.2] - 2026-10-27
 
 ### Highlights

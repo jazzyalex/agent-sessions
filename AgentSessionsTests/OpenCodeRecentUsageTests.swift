@@ -175,6 +175,25 @@ final class OpenCodeRecentUsageTests: XCTestCase {
         XCTAssertEqual(events.map(\.recordID), ["a1-step-finish"])
     }
 
+    func testAbortedStepWithoutContentIsNoUsage() throws {
+        // OpenCode 2.2.0 stores a step the user interrupted (Esc) before any output
+        // as a completed assistant row with an `aborted` error, no tokens and no content.
+        try vendorV2Session("ses")
+        try insertV2Row("ses", id: "a1", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 2),
+                        data: #"{"time":{"created":1,"completed":\#(ago(minutes: 2))},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"aborted","message":"Step interrupted"}}"#)
+        try insertV2Row("ses", id: "a2", type: "assistant", seq: 2, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: completedAssistant(created: ago(minutes: 2), completed: ago(minutes: 1)))
+        guard case .usage(let events) = try window("ses") else { return XCTFail("an interrupted empty step must not blank the window") }
+        XCTAssertEqual(events.map(\.recordID), ["a2-step-finish"])
+    }
+
+    func testAbortedStepWithContentIsUnavailable() throws {
+        try vendorV2Session("ses")
+        try insertV2Row("ses", id: "a", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1),
+                        data: #"{"time":{"created":1,"completed":\#(ago(minutes: 1))},"model":{"id":"m","providerID":"p"},"content":[{"type":"text","text":"half"}],"finish":"error","error":{"type":"aborted","message":"Step interrupted"}}"#)
+        XCTAssertEqual(try window("ses"), .unavailable, "an interrupted step that streamed output has unknown usage")
+    }
+
     func testGenericErrorWithoutTokensIsUnavailable() throws {
         // Only a proven refusal (free-limit or 429) is zero; another error may have been billed.
         for (index, error) in [#"{"type":"provider.error","status":500}"#, #"{"type":"provider.error"}"#,

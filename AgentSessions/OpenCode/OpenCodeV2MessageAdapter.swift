@@ -23,18 +23,19 @@ enum OpenCodeV2MessageAdapter {
     /// Row types that count as conversation messages in the session list.
     static let conversationTypes: Set<String> = ["user", "assistant", "shell"]
 
-    /// An assistant row for a request the provider refused before generating:
-    /// `finish: "error"`, an `error` that is a rate or quota refusal
-    /// (`provider.free-limit`, or HTTP status 429), no `tokens` and no content.
-    /// A refused request is not billed, so it used none, as a completed
-    /// compaction without tokens does. Any other error, or a row with partial
-    /// content, may have been billed; its usage stays unknown.
+    /// An assistant row for a request that ended before any output:
+    /// `finish: "error"`, no `tokens`, no content, and an `error` that is a rate
+    /// or quota refusal (`provider.free-limit`, or HTTP status 429) or the user's
+    /// interrupt (`aborted`). A refused request is not billed, and OpenCode
+    /// records no usage for an interrupted one, so it counts as none, as a
+    /// completed compaction without tokens does. Any other error, or a row with
+    /// partial content, may have been billed; its usage stays unknown.
     static func isFailedRequestWithoutUsage(_ data: [String: Any]) -> Bool {
         guard let error = data["error"] as? [String: Any],
               data["tokens"] == nil,
               data["finish"] as? String == "error",
               (data["content"] as? [Any])?.isEmpty == true else { return false }
-        if error["type"] as? String == "provider.free-limit" { return true }
+        if error["type"] as? String == "provider.free-limit" || error["type"] as? String == "aborted" { return true }
         guard let status = error["status"] as? NSNumber,
               CFGetTypeID(status) != CFBooleanGetTypeID() else { return false }
         return status.intValue == 429 && status.doubleValue == 429
