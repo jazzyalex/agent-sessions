@@ -11,8 +11,8 @@
 entries:
   - agent_sessions_version: "6.1.2+unreleased"
     as_of_date_utc: "2026-10-27"
-    as_of_commit: "15bc0cd8+working-tree"
-    note: "All-agent format-check sweep. Weekly scripts/probe_scan_output/agent_watch/20261027-042842-061784Z-p62938/report.json flagged drift in Codex, Claude and OpenCode; prebumps flagged Copilot cachePolicyTtlSeconds. Each new key was classified (backlog 'Watch list from the 2026-10-27 format sweep'), added redacted to the normal fixture, and covered by a survive-parsing test. Final weekly scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json has zero unknown types or keys for every agent."
+    as_of_commit: "54151759"
+    note: "All-agent format-check sweep. Weekly scripts/probe_scan_output/agent_watch/20261027-042842-061784Z-p62938/report.json flagged drift in Codex, Claude and OpenCode; prebumps flagged Copilot cachePolicyTtlSeconds. Each new key was classified (backlog 'Watch list from the 2026-10-27 format sweep'), added redacted to the normal fixture, and covered by a survive-parsing test. Final weekly scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json has zero unknown types or keys for every agent. Review follow-up (Repo MCP NO-SHIP on 8959c7b4..54151759): the OpenCode prebump exports the API key of the active Moonshot credential, chosen as OpenCode chooses it, respects an exported MOONSHOT_API_KEY, no longer gets skipped by an unrelated provider env var, and fails the probe when the DB is unreadable or the active credential is OAuth; GPT rows gain their published OpenAI 12-hour cache-write rates (cacheWrite1hPerMTok); Codex world_state, Copilot cachePolicyTtlSeconds and an OpenCode reader-level test close the assertion gaps."
     verified:
       codex:
         sessions:

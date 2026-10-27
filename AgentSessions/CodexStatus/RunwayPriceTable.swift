@@ -39,9 +39,11 @@ struct RunwayRateSet: Equatable, Sendable {
     let inputPerMTok: Double        // fresh (non-cached) input
     let cachedInputPerMTok: Double  // cached-input reads
     let outputPerMTok: Double
-    /// 5-minute-TTL cache write (1.25× input). nil → falls back to input.
+    /// Short-retention cache write: Claude's 5-minute TTL (1.25× input), OpenAI's
+    /// 30-minute retention. nil → falls back to input.
     let cacheWritePerMTok: Double?
-    /// 1-hour-TTL cache write (2× input). nil → falls back to the 5-minute rate, then
+    /// Long-retention cache write: Claude's 1-hour TTL (2× input), OpenAI's 12-hour
+    /// retention. nil → falls back to the short-retention rate, then
     /// to input — the pre-split behavior, kept so a manifest published without this
     /// column still prices rather than dropping the session out of `$`.
     let cacheWrite1hPerMTok: Double?
@@ -741,8 +743,10 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// exact, `gpt-5` → any other gpt-5.x). Correct via docs/prices-v2.json — no rebuild.
     ///
     /// `cachedInputPerMTok` = cache-hit read (0.1× input). `cacheWritePerMTok` =
-    /// 5-minute cache write (1.25× input); `cacheWrite1hPerMTok` = 1-hour cache write
-    /// (2× input). GPT cache-write columns are populated only where the provider
+    /// short-retention cache write (Claude 5-minute, 1.25× input; OpenAI 30-minute);
+    /// `cacheWrite1hPerMTok` = long-retention cache write (Claude 1-hour, 2× input;
+    /// OpenAI 12-hour). Codex logs writes with no tier, so they take the short rate.
+    /// GPT cache-write columns are populated only where the provider
     /// publishes a write rate; a positive unpriced write otherwise fails closed.
     ///
     /// `fast` is Anthropic's fast mode, a research preview on Opus 5.5, 5, and 4.8.
@@ -755,10 +759,10 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 2,
-      "sequence": 2026102701,
+      "sequence": 2026102702,
       "updated": "2026-10-27",
       "aliases": { "claude sonnet 4.6": "claude-sonnet-4-6", "gemini 3.6 flash": "gemini-3.6-flash", "gemini 3.8 flash": "gemini-3.8-flash" },
-      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 is $2/$10 input/output, $0.10 cache reads (0.05x input), and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. GPT-6.1 Terra pricing verified 2026-10-27 UTC at developers.openai.com/api/docs/pricing: $1/$5 input/output, $0.05 cache reads, $1.25 cache writes, and 2x fast rates. Astra, GPT-6.1 Sol/Terra, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input). A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026; their periods entry carries the $1.50/$0.15/$7.50 Google publishes from January 1, 2027, so usage is priced at the rate in force when it happened. A periods entry starts at midnight UTC on its from date and keeps the row's fast, longContext and inferenceGeoUSMultiplier unless it sets its own; older clients ignore it and keep the row's own rates; context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io; minimax-m3.1-flash ($0.15 input, $0.015 cached input, $0.60 output) verified 2026-10-21 there, with no published cache-write rate or long-context tier, and free routes (cline-free/minimax-m3.1-flash) price at this base-model row. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
+      "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-10-11 UTC from platform.claude.com and developers.openai.com. Claude Opus 4 and 4.1 retain their historical $15/$75 rates; generic Claude family aliases accept only versions with the same rate. Opus 5.5 cache reads are $0.20/MTok and fast input/output are $8/$40. Sonnet 5.5 is $2/$10 input/output, $0.10 cache reads (0.05x input), and $2.50/$4 cache writes. Fable and Mythos 5.1 cache reads are $0.25/MTok. GPT-6.1 Sol pricing verified 2026-09-30 UTC at developers.openai.com/api/docs/models/gpt-6.1-sol: $2/$10 input/output, $0.10 cache reads, $2.50 cache writes, and 2x fast rates. GPT-6.1 Terra pricing verified 2026-10-27 UTC at developers.openai.com/api/docs/pricing: $1/$5 input/output, $0.05 cache reads, $1.25 30-minute and $2.50 12-hour cache writes, and 2x fast rates. Astra, GPT-6.1 Sol/Terra, GPT-6 Sol/Luna, GPT-5.6 Sol, GPT-5.5, and GPT-5.4 requests above 272K input tokens use 2x input and 1.5x output rates. GPT prefix fallback accepts dated snapshots only; Claude family fallbacks accept only verified versions. cachedInputPerMTok is cache read; cacheWritePerMTok is the short-retention cache write (Claude 5-minute, 1.25x input; OpenAI 30-minute) and cacheWrite1hPerMTok the long-retention one (Claude 1-hour, 2x input; OpenAI 12-hour). OpenAI 30-minute and 12-hour write rates verified 2026-10-27 UTC at developers.openai.com/api/docs/pricing. Codex logs cache writes with no retention tier, so they price at the 30-minute rate. A positive cache-write volume with no published GPT write rate is unavailable. The optional fast object supplies model-specific fast-mode rates. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default. Schema 2. Clients adopt a manifest only when sequence is strictly greater than the loaded one, so raise sequence (YYYYMMDDNN) on every edit, in BOTH docs/prices-v2.json and the bundled copy in RunwayPriceTable.swift. Claude, GPT and codex-auto-review rows must also stay identical in the legacy docs/prices.json. Vendor rows below are schema-2 only and never go into docs/prices.json. Google rates verified 2026-10-14 at ai.google.dev: Gemini 3.8 Flash and 3.6 Flash Standard rates apply through December 31, 2026; their periods entry carries the $1.50/$0.15/$7.50 Google publishes from January 1, 2027, so usage is priced at the rate in force when it happened. A periods entry starts at midnight UTC on its from date and keeps the row's fast, longContext and inferenceGeoUSMultiplier unless it sets its own; older clients ignore it and keep the row's own rates; context-caching storage is billed per hour, so no cache-write rate. Z.ai rates verified 2026-10-14 at docs.z.ai. MiniMax rates verified 2026-10-14 at platform.minimax.io; minimax-m3.1-flash ($0.15 input, $0.015 cached input, $0.60 output) verified 2026-10-21 there, with no published cache-write rate or long-context tier, and free routes (cline-free/minimax-m3.1-flash) price at this base-model row. Moonshot rates verified 2026-10-14 at platform.kimi.ai. xAI rates verified 2026-10-14 at docs.x.ai: grok-4.6 bills every token at 2x when the prompt reaches 200k tokens; thresholdInputTokens is exclusive, so it is 199999. Meta rates verified 2026-10-14 at dev.meta.ai: muse-spark-1.3 is the Standard-mode rate; Meta states no long-context premium. muse-spark-1.3-contributor is Meta's Contributor-mode model ($0.10 input, $0.002 cached input, $0.20 output), verified 2026-10-14 at dev.meta.ai/docs/pricing-rate-limits; free contributor routes (muse-spark-1.3-contributor-free, cline-free/muse-spark-1.3-contributor) are priced at this base-model row. Aliases map the display names Antigravity records (Claude Sonnet 4.6, Gemini 3.6 Flash, Gemini 3.8 Flash; effort suffix stripped, lowercased) to their rows; added 2026-10-14.",
       "models": {
         "claude-opus-5-5": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 8.0, "inferenceGeoUSMultiplier": 1.1,
                             "fast": { "inputPerMTok": 8.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 40.0, "cacheWritePerMTok": 10.0, "cacheWrite1hPerMTok": 16.0 } },
@@ -785,28 +789,28 @@ final class RunwayPriceTable: @unchecked Sendable {
         "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
         "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
         "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0,  "cacheWrite1hPerMTok": 1.6 },
-        "gpt-6-astra":     { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5,
-                             "fast": { "inputPerMTok": 20.0, "cachedInputPerMTok": 2.0, "outputPerMTok": 100.0, "cacheWritePerMTok": 25.0 },
+        "gpt-6-astra":     { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 25.0,
+                             "fast": { "inputPerMTok": 20.0, "cachedInputPerMTok": 2.0, "outputPerMTok": 100.0, "cacheWritePerMTok": 25.0, "cacheWrite1hPerMTok": 50.0 },
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-6.1-sol":     { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,
-                             "fast": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
+        "gpt-6.1-sol":     { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5, "cacheWrite1hPerMTok": 5.0,
+                             "fast": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.2, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 10.0 },
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-6.1-terra":   { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.05,  "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25,
-                             "fast": { "inputPerMTok": 2.0, "cachedInputPerMTok": 0.1, "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5 },
+        "gpt-6.1-terra":   { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.05,  "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25, "cacheWrite1hPerMTok": 2.5,
+                             "fast": { "inputPerMTok": 2.0, "cachedInputPerMTok": 0.1, "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5, "cacheWrite1hPerMTok": 5.0 },
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-6-sol":       { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,
-                             "fast": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
+        "gpt-6-sol":       { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5, "cacheWrite1hPerMTok": 5.0,
+                             "fast": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4, "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 10.0 },
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-6-luna":      { "inputPerMTok": 0.1,  "cachedInputPerMTok": 0.01,  "outputPerMTok": 0.5,  "cacheWritePerMTok": 0.125,
-                             "fast": { "inputPerMTok": 0.2, "cachedInputPerMTok": 0.02, "outputPerMTok": 1.0, "cacheWritePerMTok": 0.25 },
+        "gpt-6-luna":      { "inputPerMTok": 0.1,  "cachedInputPerMTok": 0.01,  "outputPerMTok": 0.5,  "cacheWritePerMTok": 0.125, "cacheWrite1hPerMTok": 0.25,
+                             "fast": { "inputPerMTok": 0.2, "cachedInputPerMTok": 0.02, "outputPerMTok": 1.0, "cacheWritePerMTok": 0.25, "cacheWrite1hPerMTok": 0.5 },
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+        "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 10.0,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5,
+        "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5, "cacheWrite1hPerMTok": 5.0,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25,
+        "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25, "cacheWrite1hPerMTok": 0.5,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
-        "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+        "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 10.0,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
@@ -814,7 +818,7 @@ final class RunwayPriceTable: @unchecked Sendable {
         "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null,
                              "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
-        "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0,
+        "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0, "cacheWrite1hPerMTok": 10.0,
                                "longContext": { "thresholdInputTokens": 272000, "inputMultiplier": 2.0, "outputMultiplier": 1.5 } },
         "gemini-3.8-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null, "periods": [{ "from": "2027-01-01", "inputPerMTok": 1.5, "cachedInputPerMTok": 0.15, "outputPerMTok": 7.5, "cacheWritePerMTok": null }] },
         "gemini-3.6-flash": { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 3.75, "cacheWritePerMTok": null, "periods": [{ "from": "2027-01-01", "inputPerMTok": 1.5, "cachedInputPerMTok": 0.15, "outputPerMTok": 7.5, "cacheWritePerMTok": null }] },

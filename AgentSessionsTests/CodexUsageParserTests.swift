@@ -4780,17 +4780,41 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(standard.inputPerMTok, 1)
         XCTAssertEqual(standard.cachedInputPerMTok, 0.05)
         XCTAssertEqual(standard.outputPerMTok, 5)
-        XCTAssertEqual(standard.cacheWritePerMTok, 1.25)
+        XCTAssertEqual(standard.cacheWritePerMTok, 1.25, "30-minute write")
+        XCTAssertEqual(standard.cacheWrite1hPerMTok, 2.5, "12-hour write")
         let fast = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_000))
         XCTAssertEqual(fast.inputPerMTok, 2)
         XCTAssertEqual(fast.cachedInputPerMTok, 0.1)
         XCTAssertEqual(fast.outputPerMTok, 10)
         XCTAssertEqual(fast.cacheWritePerMTok, 2.5)
+        XCTAssertEqual(fast.cacheWrite1hPerMTok, 5)
 
         let long = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_001))
         XCTAssertEqual(long.inputPerMTok, 2)
         XCTAssertEqual(long.cachedInputPerMTok, 0.1)
         XCTAssertEqual(long.outputPerMTok, 7.5)
+        XCTAssertEqual(long.cacheWritePerMTok, 2.5)
+        XCTAssertEqual(long.cacheWrite1hPerMTok, 5)
+        let fastLong = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_001))
+        XCTAssertEqual(fastLong.cacheWritePerMTok, 5)
+        XCTAssertEqual(fastLong.cacheWrite1hPerMTok, 10)
+
+        // One million 12-hour write tokens bill at the 12-hour rate, not the 30-minute one.
+        XCTAssertEqual(standard.dollars(input: 0, cachedInput: 0, output: 0,
+                                        cacheWrite5m: 1_000_000, cacheWrite1h: 1_000_000), 3.75, accuracy: 1e-9)
+    }
+
+    func testEveryGPTRowWithAShortCacheWritePublishesTheTwelveHourRate() throws {
+        let table = RunwayPriceTable.makeForTesting()
+        for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
+                      "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6", "codex-auto-review"] {
+            let price = try XCTUnwrap(table.price(forModel: model), model)
+            for mode in [RunwaySpeedTier.standard, .fast] {
+                guard let rates = price.rates(for: mode, contextInputTokens: 0) else { continue }
+                let short = try XCTUnwrap(rates.cacheWritePerMTok, model)
+                XCTAssertEqual(rates.cacheWrite1hPerMTok, short * 2, "\(model) \(mode)")
+            }
+        }
     }
 
     func testOpus55PricingUsesPublishedCacheAndFastRates() throws {

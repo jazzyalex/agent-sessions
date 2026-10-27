@@ -244,28 +244,43 @@ def prepare_auth(
 
     Behavior:
     1. Start from os.environ.copy() and pin HOME=str(sandbox).
-    2. If any env var listed under prebump_cfg["env_vars"] is set in
+    2. If prebump_cfg["opencode_api_key"] names a provider, export that
+       provider's API key as the named env var. A value the caller already
+       exported wins. Otherwise the key comes from the provider's *active*
+       OpenCode 2.x credential (the `credential` table of opencode.db), chosen
+       the way OpenCode chooses it. If the active credential is OAuth, or the
+       DB cannot be read, raise HygieneError: the probe must not run with no
+       key or under another account. SQLite extracts the key, so only the
+       selected `{"type": "key"}` value reaches this process and no OAuth
+       token is ever exported. This step runs before step 3 so an unrelated
+       provider env var cannot skip it.
+    3. If any env var listed under prebump_cfg["env_vars"] is set in
        os.environ, forward it into the env dict and skip credential
        copies entirely. (Env-var-first.)
-    3. Otherwise, for each path in prebump_cfg["credential_files"]:
+    4. Otherwise, for each path in prebump_cfg["credential_files"]:
        expand ~ against real_home, run check_credential_hygiene
        (raises HygieneError on hard failure → caller maps to exit 4),
        and copy the file into the sandbox under its path relative to
        real_home, clamping to mode 0600.
-    4. Copy non-secret support files listed under
+    5. Copy non-secret support files listed under
        prebump_cfg["support_files"] into the sandbox. These files provide
        auth selection/account metadata and are size-limited, but do not use
        strict credential mode gates because CLI settings are commonly 0644.
-    5. If prebump_cfg["opencode_api_key"] names a provider, export its stored
-       OpenCode 2.x API key (the `credential` table of opencode.db) as the
-       named env var. Only `{"type": "key"}` rows qualify: an OAuth row is never
-       read, so a sandboxed refresh cannot rotate the owner's token.
 
     Returns (env, warnings). Raises HygieneError on hard failure.
     """
     env = os.environ.copy()
     env["HOME"] = str(sandbox)
     warnings: list[str] = []
+
+    key_spec = prebump_cfg.get("opencode_api_key")
+    if isinstance(key_spec, dict):
+        provider = str(key_spec.get("provider") or "")
+        env_var = str(key_spec.get("env_var") or "")
+        if not provider or not env_var:
+            raise HygieneError("opencode_api_key needs both provider and env_var")
+        if not os.environ.get(env_var):
+            env[env_var] = _opencode_active_api_key(real_home / ".local/share/opencode/opencode.db", provider)
 
     env_vars = list(prebump_cfg.get("env_vars") or [])
     for var in env_vars:
@@ -312,40 +327,47 @@ def prepare_auth(
         shutil.copy2(src, dst)
         os.chmod(dst, 0o600)
 
-    key_spec = prebump_cfg.get("opencode_api_key")
-    if isinstance(key_spec, dict):
-        key = _opencode_stored_api_key(real_home / ".local/share/opencode/opencode.db", str(key_spec.get("provider") or ""))
-        env_var = str(key_spec.get("env_var") or "")
-        if key and env_var:
-            env[env_var] = key
-        else:
-            warnings.append(f"opencode_api_key: no stored API key for {key_spec.get('provider')!r}")
     return env, warnings
 
 
-def _opencode_stored_api_key(db: Path, provider: str) -> str | None:
-    """The provider's API key from OpenCode 2.x's credential table; None for OAuth or absent rows."""
-    if not provider or not db.is_file():
-        return None
+# OpenCode 2.x resolves an integration's active credential as the first row in
+# this order (Credential.activate / Credential.create). Rows written before the
+# `active` column carry NULL, which sorts last, so the newest one wins.
+_OPENCODE_ACTIVE_CREDENTIAL_SQL = (
+    "SELECT CASE WHEN json_valid(value) THEN json_extract(value, '$.type') END,"
+    " CASE WHEN json_valid(value) AND json_extract(value, '$.type') = 'key'"
+    " THEN json_extract(value, '$.key') END"
+    " FROM credential WHERE integration_id = ?"
+    " ORDER BY active DESC, time_created DESC, id DESC LIMIT 1"
+)
+
+
+def _opencode_active_api_key(db: Path, provider: str) -> str:
+    """The API key of the provider's active OpenCode 2.x credential.
+
+    Raises HygieneError when the DB is missing or unreadable, when the provider
+    has no credential, or when its active credential is not an API key.
+    """
+    if not db.is_file():
+        raise HygieneError(f"opencode_api_key: {db} not found")
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
         try:
-            rows = con.execute(
-                "SELECT value FROM credential WHERE integration_id = ? ORDER BY time_updated DESC",
-                (provider,),
-            ).fetchall()
+            row = con.execute(_OPENCODE_ACTIVE_CREDENTIAL_SQL, (provider,)).fetchone()
         finally:
             con.close()
-    except sqlite3.Error:
-        return None
-    for (value,) in rows:
-        try:
-            data = json.loads(value)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(data, dict) and data.get("type") == "key" and isinstance(data.get("key"), str) and data["key"]:
-            return data["key"]
-    return None
+    except sqlite3.Error as exc:
+        raise HygieneError(f"opencode_api_key: cannot read {db}: {exc}") from exc
+    if row is None:
+        raise HygieneError(f"opencode_api_key: no credential for {provider!r}")
+    cred_type, key = row
+    if cred_type != "key":
+        raise HygieneError(
+            f"opencode_api_key: active {provider!r} credential is {cred_type or 'unparseable'}, not an API key"
+        )
+    if not isinstance(key, str) or not key:
+        raise HygieneError(f"opencode_api_key: active {provider!r} API key is empty")
+    return key
 
 
 class CodexExecDriver:

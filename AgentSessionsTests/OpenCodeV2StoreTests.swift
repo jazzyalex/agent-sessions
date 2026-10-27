@@ -428,6 +428,38 @@ final class OpenCodeV2StoreTests: XCTestCase {
         }
     }
 
+    func testReaderKeepsOctoberFixtureRowsAsMetaWithoutPromptsOrUsage() async throws {
+        try createV2Tables()
+        try insertNativeV2Session()
+        let before = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+
+        for (offset, name) in ["model-switched", "idle-failed", "synthetic-job"].enumerated() {
+            let url = FixturePaths.stage0FixtureURL("agents/opencode/sqlite_v2/session_message/\(name).json")
+            let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+            let type = try XCTUnwrap(row["type"] as? String)
+            let data = try JSONSerialization.data(withJSONObject: try XCTUnwrap(row["data"]), options: [.sortedKeys])
+            let created = 9070 + offset
+            try exec("""
+            INSERT INTO session_message VALUES (\(sql("msg_oct_\(offset)")), 'ses_native', \(sql(type)), \(6 + offset),
+                \(created), \(created), \(sql(String(decoding: data, as: UTF8.self))));
+            """)
+        }
+
+        let after = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        XCTAssertEqual(after.events.filter { $0.kind != .meta }.map(\.id),
+                       before.events.filter { $0.kind != .meta }.map(\.id),
+                       "the October rows add no prompt, reply or tool event")
+        for offset in 0..<3 {
+            let rowEvents = after.events.filter { $0.messageID == "msg_oct_\(offset)" }
+            XCTAssertFalse(rowEvents.isEmpty, "October row \(offset) must survive the reader")
+            XCTAssertTrue(rowEvents.allSatisfy { $0.kind == .meta }, "October row \(offset) must stay meta")
+        }
+        let usage = try await telemetry(for: "ses_native")
+        XCTAssertNil(usage.usageSummary?.unavailableReason, "a failed idle row must not make usage unavailable")
+        XCTAssertEqual(usage.usageEvents.count, 2, "the October rows add no usage")
+        XCTAssertEqual(usage.usageSummary?.topLineTokens, 171)
+    }
+
     // MARK: - Fixture
 
     private func telemetry(for id: String) async throws -> SessionTelemetry {

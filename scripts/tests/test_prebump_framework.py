@@ -171,44 +171,163 @@ def test_prepare_auth_copies_credential_when_env_missing(tmp_path, monkeypatch):
     assert env["HOME"] == str(sb)
 
 
-def _opencode_credential_db(real_home: Path, rows: list[tuple[str, str, int]]) -> None:
+_MOONSHOT_SPEC = {"opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"}}
+
+
+def _opencode_credential_db(real_home: Path, rows: list[tuple[str, str, int | None, int]]) -> Path:
+    """Rows are (integration_id, value, active, time_created), in OpenCode 2.x's schema."""
     import sqlite3
     db = real_home / ".local/share/opencode/opencode.db"
     db.parent.mkdir(parents=True)
     con = sqlite3.connect(db)
-    con.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, label TEXT, value TEXT, time_updated INTEGER)")
+    con.execute(
+        "CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, label TEXT NOT NULL,"
+        " value TEXT NOT NULL, connector_id TEXT, method_id TEXT, active INTEGER,"
+        " time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)"
+    )
     con.executemany(
-        "INSERT INTO credential VALUES (?, ?, 'x', ?, ?)",
-        [(f"c{i}", provider, value, updated) for i, (provider, value, updated) in enumerate(rows)],
+        "INSERT INTO credential VALUES (?, ?, 'x', ?, NULL, NULL, ?, ?, ?)",
+        [(f"c{i}", provider, value, active, created, created)
+         for i, (provider, value, active, created) in enumerate(rows)],
     )
     con.commit()
     con.close()
+    return db
 
 
-def test_prepare_auth_exports_opencode_api_key_but_never_oauth(tmp_path, monkeypatch):
+def _key(key: str) -> str:
+    return json.dumps({"type": "key", "key": key})
+
+
+_OAUTH = '{"type":"oauth","refresh":"r","access":"a"}'
+
+
+def _moonshot_env(tmp_path, real_home):
     from agent_watch_prebump_drivers import prepare_auth
+    sb = tmp_path / "sb"
+    sb.mkdir(exist_ok=True)
+    return prepare_auth(prebump_cfg=_MOONSHOT_SPEC, sandbox=sb, real_home=real_home)
+
+
+def test_opencode_api_key_uses_the_active_credential_not_the_newest(tmp_path, monkeypatch):
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     real_home = tmp_path / "realhome"
     _opencode_credential_db(real_home, [
-        ("moonshotai", '{"type":"key","key":"sk-moon"}', 2),
-        ("openai", '{"type":"oauth","refresh":"r","access":"a"}', 3),
+        ("moonshotai", _key("sk-active"), 1, 1),
+        ("moonshotai", _key("sk-newer-inactive"), 0, 9),
+        ("openai", _OAUTH, None, 3),
     ])
+    env, warnings = _moonshot_env(tmp_path, real_home)
+    assert env["MOONSHOT_API_KEY"] == "sk-active"
+    assert warnings == []
+
+
+def test_opencode_api_key_follows_a_switched_active_account(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    db = _opencode_credential_db(real_home, [
+        ("moonshotai", _key("sk-first"), 1, 1),
+        ("moonshotai", _key("sk-second"), 0, 2),
+    ])
+    con = sqlite3.connect(db)
+    con.execute("UPDATE credential SET active = (id = 'c1')")
+    con.commit()
+    con.close()
+    env, _ = _moonshot_env(tmp_path, real_home)
+    assert env["MOONSHOT_API_KEY"] == "sk-second"
+
+
+def test_opencode_api_key_uses_newest_row_when_none_is_marked_active(tmp_path, monkeypatch):
+    # Rows written before OpenCode added the `active` column carry NULL.
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [
+        ("moonshotai", _key("sk-old"), None, 1),
+        ("moonshotai", _key("sk-new"), None, 2),
+    ])
+    env, _ = _moonshot_env(tmp_path, real_home)
+    assert env["MOONSHOT_API_KEY"] == "sk-new"
+
+
+def test_opencode_api_key_refuses_an_active_oauth_credential(tmp_path, monkeypatch):
+    import pytest
+    from agent_watch_prebump_drivers import HygieneError
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [
+        ("moonshotai", _OAUTH, 1, 2),
+        ("moonshotai", _key("sk-inactive"), 0, 1),
+    ])
+    with pytest.raises(HygieneError, match="is oauth, not an API key"):
+        _moonshot_env(tmp_path, real_home)
+
+
+def test_opencode_api_key_failures_are_distinct_and_fatal(tmp_path, monkeypatch):
+    import sqlite3
+    import pytest
+    from agent_watch_prebump_drivers import HygieneError
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+
+    with pytest.raises(HygieneError, match="not found"):
+        _moonshot_env(tmp_path, real_home)
+
+    db = _opencode_credential_db(real_home, [("openai", _key("sk-other"), 1, 1)])
+    with pytest.raises(HygieneError, match="no credential for 'moonshotai'"):
+        _moonshot_env(tmp_path, real_home)
+
+    con = sqlite3.connect(db)
+    con.execute("DROP TABLE credential")
+    con.commit()
+    con.close()
+    with pytest.raises(HygieneError, match="cannot read"):
+        _moonshot_env(tmp_path, real_home)
+
+    locker = sqlite3.connect(db, timeout=0, isolation_level=None)
+    locker.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT,"
+                   " active INTEGER, time_created INTEGER)")
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        import agent_watch_prebump_drivers as drv
+        real_connect = sqlite3.connect
+        monkeypatch.setattr(drv.sqlite3, "connect", lambda *a, **k: real_connect(*a, **{**k, "timeout": 0}))
+        with pytest.raises(HygieneError, match="cannot read .*locked"):
+            _moonshot_env(tmp_path, real_home)
+    finally:
+        locker.execute("ROLLBACK")
+        locker.close()
+
+
+def test_opencode_api_key_respects_an_exported_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-from-env")
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [("moonshotai", _key("sk-stored"), 1, 1)])
+    env, _ = _moonshot_env(tmp_path, real_home)
+    assert env["MOONSHOT_API_KEY"] == "sk-from-env"
+
+
+def test_unrelated_env_var_does_not_skip_the_opencode_api_key(tmp_path, monkeypatch):
+    from agent_watch_prebump_drivers import prepare_auth
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [("moonshotai", _key("sk-moon"), 1, 1)])
     sb = tmp_path / "sb"
     sb.mkdir()
-
-    env, warnings = prepare_auth(
-        prebump_cfg={"opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"}},
+    env, _ = prepare_auth(
+        prebump_cfg={"env_vars": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"], **_MOONSHOT_SPEC},
         sandbox=sb, real_home=real_home,
     )
     assert env["MOONSHOT_API_KEY"] == "sk-moon"
-    assert warnings == []
+    assert env["OPENAI_API_KEY"] == "sk-openai"
 
-    env, warnings = prepare_auth(
-        prebump_cfg={"opencode_api_key": {"provider": "openai", "env_var": "OPENAI_API_KEY"}},
-        sandbox=sb, real_home=real_home,
-    )
-    assert env.get("OPENAI_API_KEY") != "a"
-    assert any("no stored API key" in w for w in warnings)
+
+def test_real_opencode_config_names_the_moonshot_key():
+    config = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
+    prebump = config["agents"]["opencode"]["prebump"]
+    assert prebump["model"].startswith("moonshotai/")
+    assert prebump["opencode_api_key"] == _MOONSHOT_SPEC["opencode_api_key"]
 
 
 def test_prepare_auth_copies_support_files_without_strict_mode(tmp_path, monkeypatch):

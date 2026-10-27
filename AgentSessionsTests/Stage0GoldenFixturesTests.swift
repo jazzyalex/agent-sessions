@@ -278,6 +278,8 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             XCTAssertTrue(decodedRawEvents.contains { $0.contains("\"\(key)\"") },
                           "Copilot 1.0.89 \(key) field should survive parsing")
         }
+        XCTAssertTrue(decodedRawEvents.contains { $0.contains("\"session.usage_record\"") && $0.contains("\"cachePolicyTtlSeconds\":0") },
+                      "Copilot 1.0.104 usage.cachePolicyTtlSeconds should survive parsing")
     }
 
     func testCopilotLargeAndSchemaDriftParses() throws {
@@ -579,6 +581,16 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(provenanceEvents.isEmpty, "content_item_metadata records should survive parsing")
         XCTAssertFalse(provenanceEvents.contains { raw($0).contains("msg-meta-1") && $0.kind == .user },
                        "a developer message with provenance must not become a user prompt")
+
+        let worldState = full.events.filter { raw($0).contains("\"type\":\"world_state\"") && raw($0).contains("\"gpt-6.1-sol\"") }
+        XCTAssertEqual(worldState.count, 1, "the object-valued world_state model record should survive parsing once")
+        if let event = worldState.first {
+            XCTAssertEqual(event.kind, .meta)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw(event).utf8)) as? [String: Any])
+            let state = (object["payload"] as? [String: Any])?["state"] as? [String: Any]
+            let model = try XCTUnwrap(state?["model"] as? [String: Any], "state.model must stay an object")
+            XCTAssertEqual(model["model"] as? String, "gpt-6.1-sol")
+        }
     }
 
     /// The invariant that matters most about these fixtures: they are committed, public
