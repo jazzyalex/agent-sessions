@@ -25,6 +25,10 @@ enum OpenCodeRateValue: Equatable, Sendable {
     case unavailable
     case working
     case idle
+    /// Idle, with the newest burst still fresh: the `.rate`, `.free` or `.unpriced`
+    /// value it showed while working. OpenCode turns are often shorter than the
+    /// sampler cadence, so the rate would otherwise never be seen.
+    indirect case idleRecent(OpenCodeRateValue)
 }
 
 /// Per-session tk/h and $/h for OpenCode, from the newest burst of completed
@@ -106,9 +110,14 @@ enum OpenCodeSessionRate {
 
     static func value(window: OpenCodeRecentWindow?, activity: OpenCodeSessionActivity?,
                       isWorking: Bool, unit: RunwayRateUnit, now: Date) -> OpenCodeRateValue {
-        guard isWorking else { return .idle }
-        if window == .unavailable { return .unavailable }
-        guard let activity, now.timeIntervalSince(activity.newestCompletion) <= freshness else { return .working }
+        let quiet: OpenCodeRateValue = isWorking ? .working : .idle
+        if window == .unavailable { return isWorking ? .unavailable : .idle }
+        guard let activity, now.timeIntervalSince(activity.newestCompletion) <= freshness else { return quiet }
+        let shown = shownValue(activity: activity, unit: unit)
+        return isWorking ? shown : .idleRecent(shown)
+    }
+
+    private static func shownValue(activity: OpenCodeSessionActivity, unit: RunwayRateUnit) -> OpenCodeRateValue {
         guard unit == .dollarsPerHour else { return .rate(activity.tokensPerHour, .tokensPerHour) }
         switch activity.pricing {
         case .priced(let perHour): return .rate(perHour, .dollarsPerHour)

@@ -181,6 +181,42 @@ final class OpenCodeSessionRateTests: XCTestCase {
                                                  unit: .tokensPerHour, now: t0.addingTimeInterval(140)), .idle)
     }
 
+    func testIdleKeepsFreshRate() {
+        let burst = [event(start: 0, end: 60, fresh: 1_000), event(start: 70, end: 130, fresh: 1_000)]
+        let activity = OpenCodeSessionRate.activity(burst: burst, prices: prices)
+        let window = OpenCodeRecentWindow.usage(burst)
+        let newest = t0.addingTimeInterval(130)
+        guard case .idleRecent(.rate(let amount, .tokensPerHour)) = OpenCodeSessionRate.value(
+            window: window, activity: activity, isWorking: false, unit: .tokensPerHour,
+            now: newest.addingTimeInterval(4 * 60)) else {
+            return XCTFail("an idle row keeps the burst's rate while it is fresh")
+        }
+        XCTAssertEqual(amount, activity.tokensPerHour)
+        XCTAssertEqual(OpenCodeSessionRate.value(window: window, activity: activity, isWorking: false,
+                                                 unit: .tokensPerHour, now: newest.addingTimeInterval(6 * 60)),
+                       .idle, "after the freshness window the row is plain idle")
+        XCTAssertEqual(OpenCodeSessionRate.value(window: window, activity: nil, isWorking: false,
+                                                 unit: .tokensPerHour, now: newest), .idle,
+                       "no burst of at least the minimum span: plain idle")
+    }
+
+    func testIdleKeepsFreeAndUnpricedInDollarLens() {
+        let free = [event(start: 0, end: 60, fresh: 1_000, model: "minimax-m3.1-flash-free"),
+                    event(start: 70, end: 130, fresh: 1_000, model: "minimax-m3.1-flash-free")]
+        let freeActivity = OpenCodeSessionRate.activity(burst: free, prices: prices)
+        let now = t0.addingTimeInterval(140)
+        XCTAssertEqual(OpenCodeSessionRate.value(window: .usage(free), activity: freeActivity, isWorking: false,
+                                                 unit: .dollarsPerHour, now: now), .idleRecent(.free))
+        let unknown = [event(start: 0, end: 60, fresh: 1_000, model: "no-such-model"),
+                       event(start: 70, end: 130, fresh: 1_000, model: "no-such-model")]
+        let unknownActivity = OpenCodeSessionRate.activity(burst: unknown, prices: prices)
+        guard case .idleRecent(.unpriced) = OpenCodeSessionRate.value(
+            window: .usage(unknown), activity: unknownActivity, isWorking: false,
+            unit: .dollarsPerHour, now: now) else {
+            return XCTFail("an idle unpriced burst keeps its reason")
+        }
+    }
+
     func testUnavailableWins() {
         let burst = [event(start: 0, end: 60, fresh: 1_000), event(start: 70, end: 130, fresh: 1_000)]
         let activity = OpenCodeSessionRate.activity(burst: burst, prices: prices)

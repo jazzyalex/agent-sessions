@@ -252,8 +252,26 @@ struct OpenCodeHUDGroupModel: Equatable {
     /// Each row's own session rate, keyed by `OpenCodeHUDGroup.sessionID(for:)`.
     /// Empty when rates are off or not yet sampled.
     var rates: [String: OpenCodeRateValue] = [:]
+    /// The unit rates are shown in; nil when this surface shows no rates, so rows
+    /// keep the plain label layout without rate and bar columns.
+    var rateUnit: RunwayRateUnit? = nil
 
     var totalCount: Int { rows.count }
+
+    /// The load bars' scale: the fastest working visible row, floored at 1 like the
+    /// runway's `maxDisplayRate`.
+    var maxBarRate: Double {
+        let rates = visibleRows.compactMap { row in
+            OpenCodeHUDGroup.sessionID(for: row).map { OpenCodeHUDGroup.loadBar(for: self.rates[$0]).displayRate }
+        }
+        return max(1, rates.max() ?? 0)
+    }
+}
+
+/// What one OpenCode row's runway load bar draws.
+struct OpenCodeLoadBar: Equatable {
+    let displayRate: Double
+    let confidence: RunwayAttributionConfidence
 }
 
 /// What a row's rate column shows, when it shows a rate rather than the state label.
@@ -262,6 +280,9 @@ struct OpenCodeRateCell: Equatable {
     /// Drives the projection color; read from the number, never the formatted text.
     let isPositive: Bool
     let help: String?
+    /// The session is idle and this is its newest burst's rate; the row keeps the
+    /// idle label next to it.
+    var isIdle: Bool = false
 }
 
 enum OpenCodeHUDGroup {
@@ -274,7 +295,8 @@ enum OpenCodeHUDGroup {
     static func make(rows: [HUDRow],
                      detectionEnabled: Bool,
                      openCodeEnabled: Bool,
-                     rates: [String: OpenCodeRateValue] = [:]) -> OpenCodeHUDGroupModel? {
+                     rates: [String: OpenCodeRateValue] = [:],
+                     rateUnit: RunwayRateUnit? = nil) -> OpenCodeHUDGroupModel? {
         guard detectionEnabled, openCodeEnabled else { return nil }
         var seen: Set<String> = []
         // Incoming order is kept on purpose: `rowsForDisplay` already applies the
@@ -286,8 +308,23 @@ enum OpenCodeHUDGroup {
             rows: openCodeRows,
             visibleRows: visible,
             overflowCount: openCodeRows.count - visible.count,
-            rates: rates
+            rates: rates,
+            rateUnit: rateUnit
         )
+    }
+
+    /// Only a working row's own rate fills its bar. Idle rows (even with a fresh
+    /// rate), Free, unpriced and not-yet-measured rows keep an empty track, as the
+    /// runway does for its idle and waiting rows.
+    static func loadBar(for value: OpenCodeRateValue?) -> OpenCodeLoadBar {
+        switch value {
+        case .rate(let amount, _):
+            return OpenCodeLoadBar(displayRate: amount, confidence: .direct)
+        case .idle, .idleRecent:
+            return OpenCodeLoadBar(displayRate: 0, confidence: .idle)
+        case .working, .free, .unpriced, .unavailable, .none:
+            return OpenCodeLoadBar(displayRate: 0, confidence: .waiting)
+        }
     }
 
     /// The same visibility `make` decides, for callers that only need a Bool.
@@ -347,6 +384,9 @@ enum OpenCodeHUDGroup {
             return OpenCodeRateCell(text: "—", isPositive: false,
                                     help: String(localized: "Usage data for this session is incomplete.",
                                                  comment: "Quota Meter OpenCode row tooltip: recent usage records are unreadable or invalid, so no rate is shown."))
+        case .idleRecent(let shown):
+            guard let cell = rateCell(for: shown) else { return nil }
+            return OpenCodeRateCell(text: cell.text, isPositive: false, help: cell.help, isIdle: true)
         case .working, .idle, .none:
             return nil
         }
@@ -4315,6 +4355,7 @@ private struct HUDLimitsRowsPanel: View {
     var body: some View {
         let rows = entries
         let layout = rowLayout(for: rows)
+        let presentation = RunwayPresentation.current(raw: runwayPresentationRaw)
         let openCodeGroup = OpenCodeHUDGroup.make(
             rows: activeRows,
             detectionEnabled: detectionEnabled,
@@ -4322,8 +4363,9 @@ private struct HUDLimitsRowsPanel: View {
             // Gated here as well as in the demand: a populated snapshot must not
             // stay on screen once rates are switched off or the strip collapses.
             rates: OpenCodeHUDGroup.displayedRates(snapshot: rateStore.snapshot,
-                                                   presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
-                                                   showsRates: showsOpenCodeRates)
+                                                   presentation: presentation,
+                                                   showsRates: showsOpenCodeRates),
+            rateUnit: showsOpenCodeRates ? OpenCodeSessionRate.unit(for: presentation) : nil
         )
         Group {
             // OpenCode-only: the group renders alone. "Usage tracking is off" is about
@@ -4922,24 +4964,64 @@ private struct HUDOpenCodeSessionsGroup: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var sessions: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(model.visibleRows) { row in
+    /// The runway row layout: title, fixed-width rate column, load bar. An idle row
+    /// that keeps its last rate shows the idle label at the end of the title column.
+    private func rateRow(_ row: HUDRow, cell: OpenCodeRateCell?, value: OpenCodeRateValue?,
+                         unit: RunwayRateUnit, index: Int) -> some View {
+        let bar = OpenCodeHUDGroup.loadBar(for: value)
+        return GeometryReader { proxy in
+            HStack(spacing: HUDRunwayLayout.columnSpacing) {
                 HStack(spacing: HUDRunwayLayout.columnSpacing) {
                     Text(verbatim: row.displayName)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    if let cell = OpenCodeHUDGroup.rateCell(
-                        for: OpenCodeHUDGroup.sessionID(for: row).flatMap { model.rates[$0] }) {
+                    if cell?.isIdle == true {
+                        stateText(row)
+                    }
+                }
+                .frame(width: HUDRunwayLayout.titleWidth(for: proxy.size.width, unit: unit), alignment: .leading)
+                Group {
+                    if let cell {
                         Text(verbatim: cell.text)
                             .lineLimit(1)
                             .foregroundStyle(cell.isPositive ? hudProjectionColor(colorScheme) : Color.secondary)
                             .help(cell.help ?? "")
                     } else {
-                        Text(OpenCodeHUDGroup.stateLabel(for: row))
-                            .lineLimit(1)
-                            .foregroundStyle(row.liveState == .active ? Color.primary : Color.secondary)
+                        stateText(row)
+                    }
+                }
+                .frame(width: HUDRunwayLayout.rateWidth(for: unit), alignment: .trailing)
+                HUDRunwayLoadBar(displayRate: bar.displayRate, maxDisplayRate: model.maxBarRate,
+                                 confidence: bar.confidence, unit: unit, animationTick: 0, index: index)
+                    // The rate column already says it; the bar's own label would repeat it.
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func stateText(_ row: HUDRow) -> some View {
+        Text(OpenCodeHUDGroup.stateLabel(for: row))
+            .lineLimit(1)
+            .foregroundStyle(row.liveState == .active ? Color.primary : Color.secondary)
+    }
+
+    private var sessions: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(model.visibleRows.enumerated()), id: \.element.id) { index, row in
+                let value = OpenCodeHUDGroup.sessionID(for: row).flatMap { model.rates[$0] }
+                let cell = OpenCodeHUDGroup.rateCell(for: value)
+                Group {
+                    if let unit = model.rateUnit {
+                        rateRow(row, cell: cell, value: value, unit: unit, index: index)
+                    } else {
+                        HStack(spacing: HUDRunwayLayout.columnSpacing) {
+                            Text(verbatim: row.displayName)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 0)
+                            stateText(row)
+                        }
                     }
                 }
                 .frame(height: QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged))

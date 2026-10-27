@@ -238,6 +238,58 @@ final class OpenCodeHUDGroupTests: XCTestCase {
         XCTAssertNil(OpenCodeHUDGroup.rateCell(for: .idle))
     }
 
+    func testIdleRecentRateIsMarkedIdleAndQuiet() throws {
+        let rate = try XCTUnwrap(OpenCodeHUDGroup.rateCell(for: .rate(2_000_000, .tokensPerHour)))
+        let idle = try XCTUnwrap(OpenCodeHUDGroup.rateCell(for: .idleRecent(.rate(2_000_000, .tokensPerHour))))
+        XCTAssertEqual(idle.text, rate.text, "the same number as while working")
+        XCTAssertTrue(idle.isIdle)
+        XCTAssertFalse(rate.isIdle)
+        XCTAssertFalse(idle.isPositive, "an idle rate is drawn secondary, not in the projection color")
+        let free = try XCTUnwrap(OpenCodeHUDGroup.rateCell(for: .idleRecent(.free)))
+        XCTAssertEqual(free.text, "Free")
+        XCTAssertTrue(free.isIdle)
+        let unpriced = try XCTUnwrap(OpenCodeHUDGroup.rateCell(
+            for: .idleRecent(.unpriced(unknownModels: ["a"], missingComponents: []))))
+        XCTAssertEqual(unpriced.help, "No API price for a")
+        XCTAssertTrue(unpriced.isIdle)
+    }
+
+    func testLoadBarFillsOnlyForAWorkingRate() {
+        let working = OpenCodeHUDGroup.loadBar(for: .rate(500_000, .tokensPerHour))
+        XCTAssertEqual(working, OpenCodeLoadBar(displayRate: 500_000, confidence: .direct))
+        XCTAssertTrue(RunwayLoadBarFill.shouldFill(displayRate: working.displayRate, maxDisplayRate: 1_000_000,
+                                                   confidence: working.confidence), "positive control")
+        let empty: [OpenCodeRateValue?] = [.idleRecent(.rate(500_000, .tokensPerHour)), .idle, .working, .free,
+                                           .unpriced(unknownModels: [], missingComponents: []), .unavailable, nil]
+        for value in empty {
+            let bar = OpenCodeHUDGroup.loadBar(for: value)
+            XCTAssertFalse(RunwayLoadBarFill.shouldFill(displayRate: bar.displayRate, maxDisplayRate: 1_000_000,
+                                                        confidence: bar.confidence), "empty track for \(String(describing: value))")
+        }
+        XCTAssertEqual(OpenCodeHUDGroup.loadBar(for: .idleRecent(.rate(500_000, .tokensPerHour))).confidence, .idle)
+    }
+
+    func testLoadBarScalesToFastestWorkingOpenCodeRow() throws {
+        let rows = [rateRow("a", session: "ses_a"), rateRow("b", session: "ses_b"), rateRow("c", session: "ses_c", state: .idle)]
+        let rates: [String: OpenCodeRateValue] = ["ses_a": .rate(1_000_000, .tokensPerHour),
+                                                  "ses_b": .rate(250_000, .tokensPerHour),
+                                                  "ses_c": .idleRecent(.rate(5_000_000, .tokensPerHour))]
+        let group = try XCTUnwrap(OpenCodeHUDGroup.make(rows: rows, detectionEnabled: true, openCodeEnabled: true,
+                                                        rates: rates, rateUnit: .tokensPerHour))
+        XCTAssertEqual(group.maxBarRate, 1_000_000, "an idle row's last rate does not set the scale")
+        let quiet = try XCTUnwrap(OpenCodeHUDGroup.make(rows: rows, detectionEnabled: true, openCodeEnabled: true,
+                                                        rates: [:], rateUnit: .tokensPerHour))
+        XCTAssertEqual(quiet.maxBarRate, 1, "floored at 1 like the runway")
+    }
+
+    func testRateUnitOnlyWhileRatesAreShown() throws {
+        let rows = [rateRow("a", session: "ses_a")]
+        XCTAssertNil(try XCTUnwrap(OpenCodeHUDGroup.make(rows: rows, detectionEnabled: true, openCodeEnabled: true)).rateUnit,
+                     "no unit, no rate columns: the row keeps its plain label layout")
+        XCTAssertEqual(try XCTUnwrap(OpenCodeHUDGroup.make(rows: rows, detectionEnabled: true, openCodeEnabled: true,
+                                                           rateUnit: .dollarsPerHour)).rateUnit, .dollarsPerHour)
+    }
+
     func testUnpricedHelpModelOnly() {
         XCTAssertEqual(OpenCodeHUDGroup.unpricedHelp(unknownModels: ["a", "b"], missingComponents: []),
                        "No API price for a, b")
