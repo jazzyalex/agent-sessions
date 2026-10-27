@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.1.2</title>
-            <pubDate>Sun, 25 Oct 2026 22:06:43 -0700</pubDate>
+            <title>6.2</title>
+            <pubDate>Tue, 27 Oct 2026 15:11:07 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,34 +27,22 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.1.2</h2>
+<h2>What&#x27;s New in 6.2</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>OpenCode in the Quota Meter shows the session you are in.</strong> Each OpenCode terminal shows its open conversation by its real title, working or idle, and closed conversations no longer pose as live. Setup is automatic: a small plugin, with its status in Settings → OpenCode. OpenCode Desktop shows working sessions only, since it keeps its idle selection to itself.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
-<li><strong>Old sessions keep the price they were run at.</strong> A provider price change now applies only to usage after it. Gemini 3.6 and 3.8 Flash double on January 1, 2027; your 2026 sessions keep their 2026 cost.</li>
+<li><strong>OpenCode sessions in the Quota Meter show their own burn rate.</strong> Each running OpenCode 2.x session shows its token rate, or its API-equivalent cost in the $ lens; free routes read Free. A row keeps its last rate for 5 minutes after a turn ends, marked idle, and has the same load bar as Codex and Claude. OpenCode has no quota or weekly figure yet.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Codex limits come back after a connection drop.</strong> A network failure could leave Codex quota out of date for up to an hour. Now it rechecks within a minute, and a warning with Retry replaces the old percentage.</li>
-<li><strong>Cleaner startup.</strong> The app no longer shows two &quot;Select a session&quot; prompts at once, or &quot;Ready&quot; while sessions are still indexing.</li>
+<li><strong>An OpenCode request the provider refused no longer hides the session&#x27;s usage.</strong> One free-tier limit (HTTP 429) made Session Info show the whole session&#x27;s usage as unavailable. A refused request now counts as using no tokens.</li>
 </ul>
-<h3>Reminder: What You Got in 6.1</h3>
-<ul>
-<li><strong>OpenCode in the Quota Meter.</strong> Running OpenCode sessions now appear under the OpenCode logo, below Codex and Claude, each marked working or idle. Limits and burn rate are not there yet. OpenCode Go users who want to help add them: <a href="https://github.com/jazzyalex/agent-sessions/issues">open an issue</a>.</li>
-<li><strong>Quota Meter in the notch (new in 6.0).</strong> Codex and Claude limits sit beside the MacBook camera, or in a small virtual notch on other displays. Hover to open the full meter with live session burn. Pick Notch, Desktop or Automatic in Settings.</li>
-<li><strong>OpenCode 2.x sessions (new in 6.0).</strong> Sessions from OpenCode 2.0 and later reach the list, and sessions carried over from 1.x keep their full history.</li>
-<li><strong>Every agent&#x27;s latest format (new in 6.0.1).</strong> Fresh sessions from twelve agents, Codex 0.163 and Claude Code 2.1.306 among them, read cleanly. OpenClaw 2026.10.5 and DeepSeek Harness 0.2.1 sessions are back, Antigravity desktop and Cline Desktop sessions appear, fx 0.0.8 sessions open, and Claude transcripts no longer repeat each turn.</li>
-</ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.1.2</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.2</a></p>
 </div>
             ]]></description>
-            <sparkle:version>86</sparkle:version>
-            <sparkle:shortVersionString>6.1.2</sparkle:shortVersionString>
+            <sparkle:version>87</sparkle:version>
+            <sparkle:shortVersionString>6.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.1.2/AgentSessions-6.1.2.dmg" length="30045822" type="application/octet-stream" sparkle:edSignature="bP2S39uiLO7VFuPj7e52w5FlPN9j/3ramsuNWzBbNM9QDQNT9OvCU8SAzb+9uLS2ikxRGCop8HBUCob4ycFwCA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg" length="30171472" type="application/octet-stream" sparkle:edSignature="VNiqWc1iLihpmKZPZUgLjhI/JIVPJoWrzn+obQeZfzXzeu/1Co1Nsqg0FnPEqro5bQP4M5qlJvLB91iGJvFUBQ=="/>
         </item>
     </channel>
 </rss>
