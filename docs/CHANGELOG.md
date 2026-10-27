@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
-- **An OpenCode request the provider refused no longer hides the session's usage.** A free-tier limit (HTTP 429) is stored as a step with an error and no token counts. Session Info showed the session's usage as unavailable, and the Quota Meter showed no rate for 2 hours. These steps now count as using no tokens.
+- **An OpenCode request the provider refused no longer hides the session's usage.** One free-tier limit (HTTP 429) made Session Info show the whole session's usage as unavailable. A refused request now counts as using no tokens.
 
 <!-- Development history for this release. The release-note generator drops this heading. -->
 ### Maintenance
