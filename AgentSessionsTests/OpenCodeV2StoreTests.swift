@@ -445,6 +445,31 @@ final class OpenCodeV2StoreTests: XCTestCase {
         XCTAssertEqual(usage.usageSummary?.topLineTokens, 171)
     }
 
+    func testSessionOfOnlyRefusedRequestsHasNoUsageRatherThanUnavailable() async throws {
+        try createV2Tables()
+        try exec("""
+        INSERT INTO session_v2 (id, project_id, slug, directory, title, version, model, time_created, time_updated)
+        VALUES ('ses_refused', 'proj', 'r', '/tmp/v2repo', 'Refused', '2.2.0', '{"id":"m","providerID":"p"}', 9000, 9100);
+        INSERT INTO session_message VALUES ('msg_r_u', 'ses_refused', 'user', 0, 9000, 9000,
+            '{"time":{"created":9000},"text":"hi","files":[],"agents":[]}');
+        INSERT INTO session_message VALUES ('msg_r_sh', 'ses_refused', 'shell', 1, 9001, 9001,
+            '{"time":{"created":9001,"completed":9002},"shellID":"sh","command":"pwd","status":"exited","exit":0}');
+        INSERT INTO session_message VALUES ('msg_r_a', 'ses_refused', 'assistant', 2, 9010, 9010,
+            '{"time":{"created":9010,"completed":9011},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":{"type":"provider.free-limit","status":429,"retryAfterMs":1}}');
+        """)
+        let usage = try await telemetry(for: "ses_refused")
+        XCTAssertNil(usage.usageSummary?.unavailableReason, "every request was refused: zero is proven")
+        XCTAssertTrue(usage.usageEvents.isEmpty)
+
+        try exec("""
+        UPDATE session_message SET data = replace(data, 'provider.free-limit', 'provider.error')
+            WHERE id = 'msg_r_a';
+        UPDATE session_message SET data = replace(data, '"status":429', '"status":500') WHERE id = 'msg_r_a';
+        """)
+        let generic = try await telemetry(for: "ses_refused")
+        XCTAssertNotNil(generic.usageSummary?.unavailableReason, "a generic error's usage is unknown")
+    }
+
     func testReaderKeepsOctoberFixtureRowsAsMetaWithoutPromptsOrUsage() async throws {
         try createV2Tables()
         try insertNativeV2Session()

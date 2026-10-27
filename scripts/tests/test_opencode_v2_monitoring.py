@@ -133,7 +133,7 @@ def test_v2_sample_unions_recent_sessions_so_a_short_newest_one_is_not_thin(tmp_
     _write_db(db, v1_updated=100, v2_updated=200)
     conn = sqlite3.connect(db)
     conn.execute(
-        "INSERT INTO session_v2 VALUES ('ses_short','p',NULL,'s','/tmp','t','2.1.4',NULL,1,300,NULL)"
+        "INSERT INTO session_v2 VALUES ('ses_short','p',NULL,'s','/tmp','t','2.1.1',NULL,1,300,NULL)"
     )
     conn.execute(
         "INSERT INTO session_message VALUES ('msg_short', 'ses_short', 'user', 0, 1, 1, ?)",
@@ -145,9 +145,33 @@ def test_v2_sample_unions_recent_sessions_so_a_short_newest_one_is_not_thin(tmp_
     fp = _fingerprint(db)
 
     assert fp["sampled_sessions"] == 2
-    assert fp["session_version"] == "2.1.4", "the newest session still names the version"
+    assert fp["session_version"] == "2.1.1"
     assert fp["message_rows_parsed"] == 4
     assert "session_message.assistant.content.tool" in fp["type_keys"], "the older rich session is in the union"
+
+
+def test_v2_sample_never_borrows_an_older_versions_sessions(tmp_path):
+    # A one-line session from a new build must not pass the thin-sample gate on
+    # an older build's tool traffic.
+    db = tmp_path / "opencode.db"
+    _write_db(db, v1_updated=100, v2_updated=200)  # rich 2.1.1 session
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO session_v2 VALUES ('ses_new','p',NULL,'s','/tmp','t','2.2.0',NULL,1,300,NULL)"
+    )
+    conn.execute(
+        "INSERT INTO session_message VALUES ('msg_new', 'ses_new', 'user', 0, 1, 1, ?)",
+        (json.dumps({"time": {"created": 1}, "text": "Reply with OK only", "files": [], "agents": []}),),
+    )
+    conn.commit()
+    conn.close()
+
+    fp = _fingerprint(db)
+
+    assert fp["session_version"] == "2.2.0"
+    assert fp["sampled_sessions"] == 1
+    assert fp["message_rows_parsed"] == 1
+    assert "session_message.assistant" not in fp["type_keys"]
 
 
 def test_v2_sample_is_capped_at_the_shared_sample_count(tmp_path):
@@ -156,7 +180,7 @@ def test_v2_sample_is_capped_at_the_shared_sample_count(tmp_path):
     conn = sqlite3.connect(db)
     for i in range(agent_watch._LOCAL_SCHEMA_SAMPLE_COUNT + 2):
         conn.execute(
-            "INSERT INTO session_v2 VALUES (?,'p',NULL,'s','/tmp','t','2.1.4',NULL,1,?,NULL)",
+            "INSERT INTO session_v2 VALUES (?,'p',NULL,'s','/tmp','t','2.1.1',NULL,1,?,NULL)",
             (f"ses_extra_{i}", 300 + i),
         )
     conn.commit()
@@ -523,6 +547,19 @@ def test_failed_request_without_tokens_is_not_a_violation():
     no_error = {k: v for k, v in failed.items() if k != "error"}
     assert "assistant.tokens.input" in agent_watch._opencode_v2_required_field_violations("assistant", no_error)
 
+    status_only = dict(failed, error={"type": "provider.rate-limit", "status": 429})
+    assert agent_watch._opencode_v2_required_field_violations("assistant", status_only) == []
+
+    # A generic error may have been billed: it stays unreadable.
+    for generic in ({"type": "provider.error", "status": 500},
+                    {"type": "provider.error", "status": 0},
+                    {"type": "provider.error", "status": True},
+                    {"name": "x"}):
+        row = dict(failed, error=generic)
+        assert "assistant.tokens.input" in agent_watch._opencode_v2_required_field_violations("assistant", row), generic
+    not_error_finish = dict(failed, finish="stop")
+    assert "assistant.tokens.input" in agent_watch._opencode_v2_required_field_violations("assistant", not_error_finish)
+
 
 def test_clean_sample_has_no_required_field_violations(tmp_path):
     db = tmp_path / "opencode.db"
@@ -794,7 +831,7 @@ _FIXTURE_PLACEHOLDERS = {"redacted", "fixture.png", "fixture", "/tmp/fixture", "
 # with these exact values.
 _FIXTURE_DISCRIMINATOR_VALUES = {
     "type": {
-        "assistant", "compaction", "direct", "idle", "inline", "model-switched", "provider.error",
+        "assistant", "compaction", "direct", "idle", "inline", "model-switched", "provider.error", "provider.free-limit",
         "reasoning", "shell", "synthetic", "system", "text", "tool", "tool.execution", "user",
     },
     "status": {"completed", "error", "exited"},

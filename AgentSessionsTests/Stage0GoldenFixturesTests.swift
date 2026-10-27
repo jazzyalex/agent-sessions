@@ -603,6 +603,11 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertEqual(encryptedCall.count, 1, "a function_call with encrypted_content stays a tool call")
         XCTAssertEqual(encryptedCall.first?.toolName, "send_message")
         XCTAssertTrue((encryptedCall.first?.toolInput ?? "").contains("message"), "its arguments stay readable")
+
+        // 2026-10-27: a harness-authored mid-session reasoning-effort change.
+        let configUpdate = full.events.filter { raw($0).contains("\"configuration_update\"") }
+        XCTAssertEqual(configUpdate.count, 1, "configuration_update should survive parsing once")
+        XCTAssertEqual(configUpdate.first?.kind, .meta, "a configuration change is not a prompt or reply")
     }
 
     /// The invariant that matters most about these fixtures: they are committed, public

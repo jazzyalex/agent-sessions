@@ -271,6 +271,10 @@ struct OpenCodeSqliteReader {
             usageUnavailableReason = "OpenCode step-finish usage is incomplete because one or more records are malformed or missing required token components."
         } else if !stepUsage.isEmpty {
             rawUsageRows = stepUsage
+        } else if isV2, stepFinishCount == 0, consistsOfRefusedRequests(messages) {
+            // Every request was refused before generating (see
+            // OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage): a true zero.
+            rawUsageRows = []
         } else if !hasPartTable {
             // Pre-step-finish databases have no part table. Their assistant
             // message tokens are the only available usage evidence.
@@ -629,6 +633,15 @@ struct OpenCodeSqliteReader {
         stringValue(object["variant"])
             ?? stringValue(object["reasoningEffort"])
             ?? stringValue(object["thinking"])
+    }
+
+    /// With no step-finish at all, true when the session made requests and all
+    /// were refused before generating, so a zero total is proven, not missing.
+    /// The adapter gives every other v2 assistant request (and every compaction
+    /// with tokens) a step-finish, so the caller's `stepFinishCount == 0` rules
+    /// those out; shell rows also adapt to `assistant` but are not requests.
+    private static func consistsOfRefusedRequests(_ messages: [OpenCodeTelemetryMessageRow]) -> Bool {
+        messages.contains { $0.object[OpenCodeV2MessageAdapter.refusedWithoutUsageKey] as? Bool == true }
     }
 
     private static func tokenObject(from object: [String: Any]) -> [String: Any]? {

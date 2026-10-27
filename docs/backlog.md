@@ -783,9 +783,16 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 - **OpenCode refused requests** — assistant rows with `error` (`provider.free-limit`,
   `status` 429, `retryAfterMs`), `finish: "error"`, empty `content` and no `tokens`.
-  They now count as no usage (`OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage`).
+  Only this proven refusal counts as no usage
+  (`OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage`); any other error without
+  tokens keeps usage unavailable, since it may have been billed. If a new refusal type
+  shows up (another `error.type`), add it only with evidence that it is not billed.
   The error itself is not shown in the transcript; same candidate as the failed `idle`
   rows below.
+- **Codex `configuration_update`** (0.164.0) — a `response_item` with
+  `{reasoning: {effort}}` and `metadata.harness_authored_configuration: true`: the
+  harness changed reasoning effort mid-session (`xhigh` -> `high`). Meta today; could
+  feed reasoning-effort changes in Session Info.
 - **Claude `tools-used`** (2.1.311) — `{type, tools: [tool names], sessionId}`, a
   session-level list of the tools used. Meta today; could feed a per-session tool
   summary without scanning the transcript.

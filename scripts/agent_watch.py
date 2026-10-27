@@ -4834,10 +4834,20 @@ def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) 
             problems.append("assistant.content")
             content = []
         tokens = data.get("tokens")
-        # A request that failed before producing anything (error, no tokens, no
-        # content) used no tokens; the app counts it as no usage
-        # (OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage).
-        failed_without_usage = isinstance(data.get("error"), dict) and "tokens" not in data and content == []
+        # A request the provider refused before generating (finish "error",
+        # provider.free-limit or HTTP 429, no tokens, no content) used no tokens;
+        # the app counts it as no usage (OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage).
+        # Any other error may have been billed and stays a violation.
+        error = data.get("error")
+        status = error.get("status") if isinstance(error, dict) else None
+        failed_without_usage = (
+            isinstance(error, dict)
+            and "tokens" not in data
+            and data.get("finish") == "error"
+            and content == []
+            and (error.get("type") == "provider.free-limit"
+                 or (isinstance(status, (int, float)) and not isinstance(status, bool) and status == 429))
+        )
         if not failed_without_usage:
             for key in ("input", "output", "reasoning"):
                 if not number(tokens, key):
@@ -4863,9 +4873,10 @@ def _opencode_v2_store_fingerprint(
     """
     Fingerprint the newest OpenCode 2.x sessions from session_v2 + session_message.
 
-    Unions the newest _LOCAL_SCHEMA_SAMPLE_COUNT unarchived sessions, as the
-    other agents' weekly samples do, so one short session (a one-line prompt)
-    cannot make the sample thin while richer recent sessions exist.
+    Unions the newest _LOCAL_SCHEMA_SAMPLE_COUNT unarchived sessions written
+    by the newest session's version, as the other agents' weekly samples do,
+    so one short session (a one-line prompt) cannot make the sample thin while
+    richer sessions from the same build exist.
 
     Returns None when the database has no 2.x store, or when its newest v1
     session is at least as new as its newest 2.x session. OpenCode copies v1
@@ -4879,13 +4890,18 @@ def _opencode_v2_store_fingerprint(
     }
     if not {"session_v2", "session_message"} <= tables:
         return None
-    v2_rows = conn.execute(
-        "SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT ?;",
-        (_LOCAL_SCHEMA_SAMPLE_COUNT,),
-    ).fetchall()
-    if not v2_rows:
+    v2_row = conn.execute(
+        "SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT 1;"
+    ).fetchone()
+    if v2_row is None:
         return None
-    v2_row = v2_rows[0]
+    # Only sessions the newest session's version wrote, so an older build's
+    # traffic cannot certify (or contaminate) the version being checked.
+    v2_rows = conn.execute(
+        "SELECT * FROM session_v2 WHERE time_archived IS NULL AND version IS ?"
+        " ORDER BY time_updated DESC LIMIT ?;",
+        (v2_row["version"], _LOCAL_SCHEMA_SAMPLE_COUNT),
+    ).fetchall()
     if "session" in tables:
         v1_newest = conn.execute(
             "SELECT MAX(time_updated) FROM session WHERE time_archived IS NULL;"

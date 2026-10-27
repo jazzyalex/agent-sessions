@@ -23,15 +23,26 @@ enum OpenCodeV2MessageAdapter {
     /// Row types that count as conversation messages in the session list.
     static let conversationTypes: Set<String> = ["user", "assistant", "shell"]
 
-    /// An assistant row for a request that failed before producing anything
-    /// (for example a 429 with `retryAfterMs`): it has an `error`, no `tokens`
-    /// and no content. OpenCode records no usage for it, so it used none, as a
-    /// completed compaction without tokens does. A row with partial content
-    /// and no tokens is not this case; its usage is unknown.
+    /// An assistant row for a request the provider refused before generating:
+    /// `finish: "error"`, an `error` that is a rate or quota refusal
+    /// (`provider.free-limit`, or HTTP status 429), no `tokens` and no content.
+    /// A refused request is not billed, so it used none, as a completed
+    /// compaction without tokens does. Any other error, or a row with partial
+    /// content, may have been billed; its usage stays unknown.
     static func isFailedRequestWithoutUsage(_ data: [String: Any]) -> Bool {
-        guard data["error"] is [String: Any], data["tokens"] == nil else { return false }
-        return (data["content"] as? [Any])?.isEmpty == true
+        guard let error = data["error"] as? [String: Any],
+              data["tokens"] == nil,
+              data["finish"] as? String == "error",
+              (data["content"] as? [Any])?.isEmpty == true else { return false }
+        if error["type"] as? String == "provider.free-limit" { return true }
+        guard let status = error["status"] as? NSNumber,
+              CFGetTypeID(status) != CFBooleanGetTypeID() else { return false }
+        return status.intValue == 429 && status.doubleValue == 429
     }
+
+    /// Key set on the adapted message of a refused request, so the usage reducer
+    /// can tell a session of only refusals from one with missing accounting.
+    static let refusedWithoutUsageKey = "refusedWithoutUsage"
 
     static func adapt(rowID: String, type: String, timeCreatedMillis: Int64,
                       timeUpdatedMillis: Int64 = 0, data: [String: Any]) -> Adapted {
@@ -88,7 +99,9 @@ enum OpenCodeV2MessageAdapter {
             // an incomplete step-finish and reports the session total as
             // unavailable instead of publishing a partial sum as complete.
             // The one exception is a request the provider refused outright.
-            if !isFailedRequestWithoutUsage(data) {
+            if isFailedRequestWithoutUsage(data) {
+                message[refusedWithoutUsageKey] = true
+            } else {
                 parts.append((rowID + "-step-finish", stepFinishPart(data: data, reason: data["finish"],
                                                                      timeUpdatedMillis: timeUpdatedMillis)))
             }

@@ -175,6 +175,18 @@ final class OpenCodeRecentUsageTests: XCTestCase {
         XCTAssertEqual(events.map(\.recordID), ["a1-step-finish"])
     }
 
+    func testGenericErrorWithoutTokensIsUnavailable() throws {
+        // Only a proven refusal (free-limit or 429) is zero; another error may have been billed.
+        for (index, error) in [#"{"type":"provider.error","status":500}"#, #"{"type":"provider.error"}"#,
+                               #"{"type":"provider.error","status":true}"#].enumerated() {
+            let id = "ses\(index)"
+            try vendorV2Session(id)
+            try insertV2Row(id, id: "a\(index)", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1),
+                            data: #"{"time":{"created":1,"completed":\#(ago(minutes: 1))},"model":{"id":"m","providerID":"p"},"content":[],"finish":"error","error":\#(error)}"#)
+            XCTAssertEqual(try window(id), .unavailable, error)
+        }
+    }
+
     func testFailedRequestWithPartialContentButNoTokensIsUnavailable() throws {
         try vendorV2Session("ses")
         try insertV2Row("ses", id: "a", type: "assistant", seq: 1, created: ago(minutes: 2), updated: ago(minutes: 1),

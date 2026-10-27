@@ -9,7 +9,7 @@
       },
       "retryAfterMs": 0,
       "status": 0,
-      "type": "provider.error"
+      "type": "provider.free-limit"
     },
     "finish": "error",
     "model": {
