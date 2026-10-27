@@ -12,7 +12,7 @@
 - **v1 scope (2026-10-26):** a row shows its **own session's** rate only. No child-session trees or aggregation. A parent's rate excludes its children; a visible child row shows its own rate, so nothing is counted twice.
 - Only tk/h and $/h. No 5h or weekly quota for OpenCode until OpenCode Go subscription data exists.
 - OpenCode 2.x live sessions only. Desktop sessions get a rate only while working.
-- **Compaction counts** as a billable call, so $/h reconciles with Session Info. A completed compaction with missing or invalid usage makes the window unavailable.
+- **Compaction counts** as a billable call, so $/h reconciles with Session Info. A completed compaction with invalid usage makes the window unavailable. **Amended at implementation (owner accepted 2026-10-26):** a completed compaction with *absent* tokens counts as no usage, as in Session Info (3 of 5 real completed compactions carry none). A v2 assistant row with valid tokens but no `time.completed` (errored requests) counts at the row's update time.
 - **Free routes read "Free"** in the $ lens (existing `"Free"` catalog key).
 - **Requests that started more than 2 h ago are not shown** (product rule). The row reads "working" until a newer request completes.
 - **Every session row visible on any surface is sampled.** No cross-surface cap.

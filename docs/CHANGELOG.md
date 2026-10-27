@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **OpenCode sessions in the Quota Meter show their own burn rate.** Each running OpenCode 2.x session shows its token rate, or its API-equivalent cost in the $ lens, from the requests it completed recently; free routes read Free. There is no OpenCode quota or weekly figure yet, since that needs OpenCode Go subscription data.
+
+<!-- Development history for this release. The release-note generator drops this heading. -->
+### Maintenance
+
+- OpenCode session rates: a batch, windowed read of `opencode.db` (one read-only connection and one read transaction per 5 s cycle) classifies each request in the last 2 h from its raw row: decoded rows without completion are in flight, unreadable or invalid recent rows make the window unavailable, and completed compactions without tokens count as no usage, as in Session Info. The newest burst (≤ 30 min gaps, ≥ 60 s span, fresh for 5 min) is priced per request through `TelemetryCostCalculator`. One shared sampler reads only while a Quota Meter surface shows OpenCode rates (not Always Off, not a collapsed strip); a 60 s forced reload covers edits the tail token cannot see. `TelemetryUsageEvent` gains `completedAt`. Plan and its four Repo MCP review rounds: `docs/superpowers/plans/2026-10-26-opencode-quota-meter-session-rates.md`.
+
 ## [6.1.2] - 2026-10-25
 
 ### Highlights
