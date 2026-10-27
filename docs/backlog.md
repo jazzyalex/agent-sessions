@@ -781,15 +781,22 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ### Prebump drivers run in the caller's working directory
 > **open** · sev: medium · urg: medium · verified 2026-10-27
 
-Only `antigravity_print` and `opencode_run` pass `cwd=` to the agent they start.
-`codex_exec`, `claude_print`, `droid_exec`, `copilot_prompt`, `openclaw_local_agent`,
-`cursor_agent_print`, `hermes_oneshot`, `pi_prompt` and `kimi_prompt` inherit the
-directory `agent_watch.py` runs from — usually this checkout. Their prompts only read
-today (list files, `pwd`), but several run with auto-approve flags, and on 2026-10-27
-a richer Antigravity prompt wrote `probe.txt` into the repo root before its driver got
-`cwd=sandbox`. Fix: give every driver the sandbox as its working directory (keeping any
-CLI flag that names the directory), assert it in each driver test, and check that a
-prebump leaves `git status` unchanged.
+Two different things decide where a probe's tools act: the subprocess `cwd=` and a CLI
+flag that names the workspace. As of 2026-10-27:
+- Subprocess `cwd=` set to the sandbox: `antigravity_print`, `opencode_run`,
+  `deepseek_harness_headless`, `cline_headless`.
+- Inherit the caller's directory, but pass a sandbox workspace flag: `grok_single`
+  (`--cwd`), `droid_exec` (`--cwd`). Defense in depth would still set `cwd=`.
+- Inherit the caller's directory with no workspace flag found yet — audit each:
+  `codex_exec`, `claude_print`, `copilot_prompt`, `openclaw_local_agent`,
+  `cursor_agent_print`, `hermes_oneshot`, `pi_prompt`, `kimi_prompt`.
+
+`agent_watch.py` usually runs from this checkout. These prompts only read today (list
+files, `pwd`), but several run with auto-approve flags, and on 2026-10-27 a richer
+Antigravity prompt wrote `probe.txt` into the repo root before its driver got
+`cwd=sandbox`. Fix before any write-capable probe prompt: give every driver the sandbox
+as its subprocess `cwd` (keeping any CLI workspace flag), assert it in each driver test,
+and check that a prebump leaves `git status` unchanged.
 
 ### Watch list from the 2026-10-27 format sweep
 > **open** · sev: low · urg: low · verified 2026-10-27
