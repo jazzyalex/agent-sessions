@@ -1,3 +1,28 @@
+## 2026-10-26 · opencode-6.1.2-and-session-rates · 6.1.2 shipped; OpenCode per-session rates committed locally, owner QA next
+status: in-progress
+
+**State:** 6.1.2 (build 86, `43ff49f9`) is released for the OpenCode Quota Meter fixes. On top of it, `main` = `origin/main` = `8959c7b4` (10 commits pushed 2026-10-26): plan revs 1–5, the presence README, `b7b650e2` feat(opencode) per-session rates, `ca7d09cb` docs, `13ddcffc` idle rates + load bars, `8959c7b4` docs. Owner approved the look of `13ddcffc` in the running app. Suite 4001 passed, 0 failed.
+
+**Verified:**
+- `b7b650e2`: full suite 3995 passed, 0 failed, 4 skipped (baseline updated to 3995). Sampler tests clean over 10 iterations. Perf gate p95 1.45 ms for 8 sessions, 1 DB open per cycle (`TEST_RUNNER_AGENT_SESSIONS_PERF=1`). Localization keys 1529.
+- One fresh whole-branch review; Critical/Important fixed RED→GREEN; Minors in `docs/backlog.md` → "OpenCode session rates: minor findings".
+
+**Decided / don't redo:**
+- v1 scope: rates for the root session only, no child-session trees, one shared sampler (`OpenCodeRateSampler.startShared`).
+- Owner rulings (in the plan's Spec amendment): tokenless completed compactions = no usage; assistant rows with tokens but no `time.completed` count at row update time.
+- Other implementation rulings: `docs/backlog.md`, same entry.
+- Repo MCP: Pro profile is unavailable for now; use `--profile review` (Extra High). Plan reviewed 4 times, rev 5 accepted without a fifth review.
+- 6.1.2 QA Gatekeeper kills of the test host were transient; see `docs/deployment.md` → Troubleshooting.
+
+**Uncommitted / ownership:**
+- `docs/backlog.md`, `docs/deployment.md` — this session's notes; uncommitted.
+- `Marketing/POST_READY_REDDIT_OPENCODE_6_1_2_2026-10-26.md` + `v612-opencode-presence-flow.svg` (gitignored): owner edited and removed "2.x" from the SVG. Open suggestion: restore "2.x" and add "Needs OpenCode 2.x; 1.x sessions get no live status". Posting is owner-only.
+
+**Next:**
+1. Owner checks OpenCode rates in the Quota Meter (tk/h after ~60 s of completed requests; $ lens shows $/h or Free; Always Off / collapsed strip hides rates; CPU calm).
+2. Rates ship in 6.2 (pushed, not released).
+3. Decide on the "2.x" wording in the Reddit draft.
+
 ## 2026-10-21 16:39 · format-check-6.0.1 · 6.0.1 released and verified; real-app smoke owed
 status: in-progress
 
