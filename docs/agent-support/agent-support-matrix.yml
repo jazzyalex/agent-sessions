@@ -3,6 +3,7 @@ as_of_commit: "7714ccaf+working-tree"
 as_of_date: 2026-09-29
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "2026-10-27 sweep: eight ceilings advance from fresh tool-using prebump sessions written by the installed builds, each matching the baseline: Codex 0.163.0 -> 0.164.0, Claude 2.1.306 -> 2.1.310 and Copilot 1.0.102 -> 1.0.104 (scripts/probe_scan_output/agent_watch/20261027-053442-937320Z-p78633-prebump/report.json, after the drift fixtures below); Kimi 2.3.0 -> 2.3.3, Cursor 2026.10.19 -> 2026.10.22 and Pi 1.3.0 -> 1.4.0 (scripts/probe_scan_output/agent_watch/20261027-042935-208834Z-p63972-prebump/report.json); Cline CLI 3.0.73 -> 3.0.74 and OpenCode 2.1.2 -> 2.1.4 (scripts/probe_scan_output/agent_watch/20261027-052948-844342Z-p76794-prebump/report.json). Drift classified and added to the normal fixtures: Codex content_item_metadata provenance and object-valued world_state.state.model; Claude user.sandboxed, permissionDecision grantScope/reasonCode, compactMetadata precomputed/runningTurnSends, auto_mode finishExposedWork and api-request-blob image source; Copilot usage.cachePolicyTtlSeconds; OpenCode model-switched, failed idle with error, and synthetic job notices. Survive-parsing tests: Stage0GoldenFixturesTests.testCodexOctoberMetadataAdditionsSurviveParsing, testClaudeOctoberSchemaAdditionsSurviveParsing, OpenCodeV2StoreTests.testAdapterKeepsOctoberFixtureRowsAsMeta. Driver changes: Cline pins cline-free/nemotron-3.5-super-vl (the minimax, deepseek and muse free promotions ended); OpenCode uses moonshotai/kimi-k2.7-code with the stored Moonshot API key exported from opencode.db (2.x keeps credentials there, not in auth.json; OAuth rows are never read) because the free tier hit its usage limit. Held: OpenClaw 2026.10.7 stays at 2026.10.5 (every turn fails in the Codex app-server, backlog entry); Antigravity, Grok, Hermes and DeepSeek Harness are installed-only. Final weekly: scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json (zero unknown types or keys for every agent; OpenCode blocked_thin_sample only because a one-line manual check session was the newest in the real store)."
   - "2026-10-21 follow-up weekly: Claude `user.refusedMessageId` (written since 2.1.304 on a harness `type:user`, `isMeta`, `turnCompanion` notice after a safety-classifier stop; the id is the stopped assistant reply's message.id, whose stop_reason is `refusal`). The notice had parsed as a user prompt (title fallback, user count, turn start); ClaudeSessionParser now emits it as a system `.meta` event (SessionParserTests.testClaudeClassifierStopNoticeIsMetaNotUserPrompt). Claude stays 2.1.306. Kimi 2.3.0 `changeNotifier.snapshot` is change-detection state, parsed as `.meta`; Kimi advanced 2.2.0 -> 2.3.0. Details in docs/agent-json-tracking.md."
   - "2026-10-21 Claude 2.1.303 / Codex 0.163.0 drift: Claude's new api-request, api-request-blob and api-request-shape request-log records are now skipped by the app (they had produced duplicate transcript rows and system-prompt search text); Codex additional_tools stays metadata and top_level_tools is opaque. Normal fixtures refreshed from all local sessions. Bumped Codex 0.162.1 -> 0.163.0 and Claude 2.1.296 -> 2.1.306 from fresh prebumps that match the new baseline (scripts/probe_scan_output/agent_watch/20261021-045130-130059Z-p72081-prebump/report.json, scripts/probe_scan_output/agent_watch/20261021-045218-153538Z-p72636-prebump/report.json); Copilot 1.0.101 usage_record counters are fixture-covered. Same day, after CLI updates, fresh tool-bearing prebump sessions matched baseline and advanced Copilot 1.0.97 -> 1.0.101 (scripts/probe_scan_output/agent_watch/20261021-050306-660954Z-p77035-prebump/report.json), OpenCode 2.1.1 -> 2.1.2, Kimi 2.1.1 -> 2.2.0, Pi 1.1.0 -> 1.3.0, Grok 1.0.44 -> 1.0.62, Cursor 2026.9.8 -> 2026.10.19 and Hermes 0.21.5 -> 0.22.2. Antigravity 1.4.3 is held: its fresh session has 4 events and a tool call with no result (blocked_thin_sample). Cline CLI 3.0.62 -> 3.0.73 (Desktop stays 0.0.28) from a fresh 3.0.73 session with run_commands/read_files tool calls and results; steward_check reports all good over 5 sessions. Final weekly: scripts/probe_scan_output/agent_watch/20261021-050648-843636Z-p79189/report.json. Details in docs/agent-json-tracking.md."
   - "2026-09-29 final 16-agent sweep: scripts/probe_scan_output/agent_watch/20260929-192820-646665Z-p88830/report.json. Codex 0.159.0, Claude 2.1.285, Copilot 1.0.89, Kimi 2.1.1, and DeepSeek Harness 0.2.0-rc.2 have fresh schema-clean evidence; Kimi alone reports supports_latest because its upstream fetch was current, while GitHub rate limiting degraded the other equal-version latest sources to cached evidence. Codex status and both Claude status/usage probes passed. Held: Antigravity 1.2.13 has a thin two-event tool-start sample; Hermes 0.21.5 cannot produce a post-update session because the migrated Copilot provider lacks COPILOT_GITHUB_TOKEN; Pi 0.86.1 cannot refresh its reused OAuth token; Grok 1.0.44 is not signed in; OpenClaw still requires its vendor-owned state migration; Cline and Qwen remain stale; Cursor and OpenCode remain installed-only; Devin and fx remain steward-owned."
@@ -62,14 +63,14 @@ notes:
   - "2026-10-20 OpenCode 2.x check: bumped OpenCode 1.19.0->2.1.1 from a fresh sandboxed prebump (scripts/probe_scan_output/agent_watch/20261020-215234-201674Z-p42358-prebump/report.json, matches baseline, 0 unknown types/keys) and a weekly that reports supports_latest (scripts/probe_scan_output/agent_watch/20261020-215312-323639Z-p42511/report.json). 2.x keeps the v1 session/message/part tables frozen and writes new sessions to session_v2 + session_message (typed rows by seq); it also copies v1 sessions there, lossily for some older ones. The app reads both stores (commits c4e21e01, 2badae02, cc7870c0). Monitoring: the fingerprint samples the store being written with nested buckets (row type, assistant content item, tool state, tokens), backed by the new redacted sqlite_v2 fixture built from every 2.x row on disk; upstream moved to npm @opencode/cli; the driver uses --standalone --auto (2.x dropped --pure/--dir, and its background service uses a fixed port)."
 agents:
   codex_cli:
-    max_verified_version: "0.163.0"
+    max_verified_version: "0.164.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.306"
+    max_verified_version: "2.1.310"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -89,7 +90,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/desktop_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.102"
+    max_verified_version: "1.0.104"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -97,7 +98,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "2.1.2"
+    max_verified_version: "2.1.4"
     version_field: "session.version"
     notes:
       - "2026-10-21 desktop surface note: OpenCode desktop 1.19.3 still writes the v1 session/message/part tables (session.version 1.19.3), not session_v2, while CLI 2.1.2 writes session_v2. A fresh desktop session with bash and read tool calls (no session_v2 row) fingerprints clean against the v1 baseline. The app lists it from the v1 store because it has no v2 row, and loads its transcript from v1 rows. max_verified_version stays the CLI's. The weekly sampler reads one store per run (the one with the newest session), so desktop v1 writes are sampled only when the desktop session is the newest. In that case the sample is the single desktop session; a short one can trip blocked_thin_sample."
@@ -128,6 +129,9 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/compaction.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/shell.json"
+      - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/synthetic-job.json"
+      - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle-failed.json"
+      - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/model-switched.json"
   hermes:
     max_verified_version: "0.22.4"
     version_field: "not_logged"
@@ -155,7 +159,7 @@ agents:
       - "AgentSessionsTests/OpenClawSqliteStoreTests.swift"
       - "scripts/tests/test_openclaw_sqlite_monitoring.py"
   cursor:
-    max_verified_version: "2026.10.19"
+    max_verified_version: "2026.10.22"
     version_field: "not_logged"
     notes:
       - "Weekly SQLite monitoring covers both legacy chat metadata and up to five newest persisted ACP stores. ACP validation mirrors the app-required meta.json schema version, exact meta/blobs column names, typed root metadata, content-addressed blob references, and protobuf graph field/wire structure without reporting paths, IDs, metadata values, transcript text, or blob contents."
@@ -169,7 +173,7 @@ agents:
       - "AgentSessionsTests/CursorSessionParserTests.swift"
       - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
-    max_verified_version: "1.3.0"
+    max_verified_version: "1.4.0"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -192,7 +196,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "2.3.0"
+    max_verified_version: "2.3.3"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -339,7 +343,7 @@ agents:
       - "AgentSessionsTests/FxIntegrationSurfaceTests.swift"
       - "scripts/tests/test_fx_schema4_monitoring.py"
   cline:
-    max_verified_version: "3.0.73"
+    max_verified_version: "3.0.74"
     desktop_max_verified_version: "0.0.48"
     version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.48 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
     support_scope: "tier-2 shared local manifest/messages transcript discovery for Cline CLI and Desktop, browsing, search, Preferences controls, colors, saved-session backfill, and analytics source filtering"

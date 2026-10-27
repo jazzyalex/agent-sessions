@@ -118,6 +118,26 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertEqual(notices.first?.role, "system")
     }
 
+    func testClaudeOctoberSchemaAdditionsSurviveParsing() throws {
+        // Claude 2.1.308+: user.sandboxed, permissionDecision grantScope/reasonCode,
+        // compactMetadata.precomputed and runningTurnSends, auto_mode finishExposedWork.
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        func raw(_ event: SessionEvent) -> String? {
+            guard let data = Data(base64Encoded: event.rawJSON) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        for key in ["sandboxed", "grantScope", "reasonCode", "precomputed", "summarisedOnly", "finishExposedWork"] {
+            XCTAssertTrue(full.events.contains { raw($0)?.contains("\"\(key)\"") == true },
+                          "Claude \(key) field should survive parsing")
+        }
+        let sandboxedResult = full.events.filter { raw($0)?.contains("\"s-drift-u1\"") == true && raw($0)?.contains("\"sandboxed\"") == true }
+        XCTAssertFalse(sandboxedResult.isEmpty)
+        XCTAssertFalse(sandboxedResult.contains { $0.kind == .user }, "a sandboxed tool result is not a user prompt")
+    }
+
     func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
@@ -538,6 +558,27 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             $0.kind == .meta && $0.rawJSON.contains("\"type\":\"item_completed\"")
         }
         XCTAssertFalse(items.isEmpty, "item_completed event should survive parsing as .meta")
+    }
+
+    func testCodexOctoberMetadataAdditionsSurviveParsing() throws {
+        // Codex 0.164.0: content_item_metadata provenance on message and
+        // agent_message passthrough, and world_state.state.model as an object.
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(fixture.contains("\"content_item_metadata\""), "fixture should cover content_item_metadata")
+        XCTAssertTrue(fixture.contains("\"state\":{\"model\":{"), "fixture should cover the object-valued world_state model")
+
+        guard let full = SessionIndexer().parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        func raw(_ event: SessionEvent) -> String {
+            if let data = Data(base64Encoded: event.rawJSON), let text = String(data: data, encoding: .utf8) { return text }
+            return event.rawJSON
+        }
+        let provenanceEvents = full.events.filter { raw($0).contains("\"content_item_metadata\"") }
+        XCTAssertFalse(provenanceEvents.isEmpty, "content_item_metadata records should survive parsing")
+        XCTAssertFalse(provenanceEvents.contains { raw($0).contains("msg-meta-1") && $0.kind == .user },
+                       "a developer message with provenance must not become a user prompt")
     }
 
     /// The invariant that matters most about these fixtures: they are committed, public

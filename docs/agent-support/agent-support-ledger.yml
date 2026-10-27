@@ -9,6 +9,65 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "6.1.2+unreleased"
+    as_of_date_utc: "2026-10-27"
+    as_of_commit: "15bc0cd8+working-tree"
+    note: "All-agent format-check sweep. Weekly scripts/probe_scan_output/agent_watch/20261027-042842-061784Z-p62938/report.json flagged drift in Codex, Claude and OpenCode; prebumps flagged Copilot cachePolicyTtlSeconds. Each new key was classified (backlog 'Watch list from the 2026-10-27 format sweep'), added redacted to the normal fixture, and covered by a survive-parsing test. Final weekly scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json has zero unknown types or keys for every agent."
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.164.0"
+          scope: "latest; installed and upstream both 0.164.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-053442-937320Z-p78633-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json", "Resources/Fixtures/stage0/agents/codex/small.jsonl", "AgentSessionsTests/Stage0GoldenFixturesTests.swift"]
+          notes: "content_item_metadata[].provenance ({type: harness, hook} or {type: tool, namespace}) on message, agent_message and compaction replacement_history items: watch. world_state.state.model is now {model, instructions}: noise, the model is still on turn_context. codex_status_probe ok."
+      claude:
+        sessions:
+          max_verified_version: "2.1.310"
+          scope: "installed; upstream 2.1.311 has no real session yet"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-053442-937320Z-p78633-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261027-053514-949553Z-p79091/report.json", "Resources/Fixtures/stage0/agents/claude/small.jsonl", "AgentSessionsTests/Stage0GoldenFixturesTests.swift"]
+          notes: "user.sandboxed and permissionDecision grantScope/reasonCode: watch (joins the permission-decision backlog entry). compactMetadata.precomputed/runningTurnSends, auto_mode.finishExposedWork and api-request-blob image source: noise. claude_status and claude_usage_probe ok."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.104"
+          scope: "latest; installed and upstream both 1.0.104"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-053442-937320Z-p78633-prebump/report.json", "Resources/Fixtures/stage0/agents/copilot/small.jsonl"]
+          notes: "usage.cachePolicyTtlSeconds (1800 next to cacheTtlSeconds): watch. Fresh session copilotVersion 1.0.104."
+      opencode:
+        sessions:
+          max_verified_version: "2.1.4"
+          scope: "latest by prebump; weekly blocked_thin_sample from a one-line manual session"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-052948-844342Z-p76794-prebump/report.json", "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/model-switched.json", "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/idle-failed.json", "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/synthetic-job.json", "AgentSessionsTests/OpenCodeV2StoreTests.swift"]
+          notes: "Fresh shell-tool session matches the baseline (44 types). model-switched, idle outcome failed + error, and synthetic job notices adapt to meta rows: failed-turn errors are a feature candidate. The driver now runs moonshotai/kimi-k2.7-code with the stored API key exported from opencode.db's credential table; the free route hit its usage limit."
+      cline:
+        sessions:
+          max_verified_version: "3.0.74"
+          scope: "latest; installed and upstream both 3.0.74"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-052948-844342Z-p76794-prebump/report.json"]
+          notes: "Fresh tool_use + tool_result session matches the baseline (19 types). The driver now passes prebump.model (cline-free/nemotron-3.5-super-vl); the owner's default free model lost its promotion."
+      kimi:
+        sessions:
+          max_verified_version: "2.3.3"
+          scope: "latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-042935-208834Z-p63972-prebump/report.json"]
+          notes: "Fresh session matches the baseline (49 types)."
+      cursor:
+        sessions:
+          max_verified_version: "2026.10.22"
+          scope: "latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-042935-208834Z-p63972-prebump/report.json"]
+          notes: "Fresh session matches the baseline (7 types); cursor_sqlite_probe ok."
+      pi:
+        sessions:
+          max_verified_version: "1.4.0"
+          scope: "latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-042935-208834Z-p63972-prebump/report.json"]
+          notes: "Fresh ls tool session matches the baseline (15 types)."
+      openclaw:
+        sessions:
+          max_verified_version: "2026.10.5"
+          scope: "held; installed 2026.10.7 cannot complete a turn"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261027-052516-584009Z-p74561-prebump/report.json"]
+          notes: "Every turn fails ~2 s after turn/start with 'codex app-server execution budget timed out' for gpt-5.6-terra and gpt-5.6-sol, in the real home too. Backlog 'OpenClaw 2026.10.7 cannot run a turn through the Codex harness'."
   - agent_sessions_version: "6.0.1-unreleased"
     as_of_date_utc: "2026-10-21"
     as_of_commit: "94d7b502+working-tree"

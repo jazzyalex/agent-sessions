@@ -256,6 +256,10 @@ def prepare_auth(
        prebump_cfg["support_files"] into the sandbox. These files provide
        auth selection/account metadata and are size-limited, but do not use
        strict credential mode gates because CLI settings are commonly 0644.
+    5. If prebump_cfg["opencode_api_key"] names a provider, export its stored
+       OpenCode 2.x API key (the `credential` table of opencode.db) as the
+       named env var. Only `{"type": "key"}` rows qualify: an OAuth row is never
+       read, so a sandboxed refresh cannot rotate the owner's token.
 
     Returns (env, warnings). Raises HygieneError on hard failure.
     """
@@ -307,7 +311,41 @@ def prepare_auth(
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         os.chmod(dst, 0o600)
+
+    key_spec = prebump_cfg.get("opencode_api_key")
+    if isinstance(key_spec, dict):
+        key = _opencode_stored_api_key(real_home / ".local/share/opencode/opencode.db", str(key_spec.get("provider") or ""))
+        env_var = str(key_spec.get("env_var") or "")
+        if key and env_var:
+            env[env_var] = key
+        else:
+            warnings.append(f"opencode_api_key: no stored API key for {key_spec.get('provider')!r}")
     return env, warnings
+
+
+def _opencode_stored_api_key(db: Path, provider: str) -> str | None:
+    """The provider's API key from OpenCode 2.x's credential table; None for OAuth or absent rows."""
+    if not provider or not db.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+        try:
+            rows = con.execute(
+                "SELECT value FROM credential WHERE integration_id = ? ORDER BY time_updated DESC",
+                (provider,),
+            ).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    for (value,) in rows:
+        try:
+            data = json.loads(value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("type") == "key" and isinstance(data.get("key"), str) and data["key"]:
+            return data["key"]
+    return None
 
 
 class CodexExecDriver:
@@ -1638,6 +1676,8 @@ class ClineHeadlessDriver:
                     "-t", str(max(30, timeout - 20)),
                     "--json",
                     "-c", str(workdir),
+                    # Config `prebump.model` pins a free route; the owner's default may lose its promotion.
+                    *(["-m", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []),
                     prompt,
                 ],
                 cwd=workdir,

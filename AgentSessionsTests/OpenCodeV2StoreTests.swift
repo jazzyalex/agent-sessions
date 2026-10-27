@@ -412,6 +412,22 @@ final class OpenCodeV2StoreTests: XCTestCase {
         XCTAssertEqual(adapted.parts.first?.dict["type"] as? String, "future-kind")
     }
 
+    func testAdapterKeepsOctoberFixtureRowsAsMeta() throws {
+        // CLI 2.1.4: model-switched rows, idle rows with a failed outcome and
+        // its error, and synthetic background-job notices.
+        for name in ["model-switched", "idle-failed", "synthetic-job"] {
+            let url = FixturePaths.stage0FixtureURL("agents/opencode/sqlite_v2/session_message/\(name).json")
+            let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+            let type = try XCTUnwrap(row["type"] as? String)
+            let data = try XCTUnwrap(row["data"] as? [String: Any])
+            let adapted = OpenCodeV2MessageAdapter.adapt(rowID: "msg_\(name)", type: type, timeCreatedMillis: 1_000, data: data)
+            XCTAssertEqual(adapted.message["role"] as? String, "system", name)
+            XCTAssertEqual(adapted.parts.count, 1, name)
+            XCTAssertEqual(adapted.parts.first?.dict["type"] as? String, type, name)
+            XCTAssertFalse(adapted.parts.contains { ($0.dict["type"] as? String) == "step-finish" }, name)
+        }
+    }
+
     // MARK: - Fixture
 
     private func telemetry(for id: String) async throws -> SessionTelemetry {

@@ -1,0 +1,18 @@
+{
+  "data": {
+    "description": "redacted",
+    "metadata": {
+      "exit": 0,
+      "jobID": "redacted",
+      "shellID": "redacted",
+      "source": "redacted",
+      "state": "redacted",
+      "truncated": false
+    },
+    "text": "redacted",
+    "time": {
+      "created": 0
+    }
+  },
+  "type": "synthetic"
+}

@@ -157,7 +157,8 @@
       },
       "prebump": {
         "driver": "opencode_run",
-        "model": "opencode/deepseek-v4.1-flash-free",
+        "model": "moonshotai/kimi-k2.7-code",
+        "opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"},
         "sandbox": {"mode": "home_override", "subdir": "opencode_sandbox"},
         "prompt": "Use the shell tool to run pwd, then say hello in one sentence.",
         "required_schema_buckets_by_store": {
@@ -810,6 +811,7 @@
       },
       "prebump": {
         "driver": "cline_headless",
+        "model": "cline-free/nemotron-3.5-super-vl",
         "sandbox": { "mode": "home_override", "subdir": "cline_sandbox" },
         "prompt": "Use your tools to list the files in the current directory, then read a.txt and say what it contains.",
         "real_home_session": true,

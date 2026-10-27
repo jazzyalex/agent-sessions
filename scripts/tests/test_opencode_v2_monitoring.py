@@ -141,7 +141,7 @@ def test_committed_v2_fixture_matches_a_clean_v2_sample(tmp_path):
     db = tmp_path / "opencode.db"
     _write_db(db, v1_updated=100, v2_updated=200)
     fixtures = sorted(str(p) for p in FIXTURE_ROOT.rglob("*.json"))
-    assert len(fixtures) == 8
+    assert len(fixtures) == 11
 
     baseline = agent_watch._baseline_type_keys_for_agent("opencode", fixtures)
     sample = agent_watch._opencode_sqlite_latest_session_schema_fingerprint(db, max_messages=250, max_parts=2500)
@@ -741,12 +741,12 @@ _FIXTURE_PLACEHOLDERS = {"redacted", "fixture.png", "fixture", "/tmp/fixture", "
 # with these exact values.
 _FIXTURE_DISCRIMINATOR_VALUES = {
     "type": {
-        "assistant", "compaction", "direct", "idle", "inline", "provider.error", "reasoning",
-        "shell", "synthetic", "system", "text", "tool", "tool.execution", "user",
+        "assistant", "compaction", "direct", "idle", "inline", "model-switched", "provider.error",
+        "reasoning", "shell", "synthetic", "system", "text", "tool", "tool.execution", "user",
     },
     "status": {"completed", "error", "exited"},
     "reason": {"auto"},
-    "outcome": {"succeeded"},
+    "outcome": {"succeeded", "failed"},
     "finish": {"stop"},
     "name": {"todowrite", "fixture.png"},
 }
@@ -764,6 +764,8 @@ _FIXTURE_KEYS = {
     "tokens_input", "tokens_output", "tokens_reasoning", "type", "variant", "version", "write", "xai",
     # shell rows
     "command", "cursor", "exit", "shellID", "size", "truncated",
+    # 2.1.4 rows: model-switched, failed idle error, synthetic background-job notice
+    "body", "description", "jobID", "previous", "response",
     # session_v2 columns that are NULL on the owner's disk but exist in the schema
     "fork_boundary", "fork_session_id", "permission", "revert", "share_url", "summary_diffs",
     "time_compacting", "time_suspended", "workspace_id",
@@ -815,7 +817,7 @@ def _fixture_string_violations(value, key=None, path="$"):
 
 def test_v2_fixture_values_follow_the_redaction_policy():
     files = sorted(FIXTURE_ROOT.rglob("*.json"))
-    assert len(files) == 8
+    assert len(files) == 11
     violations = []
     for path in files:
         obj = json.loads(path.read_text(encoding="utf-8"))

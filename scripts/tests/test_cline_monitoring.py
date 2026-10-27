@@ -150,7 +150,7 @@ def test_real_cline_config_is_monitored_against_fixture_baseline():
     matrix_versions = agent_watch._read_verified_versions_from_matrix(
         repo / "docs/agent-support/agent-support-matrix.yml"
     )
-    assert agent_watch._verified_versions_by_agent(matrix_versions)["cline"] == "3.0.73"
+    assert agent_watch._verified_versions_by_agent(matrix_versions)["cline"] == "3.0.74"
 
     manifests = [
         str(repo / "Resources/Fixtures/stage0/agents/cline/cli_tool/cline-cli-tool.json"),

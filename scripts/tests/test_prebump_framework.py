@@ -171,6 +171,46 @@ def test_prepare_auth_copies_credential_when_env_missing(tmp_path, monkeypatch):
     assert env["HOME"] == str(sb)
 
 
+def _opencode_credential_db(real_home: Path, rows: list[tuple[str, str, int]]) -> None:
+    import sqlite3
+    db = real_home / ".local/share/opencode/opencode.db"
+    db.parent.mkdir(parents=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, label TEXT, value TEXT, time_updated INTEGER)")
+    con.executemany(
+        "INSERT INTO credential VALUES (?, ?, 'x', ?, ?)",
+        [(f"c{i}", provider, value, updated) for i, (provider, value, updated) in enumerate(rows)],
+    )
+    con.commit()
+    con.close()
+
+
+def test_prepare_auth_exports_opencode_api_key_but_never_oauth(tmp_path, monkeypatch):
+    from agent_watch_prebump_drivers import prepare_auth
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    _opencode_credential_db(real_home, [
+        ("moonshotai", '{"type":"key","key":"sk-moon"}', 2),
+        ("openai", '{"type":"oauth","refresh":"r","access":"a"}', 3),
+    ])
+    sb = tmp_path / "sb"
+    sb.mkdir()
+
+    env, warnings = prepare_auth(
+        prebump_cfg={"opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"}},
+        sandbox=sb, real_home=real_home,
+    )
+    assert env["MOONSHOT_API_KEY"] == "sk-moon"
+    assert warnings == []
+
+    env, warnings = prepare_auth(
+        prebump_cfg={"opencode_api_key": {"provider": "openai", "env_var": "OPENAI_API_KEY"}},
+        sandbox=sb, real_home=real_home,
+    )
+    assert env.get("OPENAI_API_KEY") != "a"
+    assert any("no stored API key" in w for w in warnings)
+
+
 def test_prepare_auth_copies_support_files_without_strict_mode(tmp_path, monkeypatch):
     from agent_watch_prebump_drivers import prepare_auth
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)

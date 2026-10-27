@@ -1,0 +1,17 @@
+{
+  "data": {
+    "error": {
+      "message": "redacted",
+      "response": {
+        "body": "redacted"
+      },
+      "status": 0,
+      "type": "provider.error"
+    },
+    "outcome": "failed",
+    "time": {
+      "created": 0
+    }
+  },
+  "type": "idle"
+}

@@ -1,0 +1,17 @@
+{
+  "data": {
+    "model": {
+      "id": "redacted",
+      "providerID": "redacted"
+    },
+    "previous": {
+      "id": "redacted",
+      "providerID": "redacted",
+      "variant": "redacted"
+    },
+    "time": {
+      "created": 0
+    }
+  },
+  "type": "model-switched"
+}

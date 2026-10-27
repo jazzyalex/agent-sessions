@@ -742,6 +742,76 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **To close:** each family has a decided kind with a parser test, or the current
   rendering is declared acceptable.
 
+### OpenClaw 2026.10.7 cannot run a turn through the Codex harness
+> **open** · sev: med · urg: med · verified 2026-10-27
+
+- **What:** every `openclaw agent --local` turn fails about 2 s after `turn/start` with
+  `codex app-server execution budget timed out` (`pendingStage=notification_queue`,
+  `elapsedMs=null`), for `openai/gpt-5.6-terra` and `openai/gpt-5.6-sol` alike, in the
+  real home and in the prebump sandbox. OpenClaw 2026.10.7 drives Codex CLI 0.164.0
+  (updated the same week). No new OpenClaw session can be written, so OpenClaw stays
+  verified at 2026.10.5.
+- **Where:** prebump reports
+  `scripts/probe_scan_output/agent_watch/20261027-042935-208834Z-p63972-prebump/report.json`
+  and `scripts/probe_scan_output/agent_watch/20261027-052516-584009Z-p74561-prebump/report.json`.
+- **Why deferred:** the failure is between two vendor CLIs; nothing in this repo calls
+  the Codex app-server. The owner's `~/.openclaw/openclaw.json` routes every model
+  through `agentRuntime: codex`, and changing that is the owner's call.
+- **Risk if wrong:** OpenClaw format drift after 2026.10.5 goes unseen until turns work
+  again.
+- **To close:** an OpenClaw or Codex update (or a non-Codex runtime chosen by the owner)
+  lets `./scripts/agent_watch.py --mode prebump --allow-real-home --agent openclaw`
+  produce a session; then bump OpenClaw from that evidence.
+
+### Re-check GPT-5.6 Sol promotional pricing after 2026-11-21
+> **open** · sev: med · urg: high · verified 2026-10-27
+
+- **What:** OpenAI's pricing page says GPT-5.6 Sol's promotional pricing is available
+  "at least through November 21, 2026". The `gpt-5.6-sol`, `gpt-5.6` and
+  `codex-auto-review` rows ($4 / $0.40 / $20, $5 cache write) carry the promo rate.
+- **Where:** [docs/prices-v2.json](prices-v2.json), [docs/prices.json](prices.json),
+  `RunwayPriceTable.bundledJSON`.
+- **Why deferred:** the end date is not fixed; the rate is correct today.
+- **Risk if wrong:** if the promo ends and the rate rises, Sol and auto-review `$`
+  understates cost with no failing check.
+- **To close:** on or after 2026-11-22, compare the Sol row with
+  developers.openai.com/api/docs/pricing. If it changed, edit all three tables, raise
+  `sequence`, and add a `periods` entry from the change date (see the Gemini rows).
+
+### Watch list from the 2026-10-27 format sweep
+> **open** · sev: low · urg: low · verified 2026-10-27
+
+- **OpenCode 2.1.4 failed turns** — `idle` rows with `outcome: "failed"` and an `error`
+  object (`type` such as `provider.free-limit`, `message`, `status`, `response.body`).
+  They adapt to a text-less meta row, so a turn that ended in a provider error shows
+  nothing in the transcript. Candidate: render the error message like a failed tool
+  result. 3 rows on disk, all from one session that hit the free-tier limit.
+- **OpenCode `model-switched`** (`model`, `previous`, each `{id, providerID, variant}`)
+  — a mid-session model change. Rates already follow each assistant row's own model;
+  the session's listed model may be stale. Promote if the list or Quota Meter shows the
+  wrong model after a switch.
+- **OpenCode `synthetic` job notices** — `description` plus `metadata` (`source`,
+  `shellID`, `jobID`, `state`, `truncated`, `exit`): a background shell job's
+  completion notice. Meta today; check whether the text belongs in the transcript.
+- **Codex `content_item_metadata[].provenance`** (0.164.0) — on `message`,
+  `agent_message` and compaction `replacement_history` items: `{type: "harness", hook}`
+  or `{type: "tool", namespace}`. It marks harness-injected and tool-sent content. Could
+  replace guessing which developer/user records are injected; same class as
+  *Claude `isMeta` user records still render as user prompts*.
+- **Claude `user.sandboxed`** (2.1.308) — whether a tool call ran in the sandbox.
+  Candidate badge on tool rows if the UI ever shows permission context; joins
+  *Claude reports thinking time and permission decisions and nothing shows them*, which
+  now also covers `permissionDecision.grantScope` (`once`) and `reasonCode`.
+- **Copilot `cachePolicyTtlSeconds`** (1.0.103) — next to `cacheTtlSeconds` (1800 on a
+  `gpt-6-luna` call). OpenAI now lists 30-minute and 12-hour cache-write rates; a TTL is
+  what would pick between them if Copilot's own `cost` ever needs a cross-check.
+- **Noise, deliberately not filed:** Codex `world_state.state.model` as
+  `{model, instructions}` (the model is still on `turn_context`); Claude
+  `compactMetadata.precomputed` and `runningTurnSends`, `auto_mode.finishExposedWork`,
+  and image `source` blocks inside `api-request-blob` (request-log records the app skips).
+- **To close:** each line is either promoted to its own entry on a second sighting, or
+  deleted as settled noise.
+
 ### Watch list from the 2026-10-11 format sweep
 > **open** · sev: low · urg: low · verified 2026-10-11
 

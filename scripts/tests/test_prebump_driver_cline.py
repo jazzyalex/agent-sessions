@@ -188,6 +188,27 @@ def test_cline_driver_maps_timeout_and_missing_binary(tmp_path):
         assert driver.run(sandbox, env, PROMPT, 5).error == "cline_not_found"
 
 
+def test_cline_driver_passes_configured_model(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    real_home = tmp_path / "real-home"
+    sandbox.mkdir()
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+    driver = drv_mod.DRIVERS["cline_headless"]
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        driver.run(sandbox, {**_real_home_env(real_home), "AGENT_WATCH_MODEL": "cline-free/x"}, PROMPT, 240)
+    assert seen["argv"][seen["argv"].index("-m") + 1] == "cline-free/x"
+    assert seen["argv"][-1] == PROMPT
+
+    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+        driver.run(sandbox, _real_home_env(real_home), PROMPT, 240)
+    assert "-m" not in seen["argv"]
+
+
 def _prebump_config() -> dict:
     cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
     return cfg["agents"]["cline"]["prebump"]
@@ -196,6 +217,7 @@ def _prebump_config() -> dict:
 def test_cline_config_declares_real_home_tool_using_prebump():
     pb = _prebump_config()
     assert pb["driver"] == "cline_headless"
+    assert pb["model"].startswith("cline-free/")
     assert pb["real_home_session"] is True
     assert pb["credential_files"] == [] and pb["env_vars"] == []
     assert "Use your tools" in pb["prompt"] and "a.txt" in pb["prompt"]
