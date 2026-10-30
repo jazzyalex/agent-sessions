@@ -45,6 +45,7 @@ extension PreferencesView {
                             case .iterm2:      codexMode = .iterm
                             case .warp:        codexMode = .warp
                             case .warpPreview: codexMode = .warpPreview
+                            case .ghostty:     codexMode = .ghostty
                             default:           codexMode = .terminal
                             }
                             resumeSettings.setLaunchMode(codexMode)
@@ -556,7 +557,7 @@ struct DetectedTerminal: Identifiable {
 }
 
 private func detectInstalledTerminals() -> [DetectedTerminal] {
-    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview]
+    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview, .ghostty]
     return candidates.filter { kind in
         guard let bundle = kind.bundleIdentifier else { return false }
         return isTerminalInstalled(bundleId: bundle)

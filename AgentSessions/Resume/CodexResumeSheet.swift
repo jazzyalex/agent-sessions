@@ -369,7 +369,7 @@ struct CodexResumeSheet: View {
 
     private var visibleLaunchModes: [CodexLaunchMode] {
         // Embedded mode disabled to simplify UX
-        return [.terminal, .iterm, .warp, .warpPreview]
+        return [.terminal, .iterm, .warp, .warpPreview, .ghostty]
     }
 
     @MainActor

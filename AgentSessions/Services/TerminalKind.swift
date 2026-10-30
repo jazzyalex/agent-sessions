@@ -4,6 +4,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
     case iterm2
     case warp
     case warpPreview
+    case ghostty
     case terminalApp
     case unknown
 
@@ -15,6 +16,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
             case "dev.warp.Warp-Preview": return .warpPreview
             case "dev.warp.Warp-Stable":  return .warp
             case "dev.warp.Warp":         return .warp
+            case "com.mitchellh.ghostty": return .ghostty
             default: break
             }
         }
@@ -22,6 +24,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case "iTerm.app":       return .iterm2
         case "Apple_Terminal":  return .terminalApp
         case "WarpTerminal":    return .warpPreview  // fallback if bundle ID missing
+        case "ghostty":         return .ghostty
         default:                return .unknown
         }
     }
@@ -31,6 +34,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .iterm2:      return "iTerm2"
         case .warp:        return "Warp"
         case .warpPreview: return "WarpPreview"
+        case .ghostty:     return "Ghostty"
         case .terminalApp: return "Terminal"
         case .unknown:     return "Unknown"
         }
@@ -41,6 +45,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .iterm2:      return "com.googlecode.iterm2"
         case .warp:        return "dev.warp.Warp-Stable"
         case .warpPreview: return "dev.warp.Warp-Preview"
+        case .ghostty:     return "com.mitchellh.ghostty"
         case .terminalApp: return "com.apple.Terminal"
         case .unknown:     return nil
         }

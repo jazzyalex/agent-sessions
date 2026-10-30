@@ -50,6 +50,35 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(TerminalKind.warp.bundleIdentifier, "dev.warp.Warp-Stable")
     }
 
+    func testInferGhosttyFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: "com.mitchellh.ghostty")
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testInferGhosttyFromTermProgram() {
+        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: nil)
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testGhosttyBundleIdentifierAndDisplayName() {
+        XCTAssertEqual(TerminalKind.ghostty.bundleIdentifier, "com.mitchellh.ghostty")
+        XCTAssertEqual(TerminalKind.ghostty.displayName, "Ghostty")
+        XCTAssertEqual(CodexLaunchMode.ghostty.title, "Ghostty")
+    }
+
+    // MARK: - Ghostty AppleScript
+
+    func testGhosttyScriptOpensWindowInWorkingDirectoryAndTypesCommand() {
+        let script = AgentTerminalLauncher.ghosttyScriptLines()
+
+        XCTAssertEqual(script.first, "on run argv")
+        XCTAssertEqual(script.last, "end run")
+        XCTAssertTrue(script.contains("tell application \"Ghostty\""))
+        XCTAssertTrue(script.contains("set initial working directory of surfaceConfig to workingDirectory"))
+        XCTAssertTrue(script.contains("set initial input of surfaceConfig to shellCommand & linefeed"))
+        XCTAssertTrue(script.contains("new window with configuration surfaceConfig"))
+    }
+
     // MARK: - Warp tab config TOML
 
     func testWarpTabConfigUsesTerminalPane() {

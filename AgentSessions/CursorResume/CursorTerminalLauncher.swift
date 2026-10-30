@@ -32,3 +32,10 @@ final class CursorWarpPreviewLauncher: CursorTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class CursorGhosttyLauncher: CursorTerminalLaunching {
+    func launchInTerminal(_ package: CursorResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}
