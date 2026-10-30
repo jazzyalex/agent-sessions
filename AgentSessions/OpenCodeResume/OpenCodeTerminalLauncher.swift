@@ -32,3 +32,10 @@ final class OpenCodeWarpPreviewLauncher: OpenCodeTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class OpenCodeGhosttyLauncher: OpenCodeTerminalLaunching {
+    func launchInTerminal(_ package: OpenCodeResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}

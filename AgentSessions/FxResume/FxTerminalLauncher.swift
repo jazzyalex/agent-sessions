@@ -32,3 +32,10 @@ final class FxWarpPreviewLauncher: FxTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class FxGhosttyLauncher: FxTerminalLaunching {
+    func launchInTerminal(_ package: FxResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}

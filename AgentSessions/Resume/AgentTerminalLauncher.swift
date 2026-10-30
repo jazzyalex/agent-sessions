@@ -49,6 +49,20 @@ enum AgentTerminalLauncher {
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
     }
 
+    /// Opens a new Ghostty window in `cwd` and types `shellCommand` into its shell.
+    /// Uses Ghostty's AppleScript dictionary (surface configuration + new window).
+    /// The command goes in as initial input rather than as the surface command so
+    /// the user's login shell, and with it their PATH, runs first.
+    static func launchInGhostty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") async throws {
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty") != nil else {
+            throw NSError(domain: domain, code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Ghostty is not installed."])
+        }
+        let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        try runAppleScript(ghosttyScriptLines(), arguments: [shellCommand, directory], domain: domain,
+                           fallbackMessage: "Ghostty launch failed. Resume in Ghostty needs a Ghostty build with AppleScript support.")
+    }
+
     /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.
     static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) async throws {
         let scheme: String
@@ -155,6 +169,23 @@ enum AgentTerminalLauncher {
     }
 
     // MARK: - Helpers
+
+    /// AppleScript for `launchInGhostty`. argv: shell command, working directory.
+    static nonisolated func ghosttyScriptLines() -> [String] {
+        [
+            "on run argv",
+            "set shellCommand to item 1 of argv",
+            "set workingDirectory to item 2 of argv",
+            "tell application \"Ghostty\"",
+            "activate",
+            "set surfaceConfig to new surface configuration",
+            "set initial working directory of surfaceConfig to workingDirectory",
+            "set initial input of surfaceConfig to shellCommand & linefeed",
+            "new window with configuration surfaceConfig",
+            "end tell",
+            "end run"
+        ]
+    }
 
     static nonisolated func warpTabConfigTOML(configName: String, command: String, directory: String) -> String {
         """

@@ -29,7 +29,7 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 ## What it does
 
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
-- **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, or Warp.
+- **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, Warp, or Ghostty.
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows, plus each OpenCode session's token or cost rate; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.

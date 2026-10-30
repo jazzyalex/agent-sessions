@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- **Resume in Ghostty.** Ghostty is a Resume target alongside Terminal.app, iTerm2 and Warp, for every agent with a CLI resume. Pick it under Preferences → General → Terminal App, or as a Codex launch mode. Resume opens a new Ghostty window in the session's folder and types the resume command into your shell, through Ghostty's AppleScript support.
+
 ## [6.2] - 2026-10-27
 
 ### Highlights

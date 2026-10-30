@@ -32,3 +32,10 @@ final class HermesWarpPreviewLauncher: HermesTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class HermesGhosttyLauncher: HermesTerminalLaunching {
+    func launchInTerminal(_ package: HermesResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}
