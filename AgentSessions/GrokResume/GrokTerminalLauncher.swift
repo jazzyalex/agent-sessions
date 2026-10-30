@@ -32,3 +32,10 @@ final class GrokWarpPreviewLauncher: GrokTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class GrokGhosttyLauncher: GrokTerminalLaunching {
+    func launchInTerminal(_ package: GrokResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}

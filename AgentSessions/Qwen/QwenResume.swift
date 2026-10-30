@@ -229,6 +229,12 @@ protocol QwenTerminalLaunching {
                                                      kind: .warpPreview)
     }
 }
+@MainActor final class QwenGhosttyLauncher: QwenTerminalLaunching {
+    func launchInTerminal(_ package: QwenResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand,
+                                                        cwd: package.workingDirectory?.path)
+    }
+}
 
 @MainActor
 final class QwenResumeCoordinator {

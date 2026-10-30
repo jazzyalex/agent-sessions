@@ -37,6 +37,12 @@ final class ResumeTerminalDispatchTests: XCTestCase {
         XCTAssertEqual(kind, .warpPreview)
     }
 
+    func testReadsStoredGhostty() {
+        defaults.set(TerminalKind.ghostty.rawValue, forKey: ResumePreferenceHelpers.terminalKindKey)
+        let kind = ResumePreferenceHelpers.resolveTerminalKind(defaults: defaults)
+        XCTAssertEqual(kind, .ghostty)
+    }
+
     func testMigratesFromClaudePreferITermTrue() {
         defaults.set(true, forKey: ClaudeResumeSettings.Keys.preferITerm)
         let kind = ResumePreferenceHelpers.resolveTerminalKind(defaults: defaults)
