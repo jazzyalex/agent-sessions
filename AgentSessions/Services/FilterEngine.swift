@@ -758,3 +758,37 @@ enum FilterEngine {
         return ParsedQuery(freeText: remaining.joined(separator: " "), repo: repo, path: path, sideChatsOnly: sideChatsOnly)
     }
 }
+
+/// Projects the user hid from the session list, stored as canonical project root paths.
+/// A recurring automated job can fill the list with near-identical rows; hiding its
+/// project keeps it out of the list until the user unhides it in Settings.
+enum HiddenProjects {
+    static let defaultsKey = "HiddenProjectRoots"
+
+    static func roots(defaults: UserDefaults = .standard) -> [String] {
+        defaults.stringArray(forKey: defaultsKey) ?? []
+    }
+
+    static func hide(_ identity: ProjectIdentity, defaults: UserDefaults = .standard) {
+        let current = roots(defaults: defaults)
+        guard !current.contains(identity.canonicalRootPath) else { return }
+        defaults.set(current + [identity.canonicalRootPath], forKey: defaultsKey)
+    }
+
+    static func unhide(_ root: String, defaults: UserDefaults = .standard) {
+        defaults.set(roots(defaults: defaults).filter { $0 != root }, forKey: defaultsKey)
+    }
+
+    /// Drops sessions whose project is hidden. Sessions without a provable project stay,
+    /// and so does the project the user is explicitly filtering by.
+    static func excluding(_ sessions: [Session],
+                          hiddenRoots: Set<String>,
+                          selectedProject: ProjectIdentity?) -> [Session] {
+        guard !hiddenRoots.isEmpty else { return sessions }
+        return sessions.filter { session in
+            guard let identity = session.rowProjectIdentity else { return true }
+            if identity == selectedProject { return true }
+            return !hiddenRoots.contains(identity.canonicalRootPath)
+        }
+    }
+}

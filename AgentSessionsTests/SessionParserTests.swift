@@ -12325,6 +12325,36 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNotEqual(identityOne, identityTwo, "identity must not consult origin")
     }
 
+    func testHiddenProjectsExcludeOnlyHiddenRoots() throws {
+        let alpha = makeProjectIdentitySession(id: "hide-alpha", cwd: "/AS-hide/alpha/app")
+        let beta = makeProjectIdentitySession(id: "hide-beta", cwd: "/AS-hide/beta/app")
+        let noProject = makeProjectIdentitySession(id: "hide-none", cwd: nil)
+        let alphaIdentity = try XCTUnwrap(alpha.rowProjectIdentity)
+        let all = [alpha, beta, noProject]
+
+        let hidden = HiddenProjects.excluding(all, hiddenRoots: [alphaIdentity.canonicalRootPath], selectedProject: nil)
+        XCTAssertEqual(hidden.map(\.id), ["hide-beta", "hide-none"], "only the hidden project's sessions drop out")
+
+        let selected = HiddenProjects.excluding(all, hiddenRoots: [alphaIdentity.canonicalRootPath], selectedProject: alphaIdentity)
+        XCTAssertEqual(selected.map(\.id), all.map(\.id), "filtering by a hidden project still shows it")
+
+        XCTAssertEqual(HiddenProjects.excluding(all, hiddenRoots: [], selectedProject: nil).map(\.id), all.map(\.id))
+    }
+
+    func testHiddenProjectsHideAndUnhidePersist() throws {
+        let suite = "HiddenProjectsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let identity = ProjectIdentity(canonicalRootPath: "/AS-hide/alpha/app")
+
+        HiddenProjects.hide(identity, defaults: defaults)
+        HiddenProjects.hide(identity, defaults: defaults)
+        XCTAssertEqual(HiddenProjects.roots(defaults: defaults), ["/AS-hide/alpha/app"], "hiding twice stores one entry")
+
+        HiddenProjects.unhide("/AS-hide/alpha/app", defaults: defaults)
+        XCTAssertEqual(HiddenProjects.roots(defaults: defaults), [])
+    }
+
     func testProjectIdentityNilForVirtualAndStoredLabelOnlyRows() throws {
         let codexChats = makeProjectIdentitySession(
             id: "virtual-codex",

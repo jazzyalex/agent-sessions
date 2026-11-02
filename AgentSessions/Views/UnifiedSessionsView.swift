@@ -1270,6 +1270,8 @@ struct UnifiedSessionsView: View {
                     Button("Filter by Project: \(selection.displayName)") { applyProjectSelection(selection) }
                         .keyboardShortcut("p", modifiers: [.command, .option])
                         .help("Show only sessions from \(selection.displayName) (⌥⌘P)")
+                    Button("Hide Project: \(selection.displayName)") { HiddenProjects.hide(selection.identity) }
+                        .help("Hide sessions from \(selection.displayName) in the session list. Unhide it in Settings.")
                 }
                 if unified.isArchivedClaudeDesktop(s) {
                     let canRestore = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
@@ -1298,6 +1300,9 @@ struct UnifiedSessionsView: View {
                 Button("Filter by Project") {}
                     .disabled(true)
                     .help("Select a session with project metadata to filter")
+                Button("Hide Project") {}
+                    .disabled(true)
+                    .help("Select a session with project metadata to hide")
             }
         }
         .confirmationDialog(
