@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Hidden projects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hidden projects"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已隐藏的项目"
+          }
+        }
+      }
+    },
+    "Hide Project": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Project"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏项目"
+          }
+        }
+      }
+    },
+    "Hide Project: %@": {
+      "comment": "User-visible copy from UnifiedSessionsView. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Project: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏项目：%@"
+          }
+        }
+      }
+    },
+    "Hide sessions from %@ in the session list. Unhide it in Settings.": {
+      "comment": "User-visible copy from UnifiedSessionsView. Preserve runtime placeholders and allow value reordering for grammar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide sessions from %@ in the session list. Unhide it in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话列表中隐藏来自 %@ 的会话。可在设置中取消隐藏。"
+          }
+        }
+      }
+    },
     "Missing API price component: %@": {
       "comment": "Quota Meter OpenCode row tooltip in the $ lens. %@ lists model:component pairs, e.g. gpt-5:cacheWrite5m.",
       "localizations": {
@@ -20,6 +86,54 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "No API price for this session's recent usage." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "此会话最近的用量没有 API 价格。" } }
+      }
+    },
+    "Select a session with project metadata to hide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a session with project metadata to hide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择包含项目元数据的会话以进行隐藏"
+          }
+        }
+      }
+    },
+    "Show sessions from this project in the session list again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show sessions from this project in the session list again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话列表中重新显示来自此项目的会话"
+          }
+        }
+      }
+    },
+    "Unhide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unhide"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消隐藏"
+          }
+        }
       }
     },
     "Usage data for this session is incomplete.": {

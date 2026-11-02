@@ -449,6 +449,7 @@ extension PreferencesView {
                     ))
                     .help("Exclude sessions that contain no recorded tool/command calls. Strict: Claude and Antigravity are excluded unless tool calls are present in the parsed transcript.")
                 }
+                HiddenProjectsRow()
 
                 Divider()
                 Toggle("Skip preambles when parsing (Codex + Claude)", isOn: Binding(
@@ -574,4 +575,38 @@ private func isTerminalInstalled(bundleId: String) -> Bool {
     process.waitForExit()
     let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+// MARK: - Hidden projects
+
+/// Lists projects hidden from the session list (row menu → Hide Project) with a way
+/// to bring each one back. Shows nothing while no project is hidden.
+private struct HiddenProjectsRow: View {
+    @State private var roots: [String] = HiddenProjects.roots()
+
+    var body: some View {
+        Group {
+            if !roots.isEmpty {
+                PreferenceKeyValueRow(label: "Hidden projects") {
+                    VStack(alignment: .leading, spacing: LayoutTokens.xs) {
+                        ForEach(roots, id: \.self) { root in
+                            HStack(spacing: LayoutTokens.sm) {
+                                Text(verbatim: root)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .help(Text(verbatim: root))
+                                Spacer()
+                                Button("Unhide") { HiddenProjects.unhide(root) }
+                                    .help("Show sessions from this project in the session list again")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let current = HiddenProjects.roots()
+            if current != roots { roots = current }
+        }
+    }
 }

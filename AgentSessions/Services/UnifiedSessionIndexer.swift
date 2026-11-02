@@ -923,6 +923,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.hideZeroMessageSessionsPref { results = results.filter { $0.isSideChat || $0.messageCount > 0 || CursorSessionIndexer.isDBOnlySession($0) } }
                 if self.hideLowMessageSessionsPref { results = results.filter { Self.passesLowMessageVisibilityFilter($0) } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
+                results = HiddenProjects.excluding(results,
+                                                   hiddenRoots: Set(HiddenProjects.roots()),
+                                                   selectedProject: self.projectSelection?.identity)
 
                 // Sort by the current descriptor; sort-only changes are handled by a separate
                 // subscription (below) so they don't re-run the whole filter pipeline.
@@ -973,13 +976,14 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // recomputeNow() -> applyFiltersAndSort() consults @AppStorage-backed
         // prefs (hideZeroMessageSessionsPref/hideLowMessageSessionsPref/
-        // showHousekeepingSessionsPref) that read these three keys; the rest
+        // showHousekeepingSessionsPref) and the hidden-project list that read these keys; the rest
         // of the filter state is already tracked via @Published properties
         // with their own change handling, not raw defaults reads.
         let recomputeObserver = FilteredDefaultsObserver(keys: [
             "HideZeroMessageSessions",
             "HideLowMessageSessions",
-            PreferencesKey.showHousekeepingSessions
+            PreferencesKey.showHousekeepingSessions,
+            HiddenProjects.defaultsKey
         ])
         self.recomputeDefaultsObserver = recomputeObserver
         recomputeObserver.publisher
@@ -2668,6 +2672,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // Hide housekeeping-only sessions unless explicitly enabled in Settings.
         if !showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
+
+        // Hide projects the user hid from the list, unless they are filtering by that project.
+        results = HiddenProjects.excluding(results,
+                                           hiddenRoots: Set(HiddenProjects.roots()),
+                                           selectedProject: projectSelection?.identity)
 
         // Filter by message count preferences
         if hideZeroMessageSessionsPref {

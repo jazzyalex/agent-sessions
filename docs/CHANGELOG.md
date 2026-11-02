@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **Resume in Ghostty.** Choose Ghostty under Preferences → General → Terminal App for CLI Resume, including Codex. Resume opens a new window in the session folder. Requires a Ghostty build with AppleScript support; verified with Ghostty 1.4.0. Contributed by @buildfolk in #89.
+- **Hide a project from the session list.** Right-click a session and choose Hide Project to drop that project's sessions from the list, for example a scheduled job that runs every hour. Hidden projects are listed under Preferences → General → Filters, each with an Unhide button. Filtering by a hidden project still shows it.
 
 ### Bug Fixes
 
