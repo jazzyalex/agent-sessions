@@ -1,0 +1,79 @@
+name: Segv diagnostics
+
+# Finds what frees the PublishedSubject in the intermittent `SessionIndexer.deinit` segv.
+# The crash does not reproduce on macOS 15, so this has to run on the macos-26 runners.
+# Runs only for this branch, so normal CI is unchanged. To sample again, use
+# "Re-run all jobs". A red `diagnose` job means the crash reproduced: read its artifact.
+#
+# ASan's "freed by" stack is the release that reached zero, not necessarily the extra
+# release. If it is the normal `SessionIndexer.deinit` path, the reference was lost earlier.
+
+on:
+  push:
+    branches: [ ci/segv-diagnostics ]
+  workflow_dispatch:
+
+jobs:
+  # If this fails, the jobs below cannot report the crash, so they do not run.
+  control:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select and verify Xcode toolchain
+        shell: bash
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          python3 scripts/check_xcode_version.py
+      - name: Prove the instrument
+        shell: bash
+        env:
+          DIAGNOSTICS_DIR: ${{ runner.temp }}/segv-diagnostics
+        run: scripts/ci_segv_diagnostics.sh control
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: segv-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/segv-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+  diagnose:
+    needs: control
+    runs-on: macos-26
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: stress-plain-1, mode: stress-plain, stress_n: 30000, iterations: 1 }
+          - { name: stress-plain-2, mode: stress-plain, stress_n: 30000, iterations: 1 }
+          - { name: stress-asan-1, mode: stress-asan, stress_n: 8000, iterations: 1 }
+          - { name: stress-asan-2, mode: stress-asan, stress_n: 8000, iterations: 1 }
+          - { name: suite-asan-1, mode: suite-asan, stress_n: 0, iterations: 3 }
+          - { name: suite-asan-2, mode: suite-asan, stress_n: 0, iterations: 3 }
+          - { name: suite-asan-3, mode: suite-asan, stress_n: 0, iterations: 3 }
+          - { name: suite-asan-4, mode: suite-asan, stress_n: 0, iterations: 3 }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select and verify Xcode toolchain
+        shell: bash
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          python3 scripts/check_xcode_version.py
+      - name: Run ${{ matrix.name }}
+        shell: bash
+        env:
+          DIAGNOSTICS_DIR: ${{ runner.temp }}/segv-diagnostics
+          STRESS_N: ${{ matrix.stress_n }}
+          TEST_ITERATIONS: ${{ matrix.iterations }}
+        run: scripts/ci_segv_diagnostics.sh "${{ matrix.mode }}"
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: segv-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/segv-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
