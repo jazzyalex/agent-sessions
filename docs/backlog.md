@@ -2606,12 +2606,26 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 
 ## Resume / Terminal Launch
 
+### PR #89: qualify contributed Ghostty Resume support
+> **open** · sev: low · urg: high · verified 2026-11-02
+
+- **What:** [PR #89](https://github.com/jazzyalex/agent-sessions/pull/89) contributes Ghostty Resume for twelve agent adapters plus Codex. The owner authorized review, local fixes and qualification on 2026-11-02; this is not a released feature yet.
+- **Where:** `AgentSessions/Resume/AgentTerminalLauncher.swift`, `AgentSessions/Views/UnifiedSessionsView.swift`, `AgentSessionsTests/TerminalKindTests.swift`.
+- **Decision:** evaluate this contributed adapter. The [owner's reply on #88](https://github.com/jazzyalex/agent-sessions/issues/88#issuecomment-6550366758) welcomes a Ghostty contribution. This does not accept Kitty or WezTerm from #76, or include its duplicate-Resume guard.
+- **Fix shape:** keep Ghostty's AppleScript wait off the main actor, prevent pipe backpressure, and retain compatibility guidance with underlying errors. Local fixes accompany the applied PR patch.
+- **Validation 2026-11-02:** corrected local candidate is SHIP for Ghostty 1.4.0: Debug build passed; full suite 4,028 passed, 0 failed, 4 skipped (+10 tests). In-app Codex and Claude Resume passed with marker CLIs, including quoted binary/folder paths and a second Codex launch. Details and limits: [qualification report](reviews/2026-11-02-pr89-ghostty.md).
+- **Why deferred:** local qualification is complete; the local fixes must accompany integration. The qualified implementation is committed locally; no push or GitHub PR merge has been made.
+- **Risk if wrong:** Resume can hang the UI or report success without running in the intended folder. AppleScript support is required; 1.4.0 is the contributor's tested version, not a verified minimum.
+- **To close:** qualify the integrated change, merge with contributor credit and record release evidence. Live-session focus and probing remain outside this PR.
+
+
 ### PR #76: take the duplicate-Resume guard, not the terminal adapters
 > **open** · sev: low · urg: low · verified 2026-10-11
 
 - **What:** [PR #76](https://github.com/jazzyalex/agent-sessions/pull/76) adds one shared
   Resume terminal preference and adapters for Ghostty, Kitty and WezTerm, and blocks a
   repeated Resume while a launch is pending.
+- **Update 2026-11-02:** contributed Ghostty support is being evaluated separately in #89 (entry above); #76 remains scoped to its duplicate-Resume guard.
 - **Decision 2026-10-11:** no per-terminal adapters. The copy-resume-command action already
   serves every terminal with no launch code to maintain. The author was told in the PR. The
   PR stays open for the duplicate-Resume guard only, with no date promised.

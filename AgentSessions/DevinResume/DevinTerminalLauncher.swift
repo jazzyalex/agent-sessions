@@ -32,3 +32,10 @@ final class DevinWarpPreviewLauncher: DevinTerminalLaunching {
         try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
+
+@MainActor
+final class DevinGhosttyLauncher: DevinTerminalLaunching {
+    func launchInTerminal(_ package: DevinResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
+    }
+}

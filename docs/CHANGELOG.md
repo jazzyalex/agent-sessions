@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- **Resume in Ghostty.** Choose Ghostty under Preferences → General → Terminal App for CLI Resume, including Codex. Resume opens a new window in the session folder. Requires a Ghostty build with AppleScript support; verified with Ghostty 1.4.0. Contributed by @buildfolk in #89.
+
 ### Bug Fixes
 
 - **Pressing Esc in OpenCode no longer hides its rate.** An OpenCode step you interrupt before any output used to blank that session's rate in the Quota Meter for 30 minutes, and mark its Session Info token total as incomplete. It now counts as no usage, like a refused request.

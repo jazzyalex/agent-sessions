@@ -50,6 +50,92 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(TerminalKind.warp.bundleIdentifier, "dev.warp.Warp-Stable")
     }
 
+    func testInferGhosttyFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: "com.mitchellh.ghostty")
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testInferGhosttyFromTermProgram() {
+        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: nil)
+        XCTAssertEqual(kind, .ghostty)
+    }
+
+    func testGhosttyBundleIdentifierAndDisplayName() {
+        XCTAssertEqual(TerminalKind.ghostty.bundleIdentifier, "com.mitchellh.ghostty")
+        XCTAssertEqual(TerminalKind.ghostty.displayName, "Ghostty")
+        XCTAssertEqual(CodexLaunchMode.ghostty.title, "Ghostty")
+    }
+
+    // MARK: - Ghostty AppleScript
+
+    func testGhosttyScriptOpensWindowInWorkingDirectoryAndTypesCommand() {
+        let script = AgentTerminalLauncher.ghosttyScriptLines()
+
+        XCTAssertEqual(script.first, "on run argv")
+        XCTAssertEqual(script.last, "end run")
+        XCTAssertTrue(script.contains("tell application \"Ghostty\""))
+        XCTAssertTrue(script.contains("set initial working directory of surfaceConfig to workingDirectory"))
+        XCTAssertTrue(script.contains("set initial input of surfaceConfig to shellCommand & linefeed"))
+        XCTAssertTrue(script.contains("new window with configuration surfaceConfig"))
+    }
+
+    @MainActor
+    func testGhosttyScriptWaitKeepsMainActorResponsive() async throws {
+        var started = false
+        var finished = false
+        let launch = Task {
+            started = true
+            try await AgentTerminalLauncher.runGhosttyAppleScript(["delay 2"])
+            finished = true
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(started)
+        XCTAssertFalse(finished, "The UI actor must run before osascript finishes")
+        try await launch.value
+    }
+
+    func testGhosttyScriptPassesArgumentsWithoutInterpolation() async throws {
+        let value = "a path with 'quotes' and \"double quotes\"; $(touch nope)"
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: output) }
+        try await AgentTerminalLauncher.runGhosttyAppleScript([
+            "on run argv",
+            "do shell script \"printf '%s' \" & quoted form of (item 1 of argv) & \" > \" & quoted form of (item 2 of argv)",
+            "end run"
+        ], arguments: [value, output.path])
+        XCTAssertEqual(try String(contentsOf: output, encoding: .utf8), value)
+    }
+
+    func testGhosttyScriptReportsCompatibilityAndUnderlyingError() async {
+        do {
+            try await AgentTerminalLauncher.runGhosttyAppleScript(["error \"permission denied fixture\""])
+            XCTFail("Expected a launch error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("AppleScript support"))
+            XCTAssertTrue(error.localizedDescription.contains("permission denied fixture"))
+        }
+    }
+
+    func testGhosttyScriptTimesOut() async {
+        let start = Date()
+        do {
+            try await AgentTerminalLauncher.runGhosttyAppleScript(["delay 30"], timeout: 0.1)
+            XCTFail("Expected a timeout")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("timed out"))
+            XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+        }
+    }
+
+    func testGhosttyScriptLargeOutputCannotFillPipes() async throws {
+        try await AgentTerminalLauncher.runGhosttyAppleScript([
+            "repeat 10000 times",
+            "log \"stderr fixture\"",
+            "end repeat",
+            "do shell script \"/usr/bin/awk 'BEGIN { for (i=0; i<10000; i++) print \\\"output fixture\\\" }'\""
+        ])
+    }
+
     // MARK: - Warp tab config TOML
 
     func testWarpTabConfigUsesTerminalPane() {

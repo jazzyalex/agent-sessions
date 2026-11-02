@@ -49,6 +49,19 @@ enum AgentTerminalLauncher {
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
     }
 
+    /// Opens a new Ghostty window in `cwd` and types `shellCommand` into its shell.
+    /// Uses Ghostty's AppleScript dictionary (surface configuration + new window).
+    /// The command goes in as initial input rather than as the surface command so
+    /// the user's login shell, and with it their PATH, runs first.
+    static func launchInGhostty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") async throws {
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty") != nil else {
+            throw NSError(domain: domain, code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Ghostty is not installed."])
+        }
+        let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        try await runGhosttyAppleScript(ghosttyScriptLines(), arguments: [shellCommand, directory], domain: domain)
+    }
+
     /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.
     static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) async throws {
         let scheme: String
@@ -155,6 +168,60 @@ enum AgentTerminalLauncher {
     }
 
     // MARK: - Helpers
+
+    /// Ghostty may wait for Automation consent. Keep that wait off the UI actor,
+    /// discard stdout, and spool stderr so neither pipe can block the child.
+    static nonisolated func runGhosttyAppleScript(_ lines: [String], arguments: [String] = [],
+                                                  domain: String = "AgentTerminalLauncher",
+                                                  timeout: TimeInterval = 10) async throws {
+        try await Task.detached {
+            let errorURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ghostty-resume-\(UUID().uuidString).stderr")
+            guard FileManager.default.createFile(atPath: errorURL.path, contents: nil,
+                                                 attributes: [.posixPermissions: 0o600]) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            defer { try? FileManager.default.removeItem(at: errorURL) }
+            let errorHandle = try FileHandle(forWritingTo: errorURL)
+            defer { try? errorHandle.close() }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = lines.flatMap { ["-e", $0] } + arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = errorHandle
+            try process.run()
+            guard process.waitForExit(timeout: timeout) else {
+                throw NSError(domain: domain, code: 5, userInfo: [NSLocalizedDescriptionKey:
+                    "Ghostty launch timed out. Check the Automation permission for Agent Sessions in System Settings and try again."])
+            }
+            guard process.terminationStatus == 0 else {
+                let reader = try FileHandle(forReadingFrom: errorURL)
+                defer { try? reader.close() }
+                let data = try reader.read(upToCount: 16_384) ?? Data()
+                let detail = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                let message = "Ghostty launch failed. Resume in Ghostty needs a Ghostty build with AppleScript support."
+                throw NSError(domain: domain, code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey:
+                    detail.isEmpty ? message : "\(message)\n\(detail)"])
+            }
+        }.value
+    }
+
+    /// AppleScript for `launchInGhostty`. argv: shell command, working directory.
+    static nonisolated func ghosttyScriptLines() -> [String] {
+        [
+            "on run argv",
+            "set shellCommand to item 1 of argv",
+            "set workingDirectory to item 2 of argv",
+            "tell application \"Ghostty\"",
+            "activate",
+            "set surfaceConfig to new surface configuration",
+            "set initial working directory of surfaceConfig to workingDirectory",
+            "set initial input of surfaceConfig to shellCommand & linefeed",
+            "new window with configuration surfaceConfig",
+            "end tell",
+            "end run"
+        ]
+    }
 
     static nonisolated func warpTabConfigTOML(configName: String, command: String, directory: String) -> String {
         """

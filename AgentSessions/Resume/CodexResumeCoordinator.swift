@@ -118,6 +118,11 @@ final class CodexResumeCoordinator {
                         cwd: package.workingDirectory?.path,
                         kind: .warpPreview
                     )
+                case .ghostty:
+                    try await AgentTerminalLauncher.launchInGhostty(
+                        shellCommand: package.displayCommand,
+                        cwd: package.workingDirectory?.path
+                    )
                 default:
                     try await terminalLauncher.launchInTerminal(package)
                 }
