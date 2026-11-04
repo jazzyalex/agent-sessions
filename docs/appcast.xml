@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.2</title>
-            <pubDate>Tue, 27 Oct 2026 15:11:07 -0700</pubDate>
+            <title>6.3</title>
+            <pubDate>Tue, 03 Nov 2026 20:59:52 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,22 +27,22 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.2</h2>
+<h2>What&#x27;s New in 6.3</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>OpenCode sessions in the Quota Meter show their own burn rate.</strong> Each running OpenCode 2.x session shows its token rate, or its API-equivalent cost in the $ lens; free routes read Free. A row keeps its last rate for 5 minutes after a turn ends, marked idle, and has the same load bar as Codex and Claude. OpenCode has no quota or weekly figure yet.</li>
+<li><strong>Resume in Ghostty.</strong> Choose Ghostty under Preferences → General → Terminal App for CLI Resume, including Codex. Resume opens a new window in the session folder. Requires a Ghostty build with AppleScript support; verified with Ghostty 1.4.0. Contributed by @buildfolk in #89.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>An OpenCode request the provider refused no longer hides the session&#x27;s usage.</strong> One free-tier limit (HTTP 429) made Session Info show the whole session&#x27;s usage as unavailable. A refused request now counts as using no tokens.</li>
+<li><strong>Pressing Esc in OpenCode no longer hides its rate.</strong> An OpenCode step you interrupt before any output used to blank that session&#x27;s rate in the Quota Meter for 30 minutes, and mark its Session Info token total as incomplete. It now counts as no usage, like a refused request.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.2</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.3</a></p>
 </div>
             ]]></description>
-            <sparkle:version>87</sparkle:version>
-            <sparkle:shortVersionString>6.2</sparkle:shortVersionString>
+            <sparkle:version>88</sparkle:version>
+            <sparkle:shortVersionString>6.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg" length="30171472" type="application/octet-stream" sparkle:edSignature="VNiqWc1iLihpmKZPZUgLjhI/JIVPJoWrzn+obQeZfzXzeu/1Co1Nsqg0FnPEqro5bQP4M5qlJvLB91iGJvFUBQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg" length="30202561" type="application/octet-stream" sparkle:edSignature="keIS/Gc87uZulpSauiUC3d81LFNeN25834f5mfLu8C2MSaP2f2JA922TWnRmQETozUKNv2ItFVEBsGB7bPNYBQ=="/>
         </item>
     </channel>
 </rss>
