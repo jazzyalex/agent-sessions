@@ -468,7 +468,8 @@ def test_skill_split_keeps_every_original_section():
     folder = REPO / "skills/agent-session-format-check"
     assert len((folder / "SKILL.md").read_text().splitlines()) < 200
     mapping = json.loads((folder / "references/section-map.json").read_text())
-    original = subprocess.run(["git", "show", "HEAD:skills/agent-session-format-check/SKILL.md"],
+    # df9c05e7 is the last commit before the split; HEAD already holds the short runbook.
+    original = subprocess.run(["git", "show", "df9c05e7:skills/agent-session-format-check/SKILL.md"],
                               capture_output=True, text=True, check=True).stdout
     headings = [line for line in original.splitlines() if line.startswith("## ")]
     assert set(mapping) == set(headings)
