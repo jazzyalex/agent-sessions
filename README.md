@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg"><b>Download Agent Sessions 6.2</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg"><b>Download Agent Sessions 6.3</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -33,6 +33,11 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows, plus each OpenCode session's token or cost rate; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 6.3
+
+- **Resume in Ghostty.** Choose Ghostty under Preferences → General → Terminal App, and Resume opens a new Ghostty window in the session folder, for Codex and the other supported CLIs. Requires a Ghostty build with AppleScript support (verified with 1.4.0). Contributed by @buildfolk.
+- **Pressing Esc in OpenCode no longer hides its rate.** An interrupted step with no output now counts as no usage, so the session keeps its Quota Meter rate and a complete Session Info total.
 
 ## What's New in 6.2
 
@@ -158,7 +163,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-6.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.2/AgentSessions-6.2.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-6.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 

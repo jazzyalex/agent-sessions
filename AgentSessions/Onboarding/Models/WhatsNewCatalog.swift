@@ -119,10 +119,27 @@ enum WhatsNewCatalog {
         "5.7": "Codex sessions stay in the list after Codex compresses them, and Session Info prices eight more agents.",
         "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list.",
         "6.1": "Running OpenCode sessions now appear in the Quota Meter.",
-        "6.2": "OpenCode sessions in the Quota Meter now show their own burn rate."
+        "6.2": "OpenCode sessions in the Quota Meter now show their own burn rate.",
+        "6.3": "CLI sessions now resume in Ghostty, too."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.3": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "terminal",
+                title: "Resume in Ghostty",
+                body: "Choose Ghostty under Preferences → General → Terminal App. Resume then opens a new Ghostty window in the session folder. Requires a Ghostty build with AppleScript support. Contributed by @buildfolk."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.2": [
             WhatsNewItem(
                 kind: .highlight,

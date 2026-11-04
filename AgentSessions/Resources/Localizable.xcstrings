@@ -1021,6 +1021,57 @@
         }
       }
     },
+    "CLI sessions now resume in Ghostty, too.": {
+      "comment": "One-line teaser for the Agent Sessions 6.3 What's New card. Ghostty is a terminal app name; do not translate it.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI sessions now resume in Ghostty, too."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI 会话现在也可以在 Ghostty 中继续。"
+          }
+        }
+      }
+    },
+    "Resume in Ghostty": {
+      "comment": "Title for the Agent Sessions 6.3 What's New highlight about resuming CLI sessions in the Ghostty terminal.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume in Ghostty"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Ghostty 中继续"
+          }
+        }
+      }
+    },
+    "Choose Ghostty under Preferences → General → Terminal App. Resume then opens a new Ghostty window in the session folder. Requires a Ghostty build with AppleScript support. Contributed by @buildfolk.": {
+      "comment": "Body for the Agent Sessions 6.3 What's New highlight. Preferences → General → Terminal App names the setting path; @buildfolk is a GitHub username and stays as written.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Ghostty under Preferences → General → Terminal App. Resume then opens a new Ghostty window in the session folder. Requires a Ghostty build with AppleScript support. Contributed by @buildfolk."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在“设置 → 通用 → Terminal App”中选择 Ghostty。之后“继续”会在会话文件夹中打开一个新的 Ghostty 窗口。需要支持 AppleScript 的 Ghostty 版本。由 @buildfolk 贡献。"
+          }
+        }
+      }
+    },
     "OpenCode sessions in the Quota Meter now show their own burn rate.": {
       "comment": "One-line teaser for the Agent Sessions 6.2 What's New card.",
       "localizations": {
