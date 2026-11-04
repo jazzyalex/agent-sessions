@@ -2,6 +2,46 @@ import XCTest
 @testable import AgentSessions
 
 final class Stage0GoldenFixturesTests: XCTestCase {
+    func testNovemberCodexCoverageSurvivesFullParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        for key in ["cloud_skills", "inputImages", "encrypted_content", "last_usage_includes_reasoning"] {
+            XCTAssertTrue(full.events.contains { $0.rawJSON.contains("\"\(key)\"") }, key)
+        }
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call })
+    }
+
+    func testNovemberClaudeCoverageSurvivesFullParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        let raw = full.events.compactMap { Data(base64Encoded: $0.rawJSON) }
+            .compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
+        for key in ["preCompactArtifactReadVersions", "apiErrorParams", "classifierCategory", "ruleSource", "commandRun"] {
+            XCTAssertTrue(raw.contains("\"\(key)\""), key)
+        }
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant })
+    }
+
+    func testNovemberCopilotCoverageSurvivesFullParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/copilot/small.jsonl")
+        let full = try XCTUnwrap(CopilotSessionParser.parseFileFull(at: url))
+        XCTAssertTrue(full.events.contains {
+            guard let data = Data(base64Encoded: $0.rawJSON), let raw = String(data: data, encoding: .utf8) else { return false }
+            return raw.contains("selectionReason")
+        })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call })
+    }
+
+    func testNovemberPiCoverageSurvivesFullParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/pi/small.jsonl")
+        let full = try XCTUnwrap(PiSessionParser.parseFileFull(at: url))
+        XCTAssertTrue(full.events.contains {
+            guard let data = Data(base64Encoded: $0.rawJSON), let raw = String(data: data, encoding: .utf8) else { return false }
+            return raw.contains("totalFromProvider")
+        })
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant })
+    }
+
     func testCodexSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
         let idx = SessionIndexer()
@@ -567,6 +607,32 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(items.isEmpty, "item_completed event should survive parsing as .meta")
     }
 
+    func testCodexItemCompletedGenerationMetadataSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(fixture.contains("\"generationId\""))
+        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        let events = full.events.filter { event in
+            let data = Data(base64Encoded: event.rawJSON) ?? Data(event.rawJSON.utf8)
+            return String(decoding: data, as: UTF8.self).contains("\"generationId\"")
+        }
+        XCTAssertFalse(events.isEmpty)
+        XCTAssertFalse(events.contains { $0.kind == .user }, "generation metadata must not become a prompt")
+    }
+
+    func testCodexCompactionDynamicToolMetadataSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        let fixture = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(fixture.contains("\"dynamic_tools\""))
+        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        let events = full.events.filter { event in
+            let data = Data(base64Encoded: event.rawJSON) ?? Data(event.rawJSON.utf8)
+            return String(decoding: data, as: UTF8.self).contains("\"dynamic_tools\"")
+        }
+        XCTAssertFalse(events.isEmpty)
+        XCTAssertTrue(events.allSatisfy { $0.kind == .meta }, "resume metadata must not become a prompt or tool call")
+    }
+
     func testCodexOctoberMetadataAdditionsSurviveParsing() throws {
         // Codex 0.164.0: content_item_metadata provenance on message and
         // agent_message passthrough, and world_state.state.model as an object.
@@ -588,7 +654,12 @@ final class Stage0GoldenFixturesTests: XCTestCase {
                        "a developer message with provenance must not become a user prompt")
 
         let worldState = full.events.filter { raw($0).contains("\"type\":\"world_state\"") && raw($0).contains("\"gpt-6.1-sol\"") }
-        XCTAssertEqual(worldState.count, 1, "the object-valued world_state model record should survive parsing once")
+        let fixtureWorldStates = fixture.split(separator: "\n").filter {
+            $0.contains("\"type\":\"world_state\"") && $0.contains("\"gpt-6.1-sol\"")
+        }
+        XCTAssertGreaterThan(fixtureWorldStates.count, 0)
+        XCTAssertEqual(worldState.count, fixtureWorldStates.count,
+                       "each object-valued world_state fixture record should survive exactly once")
         if let event = worldState.first {
             XCTAssertEqual(event.kind, .meta)
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw(event).utf8)) as? [String: Any])

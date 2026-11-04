@@ -21,6 +21,7 @@
   "summary_diffs": "redacted",
   "summary_files": 0,
   "time_compacting": 0,
+  "time_busy": 0,
   "time_created": 0,
   "time_idle": 0,
   "time_suspended": 0,

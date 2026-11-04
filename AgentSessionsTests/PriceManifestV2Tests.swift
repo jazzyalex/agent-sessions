@@ -2,6 +2,27 @@ import XCTest
 @testable import AgentSessions
 
 final class PriceManifestV2Tests: XCTestCase {
+    func testNovemberObservedModelsHaveVerifiedRatesWithoutPricingVariants() throws {
+        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        let mini = try XCTUnwrap(snapshot.resolvedPrice(forModel: "openai/gpt-4o-mini")?.price)
+        XCTAssertEqual(mini.inputPerMTok, 0.15)
+        XCTAssertEqual(mini.cachedInputPerMTok, 0.075)
+        XCTAssertEqual(mini.outputPerMTok, 0.60)
+        let solar = try XCTUnwrap(snapshot.resolvedPrice(forModel: "cline-free/solar-mini4")?.price)
+        XCTAssertEqual(solar.inputPerMTok, 0.10)
+        XCTAssertEqual(solar.cachedInputPerMTok, 0.01)
+        XCTAssertEqual(solar.outputPerMTok, 0.40)
+        let kimi = try XCTUnwrap(snapshot.resolvedPrice(forModel: "moonshot-ai/kimi-k3")?.price)
+        XCTAssertEqual(kimi.inputPerMTok, 3)
+        XCTAssertEqual(kimi.cachedInputPerMTok, 0.30)
+        XCTAssertEqual(kimi.outputPerMTok, 15)
+        XCTAssertEqual(kimi.cacheWritePerMTok, 3)
+        XCTAssertEqual(kimi.cacheWrite1hPerMTok, 6)
+        for slug in ["gpt-4o-mini-preview", "solar-mini4-pro", "kimi-k3-preview"] {
+            XCTAssertNil(snapshot.resolvedPrice(forModel: slug), "Unverified variants keep their own price requirement")
+        }
+    }
+
     private func rate(_ input: Double) -> RunwayModelPrice {
         RunwayModelPrice(standard: RunwayRateSet(inputPerMTok: input, cachedInputPerMTok: input / 10,
                                                  outputPerMTok: input * 5, cacheWritePerMTok: nil,

@@ -23,6 +23,19 @@ final class OpenCodeV2StoreTests: XCTestCase {
 
     // MARK: - Discovery
 
+    func testBusyTimestampColumnSurvivesDiscoveryAndFullLoad() throws {
+        try createV1Tables()
+        try createV2Tables()
+        try insertNativeV2Session()
+        let before = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        try exec("ALTER TABLE session_v2 ADD COLUMN time_busy INTEGER;")
+        try exec("UPDATE session_v2 SET time_busy = 9001 WHERE id = 'ses_native';")
+        let after = try XCTUnwrap(OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_native"))
+        XCTAssertEqual(after.events.count, before.events.count)
+        XCTAssertFalse(after.events.isEmpty)
+        XCTAssertTrue(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).contains { $0.id == "ses_native" })
+    }
+
     func testListMergesV2AndUncopiedV1SessionsWithV2Winning() throws {
         try createV1Tables()
         try createV2Tables()
