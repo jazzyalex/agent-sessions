@@ -1237,6 +1237,11 @@ struct UnifiedSessionsView: View {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
+	                    if s.source == .claude {
+	                        Button("Open in VS Code") { openInVSCode(s) }
+	                            .disabled(!ClaudeVSCodeLauncher.isEditorInstalled)
+	                            .help("Open this session in the Claude Code extension for VS Code. The session folder opens first.")
+	                    }
 	                    Divider()
 	                }
                     if activeCodexSessions.supportsLiveSessions(for: s.source) {
@@ -3567,6 +3572,20 @@ struct UnifiedSessionsView: View {
             case .launched:
                 break
             case .needsConfiguration(let message), .failure(let message):
+                showActionAlert(message: message, in: presentingWindow)
+            }
+        }
+    }
+
+    private func openInVSCode(_ session: Session) {
+        guard session.source == .claude, !session.isClaudeWorkflowSubagent else { return }
+        // Captured at click time for the same reason as in `resume(_:)`: VS Code
+        // takes focus, so a late failure must attach to the window it came from.
+        let presentingWindow = NSApp.keyWindow ?? NSApp.mainWindow
+        let sessionID = ClaudeSessionIDHelper.deriveSessionID(from: session)
+        let folder = ClaudeSessionIDHelper.projectRoot(for: session, includeDefaultFallback: false)
+        Task { @MainActor in
+            if case .failure(let message) = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: folder) {
                 showActionAlert(message: message, in: presentingWindow)
             }
         }

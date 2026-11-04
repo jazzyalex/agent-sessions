@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Open Claude sessions in VS Code.** Right-click a Claude Code session and choose Open in VS Code. Agent Sessions opens the session's folder in VS Code, then hands the session to the Claude Code extension, which resumes it in a tab. A removed worktree falls back to its repository root. Needs VS Code or VS Code Insiders with the Claude Code extension.
+
 ## [6.3] - 2026-11-03
 
 ### Highlights
