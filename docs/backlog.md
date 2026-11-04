@@ -2629,6 +2629,20 @@ Test: testEffectivePresentationMatrix, testWeeklyPresentationStaysWeeklyWithoutR
 
 ---
 
+## Session List
+
+### Hide a project from the session list
+> **open** · sev: low · urg: low · verified 2026-10-31
+
+- **What:** [#87](https://github.com/jazzyalex/agent-sessions/issues/87) asks for a persistent way to hide a project. An hourly scheduled Claude Code job fills the top of the list with full sessions. The Project filter shows one chosen project only, and the housekeeping and message-count filters do not match these sessions.
+- **Where:** the list filters in [UnifiedSessionIndexer.swift:2669](../AgentSessions/Services/UnifiedSessionIndexer.swift:2669); the `repo:` and `path:` operators in `FilterEngine.parseOperators` have no exclude form.
+- **Fix shape:** a stored list of hidden projects, keyed by the same identity as `selectedProjectIdentity`. Add a Hide action in the project filter or the row menu, and a list in Settings to undo it.
+- **Why deferred:** owner decision 2026-10-31; one request so far.
+- **Risk if wrong:** hidden sessions can look lost, so the list must show that a project is hidden.
+- **To close:** a hidden project stays hidden across relaunch, and Settings can restore it.
+
+---
+
 ## Resume / Terminal Launch
 
 ### PR #89: qualify contributed Ghostty Resume support
