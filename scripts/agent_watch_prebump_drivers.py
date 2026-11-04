@@ -274,6 +274,11 @@ def prepare_auth(
     Returns (env, warnings). Raises HygieneError on hard failure.
     """
     env = os.environ.copy()
+    drop_names = set(prebump_cfg.get("drop_env") or [])
+    drop_prefixes = tuple(prebump_cfg.get("drop_env_prefixes") or [])
+    for key in list(env):
+        if key in drop_names or (drop_prefixes and key.startswith(drop_prefixes)):
+            del env[key]
     env["HOME"] = str(sandbox)
     warnings: list[str] = []
 
@@ -405,6 +410,7 @@ class CodexExecDriver:
         try:
             proc = subprocess.run(
                 ["codex", "exec", "--sandbox", "read-only", prompt],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -472,6 +478,7 @@ class ClaudePrintDriver:
             proc = subprocess.run(
                 cmd,
                 env=env,
+                cwd=str(sandbox),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -585,6 +592,7 @@ class DroidExecDriver:
         try:
             proc = subprocess.run(
                 ["droid", "exec", "--auto", "low", "--cwd", str(sandbox), prompt],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -660,7 +668,7 @@ class CopilotPromptDriver:
         return leaks
 
     @staticmethod
-    def _gh_auth_token() -> str | None:
+    def _gh_auth_token(sandbox: Path) -> str | None:
         """Token from the locally authenticated gh CLI, or None.
 
         Never logged or written to the report — it is only placed in the child env.
@@ -670,6 +678,7 @@ class CopilotPromptDriver:
                 ["gh", "auth", "token"],
                 # Explicit env, matching every other subprocess call in this module.
                 # gh reads its own config/keyring, so the real environment is required.
+                cwd=str(sandbox),
                 env=os.environ.copy(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -702,7 +711,7 @@ class CopilotPromptDriver:
         # exists, so without this the driver could never authenticate on a machine that
         # signs in through gh.
         if not any(env.get(v) for v in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
-            token = self._gh_auth_token()
+            token = self._gh_auth_token(sandbox)
             if token:
                 env["COPILOT_GITHUB_TOKEN"] = token
         real_home = Path(os.environ.get("HOME", str(Path.home())))
@@ -720,6 +729,7 @@ class CopilotPromptDriver:
         try:
             proc = subprocess.run(
                 cmd,
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -766,6 +776,7 @@ def _opencode_major_version(env: dict[str, str]) -> int:
     try:
         proc = subprocess.run(
             ["opencode", "--version"],
+            cwd=env.get("HOME"),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -874,6 +885,7 @@ class OpenClawLocalAgentDriver:
                     "--timeout",
                     str(timeout),
                 ],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1029,6 +1041,7 @@ class CursorAgentPrintDriver:
                     str(sandbox),
                     probe_prompt,
                 ],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1075,6 +1088,7 @@ class HermesOneshotDriver:
                     "--accept-hooks",
                     "--ignore-rules",
                 ],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1188,6 +1202,7 @@ class PiPromptDriver:
                     *(["--model", env["AGENT_WATCH_MODEL"]] if env.get("AGENT_WATCH_MODEL") else []),
                     prompt,
                 ],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1281,6 +1296,7 @@ class KimiPromptDriver:
         try:
             proc = subprocess.run(
                 ["kimi", "-p", prompt, "--output-format", "text"],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1375,6 +1391,7 @@ class GrokSingleDriver:
                     "--disable-web-search",
                     "--output-format", "plain",
                 ],
+                cwd=str(sandbox),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

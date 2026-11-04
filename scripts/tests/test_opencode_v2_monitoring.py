@@ -860,7 +860,7 @@ _FIXTURE_KEYS = {
     "body", "description", "jobID", "previous", "response",
     # session_v2 columns that are NULL on the owner's disk but exist in the schema
     "fork_boundary", "fork_session_id", "permission", "revert", "share_url", "summary_diffs",
-    "time_compacting", "time_suspended", "workspace_id",
+    "time_compacting", "time_suspended", "time_busy", "workspace_id",
 }
 
 

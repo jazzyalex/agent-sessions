@@ -161,6 +161,9 @@ Configuration:
 
 ## Scheduling
 
+The schedule is inactive until `bash tools/agent-watch/install.sh` succeeds on this Mac.
+For a full update sweep, follow the [canonical runbook](../../skills/agent-session-format-check/SKILL.md).
+
 The weekly run has a tracked LaunchAgent — `tools/agent-watch/`. Install it with:
 
     bash tools/agent-watch/install.sh

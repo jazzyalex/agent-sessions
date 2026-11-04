@@ -1,9 +1,6 @@
-# Update Checklist (Skill Reference)
+# Update checklist
 
-Use this checklist when the agent-support-matrix skill is invoked.
-
-## Required steps
-- Read `docs/agent-support/update-checklist.md` and follow it.
-- Do not update `docs/agent-support/agent-support-matrix.yml` without fixtures or sample logs
-  plus passing parser tests.
-- Record the upstream check in `docs/agent-json-tracking.md` with sources and evidence paths.
+Follow [the canonical runbook](../../agent-session-format-check/SKILL.md) and
+[the evidence gates](../../../docs/agent-support/update-checklist.md).
+Records come from the final weekly only, after the last CLI update. No ceiling bump
+without a native session from that build and passing parser/discovery checks.

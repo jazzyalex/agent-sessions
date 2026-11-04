@@ -4,6 +4,8 @@
     "codex": {
       "cadence": { "daily": true, "weekly": true },
       "installed_version_cmd": ["codex", "--version"],
+      "install": {"argv":["npm","install","-g","@openai/codex@{version}"],"version_probe":["codex","--version"]},
+      "preflight": {"credential_files":["~/.codex/auth.json"],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.codex_cli.max_verified_version",
       "upstream": [
         { "kind": "github_latest_release", "repo": "openai/codex" }
@@ -61,6 +63,8 @@
     "claude": {
       "cadence": { "daily": true, "weekly": true },
       "installed_version_cmd": ["claude", "--version"],
+      "install": {"argv":["claude","update"],"version_probe":["claude","--version"]},
+      "preflight": {"credential_files":["~/.claude/.credentials.json"],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.claude_code.max_verified_version",
       "upstream": [
         { "kind": "github_latest_release", "repo": "anthropics/claude-code" }
@@ -119,6 +123,8 @@
     "opencode": {
       "cadence": { "daily": true, "weekly": true },
       "installed_version_cmd": ["opencode", "--version"],
+      "install": {"argv":["npm","install","-g","@opencode/cli@{version}"],"version_probe":["opencode","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.opencode.max_verified_version",
       "upstream": [
         {
@@ -134,6 +140,7 @@
       "weekly": {
         "local_schema": {
           "kind": "opencode_latest_session",
+          "single_session_reason": "The sample is restricted to the newest session's writer-version cohort; older versions cannot fill its schema gaps.",
           "db_roots": ["~/.local/share/opencode/opencode.db"],
           "roots": ["~/.local/share/opencode/storage/session"],
           "glob": "**/ses_*.json",
@@ -157,6 +164,8 @@
       },
       "prebump": {
         "driver": "opencode_run",
+        "fallback_models": ["moonshotai/kimi-k2.7"],
+        "drop_env_prefixes": ["OPENCODE_"],
         "model": "moonshotai/kimi-k2.7-code",
         "opencode_api_key": {"provider": "moonshotai", "env_var": "MOONSHOT_API_KEY"},
         "sandbox": {"mode": "home_override", "subdir": "opencode_sandbox"},
@@ -194,6 +203,8 @@
     "hermes": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["hermes", "--version"],
+      "install": {"argv":["hermes","update"],"version_probe":["hermes","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.hermes.max_verified_version",
       "upstream": [
         {
@@ -246,6 +257,8 @@
     "antigravity": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["agy", "--version"],
+      "install": {"argv":["agy","update"],"version_probe":["agy","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.antigravity.max_verified_version",
       "upstream": [
         {
@@ -304,6 +317,8 @@
     "copilot": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["copilot", "--version"],
+      "install": {"argv":["copilot","update"],"version_probe":["copilot","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.copilot_cli.max_verified_version",
       "upstream": [
         { "kind": "github_latest_release", "repo": "github/copilot-cli" }
@@ -356,6 +371,8 @@
     "openclaw": {
       "cadence": { "daily": true, "weekly": true },
       "installed_version_cmd": ["openclaw", "--version"],
+      "install": {"argv":["npm","install","-g","openclaw@{version}"],"version_probe":["openclaw","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.openclaw.max_verified_version",
       "upstream": [
         { "kind": "npm_latest", "package": "openclaw" }
@@ -430,6 +447,8 @@
     "cursor": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["cursor-agent", "--version"],
+      "install": {"argv":["cursor-agent","update"],"version_probe":["cursor-agent","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "installed_version_fallback_cmds": [
         ["agent", "--version"],
         ["cursor", "--version"],
@@ -497,6 +516,8 @@
     "pi": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["pi", "--version"],
+      "install": {"argv":["npm","install","-g","@earendil-works/pi-coding-agent@{version}"],"version_probe":["pi","--version"]},
+      "preflight": {"credential_files":["~/.pi/agent/auth.json"],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.pi.max_verified_version",
       "upstream": [
         { "kind": "npm_latest", "package": "@earendil-works/pi-coding-agent" }
@@ -524,7 +545,8 @@
       },
       "prebump": {
         "driver": "pi_prompt",
-        "model": "openai-codex/gpt-6-luna",
+        "fallback_models": ["openai/gpt-6.1-sol"],
+        "model": "openai/gpt-6-luna",
         "sandbox": {"mode": "home_override", "subdir": "pi_sandbox"},
         "prompt": "Call the ls tool now with path '.'. Do not answer before making that tool call. List filenames only; do not open, read, or modify files.",
         "timeout_seconds": 180,
@@ -565,6 +587,8 @@
     "kimi": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["kimi", "--version"],
+      "install": {"argv":["npm","install","-g","@moonshot-ai/kimi-code@{version}"],"version_probe":["kimi","--version"]},
+      "preflight": {"credential_files":["~/.kimi-code/config.toml"],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.kimi_code.max_verified_version",
       "upstream": [
         { "kind": "npm_latest", "package": "@moonshot-ai/kimi-code" }
@@ -610,6 +634,8 @@
     "grok": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["grok", "--version"],
+      "install": {"argv":["grok","update","--version","{version}"],"version_probe":["grok","--version"]},
+      "preflight": {"credential_files":["~/.grok/auth.json"],"credential_required":false,"auth_argv":["grok","models"]},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.grok_cli.max_verified_version",
       "upstream": [
         {
@@ -674,6 +700,7 @@
     "qwen": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["qwen", "--version"],
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.qwen_code.max_verified_version",
       "upstream": [
         { "kind": "npm_latest", "package": "@qwen-code/qwen-code" }
@@ -703,6 +730,7 @@
     "devin": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["devin", "--version"],
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.devin_cli.max_verified_version",
       "upstream": [
         {
@@ -719,6 +747,7 @@
       "weekly": {
         "local_schema": {
           "kind": "devin_latest_session",
+          "single_session_reason": "Bounded main-chain topology probe; native verification is steward-owned and no local CLI is installed.",
           "db_roots": ["~/.local/share/devin/cli/sessions.db"],
           "max_nodes": 500
         },
@@ -734,6 +763,7 @@
     "fx": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["fx", "--version"],
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.fx.max_verified_version",
       "upstream": [
         {
@@ -776,6 +806,8 @@
     "cline": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["cline", "--version"],
+      "install": {"argv":["npm","install","-g","cline@{version}"],"version_probe":["cline","--version"]},
+      "preflight": {"credential_files":["~/.cline/data/settings/providers.json"],"credential_required":false,"models_argv":["curl","-fsS","--max-time","15","https://api.cline.bot/api/v1/ai/cline/recommended-models"],"models_format":"lines"},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.cline.max_verified_version",
       "upstream": [
         { "kind": "npm_latest", "package": "cline" }
@@ -809,6 +841,7 @@
       },
       "prebump": {
         "driver": "cline_headless",
+        "fallback_models": ["cline-free/solar-mini4"],
         "model": "cline-free/nemotron-3.5-super-vl",
         "sandbox": { "mode": "home_override", "subdir": "cline_sandbox" },
         "prompt": "Use your tools to list the files in the current directory, then read a.txt and say what it contains.",
@@ -833,6 +866,8 @@
     "deepseek_harness": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["dsh", "--version"],
+      "install": {"argv":["npm","install","-g","@deepseek-ai/dsh@{version}"],"version_probe":["dsh","--version"]},
+      "preflight": {"credential_files":[],"credential_required":false},
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.deepseek_harness.max_verified_version",
       "upstream": [
         { "kind": "github_latest_release_including_prerelease", "repo": "deepseek-ai/deepseek-harness" }

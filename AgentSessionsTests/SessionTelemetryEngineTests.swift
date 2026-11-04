@@ -1316,6 +1316,30 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 1)
     }
 
+    func testDetailedCancellationDescribesWaiterWhileSharedScanCompletes() async throws {
+        let url = try write(codexLines())
+        let metrics = SessionInfoMetrics()
+        let blocker = BlockingAction()
+        defer { blocker.release() }
+        let engine = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: .makeForTesting(),
+            metrics: metrics, beforeTelemetryScan: { blocker.run() })
+        let first = Task { await engine.telemetryReadResult(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where !blocker.hasEntered { await Task.yield() }
+        XCTAssertTrue(blocker.hasEntered)
+        let second = Task { await engine.telemetry(for: session(url, source: .codex)) }
+        for _ in 0..<10_000 where metrics.snapshot.inFlightJoinCount == 0 { await Task.yield() }
+        XCTAssertEqual(metrics.snapshot.inFlightJoinCount, 1)
+        first.cancel()
+        let cancelled = await first.value
+        XCTAssertNil(cancelled.telemetry)
+        XCTAssertEqual(cancelled.unavailableReason, .scanWaitCancelled)
+        blocker.release()
+        let completed = await second.value
+        XCTAssertNotNil(completed)
+        XCTAssertEqual(engine.parseCount, 1)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 1)
+    }
+
     func testCancellingFinalSubscriberCancelsProducerAndNextRequestStartsFresh() async throws {
         let url = try write(codexLines())
         let metrics = SessionInfoMetrics()
@@ -1374,6 +1398,31 @@ final class SessionTelemetryEngineTests: XCTestCase {
                        "a changed file is retried once against its new signature")
         XCTAssertEqual(metrics.snapshot.telemetryBytesScanned, initialBytes + finalBytes,
                        "bytes scanned must report each bounded physical read")
+    }
+
+    func testDetailedTelemetryReadDistinguishesStableAndRepeatedChanges() async throws {
+        let url = try write(codexLines())
+        let stable = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: .makeForTesting())
+        let available = await stable.telemetryReadResult(for: session(url, source: .codex))
+        XCTAssertNotNil(available.telemetry)
+        XCTAssertNil(available.unavailableReason)
+
+        let mutation = AppendOnEveryCall(url: url, line: codexLines().last!)
+        let metrics = SessionInfoMetrics()
+        let changing = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: .makeForTesting(),
+            metrics: metrics, afterFirstTelemetryLine: { mutation.run() })
+        let unavailable = await changing.telemetryReadResult(for: session(url, source: .codex))
+        XCTAssertNil(unavailable.telemetry)
+        XCTAssertEqual(unavailable.unavailableReason, .revisionChanged)
+        XCTAssertEqual(metrics.snapshot.telemetryRequestCount, 2)
+    }
+
+    func testDetailedTelemetryReadReportsMissingRevision() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let engine = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: .makeForTesting())
+        let result = await engine.telemetryReadResult(for: session(url, source: .codex))
+        XCTAssertNil(result.telemetry)
+        XCTAssertEqual(result.unavailableReason, .missingRevision)
     }
 
     func testRepeatedChangesRetryOnlyOnceAndFailClosed() async throws {

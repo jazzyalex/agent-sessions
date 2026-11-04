@@ -257,29 +257,62 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         }
     }
 
+    /// Controlled diagnostic categories. Never carry transcript text, paths or IDs.
+    enum UnavailableReason: String, Sendable {
+        case cancelled
+        case unsupportedCapabilities = "unsupported_capabilities"
+        case missingBackend = "missing_backend"
+        case missingPath = "missing_path"
+        case missingRevision = "missing_revision"
+        case revisionChanged = "revision_changed_retry_exhausted"
+        case missingWorker = "missing_worker"
+        case scanWaitCancelled = "scan_wait_cancelled"
+        case scanFailed = "scan_failed"
+    }
+
+    enum ReadResult: Sendable {
+        case available(SessionTelemetry)
+        case unavailable(UnavailableReason)
+
+        var telemetry: SessionTelemetry? {
+            if case let .available(value) = self { return value }
+            return nil
+        }
+
+        var unavailableReason: UnavailableReason? {
+            if case let .unavailable(reason) = self { return reason }
+            return nil
+        }
+    }
+
     /// nil when the source cannot produce telemetry, or the file is unreadable.
+    /// Existing consumers retain exactly the same fail-closed optional API.
     func telemetry(for session: Session) async -> SessionTelemetry? {
+        (await telemetryReadResult(for: session)).telemetry
+    }
+
+    func telemetryReadResult(for session: Session) async -> ReadResult {
         await telemetry(for: session, revisionRetryCount: 0)
     }
 
-    private func telemetry(for session: Session, revisionRetryCount: Int) async -> SessionTelemetry? {
-        guard !Task.isCancelled else { return nil }
+    private func telemetry(for session: Session, revisionRetryCount: Int) async -> ReadResult {
+        guard !Task.isCancelled else { return .unavailable(.cancelled) }
         let descriptor = SessionSourceRegistry.descriptor(for: session.source)
         let capabilities = descriptor.telemetry
         // Capability- and registry-gated: adding a provider is a descriptor edit
         // plus an accumulator, with no engine switch or provider list to update.
-        guard capabilities.configuration.isAvailable || capabilities.tokens.isAvailable else { return nil }
-        guard descriptor.hasTelemetryBackend(for: session) else { return nil }
+        guard capabilities.configuration.isAvailable || capabilities.tokens.isAvailable else { return .unavailable(.unsupportedCapabilities) }
+        guard descriptor.hasTelemetryBackend(for: session) else { return .unavailable(.missingBackend) }
 
         let path = session.filePath
-        guard !path.isEmpty else { return nil }
+        guard !path.isEmpty else { return .unavailable(.missingPath) }
 
         // Shared-storage backends provide a logical, session-scoped revision;
         // file-backed sources use the physical signature. A missing revision
         // means the source cannot be proven current, so fail closed.
         guard let expectedRevision = resolveTelemetryRevision(
             for: session,
-            telemetryRevision: descriptor.telemetryRevision) else { return nil }
+            telemetryRevision: descriptor.telemetryRevision) else { return .unavailable(.missingRevision) }
 
         let pricingSnapshot = priceTable.snapshot()
         let pricing = TelemetryPricingIdentity(snapshot: pricingSnapshot)
@@ -302,12 +335,12 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             pricingSnapshot: pricingSnapshot)
 
         if let cached = selection.cached {
-            guard !Task.isCancelled else { return nil }
+            guard !Task.isCancelled else { return .unavailable(.cancelled) }
             guard isCurrentTelemetryRevision(
                 for: session,
                 expectedRevision: expectedRevision,
                 telemetryRevision: descriptor.telemetryRevision) else {
-                guard revisionRetryCount < 1 else { return nil }
+                guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
                 return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
             }
             let result = applyingWeeklyQuota(to: cached.telemetry,
@@ -321,38 +354,39 @@ final class SessionTelemetryEngine: @unchecked Sendable {
                 for: session,
                 expectedRevision: expectedRevision,
                 telemetryRevision: descriptor.telemetryRevision) else {
-                guard revisionRetryCount < 1 else { return nil }
+                guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
                 return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
             }
-            guard !Task.isCancelled else { return nil }
+            guard !Task.isCancelled else { return .unavailable(.cancelled) }
             metrics.recordCacheHit()
-            return result
+            return .available(result)
         }
 
         if selection.joinedInFlight {
             metrics.recordInFlightJoin()
         }
         guard let worker = selection.worker,
-              let workerID = selection.workerID else { return nil }
+              let workerID = selection.workerID else { return .unavailable(.missingWorker) }
         // This is a shared producer. Do not cancel it when this subscriber is
         // cancelled while another visible Session Info consumer may still need
         // it. The final subscriber does cancel it, so rapid navigation does not
         // accumulate unowned full-file scans.
-        guard let scan = await awaitSharedScan(worker, key: key, workerID: workerID) else { return nil }
+        guard let scan = await awaitSharedScan(worker, key: key, workerID: workerID) else { return .unavailable(.scanWaitCancelled) }
 
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled else { return .unavailable(.cancelled) }
         guard let computed = scan.computed else {
-            guard scan.revisionChanged, revisionRetryCount < 1 else { return nil }
+            guard scan.revisionChanged else { return .unavailable(.scanFailed) }
+            guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
             return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
         }
         guard isCurrentTelemetryRevision(
             for: session,
             expectedRevision: expectedRevision,
             telemetryRevision: descriptor.telemetryRevision) else {
-            guard revisionRetryCount < 1 else { return nil }
+            guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
             return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
         }
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled else { return .unavailable(.cancelled) }
         let result = applyingWeeklyQuota(to: computed.telemetry,
                                          source: session.source,
                                          capabilities: capabilities,
@@ -364,11 +398,11 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             for: session,
             expectedRevision: expectedRevision,
             telemetryRevision: descriptor.telemetryRevision) else {
-            guard revisionRetryCount < 1 else { return nil }
+            guard revisionRetryCount < 1 else { return .unavailable(.revisionChanged) }
             return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
         }
-        guard !Task.isCancelled else { return nil }
-        return result
+        guard !Task.isCancelled else { return .unavailable(.cancelled) }
+        return .available(result)
     }
 
     private func resolveTelemetryRevision(

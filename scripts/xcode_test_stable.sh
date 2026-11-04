@@ -9,9 +9,10 @@ PROJECT="AgentSessions.xcodeproj"
 SCHEME="AgentSessions"
 CONFIGURATION="Debug"
 DESTINATION="platform=macOS,arch=arm64"
-DERIVED_DATA_PATH="${PWD}/.deriveddata-tests"
+DERIVED_DATA_PATH=".deriveddata-tests"
 
-exec env AGENT_SESSIONS_TEST_MODE=1 xcodebuild \
+exec env AGENT_SESSIONS_TEST_MODE=1 \
+  TEST_RUNNER_AS_REAL_SESSION_REPLAY="${AS_REAL_SESSION_REPLAY:-0}" xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \
   -configuration "${CONFIGURATION}" \

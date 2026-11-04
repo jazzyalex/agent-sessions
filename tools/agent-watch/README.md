@@ -27,10 +27,9 @@ wake; this is a review task, not a deadline.
     ls -dt scripts/probe_scan_output/agent_watch/*/report.json | head -1
     cat tools/agent-watch/out/launchd.log
 
-Then follow the decision matrix in `skills/agent-session-format-check/SKILL.md`:
-triage each agent by `severity` / `recommendation`, run `--mode prebump` for
-anything flagged `run_prebump_validator`, and bump the verified versions in
-`docs/agent-support/agent-support-{matrix,ledger}.yml`.
+Then follow the [canonical runbook](../../skills/agent-session-format-check/SKILL.md).
+Read `compatibility.verdict`, current schema drift, usage probes and discovery checks;
+legacy severity alone does not establish support. Records come from the final weekly only.
 
 ## Two things that will surprise you
 

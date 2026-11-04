@@ -161,6 +161,11 @@ def _github_token() -> str | None:
         value = os.environ.get(key)
         if value:
             return value
+    # Reuse the owner's existing gh login; never start a login or expose its token
+    # in argv/logs. Scheduled scans otherwise hit the anonymous GitHub API limit.
+    rc, output, _ = _run_cmd(["gh", "auth", "token"], timeout=5)
+    if rc == 0 and output.strip():
+        return output.strip()
     return None
 
 
@@ -3932,6 +3937,7 @@ def _hermes_state_db_latest_session_schema_fingerprint(
     *,
     exclude_prebump: bool = False,
     prompt_needles: tuple[str, ...] = (),
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Fingerprint the newest Hermes session in `state.db`.
 
@@ -3952,7 +3958,7 @@ def _hermes_state_db_latest_session_schema_fingerprint(
                 ks.add(k)
 
     try:
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
     except Exception:
         return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 1, "read_failed": True}
@@ -3962,9 +3968,10 @@ def _hermes_state_db_latest_session_schema_fingerprint(
             f"""
             SELECT id, source, model, model_config, system_prompt, started_at, ended_at, message_count
             FROM sessions
+            WHERE (? IS NULL OR id = ?)
             ORDER BY started_at DESC
             LIMIT {_PREBUMP_CANDIDATE_POOL if exclude_prebump else 1};
-            """
+            """, (session_id, session_id)
         ).fetchall()
         if exclude_prebump and rows:
 
@@ -4053,6 +4060,40 @@ def _hermes_state_db_latest_session_schema_fingerprint(
         "session_id": str(row["id"]),
         **prebump_stats,
     }
+
+
+def _hermes_weekly_schema_fingerprint(path: Path, max_messages: int,
+                                      prompt_needles: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Read up to five real Hermes sessions; leave the single-session prebump path exact."""
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+            candidates = conn.execute("SELECT id FROM sessions ORDER BY started_at DESC LIMIT ?",
+                                      (_PREBUMP_CANDIDATE_POOL,)).fetchall()
+            def is_prebump(row):
+                message = conn.execute("SELECT content FROM messages WHERE session_id=? AND role='user' "
+                                       "ORDER BY timestamp,id LIMIT 1", (row[0],)).fetchone()
+                return bool(message and isinstance(message[0], str)
+                            and _text_has_prebump_signal(message[0][:_PREBUMP_HEAD_CHARS], prompt_needles))
+            selected, stats = _prefer_real_sessions(candidates, _LOCAL_SCHEMA_SAMPLE_COUNT, is_prebump)
+        fps = [_hermes_state_db_latest_session_schema_fingerprint(path, max_messages, session_id=row[0])
+               for row in selected]
+        if not fps:
+            return _hermes_state_db_latest_session_schema_fingerprint(path, max_messages)
+        merged = dict(fps[0])
+        merged.update(stats)
+        merged["type_keys"] = _merge_type_keys(fps)
+        counts: dict[str, int] = {}
+        for fp in fps:
+            for kind, count in fp.get("type_counts", {}).items():
+                counts[kind] = counts.get(kind, 0) + count
+        merged["type_counts"] = counts
+        merged["sampled_sessions"] = len(fps)
+        merged["parsed_messages"] = sum(fp.get("parsed_messages", 0) for fp in fps)
+        merged["parsed_tool_calls"] = sum(fp.get("parsed_tool_calls", 0) for fp in fps)
+        _merge_sampled_parse_errors(merged, fps)
+        return merged
+    except sqlite3.Error:
+        return {"file": str(path), "read_failed": True, "type_counts": {}, "type_keys": {}, "parse_errors": 1}
 
 
 def _opencode_storage_root_for_session_file(session_path: Path) -> Path | None:
@@ -4845,7 +4886,7 @@ def _opencode_v2_required_field_violations(row_type: str, data: dict[str, Any]) 
             and "tokens" not in data
             and data.get("finish") == "error"
             and content == []
-            and (error.get("type") == "provider.free-limit"
+            and (error.get("type") in ("provider.free-limit", "aborted")
                  or (isinstance(status, (int, float)) and not isinstance(status, bool) and status == 429))
         )
         if not failed_without_usage:
@@ -6249,19 +6290,40 @@ def _latest_successful_prebump_evidence(
 
 def _classify_prebump_failure(entry: dict[str, Any]) -> str:
     error = str(entry.get("error") or "").lower()
+    # Structured safety failures outrank noisy model diagnostics. Never retry them.
+    for marker, category in (("sandbox_breach", "sandbox_breach"),
+                             ("auth_failed", "auth_failed"), ("timeout", "timeout"),
+                             ("quota_failed", "quota_failed"),
+                             ("discovery_contract", "discovery_contract_failed"),
+                             ("config_gate", "config_error"), ("hygiene", "config_error")):
+        if marker in error:
+            return category
     detail_parts = [error]
     for key in ("stderr_file", "stdout_file"):
         value = entry.get(key)
         if not isinstance(value, str) or not value:
             continue
         try:
-            text = Path(value).read_text(encoding="utf-8", errors="replace")
+            with Path(value).open("rb") as handle:
+                head = handle.read(4000)
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(4000, size - 4000) if size > 4000 else size)
+                tail = handle.read(4000)
+            text = (head + b"\n" + tail).decode("utf-8", errors="replace")
         except OSError:
             continue
-        detail_parts.append(text.lower()[:4000])
+        detail_parts.append(text.lower())
     detail = "\n".join(detail_parts)
-    if any(token in detail for token in ("not logged in", "no authentication", "authentication_failed", "/login", "auth login")):
+    if re.search(r"\bhttp\s*429\b", detail):
+        return "quota_failed"
+    if any(token in detail for token in ("not logged in", "not signed in", "session expired", "session has expired",
+                                         "no authentication", "authentication_failed", "/login", "auth login",
+                                         "oauth token refresh failed", "refresh_token_reused")):
         return "auth_failed"
+    if any(token in detail for token in ("model_unavailable", "model is no longer available", "unknown model",
+                                         "modelnotfounderror", "model not found", "model has been removed")):
+        return "model_unavailable"
     if "timeout" in detail:
         return "timeout"
     if "not_found" in detail or "not found" in detail:
@@ -7209,7 +7271,14 @@ def _run_prebump(
             timeout = int(pb.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
 
         try:
-            result = driver.run(sandbox, env, prompt, timeout)
+            from agent_watch_workflow import guarded_driver_run, run_with_fallback
+            def run_model(model):
+                if model:
+                    env["AGENT_WATCH_MODEL"] = model
+                return guarded_driver_run(Path(__file__).resolve().parents[1],
+                                          lambda: driver.run(sandbox, env, prompt, timeout))
+            result, model_attempts = run_with_fallback(
+                run_model, model_override, pb.get("fallback_models") or [], _classify_prebump_failure)
         except drv_mod.HygieneError as exc:
             entries.append({
                 "agent": agent_name,
@@ -7239,7 +7308,7 @@ def _run_prebump(
             and isinstance(result.error, str)
             and result.error.startswith("sandbox_breach")
         ):
-            if not args.allow_real_home:
+            if not args.allow_real_home or result.error == "sandbox_breach:repository_changed":
                 entries.append({
                     "agent": agent_name,
                     "driver": driver_name,
@@ -7262,7 +7331,8 @@ def _run_prebump(
             drv_mod.teardown_sandbox(sandbox, keep=args.keep_sandbox)
             env["HOME"] = str(real_home)
             try:
-                result = driver.run(sandbox, env, prompt, timeout)
+                result = guarded_driver_run(Path(__file__).resolve().parents[1],
+                                            lambda: driver.run(sandbox, env, prompt, timeout))
             except drv_mod.HygieneError as exc:
                 entries.append({
                     "agent": agent_name,
@@ -7403,6 +7473,7 @@ def _run_prebump(
             sample_freshness=sf,
             auth_warnings=auth_warnings,
         )
+        entry["model_attempts"] = model_attempts
         entries.append(entry)
         # A successful CLI invocation can still produce schema drift. Preserve that
         # sandbox so the report's session_path remains inspectable; otherwise the
@@ -7433,7 +7504,8 @@ def _run_prebump(
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["daily", "weekly", "prebump"], required=True)
+    parser.add_argument("--mode", choices=["daily", "weekly", "prebump", "preflight", "update"])
+    parser.add_argument("--summary", metavar="REPORT", help="Render the per-agent table from a final report.")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--timeout", type=int, default=12)
     parser.add_argument("--verbose", action="store_true")
@@ -7456,11 +7528,49 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--allow-real-home", action="store_true", help="Allow copilot (and other home_override agents) to fall back to real HOME after an explicit sandbox-leak diagnostic.")
     args = parser.parse_args(argv)
 
+    import agent_watch_workflow as workflow
+    if args.summary:
+        print(workflow.summary(_read_json(Path(args.summary))))
+        return 0
+    if not args.mode:
+        parser.error("--mode or --summary is required")
+
     cfg_path = Path(args.config)
     cfg = _read_json(cfg_path)
     report_root = Path(cfg.get("report_root") or "scripts/probe_scan_output/agent_watch")
     report_dir = report_root / _now_utc_slug()
     report_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.mode in ("preflight", "update"):
+        selected = cfg.get("agents", {})
+        if args.agent:
+            if any(name not in selected for name in args.agent):
+                parser.error("unknown agent")
+            selected = {name: agent for name, agent in selected.items() if name in args.agent}
+        if args.mode == "preflight":
+            report = workflow.preflight({"agents": selected}, timeout=args.timeout)
+            print("Owner actions: " + json.dumps(report["owner_actions"], sort_keys=True))
+        else:
+            # Codex last: the running harness keeps its original executable.
+            ordered = sorted(selected, key=lambda name: (name == "codex", name))
+            report = {"mode": "update", "results": {}}
+            for name in ordered:
+                agent = selected[name]
+                if not isinstance(agent.get("install"), dict):
+                    report["results"][name] = {"ok": False, "error": "install_not_configured"}
+                    continue
+                report["results"][name] = workflow.update_agent(
+                    agent, target=workflow.latest(agent, args.timeout), timeout=args.timeout_seconds or 600)
+        report["timestamp_utc"] = datetime.now(timezone.utc).isoformat()
+        path = report_dir / "report.json"
+        path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        print(f"Agent watch ({args.mode}) report: {path}")
+        if args.mode == "update":
+            for name, row in report["results"].items():
+                print(f"{name}: {row.get('old_version')} -> {row.get('new_version')} {row.get('error') or 'ok'}")
+            return int(any(not row.get("ok") and row.get("error") not in ("not_installed", "install_not_configured")
+                           for row in report["results"].values()))
+        return 0
 
     matrix_versions = _read_verified_versions_from_matrix(Path("docs/agent-support/agent-support-matrix.yml"))
     matrix_obj = Path("docs/agent-support/agent-support-matrix.yml").read_text(encoding="utf-8", errors="replace")
@@ -7510,6 +7620,8 @@ def main(argv: list[str]) -> int:
     any_actionable = False
 
     for agent_name, agent_cfg in (cfg.get("agents") or {}).items():
+        if args.agent and agent_name not in args.agent:
+            continue
         cadence = (agent_cfg.get("cadence") or {})
         if args.mode == "daily" and not cadence.get("daily", False):
             continue
@@ -7608,6 +7720,9 @@ def main(argv: list[str]) -> int:
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
+            if isinstance(local_schema_cfg, dict):
+                weekly_details["price_coverage"] = workflow.price_coverage(
+                    agent_name, local_schema_cfg, _read_json(Path("docs/prices-v2.json")))
             discovery_contract_cfg = (agent_cfg.get("weekly") or {}).get("discovery_path_contract")
             if isinstance(local_schema_cfg, dict):
                 kind = local_schema_cfg.get("kind")
@@ -7705,10 +7820,9 @@ def main(argv: list[str]) -> int:
                     for db_path in db_roots:
                         if db_path.exists():
                             newest = db_path
-                            local_fp = _hermes_state_db_latest_session_schema_fingerprint(
+                            local_fp = _hermes_weekly_schema_fingerprint(
                                 db_path,
                                 max_messages=max_messages,
-                                exclude_prebump=True,
                                 prompt_needles=_prebump_prompt_needles(agent_cfg),
                             )
                             break
@@ -7821,6 +7935,7 @@ def main(argv: list[str]) -> int:
                         newest = Path(local_fp["file"])
 
                 if local_fp is not None:
+                    workflow.add_sampling_contract(agent_name, local_schema_cfg, local_fp)
                     compressed_glob = local_schema_cfg.get("compressed_glob")
                     if isinstance(compressed_glob, str) and compressed_glob:
                         # Codex rollout compression replaces cold `.jsonl` files with
@@ -7856,6 +7971,10 @@ def main(argv: list[str]) -> int:
                         weekly_details["schema_diff"] = schema_diff
                 else:
                     weekly_details["local_schema"] = {"error": "no_files_found", "roots": roots, "glob": glob, "kind": kind}
+                    workflow.add_sampling_contract(agent_name, local_schema_cfg, weekly_details["local_schema"])
+
+                if kind == "deepseek_harness_sessions" and local_fp is not None and dsh_integrity_contract is not None:
+                    local_fp["store_sessions"] = dsh_integrity_contract.get("candidate_sessions", 0)
 
                 if isinstance(discovery_contract_cfg, dict):
                     local_file = None
@@ -7876,6 +7995,10 @@ def main(argv: list[str]) -> int:
                     weekly_details["discovery_path_contract"] = contract_result
                     if kind != "deepseek_harness_sessions":
                         discovery_contract_failed = bool(local_file) and not bool(contract_result.get("ok"))
+                    if (weekly_details.get("local_schema") or {}).get("sampling_contract_error"):
+                        contract_result["sampling_ok"] = False
+                        contract_result["ok"] = False
+                        discovery_contract_failed = True
 
             probes_cfg = (agent_cfg.get("weekly") or {}).get("probes") or []
             probe_results: list[dict[str, Any]] = []
@@ -8163,6 +8286,8 @@ def main(argv: list[str]) -> int:
         any_actionable = any_actionable or actionable
 
         results[agent_name] = {
+            "tier": workflow.tiers().get(agent_name, "unrecorded"),
+            "hold": workflow.matrix_hold(agent_name),
             "verified_version": verified,
             "installed": {
                 "argv": effective_installed_cmd,
@@ -8227,7 +8352,7 @@ def main(argv: list[str]) -> int:
                     sample_freshness=sample_freshness,
                     compatibility=compatibility,
                     upstream_reconciliation=upstream_reconciliation,
-                )
+                ) + workflow.sampling_summary((weekly_details or {}).get("local_schema") or {})
             )
 
     report = {

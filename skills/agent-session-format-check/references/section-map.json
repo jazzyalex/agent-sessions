@@ -1,0 +1,22 @@
+{
+  "## 1  Quick Start (all agents)": "prebump-drivers.md",
+  "## 1a  Real-Session Prebump Validation (required before latest claims)": "prebump-drivers.md",
+  "## 1b  Claiming a Newer Upstream Build (install → fresh session → verify → bump)": "prebump-drivers.md",
+  "## 1c  When an Agent Cannot Produce a Session At All": "incidents.md",
+  "## 1d  Building a Prebump Driver": "prebump-drivers.md",
+  "## 1e  The Value Pass (what new fields are *for*, not just whether they break us)": "fingerprint.md",
+  "## 1f  Steward Check (what a community steward runs)": "stewards.md",
+  "## 1g  Agents With a Steward (what the maintainer does *not* chase)": "stewards.md",
+  "## 2  Usage / Limits Drift (Codex + Claude)": "agent-notes.md",
+  "## 2a  Model Price Freshness (Session Runway `$` burn)": "prices.md",
+  "## 2b  Codex Rollout Compression (`.jsonl.zst`)": "agent-notes.md",
+  "## 3  OpenCode Storage Changes": "agent-notes.md",
+  "## 3b  OpenClaw SQLite Store (2026.10.5+)": "agent-notes.md",
+  "## 3a  Cursor Storage": "agent-notes.md",
+  "## 4  Discovery Path Contracts": "fingerprint.md",
+  "## 4a  Grok Sessions Are Directories": "agent-notes.md",
+  "## 5  How the Fingerprint Works (and what it cannot see)": "fingerprint.md",
+  "## 5a  What to Collect as Evidence": "fingerprint.md",
+  "## 6  Verification Update Checklist (after approval)": "fingerprint.md",
+  "## 7  Redaction Guardrails (fixtures)": "fingerprint.md"
+}
