@@ -40,8 +40,12 @@ enum ClaudeSessionIDHelper {
     /// `claude --resume` only works when the cwd matches the project root,
     /// so we read `originalPath` from the project's sessions-index.json.
     /// Falls back to session.cwd, then to ClaudeResumeSettings.defaultWorkingDirectory.
+    /// Pass `includeDefaultFallback: false` when a wrong folder is worse than none:
+    /// VS Code resumes only from the session's own folder.
     @MainActor
-    static func projectRoot(for session: Session, settings: ClaudeResumeSettings? = nil) -> URL? {
+    static func projectRoot(for session: Session,
+                            settings: ClaudeResumeSettings? = nil,
+                            includeDefaultFallback: Bool = true) -> URL? {
         let settings = settings ?? .shared
         let url = URL(fileURLWithPath: session.filePath)
         var projectDir = url.deletingLastPathComponent()
@@ -67,7 +71,7 @@ enum ClaudeSessionIDHelper {
         if let cwd = session.cwd, !cwd.isEmpty {
             return URL(fileURLWithPath: cwd)
         }
-        if !settings.defaultWorkingDirectory.isEmpty {
+        if includeDefaultFallback, !settings.defaultWorkingDirectory.isEmpty {
             return URL(fileURLWithPath: settings.defaultWorkingDirectory)
         }
         return nil
