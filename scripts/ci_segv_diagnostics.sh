@@ -68,9 +68,10 @@ fi
 xcodebuild "${xcode_args[@]}" test > "$log" 2>&1
 xcodebuild_status=$?
 
-# ReportCrash writes the .ips after the process has gone.
+# ReportCrash writes the .ips after the process has gone. Wait on any failed run, because a
+# host that crashes before its first test logs "Early unexpected exit", not "Restarting".
 crashed=0
-if grep -q 'Restarting after unexpected exit' "$log"; then
+if [[ "$xcodebuild_status" -ne 0 ]]; then
   for _ in {1..30}; do
     find ~/Library/Logs/DiagnosticReports -name 'AgentSessions*.ips' -newer "$started" 2>/dev/null | grep -q . && break
     /bin/sleep 2
@@ -107,6 +108,18 @@ passed=$(grep -c "Test Case '.*' passed" "$log")
 } > "$summary"
 
 cat "$summary"
+
+# The full log only reaches the artifact. When no test started, the cause is in the build or
+# the host launch, so put it in the job log too.
+if [[ "$xcodebuild_status" -ne 0 ]] && ! grep -q "Test Case '.*' started" "$log"; then
+  echo
+  echo "--- xcodebuild failed before any test started: errors ---"
+  grep -nE '(error|fatal error):|\*\* (BUILD|TEST) FAILED|unexpected exit|Testing failed|failed to (load|launch)' "$log" \
+    | head -60 | cut -c1-300
+  echo "--- last 60 lines of xcodebuild.log ---"
+  tail -60 "$log" | cut -c1-300
+fi
+
 gzip -f "$log"
 
 if [[ -z "$(ls "$out"/crash-reports/*.ips 2>/dev/null)" && "$passed" -eq 0 ]]; then
