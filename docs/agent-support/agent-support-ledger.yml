@@ -9,6 +9,115 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "6.2+unreleased"
+    as_of_date_utc: "2026-11-02"
+    as_of_commit: "df9c05e7"
+    note: "Final weekly verifies twelve driver-backed installed builds after stable CLI updates and review fixes. Kimi remains held on account HTTP 429; Qwen is the unavailable maintainer exception and Devin/fx remain steward-owned. Records describe the tested working tree on the audited HEAD baseline; nothing was committed or published."
+    report: "scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json"
+    value_pass:
+      keys: 79
+      new_buckets: 9
+      noise: 19
+      watch: 56
+      candidate: 13
+      handled: 0
+      evidence: "scripts/probe_scan_output/format-value-pass-2026-11-02.json"
+    replay:
+      evidence: "scripts/probe_scan_output/replay/counts.json"
+      scope: "newest 20 Codex, Claude and OpenCode sessions; remaining agents not semantically replayed"
+      note: "No parse failures or empty event lists; one Claude metadata-only usage probe and sixteen OpenCode refusal-only sessions emit no usage. Codex: 20 of 20 complete after the reason diagnostic was added. An earlier run had one nil-telemetry result with no recorded reason; its cause is unproved and stays a backlog finding (scripts/probe_scan_output/nil-telemetry-investigation-2026-11-02.md)."
+    tests:
+      python_passed: 638
+      xcode_passed: 4043
+      xcode_skipped: 4
+      xcode_failed: 0
+      evidence: ".deriveddata-tests/Logs/Test/Run-AgentSessions-2026.11.02_15-00-54--0800.xcresult"
+    prices:
+      sequence: 2026110201
+      added: ["gpt-4o-mini", "solar-mini4", "kimi-k3"]
+      evidence: "scripts/probe_scan_output/official-provider-prices-2026-11-02.md"
+      note: "Unpublished/anonymous routes, an unverified Fable alias, an internal mirror label and DeepSeek intraday tariffs remain explicit coverage findings."
+    verified:
+      antigravity:
+        sessions:
+          max_verified_version: "1.4.12"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.316"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      cline:
+        sessions:
+          max_verified_version: "3.0.74"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      codex:
+        sessions:
+          max_verified_version: "0.166.0"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-202954-265829Z-p56087-prebump/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.105"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-202954-265829Z-p56087-prebump/report.json"]
+      cursor:
+        sessions:
+          max_verified_version: "2026.10.22"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      deepseek_harness:
+        sessions:
+          max_verified_version: "0.2.1-rc.5"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      grok:
+        sessions:
+          max_verified_version: "1.0.70"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      hermes:
+        sessions:
+          max_verified_version: "0.22.6"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.10.9"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "2.2.5"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-202954-265829Z-p56087-prebump/report.json"]
+      pi:
+        sessions:
+          max_verified_version: "1.5.0"
+          scope: "latest fetched build; fresh native tool turn, baseline, discovery and final probes pass"
+          evidence: ["scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json", "scripts/probe_scan_output/agent_watch/20261102-202954-265829Z-p56087-prebump/report.json"]
+    held:
+      kimi:
+        version: "2.4.1"
+        retained_ceiling: "2.3.3"
+        since: "2026-11-02"
+        reason: "Account HTTP 429 prevented a fresh tool turn."
+        evidence: "scripts/probe_scan_output/agent_watch/20261102-201458-674814Z-p37790-prebump/report.json"
+      qwen:
+        version: "0.26.6"
+        retained_ceiling: "0.14.3"
+        reason: "No driver; owner-scoped unavailable maintainer lane; not chased."
+    steward:
+      devin:
+        ceiling: "3000.6.7 (260a97c8)"
+        upstream: "3000.11.228"
+        note: "No local CLI; requires native steward verification; no message sent."
+      fx:
+        ceiling: "0.0.7"
+        upstream: "0.0.16"
+        note: "Issue #83 already requests the native schema-4 re-check; no message sent."
   - agent_sessions_version: "6.1.2+unreleased"
     as_of_date_utc: "2026-10-27"
     as_of_commit: "c246640c"

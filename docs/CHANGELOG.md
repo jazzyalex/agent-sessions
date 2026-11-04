@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
 <!-- Development history for this release. The release-note generator drops this heading. -->
 ### Maintenance
 
+- Format-check workflow: preflight collects credential/model checks, updates re-probe PATH, every prebump driver uses a sandbox working directory, and repository changes fail the run. Weekly sampling reports store/sample counts; the gated Codex/Claude/OpenCode replay exercises production readers and emits counts only. The canonical runbook and focused references replace duplicate instructions.
+- Replay now retains controlled nil-telemetry reasons, including exhausted revision retries and cancelled scan waits. The app's optional telemetry API and fail-closed behavior are unchanged.
+- Price coverage adds the official GPT-4o mini, Solar Mini 4 and Kimi K3 rates. The v2/bundled sequence is 2026110201; the legacy table receives the GPT row and updated date. Unpublished routes and DeepSeek's time-dependent tariff remain explicit coverage findings.
 - `OpenCodeV2MessageAdapter.isFailedRequestWithoutUsage` also accepts `error.type == "aborted"` (OpenCode 2.2.0's "Step interrupted") with `finish: "error"`, no tokens and empty content. An aborted step that streamed content still makes usage unknown.
 
 ## [6.2] - 2026-10-27

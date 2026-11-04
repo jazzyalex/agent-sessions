@@ -1,3 +1,24 @@
+## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
+status: in-progress
+
+**State:** The Codex run finished the workflow changes and the full sweep; the work is committed on `main`. 6.3 (Ghostty Resume + OpenCode Esc fix) needs release copy, then deploy.
+
+**Verified:**
+- Final sweep: twelve agents `supports_latest`; final weekly `scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json`; Codex report `scripts/probe_scan_output/format-check-final-report-2026-11-02.md`.
+- Tests after the nil-telemetry diagnostic: XCTest 4,047 total, 4,043 passed, 4 skipped, 0 failed; Python 638 passed + 5 subtests.
+- Weekly LaunchAgent `com.agentsessions.agent-watch` installed (Mondays 09:00).
+- Prices manifest raised to sequence 2026110201 (GPT-4o mini, Solar Mini 4, Kimi K3).
+
+**Decided / don't redo:**
+- The sweep updates agent CLIs itself; it does not wait for the owner.
+- Kimi 2.4.1 is held on an account-level HTTP 429; a fresh tool turn after the allowance resets clears it.
+- The one earlier Codex nil-telemetry replay result has no recorded reason; it stays an unproved backlog finding.
+
+**Next:**
+1. Write 6.3 release copy (README, `docs/index.html`, What's New catalog + xcstrings), set the test baseline to 4043, then deploy.
+2. Owner resumes one real agent in Ghostty from the app before release.
+3. Owner decides on the Hermes stash `hermes-update-autostash-20261021-044848`.
+
 ## 2026-10-26 · opencode-6.1.2-and-session-rates · 6.1.2 shipped; OpenCode per-session rates committed locally, owner QA next
 status: in-progress
 

@@ -243,6 +243,51 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
+### Claude usage probe: intermittent exit 16 with working CLI authentication
+> **open** · sev: med · urg: low · verified 2026-11-02
+
+- **What:** initial and intermediate weeklies returned `claude_usage_probe` exit 16 / `parsing_failed` while fresh `claude -p` tool turns worked. A standalone capture and the final weekly after XCTest completed returned exit 0. This is a monitoring reliability finding, not proof of expired authentication or a session-format defect.
+- **Where:** `AgentSessions/Resources/claude_usage_capture.sh`, initial report `scripts/probe_scan_output/agent_watch/20261102-200951-888181Z-p26295/report.json`, intermediate `20261102-204530-636965Z-p69824/report.json`, final `20261102-205312-785700Z-p76755/report.json`.
+- **Why deferred:** Hypothesis: load or TUI render readiness affects capture timing. A repeatable failing capture has not established the cause, so no parsing rule was broadened.
+- **Risk if wrong:** usage monitoring can report a false outage and the app may retain its last good snapshot.
+- **To close:** reproduce with a redacted capture, then add positive and negative readiness/parser cases before changing the script.
+
+### November value-pass candidates: quota context and input-image provenance
+> **open** · sev: low · urg: low · verified 2026-11-02
+
+- **What:** Claude `assistant.apiErrorParams.rate_limit_info` exposes `isUsingOverage`, `overageDisabledReason`, `overageStatus`, `rateLimitType`, `resetsAt` and `status`; the six records in 3 of the newest 100 sessions contain structured quota context the transcript parser does not read. Codex `event_msg.payload:item_completed.item.inputImages` and its `path` occur in 2 records (3 image references) in 1 of the newest 100 sessions; `SessionIndexer` does not read that field. These are candidates, not handled fields or proven rendering defects.
+- **Where:** `scripts/probe_scan_output/format-claude-rebuild-before.log`, `format-codex-rebuild-current.log` and the normal stage0 fixtures. The per-field tracker rows retain the final weekly evidence and bucket.
+- **Why deferred:** this sweep changes app behavior only for proven defects. Measure whether the information duplicates visible error text or ordinary response-item images before designing UI.
+- **Risk if wrong:** treating internal metadata as display authority could duplicate messages or misstate account limits.
+- **To close:** prove a user-visible read path with positive and negative fixtures, or document why a field is noise.
+
+### Recent model prices: unidentified routes and time-dependent DeepSeek rates
+> **open** · sev: med · urg: low · verified 2026-11-02
+
+- **What:** recent usage names `cline-free/nemotron-3.5-super-vl`, `mai-code-1.1-flash`, `big-pickle` and `~anthropic/claude-fable-latest`; no first-party per-token rate or exact version mapping was established. DeepSeek `deepseek-flash` / `deepseek-v4.1-flash-free` / `cline-free/deepseek-v4.1-flash` has peak $0.30/$0.006/$1.20 and offpeak $0.15/$0.003/$0.60 input/cache/output per MTok. The current date-based price periods cannot encode its daily hours and holiday calendar. OpenClaw `delivery-mirror` is an internal unpriced label; establish zero-token eligibility before adding an exemption.
+- **Where:** official-source evidence `scripts/probe_scan_output/official-provider-prices-2026-11-02.md`; [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/), [NVIDIA model](https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b), [OpenCode model identities](https://opencode.ai/v2/docs/console/models/).
+- **Why deferred:** a free promotion is not a published API-equivalent base rate, and a family guess or static DeepSeek peak rate would present an unsupported estimate as exact.
+- **Risk if wrong:** inaccurate dollar estimates or silently omitted contributing usage.
+- **To close:** verify route identity and published rates, or implement time-aware tariffs with positive and negative boundary cases.
+
+### Explain nil telemetry in the real-session replay
+> **partial** · sev: low · urg: low · verified 2026-11-02
+
+- **What:** the final 60-session replay read 20 Codex sessions with zero parse failures or empty event lists, but one returned `telemetry_not_available`. Earlier runs returned telemetry for all 20. The counts do not identify which nil-return guard was taken. Hypothesis: a live transcript changed during both allowed scans; that cause has not been proved.
+- **Where:** `scripts/probe_scan_output/replay/counts.json`; `scripts/probe_scan_output/format-complete-xcode.log`; `AgentSessions/Telemetry/SessionTelemetryEngine.swift:265-370`.
+- **Update:** the engine now returns a controlled diagnostic alongside its unchanged optional API; replay retains that reason in counts. Stable and twice-changing Codex fixtures distinguish available telemetry from exhausted revision retries; missing revision and cancelled-wait cases are covered. Two instrumented replays each read 20 Codex sessions with complete telemetry and no nil result. The old counts cannot retrospectively identify its cause. Evidence: `scripts/probe_scan_output/nil-telemetry-investigation-2026-11-02.md`.
+- **Why deferred:** diagnostics are implemented, but the original result is not reproduced or attributed. The engine deliberately fails closed for missing/currentness evidence, cancellation and scan failures. No app parsing defect has been established; changing usage rules would guess at the cause.
+- **Risk if wrong:** calling this an expected race could hide a real backend failure. Keep the unexplained count visible; never turn it into zero usage or claim a clean semantic replay.
+- **To close:** the diagnostic gap is fixed; if nil recurs, use its controlled reason to establish whether a real defect exists. The original historical event cannot be attributed from its counts-only artifact; do not call the live-file hypothesis proved.
+
+### Extend semantic replay beyond the three core agents
+> **open** · sev: low · urg: low · verified 2026-11-02
+
+- **What:** `AgentSessionsTests/RealSessionReplayTests.swift` replays Codex, Claude and OpenCode only. Other agents have schema/fixture checks but no real-store semantic replay in this initial bounded implementation.
+- **Why deferred:** shared-store discovery and unavailable telemetry need source-specific reason categories; a generic nil result must not be presented as a parser regression.
+- **Risk if wrong:** known-key behavioral regressions in other readers remain outside the replay channel.
+- **To close:** add each production discovery/full-parser/usage path, keep SQLite read-only and output counts-only, and explain unavailable reasons. Do not install absent steward agents.
+
 ### Check the DeepSeek Harness reader against the v3→v4 notes from the DSH discussion
 > **open** · sev: med · urg: low · verified —
 
@@ -777,26 +822,6 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **To close:** on or after 2026-11-22, compare the Sol row with
   developers.openai.com/api/docs/pricing. If it changed, edit all three tables, raise
   `sequence`, and add a `periods` entry from the change date (see the Gemini rows).
-
-### Prebump drivers run in the caller's working directory
-> **open** · sev: medium · urg: medium · verified 2026-10-27
-
-Two different things decide where a probe's tools act: the subprocess `cwd=` and a CLI
-flag that names the workspace. As of 2026-10-27:
-- Subprocess `cwd=` set to the sandbox: `antigravity_print`, `opencode_run`,
-  `deepseek_harness_headless`, `cline_headless`.
-- Inherit the caller's directory, but pass a sandbox workspace flag: `grok_single`
-  (`--cwd`), `droid_exec` (`--cwd`). Defense in depth would still set `cwd=`.
-- Inherit the caller's directory with no workspace flag found yet — audit each:
-  `codex_exec`, `claude_print`, `copilot_prompt`, `openclaw_local_agent`,
-  `cursor_agent_print`, `hermes_oneshot`, `pi_prompt`, `kimi_prompt`.
-
-`agent_watch.py` usually runs from this checkout. These prompts only read today (list
-files, `pwd`), but several run with auto-approve flags, and on 2026-10-27 a richer
-Antigravity prompt wrote `probe.txt` into the repo root before its driver got
-`cwd=sandbox`. Fix before any write-capable probe prompt: give every driver the sandbox
-as its subprocess `cwd` (keeping any CLI workspace flag), assert it in each driver test,
-and check that a prebump leaves `git status` unchanged.
 
 ### Watch list from the 2026-10-27 format sweep
 > **open** · sev: low · urg: low · verified 2026-10-27
