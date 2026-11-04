@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.3] - 2026-11-03
+
 ### Highlights
 
 - **Resume in Ghostty.** Choose Ghostty under Preferences → General → Terminal App for CLI Resume, including Codex. Resume opens a new window in the session folder. Requires a Ghostty build with AppleScript support; verified with Ghostty 1.4.0. Contributed by @buildfolk in #89.
