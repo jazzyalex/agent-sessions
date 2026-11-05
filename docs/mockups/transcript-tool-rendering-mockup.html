@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Sessions — Tool rendering proposal</title>
+<style>
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  --fs: 12.5px;            /* transcript font size (user-adjustable in the app) */
+}
+body.light {
+  --page: #ececec; --bg: #ffffff; --chrome: #f5f5f5; --hair: rgba(0,0,0,.10);
+  --label: rgba(0,0,0,.86); --label2: rgba(0,0,0,.56); --label3: rgba(0,0,0,.38);
+  --fill: rgba(0,0,0,.035); --fill2: rgba(0,0,0,.065); --pane-border: rgba(0,0,0,.07);
+  --blue:#007AFF; --purple:#AF52DE; --green:#28CD41; --green-t:#1D7F33; --red:#FF3B30; --red-t:#C4150C;
+  --orange:#FF9500; --orange-t:#A65A00; --teal:#30B0C7; --indigo:#5856D6; --brown:#8C571F; --yellow:#FFCC00;
+  --add:rgba(40,205,65,.14); --del:rgba(255,59,48,.11); --hunk:rgba(0,122,255,.07); --find:rgba(255,204,0,.55);
+  --note: #5b5b60;
+}
+body.dark {
+  --page: #141414; --bg: #1e1e1e; --chrome: #2b2b2b; --hair: rgba(255,255,255,.10);
+  --label: rgba(255,255,255,.88); --label2: rgba(255,255,255,.58); --label3: rgba(255,255,255,.38);
+  --fill: rgba(255,255,255,.045); --fill2: rgba(255,255,255,.08); --pane-border: rgba(255,255,255,.07);
+  --blue:#0A84FF; --purple:#BF5AF2; --green:#32D74B; --green-t:#32D74B; --red:#FF453A; --red-t:#FF6961;
+  --orange:#FF9F0A; --orange-t:#FFB340; --teal:#40C8E0; --indigo:#5E5CE6; --brown:#BD7538; --yellow:#FFD60A;
+  --add:rgba(50,215,75,.16); --del:rgba(255,69,58,.16); --hunk:rgba(10,132,255,.12); --find:rgba(255,214,10,.45);
+  --note: #a8a8ae;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--label); font: 13px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-decoration: none; }
+
+/* ── Page chrome (not part of the app) ── */
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 14px; align-items: center; padding: 10px 24px; background: color-mix(in srgb, var(--page) 88%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--hair); }
+.topbar h1 { font-size: 14px; margin: 0; font-weight: 600; }
+.topbar nav { display: flex; gap: 12px; font-size: 12px; }
+.topbar .sp { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--hair); border-radius: 6px; overflow: hidden; background: var(--bg); }
+.seg button { border: 0; background: transparent; color: var(--label2); font: 12px var(--font); padding: 3px 11px; cursor: pointer; }
+.seg button.on { background: var(--blue); color: #fff; }
+.page { max-width: 1320px; margin: 0 auto; padding: 8px 24px 80px; }
+section { margin-top: 34px; }
+section > h2 { font-size: 18px; margin: 0 0 4px; }
+section > p.lede { margin: 0 0 16px; color: var(--note); max-width: 900px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+.cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+.cols > *, .cols3 > * { min-width: 0; }
+@media (max-width: 1100px) { .cols, .cols3 { grid-template-columns: 1fr; } }
+.caption { font: 600 12px var(--font); color: var(--label2); margin: 0 0 6px 2px; text-transform: uppercase; letter-spacing: .4px; }
+.caption .bad { color: var(--red-t); } .caption .good { color: var(--green-t); }
+.anno { font-size: 12px; color: var(--note); margin: 8px 2px 0; }
+.anno b { color: var(--label); }
+.anno ol, .anno ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* ── App window ── */
+.win { background: var(--bg); border-radius: 10px; overflow: hidden; border: 1px solid var(--hair); box-shadow: 0 18px 50px rgba(0,0,0,.18), 0 0 0 .5px rgba(0,0,0,.1); }
+.titlebar { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--hair); }
+.lights { display: flex; gap: 7px; } .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.titlebar .t { font: 600 12px var(--font); color: var(--label2); margin-left: 8px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--hair); background: var(--bg); }
+.toolbar .seg button { padding: 2px 10px; font-size: 11.5px; }
+.pill { font: 11px var(--font); color: var(--label2); border: 1px solid var(--hair); border-radius: 10px; padding: 1px 8px; background: var(--fill); }
+.pill.on { color: var(--label); background: var(--fill2); }
+.toolbar .sp { flex: 1; }
+.list { padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── Cards (match BlockCardCellView: 3pt accent bar, 6% tint, r=6) ── */
+.card { position: relative; border-radius: 6px; padding: 0 12px 8px 15px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); border-radius: 6px 0 0 6px; }
+.card.user { --accent: var(--blue); } .card.agent { --accent: var(--brown); } .card.tool { --accent: var(--purple); }
+.card.err { --accent: var(--red); }
+.chead { height: 22px; padding-top: 6px; display: flex; align-items: center; gap: 6px; }
+.role { font: 600 11px var(--font); color: var(--accent); }
+.ts { font: 10px var(--font); color: var(--label3); }
+.chip { font: 10px var(--mono); color: var(--label3); }
+.body { font: var(--fs)/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; padding-top: 2px; }
+.body code { background: var(--fill2); border-radius: 3px; padding: 0 3px; }
+
+/* Today: the current tool card (verbatim reproduction style) */
+.today .body { font-size: var(--fs); }
+.showall { font: 500 11px var(--font); color: var(--blue); padding-top: 4px; }
+
+/* ── Proposed: L0 group header ── */
+.ghead { min-height: 22px; padding-top: 6px; display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.chev { width: 10px; height: 10px; flex: none; color: var(--label2); transition: transform .15s; }
+.open > .ghead .chev, .open > .row .chev { transform: rotate(90deg); }
+.gtitle { font: 600 11px var(--font); color: var(--accent); white-space: nowrap; }
+.digest { font: 11px var(--font); color: var(--label2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fail { font: 600 10px var(--font); color: #fff; background: var(--red); border-radius: 8px; padding: 0 6px; white-space: nowrap; }
+.warn { font: 600 10px var(--font); color: var(--orange-t); border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent); border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+.grow { flex: 1; }
+.dur { font: 10px var(--mono); color: var(--label3); white-space: nowrap; }
+.gbody { display: none; padding: 3px 0 0; }
+.open > .gbody { display: block; }
+
+/* ── L1 invocation row ── */
+.inv { border-top: 1px solid var(--pane-border); }
+.inv:first-child { border-top: 0; }
+.row { display: flex; align-items: center; gap: 7px; height: 24px; cursor: pointer; user-select: none; position: relative; }
+.row .ico { width: 14px; height: 14px; flex: none; color: var(--label2); }
+.inv.failed .row .ico { color: var(--red); }
+.verb { font: 600 11.5px var(--font); color: var(--label2); white-space: nowrap; flex: none; }
+.arg { font: 12px var(--mono); color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.arg .dim { color: var(--label3); }
+.meta { display: flex; gap: 8px; align-items: center; flex: none; margin-left: auto; padding-left: 10px; }
+.m { font: 10.5px var(--mono); color: var(--label3); white-space: nowrap; }
+.m.bad { color: var(--red-t); font-weight: 600; }
+.m.add { color: var(--green-t); } .m.del { color: var(--red-t); }
+.m.quiet { font-family: var(--font); }
+.hoverbar { display: none; gap: 2px; }
+.row:hover .hoverbar { display: inline-flex; }
+.hb { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--label2); }
+.hb:hover { background: var(--fill2); }
+.hb svg { width: 12px; height: 12px; }
+.agentdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+/* ── L2 expanded ── */
+.det { display: none; padding: 0 0 8px 31px; }
+.open > .det { display: block; }
+.ctx { font: 10.5px var(--font); color: var(--label3); margin: 0 0 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.ctx b { font-weight: 500; color: var(--label2); }
+.pane { background: var(--fill); border: 1px solid var(--pane-border); border-radius: 5px; font: calc(var(--fs) - .5px)/1.5 var(--mono); overflow: hidden; }
+.pane + .pane { margin-top: 5px; }
+.cmd { padding: 5px 9px; white-space: pre-wrap; word-break: break-word; color: var(--label); }
+.cmd .p { color: var(--label3); user-select: none; }
+.cmd .hang { display: block; padding-left: 2ch; text-indent: -2ch; }
+.out { padding: 5px 9px; white-space: pre-wrap; word-break: break-word; color: var(--label); }
+.out.err { background: color-mix(in srgb, var(--red) 7%, transparent); }
+.out .stderr { color: var(--red-t); }
+.out .dim { color: var(--label3); }
+.out .hl { background: var(--find); border-radius: 2px; }
+.sect { font: 600 9.5px var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--label3); padding: 4px 9px 0; }
+.fold { display: flex; align-items: center; gap: 8px; padding: 2px 9px; font: 11px var(--font); color: var(--label2); background: var(--fill2); border-top: 1px solid var(--pane-border); border-bottom: 1px solid var(--pane-border); }
+.fold a { font-weight: 500; }
+.longcap { color: var(--blue); font: 500 11px var(--font); white-space: nowrap; }
+.foot { display: flex; gap: 10px; align-items: center; padding: 3px 9px; border-top: 1px solid var(--pane-border); font: 10.5px var(--font); color: var(--label3); }
+.foot .bad { color: var(--red-t); font-weight: 600; }
+.foot .w { color: var(--orange-t); }
+.foot .sp { flex: 1; }
+
+/* gutter (line-numbered output: cat -n, nl -ba, Read tools) */
+.gut { display: grid; grid-template-columns: max-content 1fr; }
+.gut .n { color: var(--label3); text-align: right; padding: 0 10px 0 9px; user-select: none; border-right: 1px solid var(--pane-border); }
+.gut .c { padding: 0 9px; white-space: pre-wrap; word-break: break-word; }
+.gut .n.add, .gut .c.add { background: var(--add); }
+.gut .n.del, .gut .c.del { background: var(--del); }
+.gut .n.hunk, .gut .c.hunk { background: var(--hunk); color: var(--label2); }
+.filehead { display: flex; gap: 8px; align-items: center; padding: 4px 9px; font: 11px var(--font); color: var(--label2); border-bottom: 1px solid var(--pane-border); }
+.filehead .path { font: 600 11px var(--mono); color: var(--label); }
+.filehead .sp { flex: 1; }
+
+/* key/value (MCP & unknown tools) */
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 1px 12px; padding: 5px 9px; }
+.kv .k { color: var(--label2); }
+.kv .v { white-space: pre-wrap; word-break: break-word; }
+.kv .v.s { color: var(--label); }
+.kv .v.num { color: var(--indigo); }
+.kv .v.bool { color: var(--orange-t); }
+
+/* checklist */
+.todo { padding: 5px 9px; font: var(--fs)/1.6 var(--mono); }
+.todo div { display: flex; gap: 8px; }
+.todo .bx { width: 13px; height: 13px; margin-top: 3px; border-radius: 3px; border: 1.3px solid var(--label3); flex: none; display: grid; place-items: center; }
+.todo .done .bx { background: var(--green); border-color: var(--green); }
+.todo .done .bx::after { content: ""; width: 6px; height: 3px; border: 1.6px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px,-1px); }
+.todo .doing .bx { border-color: var(--blue); }
+.todo .doing .bx::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
+.todo .done span { color: var(--label3); text-decoration: line-through; }
+.todo .doing span { font-weight: 600; }
+
+/* prose inside a tool (web fetch / subagent result) */
+.prose { padding: 6px 10px; font: var(--fs)/1.55 var(--mono); }
+.prose h4 { font-size: 1em; margin: 0 0 4px; }
+.prose p { margin: 0 0 6px; } .prose p:last-child { margin: 0; }
+.prose ul { margin: 0 0 6px; padding-left: 18px; }
+
+.thumb { margin: 6px 9px 4px; width: 240px; border-radius: 5px; border: 1px solid var(--pane-border); overflow: hidden; display: block; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.thumbcap { margin: 0 9px 6px; font: 10px var(--font); color: var(--label3); }
+.menu { width: 250px; padding: 5px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 92%, transparent); border: 1px solid var(--hair); box-shadow: 0 10px 30px rgba(0,0,0,.18); font: 13px var(--font); }
+.mi { display: flex; justify-content: space-between; padding: 2px 9px; border-radius: 4px; color: var(--label); }
+.mi span { color: var(--label3); }
+.mi.hi { background: var(--blue); color: #fff; } .mi.hi span { color: rgba(255,255,255,.8); }
+.mi.dis { color: var(--label3); }
+.msep { height: 1px; background: var(--hair); margin: 5px 9px; }
+.filehead .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.badge { font: 600 9.5px var(--font); color: var(--label2); border: 1px solid var(--hair); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+.tag-new { font: 600 9.5px var(--font); color: #fff; background: var(--blue); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
+/* plain-text rendering sample */
+pre.plain { margin: 0; padding: 10px 12px; font: 12px/1.5 var(--mono); background: var(--bg); color: var(--label); white-space: pre-wrap; }
+table.matrix { border-collapse: collapse; font-size: 12px; width: 100%; background: var(--bg); border-radius: 8px; overflow: hidden; }
+table.matrix th, table.matrix td { border-bottom: 1px solid var(--hair); padding: 5px 10px; text-align: left; vertical-align: top; }
+table.matrix th { background: var(--chrome); font-weight: 600; color: var(--label2); }
+table.matrix td code { font: 11px var(--mono); }
+</style>
+</head>
+<body class="light">
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-chev" viewBox="0 0 10 10"><path d="M3.5 1.8 6.8 5 3.5 8.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-term" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.4 6.2 6.6 8 4.4 9.8M8 10h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9 1.9V5.2h3.4M6 8h4.5M6 10.4h4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.6 2.4l3 3-7.9 7.9-3.6.7.7-3.6z M9.2 3.8l3 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-docplus" viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v9.2H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8.2 7.2v4.6M5.9 9.5h4.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="4.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 10l3.8 3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 4.2h4.3l1.4 1.6h6.7v7.4H1.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" fill="none" stroke="currentColor" stroke-width="1.1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 16 16"><path d="M2.3 4.2l1 1 1.8-2M2.3 9.2l1 1 1.8-2M7 4.4h7M7 9.4h7M2.6 13h2M7 13h7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-agent" viewBox="0 0 16 16"><circle cx="5.6" cy="5.4" r="2.3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.2" cy="6.2" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1.6 13.4c.4-2.6 2-3.9 4-3.9s3.6 1.3 4 3.9M10.3 9.6c1.9-.2 3.4.9 3.8 3.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 16 16"><path d="M5.5 1.8v3.4M10.5 1.8v3.4M3.6 5.2h8.8v2.6a4.4 4.4 0 0 1-8.8 0zM8 12.2v2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-photo" viewBox="0 0 16 16"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="5.6" cy="6.3" r="1.2" fill="currentColor"/><path d="M2.4 12l3.7-3.4 2.6 2.3 2-1.7 3 2.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-ask" viewBox="0 0 16 16"><path d="M2 3.2h12v8H7.2L4 14v-2.8H2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6.6 5.6a1.5 1.5 0 1 1 2 1.4c-.5.2-.6.5-.6 1M8 9.3v.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-braces" viewBox="0 0 16 16"><path d="M5.6 2.2c-1.6 0-1.9.8-1.9 2.2v1.4c0 1-.5 1.7-1.6 2.2 1.1.5 1.6 1.2 1.6 2.2v1.4c0 1.4.3 2.2 1.9 2.2M10.4 2.2c1.6 0 1.9.8 1.9 2.2v1.4c0 1 .5 1.7 1.6 2.2-1.1.5-1.6 1.2-1.6 2.2v1.4c0 1.4-.3 2.2-1.9 2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-stack" viewBox="0 0 16 16"><path d="M8 1.9 14 5 8 8.1 2 5z M2 8l6 3.1L14 8 M2 11l6 3.1 6-3.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="9" height="9" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.5 11H3a1.2 1.2 0 0 1-1.2-1.2V3A1.2 1.2 0 0 1 3 1.8h6.8A1.2 1.2 0 0 1 11 3v.5" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5.6" y="5.6" width="4.8" height="4.8" rx=".8" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<div class="topbar">
+  <h1>Tool rendering — proposal</h1>
+  <nav><a href="#hero">Screenshot case</a><a href="#levels">Three levels</a><a href="#gallery">Every category</a><a href="#edges">Edge cases</a><a href="#plain">Text mode &amp; copy</a></nav>
+  <span class="sp"></span>
+  <div class="seg" id="theme"><button class="on" data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</div>
+
+<div class="page">
+
+<!-- ═════════════════════════════ HERO ═════════════════════════════ -->
+<section id="hero">
+  <h2>The screenshot case: one Codex "code mode" turn</h2>
+  <p class="lede">Same data both sides. Codex's <code>exec</code> tool takes a JavaScript snippet that runs several shell commands; its output is a JSON array of text items that carry JSON lines inside strings. Today the view prints all of it raw. The proposal pairs each call with its output, splits the script into its commands, and decodes every layer.</p>
+  <div class="cols">
+    <div>
+      <div class="caption"><span class="bad">Today</span> · 6.3 Session view (reproduced)</div>
+      <div class="win">
+        <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="t">Codex CLI · Fix tool-card summaries</div></div>
+        <div class="list today">
+          <div class="card agent"><div class="chead"><span class="role">Agent</span><span class="ts">11:32:16 AM</span><span class="chip">14.2s · 5 calls</span></div>
+            <div class="body">I'll check the handover and the current tool-card code before I change anything.</div></div>
+          <div class="card tool"><div class="chead"><svg class="chev" style="transform:rotate(90deg)"><use href="#i-chev"/></svg><span class="role" style="font-family:var(--mono);font-weight:400;color:var(--label2)">10 tool calls</span><span class="ts">11:32:18 AM</span></div>
+<div class="body">• exec
+exec text(await tools.exec_command({cmd:"pwd; rg -n 'custom_tool_call' AgentSessions --glob '*.swift'","max_out…
+
+• Tool call
+[
+  {
+    "text" : "Script completed\nWall time 0.4 seconds\nOutput:\n",
+    "type" : "input_text"
+  },
+  {
+    "text" : "Warning: truncated output (original token count: 19326)\nTotal output lines: 2\n\n{\"chunk_id\":\"55bd45\",\"wall_time_seconds\":0.081781792,\"exit_code\":0,\"original_token_count\":61,\"output\":\"\/Users\/alexm\/Repository\/Codex-History\\nAgentSessions\/Model\/SessionEvent.swift:32:            case \\\"tool_call\\\", \\\"tool-call\\\", \\\"toolcall\\\", \\\"tool_use\\\", \\\"tool-use\\\", \\\"function_call\\\", \\\"web_search_call\\\", \\\"custom_tool_call\\\": return .tool_call\\n\"}\n{\"chunk_id\":\"dc8d5f\",\"wall_time_seconds\":0.000012583,\"exit_code\":0,\"original_token_count\":19265,\"output\":\"Warning: truncated output (original token count: 19265)\\nTotal output lines: 412\\n\\n## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next\\nstatus: in-progress\\n\\n**State:** The Codex run finished the workflow changes and the full sweep; the work is committed on `main`. 6.3 (Ghostty Resume + OpenCode Esc fix) needs release copy, then deploy.\\n\\n**Verified:**\\n- Final sweep: twelve agents `supports_latest`; final weekly</div>
+            <div class="showall">Show all 61 lines</div>
+          </div>
+        </div>
+      </div>
+      <div class="anno"><b>What goes wrong</b>
+        <ol>
+          <li>"10 tool calls" counts blocks. Five calls, each with an output block, give 10. The five calls run six actions. (Your screenshot: 6 calls, so "12 tool calls".)</li>
+          <li>The call line is the tool name plus the input squeezed onto one line and cut at 120 characters. You cannot see the full command anywhere in the card.</li>
+          <li>The output is labelled "Tool call" because the output event has no tool name, and nothing ties it to its call.</li>
+          <li>The parser turned the output array into pretty JSON at index time, so escaped <code>\n</code>, <code>\"</code> and <code>\\\"</code> appear as text. That is three layers of escaping.</li>
+          <li>The 20-line limit counts <code>\n</code> characters. One escaped line holds the whole output, so a "1-line" output wraps to a wall of text.</li>
+          <li>Text mode, search and export already run a 1,700-line tool normalizer. The Session view does not use it.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div>
+      <div class="caption"><span class="good">Proposed</span></div>
+      <div class="win">
+        <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="t">Codex CLI · Fix tool-card summaries</div></div>
+        <div class="list">
+          <div class="card agent"><div class="chead"><span class="role">Agent</span><span class="ts">11:32:16 AM</span><span class="chip">14.2s · 5 calls</span></div>
+            <div class="body">I'll check the handover and the current tool-card code before I change anything.</div></div>
+
+          <div class="card tool open js-tog">
+            <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">5 tool calls</span><span class="digest">Read 2 files · Searched 2 · Edited 1 file · Ran 1 command</span><span class="fail">1 failed</span><span class="grow"></span><span class="dur">14.2s</span><span class="ts">11:32:18 AM</span></div>
+            <div class="gbody">
+
+              <div class="inv open">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-search"/></svg><span class="verb">Searched</span><span class="arg">custom_tool_call <span class="dim">in AgentSessions · *.swift</span></span><span class="meta"><span class="hoverbar"><span class="hb" title="Copy"><svg><use href="#i-copy"/></svg></span><span class="hb" title="Show raw event"><svg><use href="#i-braces"/></svg></span></span><span class="m quiet">1 match</span><span class="m">0.08s</span></span></div>
+                <div class="det">
+                  <div class="ctx"><span>exec script · command 1 of 2</span></div>
+                  <div class="pane">
+                    <div class="cmd"><span class="hang"><span class="p">$ </span>pwd; rg -n 'custom_tool_call' AgentSessions --glob '*.swift'</span></div>
+                    <div class="out" style="border-top:1px solid var(--pane-border)"><span class="dim">/Users/alexm/Repository/Codex-History</span>
+AgentSessions/Model/SessionEvent.swift:32:  case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call", "web_search_call", "custom_tool_call": return .tool_call</div>
+                    <div class="foot"><span>exit 0</span><span>0.08s</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="inv">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">RepoHandover.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn" title="Codex cut this output before it reached the model">cut by Codex</span><span class="m quiet">412 lines</span><span class="m">0.01s</span></span></div>
+                <div class="det">
+                  <div class="ctx"><span>exec script · command 2 of 2</span></div>
+                  <div class="pane">
+                    <div class="cmd"><span class="p">$ </span>sed -n '1,160p' RepoHandover.md</div>
+                    <div class="out" style="border-top:1px solid var(--pane-border)">## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
+status: in-progress
+
+**State:** The Codex run finished the workflow changes and the full sweep; the work is committed on `main`. 6.3 (Ghostty Resume + OpenCode Esc fix) needs release copy, then deploy.</div>
+                    <div class="fold">⋯ 405 more lines <a href="#">Show all</a></div>
+                    <div class="out">2. Owner resumes one real agent in Ghostty from the app before release.
+3. Owner decides on the Hermes stash.</div>
+                    <div class="foot"><span>exit 0</span><span class="w">Codex cut the output at 19,265 tokens · 412 lines reached the model</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="inv">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">TranscriptBlockListView.swift <span class="dim">L3780–3852</span></span><span class="meta"><span class="m quiet">73 lines</span><span class="m">0.02s</span></span></div>
+              </div>
+              <div class="inv">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-search"/></svg><span class="verb">Searched</span><span class="arg">expandedToolBodyText <span class="dim">in AgentSessions</span></span><span class="meta"><span class="m quiet">6 matches · 2 files</span><span class="m">0.05s</span></span></div>
+              </div>
+              <div class="inv">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-pencil"/></svg><span class="verb">Edited</span><span class="arg">TranscriptToolSummary.swift</span><span class="meta"><span class="m add">+14</span><span class="m del">−2</span><span class="m">0.1s</span></span></div>
+              </div>
+
+              <div class="inv failed open">
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">xcodebuild test -scheme AgentSessions -only-testing:AgentSessionsTests/TranscriptToolSummaryTests</span><span class="meta"><span class="m bad">exit 65</span><span class="m">48s</span></span></div>
+                <div class="det">
+                  <div class="pane">
+                    <div class="cmd"><span class="hang"><span class="p">$ </span>xcodebuild test -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/TranscriptToolSummaryTests 2&gt;&amp;1 | tail -40</span></div>
+                    <div class="fold" style="border-top:1px solid var(--pane-border)">⋯ 22 earlier lines <a href="#">Show all</a></div>
+                    <div class="out err">Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' started.
+<span class="stderr">/Users/alexm/Repository/Codex-History/AgentSessionsTests/TranscriptToolSummaryTests.swift:212: error: -[TranscriptToolSummaryTests testExecScriptSummary] : XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'custom_tool_call' AgentSessions")</span>
+Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' failed (0.004 seconds).
+Executed 18 tests, with 1 failure (0 unexpected) in 0.031 (0.034) seconds
+<span class="stderr">** TEST FAILED **</span></div>
+                    <div class="foot"><span class="bad">exit 65</span><span>48s</span><span class="sp"></span><span>last 18 of 40 lines</span></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="anno"><b>What changes</b>
+        <ul>
+          <li>One row per action. The script's two commands become two rows, and each row owns its own output.</li>
+          <li>Each row reads as a sentence: verb, object, result. Read-only commands such as <code>sed -n</code>, <code>nl</code>, <code>cat</code> and <code>rg</code> read as Read and Searched. The exact command is always one click away.</li>
+          <li>Success is quiet and failure is loud. The failed run opens itself and shows the red count in the header.</li>
+          <li>Agent truncation goes to the footer as a fact. It is not printed as text inside the output.</li>
+          <li>Long output shows its first and last lines with a fold between them. Long lines get a character limit.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ LEVELS ═════════════════════════════ -->
+<section id="levels">
+  <h2>Three levels of detail</h2>
+  <p class="lede">A run of tool calls is one card. Level 0 is a one-line summary. Level 1 lists the actions. Level 2 shows one action in full. Each level answers a question that gets less frequent: <i>what happened</i>, <i>which steps</i>, <i>show me the bytes</i>.</p>
+  <div class="cols3">
+    <div>
+      <div class="caption">L0 · collapsed group</div>
+      <div class="win"><div class="list">
+        <div class="card tool js-tog">
+          <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">5 tool calls</span><span class="digest">Read 2 files · Searched 2 · Edited 1…</span><span class="fail">1 failed</span><span class="grow"></span><span class="dur">14.2s</span></div>
+          <div class="gbody"></div>
+        </div>
+        <div class="card tool js-tog">
+          <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">Ran</span><span class="digest" style="font-family:var(--mono);color:var(--label)">swift build -c release</span><span class="grow"></span><span class="m quiet">exit 0</span><span class="dur">1m 12s</span></div>
+          <div class="gbody"></div>
+        </div>
+      </div></div>
+      <div class="anno">A group shows a summary of verbs, sorted by count. More than three verbs end in "…". A single call needs no group, so it shows its own Level 1 row as the card header.</div>
+    </div>
+    <div>
+      <div class="caption">L1 · actions</div>
+      <div class="win"><div class="list">
+        <div class="card tool open">
+          <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">5 tool calls</span><span class="digest">Read 2 files · Searched 2…</span><span class="fail">1 failed</span><span class="grow"></span><span class="dur">14.2s</span></div>
+          <div class="gbody">
+            <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-search"/></svg><span class="verb">Searched</span><span class="arg">custom_tool_call</span><span class="meta"><span class="m quiet">1 match</span></span></div></div>
+            <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">RepoHandover.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn">cut by Codex</span></span></div></div>
+            <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-pencil"/></svg><span class="verb">Edited</span><span class="arg">TranscriptToolSummary.swift</span><span class="meta"><span class="m add">+14</span><span class="m del">−2</span></span></div></div>
+            <div class="inv failed"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">xcodebuild test -scheme AgentSessions…</span><span class="meta"><span class="m bad">exit 65</span></span></div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="anno">Rows are 24 pt high, with an icon, a verb, the object in monospace and a result on the right. When the pointer is over a row, Copy and Raw buttons appear. Option-click on a chevron opens or closes all rows (Finder behavior).</div>
+    </div>
+    <div>
+      <div class="caption">L2 · one action</div>
+      <div class="win"><div class="list">
+        <div class="card tool open">
+          <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">Edited</span><span class="digest" style="font-family:var(--mono);color:var(--label)">TranscriptToolSummary.swift</span><span class="grow"></span><span class="m add">+3</span><span class="m del">−1</span></div>
+          <div class="gbody" style="padding-left:17px;padding-bottom:2px">
+            <div class="pane">
+              <div class="filehead"><span class="path">AgentSessions/Services/TranscriptToolSummary.swift</span><span class="sp"></span><span>1 hunk</span></div>
+              <div class="gut">
+                <div class="n hunk"></div><div class="c hunk">@@ -18,7 +18,9 @@ enum TranscriptToolSummary {</div>
+                <div class="n">18</div><div class="c">    static func summary(toolName: String?, toolInput: String?) -&gt; String {</div>
+                <div class="n del">19</div><div class="c del">-        if let input = toolInput, let json = parseJSON(input) {</div>
+                <div class="n add">19</div><div class="c add">+        if let script = ExecScript.parse(toolInput) {</div>
+                <div class="n add">20</div><div class="c add">+            return script.commands.first?.display ?? "exec"</div>
+                <div class="n add">21</div><div class="c add">+        }</div>
+                <div class="n">22</div><div class="c">            if let command = commandSummary(from: json) {</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div class="anno">Level 2 picks a renderer by category: command, file, diff, search, list, web, plan, subagent, structured data or image. Each renderer has a fallback, so an unknown payload still decodes cleanly.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ GALLERY ═════════════════════════════ -->
+<section id="gallery">
+  <h2>Every category, every agent</h2>
+  <p class="lede">The layout comes from the category, not from the agent. A Claude <code>Read</code>, an OpenCode <code>read</code> and a Codex <code>sed -n '1,80p' f</code> all render as <b>Read · file · L1–80</b> with a line gutter. The agent adapters only translate payloads. They never draw.</p>
+
+  <div class="cols">
+  <div>
+    <div class="caption">Read · line-numbered output gets a real gutter</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-doc"/></svg><span class="gtitle" style="color:var(--label2)">Read</span><span class="digest" style="font-family:var(--mono);color:var(--label)">SessionTranscriptBuilder.swift <span style="color:var(--label3)">L740–748</span></span><span class="grow"></span><span class="badge">Claude</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane"><div class="gut">
+            <div class="n">740</div><div class="c">    private static func renderToolCallLabel(name: String?, args: String?) -&gt; String {</div>
+            <div class="n">741</div><div class="c">        var label = name ?? "?"</div>
+            <div class="n">742</div><div class="c">        if let a = args, !a.isEmpty {</div>
+            <div class="n">743</div><div class="c">            let compact = compactJSONOneLine(a)</div>
+            <div class="n">744</div><div class="c">            let truncated = truncateTo(compact, max: 120)</div>
+            <div class="n">745</div><div class="c">            label += " " + truncated</div>
+            <div class="n">746</div><div class="c">        }</div>
+            <div class="n">747</div><div class="c">        return label</div>
+            <div class="n">748</div><div class="c">    }</div>
+          </div>
+          <div class="foot"><span>9 lines</span><span class="sp"></span><span title="Claude Code appended a system note to this tool result">+ 1 system note (hidden)</span></div></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">Detects <code>cat -n</code> arrows (<code>   740→</code>), <code>nl -ba</code> tabs and <code>N:</code> forms, and moves the numbers into a gutter that copy skips. Trailing <code>&lt;system-reminder&gt;</code> blocks fold into a muted note.</div>
+  </div>
+
+  <div>
+    <div class="caption">Patch · Codex <code>apply_patch</code>, several files</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-pencil"/></svg><span class="gtitle" style="color:var(--label2)">Edited</span><span class="digest" style="font-family:var(--mono);color:var(--label)">2 files</span><span class="grow"></span><span class="m add">+9</span><span class="m del">−2</span><span class="badge">Codex</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane">
+            <div class="filehead"><span class="path">AgentSessions/Services/ExecScript.swift</span><span class="tag-new">NEW</span><span class="sp"></span><span class="m add">+6</span></div>
+            <div class="gut">
+              <div class="n add">1</div><div class="c add">+/// Parses Codex code-mode `exec` input into its tool calls.</div>
+              <div class="n add">2</div><div class="c add">+struct ExecScript: Equatable {</div>
+              <div class="n add">3</div><div class="c add">+    struct Call: Equatable { var tool: String; var arguments: [String: String] }</div>
+              <div class="n add">4</div><div class="c add">+    var calls: [Call]</div>
+            </div>
+            <div class="fold">⋯ 2 more lines <a href="#">Show all</a></div>
+            <div class="filehead" style="border-top:1px solid var(--pane-border)"><span class="path">AgentSessions/Services/TranscriptToolSummary.swift</span><span class="sp"></span><span class="m add">+3</span> <span class="m del">−2</span></div>
+            <div class="gut">
+              <div class="n hunk"></div><div class="c hunk">@@ enum TranscriptToolSummary</div>
+              <div class="n del"></div><div class="c del">-        if let input = toolInput, let json = parseJSON(input) {</div>
+              <div class="n add"></div><div class="c add">+        if let script = ExecScript.parse(toolInput) {</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">The parser handles <code>*** Begin Patch</code> envelopes (Add, Update, Delete, Move), unified diffs, and <code>old_string</code>/<code>new_string</code> pairs. Patch formats without line numbers get an empty gutter.</div>
+  </div>
+  </div>
+
+  <div class="cols" style="margin-top:22px">
+  <div>
+    <div class="caption">Search · results grouped by file</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-search"/></svg><span class="gtitle" style="color:var(--label2)">Searched</span><span class="digest" style="font-family:var(--mono);color:var(--label)">"isToolCard" <span style="color:var(--label3)">in AgentSessions/Views</span></span><span class="grow"></span><span class="m quiet">5 matches · 1 file</span><span class="badge">Claude</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane">
+            <div class="filehead"><span class="path">TranscriptBlockListView.swift</span><span class="sp"></span><span>5</span></div>
+            <div class="gut">
+              <div class="n">67</div><div class="c">    var <span class="out hl" style="padding:0">isToolCard</span>: Bool {</div>
+              <div class="n">1822</div><div class="c">        row.<span class="out hl" style="padding:0">isToolCard</span> ? BlockCardCellView.expandedToolBodyText(…)</div>
+              <div class="n">1826</div><div class="c">        guard row.<span class="out hl" style="padding:0">isToolCard</span> else { return .notApplicable }</div>
+              <div class="n">1841</div><div class="c">        guard inlineImagesEnabled, !row.<span class="out hl" style="padding:0">isToolCard</span>, !row.isMeta else { return [] }</div>
+              <div class="n">3090</div><div class="c">        if row.<span class="out hl" style="padding:0">isToolCard</span> {</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">Works on <code>path:line:text</code> (rg, grep -n, Grep in content mode) and on plain path lists (Glob, files_with_matches). The search term is highlighted in the results.</div>
+  </div>
+  <div>
+    <div class="caption">Plan / todo · a checklist, not JSON</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-list"/></svg><span class="gtitle" style="color:var(--label2)">Updated plan</span><span class="digest">2 of 5 done</span><span class="grow"></span><span class="badge">Codex · Claude · Gemini…</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane"><div class="todo">
+            <div class="done"><i class="bx"></i><span>Pair calls with outputs by call id</span></div>
+            <div class="done"><i class="bx"></i><span>Parse exec scripts into commands</span></div>
+            <div class="doing"><i class="bx"></i><span>Decode content-item arrays and JSON lines</span></div>
+            <div><i class="bx"></i><span>Head/tail fold with long-line limit</span></div>
+            <div><i class="bx"></i><span>Golden corpus readability check</span></div>
+          </div></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">Covers <code>update_plan</code>, <code>TodoWrite</code>, <code>todowrite</code> and <code>write_todos</code>. An optional explanation shows above the list as prose.</div>
+  </div>
+  </div>
+
+  <div class="cols" style="margin-top:22px">
+  <div>
+    <div class="caption">Subagent · prompt and result as prose</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-agent"/></svg><span class="gtitle" style="color:var(--label2)">Subagent</span><span class="digest" style="color:var(--label)">Survey Codex + Claude tool payloads</span><span class="grow"></span><span class="m quiet">sonnet · 41 tool calls</span><span class="dur">6m 02s</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane">
+            <div class="sect">Prompt</div>
+            <div class="prose" style="color:var(--label2)">You are doing a READ-ONLY survey for a transcript-formatting redesign… <a href="#">Show all 48 lines</a></div>
+            <div class="sect" style="border-top:1px solid var(--pane-border)">Result</div>
+            <div class="prose"><p>Report written to <code>scratchpad/survey-codex-claude.md</code>.</p><ul><li>Census table per agent, with input and output shapes.</li><li>Ten worst shapes, ranked, at the end.</li></ul></div>
+            <div class="foot"><a href="#">Open subagent session ›</a></div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">Covers Task/Agent, spawn_agent and delegate tools. The result is markdown and is rendered like an agent message. The footer link opens the subagent's own transcript when the app indexed it.</div>
+  </div>
+  <div>
+    <div class="caption">MCP / unknown tool · fields, not a JSON blob</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-plug"/></svg><span class="gtitle" style="color:var(--label2)">github › create_pull_request</span><span class="grow"></span><span class="m quiet">ok</span><span class="dur">1.4s</span></div>
+        <div class="gbody" style="padding-left:17px">
+          <div class="pane">
+            <div class="kv">
+              <span class="k">owner</span><span class="v s">jazzyalex</span>
+              <span class="k">repo</span><span class="v s">agent-sessions</span>
+              <span class="k">title</span><span class="v s">fix(transcript): pair tool calls with outputs</span>
+              <span class="k">draft</span><span class="v bool">true</span>
+              <span class="k">body</span><span class="v s">Pairs each tool output with its call by call id.
+Falls back to order inside the turn. <a href="#">+12 lines</a></span>
+            </div>
+            <div class="sect" style="border-top:1px solid var(--pane-border)">Result</div>
+            <div class="kv">
+              <span class="k">number</span><span class="v num">142</span>
+              <span class="k">html_url</span><span class="v"><a href="#">https://github.com/jazzyalex/agent-sessions/pull/142</a></span>
+              <span class="k">state</span><span class="v s">open</span>
+              <span class="k">… 31 more fields</span><span class="v"><a href="#">Show</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno">Flat objects show as aligned key/value pairs. Strings are unescaped, multi-line strings keep their line breaks, and nested objects fold. Arrays of objects with the same keys show as a table. URLs are links.</div>
+  </div>
+  </div>
+
+  <div class="cols" style="margin-top:22px">
+  <div>
+    <div class="caption">Web fetch / search · markdown in a fold</div>
+    <div class="win"><div class="list">
+      <div class="card tool">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-globe"/></svg><span class="gtitle" style="color:var(--label2)">Fetched</span><span class="digest" style="font-family:var(--mono)"><a href="#">developer.apple.com/documentation/appkit/nstextblock</a></span><span class="grow"></span><span class="m quiet">2.1 KB</span></div>
+      </div>
+      <div class="card tool">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-globe"/></svg><span class="gtitle" style="color:var(--label2)">Searched the web</span><span class="digest" style="font-family:var(--mono);color:var(--label)">"NSTextBlock background padding TextKit 1"</span><span class="grow"></span><span class="m quiet">8 results</span></div>
+      </div>
+    </div></div>
+    <div class="anno">Closed by default because web pages are long. When open, the page renders as markdown in a pane with a height limit. Search results show as a list of title and domain.</div>
+  </div>
+  <div>
+    <div class="caption">Screenshot / image output · thumbnail</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-photo"/></svg><span class="gtitle" style="color:var(--label2)">Screenshot</span><span class="digest">Agent Sessions — Session view</span><span class="grow"></span><span class="badge">Claude · computer-use</span></div>
+        <div class="gbody" style="padding-left:17px"><div class="pane">
+          <svg class="thumb" viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+            <rect width="240" height="150" fill="#ffffff"/>
+            <rect width="240" height="14" fill="#f2f2f2"/><circle cx="8" cy="7" r="2.6" fill="#ff5f57"/><circle cx="16" cy="7" r="2.6" fill="#febc2e"/><circle cx="24" cy="7" r="2.6" fill="#28c840"/>
+            <rect x="0" y="14" width="92" height="136" fill="#efeff1"/>
+            <g fill="#d7d7dc"><rect x="6" y="22" width="60" height="4" rx="2"/><rect x="6" y="34" width="78" height="4" rx="2"/><rect x="6" y="46" width="70" height="4" rx="2"/><rect x="6" y="58" width="74" height="4" rx="2"/><rect x="6" y="70" width="64" height="4" rx="2"/></g>
+            <rect x="4" y="31" width="84" height="10" rx="2" fill="#007AFF" opacity=".18"/>
+            <rect x="100" y="22" width="132" height="22" rx="2" fill="#AF52DE" opacity=".07"/><rect x="100" y="22" width="1.5" height="22" fill="#AF52DE"/>
+            <g fill="#c9c9ce"><rect x="105" y="27" width="40" height="3" rx="1.5"/><rect x="105" y="35" width="110" height="3" rx="1.5"/></g>
+            <rect x="100" y="50" width="132" height="30" rx="2" fill="#8C571F" opacity=".07"/><rect x="100" y="50" width="1.5" height="30" fill="#8C571F"/>
+            <g fill="#c9c9ce"><rect x="105" y="55" width="30" height="3" rx="1.5"/><rect x="105" y="63" width="118" height="3" rx="1.5"/><rect x="105" y="70" width="96" height="3" rx="1.5"/></g>
+            <rect x="100" y="86" width="132" height="44" rx="2" fill="#AF52DE" opacity=".07"/><rect x="100" y="86" width="1.5" height="44" fill="#AF52DE"/>
+            <rect x="108" y="96" width="118" height="28" rx="2" fill="#000" opacity=".04"/>
+            <g fill="#c9c9ce"><rect x="105" y="90" width="50" height="3" rx="1.5"/><rect x="112" y="101" width="92" height="3" rx="1.5"/><rect x="112" y="108" width="70" height="3" rx="1.5"/><rect x="112" y="115" width="84" height="3" rx="1.5"/></g>
+          </svg>
+          <div class="thumbcap">1440 × 900 PNG · click to open</div>
+        </div></div>
+      </div>
+    </div></div>
+    <div class="anno">Base64 image items render as thumbnails through the existing inline-image grid, and a click opens them. Base64 text never appears in the transcript.</div>
+  </div>
+  </div>
+
+  <div class="cols" style="margin-top:22px">
+  <div>
+    <div class="caption">Ask the user · question, options, answer</div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-ask"/></svg><span class="gtitle" style="color:var(--label2)">Asked</span><span class="digest" style="color:var(--label)">Which phase should ship first?</span><span class="grow"></span></div>
+        <div class="gbody" style="padding-left:17px"><div class="pane"><div class="prose">
+          <p>○ Commands and code-mode scripts only</p><p><b>● Commands + files + diffs</b> <span style="color:var(--label3)">— chosen</span></p><p>○ All categories at once</p>
+        </div></div></div>
+      </div>
+    </div></div>
+  </div>
+  <div>
+    <div class="caption">Write a new file · content folded, language noted</div>
+    <div class="win"><div class="list">
+      <div class="card tool">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-docplus"/></svg><span class="gtitle" style="color:var(--label2)">Created</span><span class="digest" style="font-family:var(--mono);color:var(--label)">docs/mockups/transcript-tool-rendering-mockup.html</span><span class="grow"></span><span class="m add">+612</span></div>
+      </div>
+      <div class="card tool">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-folder"/></svg><span class="gtitle" style="color:var(--label2)">Listed</span><span class="digest" style="font-family:var(--mono);color:var(--label)">AgentSessions/Services</span><span class="grow"></span><span class="m quiet">94 files</span></div>
+      </div>
+    </div></div>
+    <div class="anno">A heredoc (<code>cat &gt; f &lt;&lt;'EOF'</code>) counts as Created. The command shows its first line, and the body becomes the file pane.</div>
+  </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ EDGES ═════════════════════════════ -->
+<section id="edges">
+  <h2>Edge cases</h2>
+  <p class="lede">Each case comes from real local sessions (see the spec's corpus section). Rule: always show the call, even when the output is missing, and always show the output, even when the call is missing.</p>
+  <div class="cols">
+  <div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">4 tool calls</span><span class="digest">Ran 3 commands at once · Read 1 file</span><span class="grow"></span><span class="dur">3.9s</span></div>
+        <div class="gbody">
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">git status --short</span><span class="meta"><span class="m quiet">3 lines</span><span class="m">0.04s</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">git log --oneline -5</span><span class="meta"><span class="m quiet">5 lines</span><span class="m">0.05s</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">git diff --stat</span><span class="meta"><span class="m quiet">no output</span><span class="m">0.04s</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-search"/></svg><span class="verb">Searched</span><span class="arg">"TODO" <span class="dim">in AgentSessions</span></span><span class="meta"><span class="m quiet">no matches</span><span class="m">0.06s</span></span></div></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno"><b>Parallel calls.</b> Three calls, then three outputs. Today the pairing uses a stack (last in, first out), so the first output goes to the third call and the durations are wrong. Pair by call id first. <b>Empty output</b> shows as "no output" in the row, with no pane. <b>grep/rg exit 1 with no output</b> means "no matches". It is not a failure.</div>
+  </div>
+  <div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">10 tool calls</span><span class="digest">Ran 2 commands · Polled 6 · 1 rejected…</span><span class="grow"></span></div>
+        <div class="gbody">
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="color:var(--label3)"><use href="#i-stop"/></svg><span class="verb">Ran</span><span class="arg">npm run dev</span><span class="meta"><span class="m quiet" style="color:var(--orange-t)">interrupted</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="color:var(--label3)"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">sleep 30; tail -n 20 build.log</span><span class="meta"><span class="m quiet">no result recorded</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Polled</span><span class="arg">npm run dev <span class="dim">· session 42437</span></span><span class="meta"><span class="m quiet">×6 · still running</span><span class="m">1m 30s</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="color:var(--label3)"><use href="#i-pencil"/></svg><span class="verb">Edit</span><span class="arg">project.pbxproj</span><span class="meta"><span class="m quiet">rejected by you</span></span></div></div>
+          <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-agent"/></svg><span class="verb">Messaged</span><span class="arg">/root/reviewer <span class="dim">· message encrypted in the log (771 chars)</span></span><span class="meta"><span class="m quiet">no output</span></span></div></div>
+          <div class="inv open"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-braces"/></svg><span class="verb">Output</span><span class="arg"><span class="dim">from shell · call is in an earlier part of the session</span></span><span class="meta"><a class="m quiet" href="#" style="color:var(--blue)">Load call</a></span></div>
+            <div class="det"><div class="pane">
+              <div class="out">{"level":"info","msg":"listening","port":5173}
+<span class="dim">{"level":"info","msg":"ready in 412 ms"}</span>
+{"level":"warn","msg":"<span class="dim">…</span> <span class="longcap">+3,812 chars</span></div>
+              <div class="foot"><span>2 JSON lines shown as JSON lines (one object per line)</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="anno"><b>Interrupted</b> means a turn_aborted or interrupt event came after the call. <b>No result recorded</b> means the session ended, or is still running, with no output for the call. <b>Orphan output</b> means the windowed view cut off the call. Pairing runs over the whole session, so the row still knows the tool name. A <b>long single line</b> stops at a character limit and shows "+N chars" to open the rest. <b>Polls</b> (Codex <code>write_stdin</code>/<code>wait</code>) link to the command they watch and collapse into one row with a count. <b>Rejected</b> calls show in grey (today they are hidden). <b>Encrypted</b> Codex collaboration messages show a placeholder, never the ciphertext.</div>
+  </div>
+  </div>
+
+  <div class="cols" style="margin-top:22px">
+  <div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-term"/></svg><span class="gtitle" style="color:var(--label2)">Ran</span><span class="digest" style="font-family:var(--mono);color:var(--label)">swift test 2&gt;&amp;1</span><span class="grow"></span><span class="m quiet">18,442 lines</span><span class="dur">3m 40s</span></div>
+        <div class="gbody" style="padding-left:17px"><div class="pane">
+          <div class="out">Building for debugging...
+[1/412] Compiling AgentSessionsCore Session.swift
+[2/412] Compiling AgentSessionsCore SessionEvent.swift</div>
+          <div class="fold">⋯ 18,436 more lines <a href="#">Show 500 more</a> · <a href="#">Show all</a> · <a href="#">Copy output</a></div>
+          <div class="out">Test Suite 'All tests' passed at 2026-11-04 11:58:02.114.
+	 Executed 4,043 tests, with 0 failures (0 unexpected) in 212.4 (213.0) seconds</div>
+          <div class="foot"><span>exit 0</span><span>3m 40s</span><span class="sp"></span><span>2.4 MB</span></div>
+        </div></div>
+      </div>
+    </div></div>
+    <div class="anno"><b>Huge output.</b> The pane shows head and tail lines inside a fixed visual-line budget. "Show 500 more" opens the output in steps. "Show all" has a hard limit (for example 20,000 lines), and past it the pane offers Copy and JSON view. The body never exceeds what one NSTextView can lay out without a stall.</div>
+  </div>
+  <div>
+    <div class="win"><div class="list">
+      <div class="card tool open">
+        <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-term"/></svg><span class="gtitle" style="color:var(--label2)">Ran</span><span class="digest" style="font-family:var(--mono);color:var(--label)">cat &gt; scripts/check.sh &lt;&lt;'EOF'</span><span class="grow"></span><span class="m quiet">exit 0</span></div>
+        <div class="gbody" style="padding-left:17px"><div class="pane">
+          <div class="ctx" style="padding:4px 9px 0;margin:0"><span><b>cwd</b> ~/Repository/Codex-History</span><span><b>shell</b> zsh -lc</span><span><b>timeout</b> 120s</span></div>
+          <div class="cmd"><span class="p">$ </span>cat &gt; scripts/check.sh &lt;&lt;'EOF'</div>
+          <div class="sect" style="border-top:1px solid var(--pane-border)">heredoc · 14 lines</div>
+          <div class="gut"><div class="n">1</div><div class="c">#!/bin/zsh</div><div class="n">2</div><div class="c">set -euo pipefail</div><div class="n">3</div><div class="c">xcodebuild -scheme AgentSessions build | xcbeautify</div></div>
+          <div class="fold">⋯ 11 more lines <a href="#">Show all</a></div>
+          <div class="cmd" style="border-top:1px solid var(--pane-border)"><span class="p">  </span>EOF</div>
+        </div></div>
+      </div>
+    </div></div>
+    <div class="anno"><b>Wrapper and context.</b> The parser removes <code>bash -lc</code>, <code>zsh -lc</code> and <code>cd X &amp;&amp;</code> prefixes and shows them as context (cwd, shell, timeout). The command text itself is never changed. <b>Heredocs</b> become a file pane. <b>ANSI codes</b> are removed in v1 and can map to colors later. <b>CRLF</b> becomes LF. <b>Tabs</b> keep 4-column stops.</div>
+  </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════ PLAIN ═════════════════════════════ -->
+<section id="plain">
+  <h2>Text mode, copy and export</h2>
+  <p class="lede">One presentation model feeds every surface: the Session view draws it, and Text mode, Copy, Markdown export and the search index use its plain-text form. Copy gives what you see, without gutters, and folds open in full.</p>
+  <div class="cols">
+    <div>
+      <div class="caption">Copy of the failed row (plain text)</div>
+      <div class="win"><pre class="plain">$ xcodebuild test -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/TranscriptToolSummaryTests 2&gt;&amp;1 | tail -40
+[exit 65 · 48s]
+Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' started.
+…/TranscriptToolSummaryTests.swift:212: error: … XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'custom_tool_call' AgentSessions")
+** TEST FAILED **</pre></div>
+    </div>
+    <div>
+      <div class="caption">Row context menu</div>
+      <div class="menu">
+        <div class="mi">Copy<span>⌘C</span></div>
+        <div class="mi">Copy Command</div>
+        <div class="mi hi">Copy Output</div>
+        <div class="mi">Copy as Markdown</div>
+        <div class="msep"></div>
+        <div class="mi">Show Raw Event</div>
+        <div class="mi">Expand All in Group<span>⌥-click</span></div>
+        <div class="msep"></div>
+        <div class="mi">Speak</div>
+        <div class="mi dis">Stop Speaking</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+  document.querySelectorAll('#theme button').forEach(b => b.addEventListener('click', () => {
+    document.body.className = b.dataset.t;
+    document.querySelectorAll('#theme button').forEach(x => x.classList.toggle('on', x === b));
+  }));
+  // L0 group toggle
+  document.querySelectorAll('.ghead').forEach(h => h.addEventListener('click', e => {
+    const card = h.parentElement;
+    if (e.altKey) { card.querySelectorAll('.inv').forEach(i => i.classList.toggle('open', !card.classList.contains('open') || !i.classList.contains('open'))); }
+    card.classList.toggle('open');
+  }));
+  // L1 row toggle; Option-click toggles all siblings
+  document.querySelectorAll('.inv > .row').forEach(r => r.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    const inv = r.parentElement;
+    const willOpen = !inv.classList.contains('open');
+    if (e.altKey) inv.parentElement.querySelectorAll(':scope > .inv').forEach(i => i.classList.toggle('open', willOpen));
+    else inv.classList.toggle('open');
+  }));
+  document.querySelectorAll('a[href="#"]').forEach(a => a.addEventListener('click', e => e.preventDefault()));
+</script>
+</body>
+</html>
