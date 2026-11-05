@@ -127,7 +127,7 @@ indirect enum ToolPayloadValue: Codable, Equatable, Sendable {
 
 The parser reads JavaScript object literals: unquoted keys, JSON strings with `\"` escapes, single-quoted strings, template literals without `${}`, numbers, booleans, nested objects and arrays. `Promise.all([...])` and several `text(await tools.x({...}))` statements give several calls in source order. A value it cannot read (identifier, `${}` template, function call) is stored as `.string("<expr>")`, and the parse still succeeds.
 
-- Primary-argument rule (used by the call label only): the first non-empty string among the keys `command`, `cmd`, `file_path`, `path`, `filePath`, `target_file`, `pattern`, `query`, `url`, `description`. An argv array (`command: ["bash","-lc","ls"]`) is joined after leading wrapper tokens are dropped (existing rule).
+- Primary-argument rule (used by the call label only): the first non-empty string among the keys `command`, `cmd`, `file_path`, `filePath`, `target_file`, `pattern`, `query`, `url`, `path`, `description` (`pattern` before `path`, so `Grep {pattern, path}` shows the pattern; ruling after the Task 2 review). An argv array (`command: ["bash","-lc","ls"]`) is joined after leading wrapper tokens are dropped (existing rule).
 - `TranscriptToolSummary.summary` keeps its current key order (description before file path, spec §14 Q1) and its `lastPathComponent` rule, so `testDescriptionBeatsFilePath` and `testFilePathSummary` stay unchanged. It only gains: `cmd` where it reads `command`, and for `exec` the first call's `cmd`.
 
 - [ ] **Step 1: Write failing tests**
