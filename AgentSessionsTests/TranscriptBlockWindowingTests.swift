@@ -155,6 +155,113 @@ final class TranscriptBlockWindowingTests: XCTestCase {
         XCTAssertFalse(diff.reloadBoundaryRow)
     }
 
+    // MARK: classifyChange / prependDiff over tool rows (Task 12)
+
+    private typealias F = TranscriptTestFixtures
+
+    /// Rows `TranscriptToolRows.emit` gives for the stream `blocks` (positions = global indices),
+    /// limited to `window`. Every invocation succeeds here.
+    private func toolRows(_ blocks: [SessionTranscriptBuilder.LogicalBlock],
+                          window: ClosedRange<Int>? = nil,
+                          openGroups: Set<Int> = []) -> [BlockRowModel] {
+        let stream = F.sequence(blocks)
+        let index = ToolInvocationIndex.build(blocks: stream, source: .claude)
+        return TranscriptToolRows.emit(
+            blocks: window.map { stream[$0] } ?? stream[...], index: index,
+            rowSummary: { ToolInvocationBuilder.rowSummary($0, blocks: stream, index: index, source: .claude) },
+            openGroups: openGroups, openInvocations: [],
+            activeRoles: Set(TranscriptRoleFilter.allCases), failedInvocationIDs: [])
+    }
+
+    private func call(_ id: String) -> SessionTranscriptBuilder.LogicalBlock {
+        F.block(.toolCall, id: id, toolName: "Bash", toolInput: "{\"command\":\"make\"}")
+    }
+
+    private func out(_ id: String) -> SessionTranscriptBuilder.LogicalBlock {
+        F.block(.toolOut, id: id, text: "ok")
+    }
+
+    private func hid(_ group: Int) -> Int { TranscriptToolRows.groupHeaderRowID(forGroup: group) }
+
+    func testAppendingCallToOpenGroupIsAppendOnly() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 with group 1 open; then 5 c3 · 6 o3 arrive.
+        let before = [F.block(.user, text: "go"), call("t1"), out("t1"), call("t2"), out("t2")]
+        let old = toolRows(before, openGroups: [1])
+        let new = toolRows(before + [call("t3"), out("t3")], openGroups: [1])
+
+        XCTAssertEqual(old.map(\.id), [0, hid(1), 1, 3])
+        XCTAssertEqual(new.map(\.id), [0, hid(1), 1, 3, 5])
+        // The header (3 calls now) and the old last row (now middle) reload; the new row appends.
+        XCTAssertEqual(BlockTableController.classifyChange(old: old, new: new),
+                       .appendWithReload(count: 1, reloadRows: IndexSet([1, 3])))
+    }
+
+    func testOutputArrivalReloadsOnlyItsRow() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 with group 1 open; then o2 arrives.
+        let before = [F.block(.user, text: "go"), call("t1"), out("t1"), call("t2")]
+        let old = toolRows(before, openGroups: [1])
+        let new = toolRows(before + [out("t2")], openGroups: [1])
+
+        XCTAssertEqual(old.map(\.id), new.map(\.id))
+        XCTAssertEqual(BlockTableController.classifyChange(old: old, new: new),
+                       .appendWithReload(count: 0, reloadRows: IndexSet(integer: 3)))
+
+        // A solo row: the same in-place reload.
+        let solo = [F.block(.user, text: "go"), call("t1")]
+        XCTAssertEqual(BlockTableController.classifyChange(old: toolRows(solo), new: toolRows(solo + [out("t1")])),
+                       .appendWithReload(count: 0, reloadRows: IndexSet(integer: 1)))
+    }
+
+    func testNonToolContentChangeStaysWholesale() {
+        // A streaming assistant message in the prefix changed: unchanged behaviour.
+        let old = toolRows([F.block(.user, text: "go"), F.block(.assistant, text: "Hel"), call("t1")])
+        let new = toolRows([F.block(.user, text: "go"), F.block(.assistant, text: "Hello"), call("t1"), out("t1")])
+        XCTAssertEqual(BlockTableController.classifyChange(old: old, new: new), .wholesale)
+
+        // Identical and plain appends keep today's results.
+        XCTAssertEqual(BlockTableController.classifyChange(old: old, new: old), .identical)
+        XCTAssertEqual(BlockTableController.classifyChange(
+            old: toolRows([F.block(.user, text: "go")]),
+            new: toolRows([F.block(.user, text: "go"), F.block(.assistant, text: "a")])), .appendOnly(count: 1))
+
+        // A solo row that becomes a group changes its row id.
+        XCTAssertEqual(BlockTableController.classifyChange(
+            old: toolRows([F.block(.user, text: "go"), call("t1"), out("t1")]),
+            new: toolRows([F.block(.user, text: "go"), call("t1"), out("t1"), call("t2")])), .wholesale)
+
+        // Legacy `.toolGroup` rows are not tool rows: a changed one stays wholesale.
+        XCTAssertEqual(BlockTableController.classifyChange(old: [groupRow([1, 2])],
+                                                           new: [groupRow([1, 2, 3]), messageRow(4)]), .wholesale)
+    }
+
+    func testPrependAcrossGroupBoundaryFallsBackSafely() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 c3 · 6 o3 · 7 assistant
+        let blocks = [F.block(.user, text: "go"), call("t1"), out("t1"), call("t2"), out("t2"),
+                      call("t3"), out("t3"), F.block(.assistant, text: "done")]
+
+        // Closed: the window 3...7 keys the group by invocation 3; loading older re-keys it to 1.
+        let old = toolRows(blocks, window: 3...7)
+        let new = toolRows(blocks)
+        XCTAssertEqual(old.map(\.id), [hid(3), 7])
+        XCTAssertEqual(new.map(\.id), [0, hid(1), 7])
+        let closed = BlockTableController.prependDiff(old: old, new: new)
+        XCTAssertFalse(closed.canSplice)
+        XCTAssertEqual(closed.droppedRowIDs, [hid(3)])
+
+        // Open, with the open state carried to the new id: the old header is still reported.
+        let openOld = toolRows(blocks, window: 3...7, openGroups: [3])
+        let openNew = toolRows(blocks, openGroups: [1, 3])
+        XCTAssertEqual(openOld.map(\.id), [hid(3), 3, 5, 7])
+        XCTAssertEqual(openNew.map(\.id), [0, hid(1), 1, 3, 5, 7])
+        let carried = BlockTableController.prependDiff(old: openOld, new: openNew)
+        XCTAssertFalse(carried.canSplice)
+        XCTAssertEqual(carried.droppedRowIDs, [hid(3)])
+
+        // Open, without carrying the state: the anchor row disappears; still a safe reload.
+        let lost = BlockTableController.prependDiff(old: openOld, new: toolRows(blocks, openGroups: [3]))
+        XCTAssertFalse(lost.canSplice)
+    }
+
     // MARK: extendedTailRange — live-append window maintenance
 
     func testExtendedTailRangePreservesWidenedLowerBound() {

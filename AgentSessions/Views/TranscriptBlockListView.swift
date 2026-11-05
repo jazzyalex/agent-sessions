@@ -32,15 +32,26 @@ enum TranscriptRoleFilter: String, CaseIterable, Hashable {
 /// folds consecutive `.toolCall`/`.toolOut` message rows (run length >= 2)
 /// into a single `.toolGroup` row; a lone tool block stays `.message` but is
 /// still rendered as a collapsed tool card (see `isToolCard`).
+///
+/// `TranscriptToolRows.emit` (tool rendering Task 12) emits `.toolGroupHeader`
+/// and `.toolInvocation` rows instead. The live table switches to them in Task 13,
+/// which adds their cells; until then nothing in production emits them, and the
+/// accessors below treat them as empty rows.
 struct BlockRowModel: Identifiable, Equatable {
     enum Content: Equatable {
         /// user / assistant / error / meta / tool (as ordinary card until T6)
         case message(SessionTranscriptBuilder.LogicalBlock)
         /// merged consecutive tool blocks — produced by Task 6, never by T5.
         case toolGroup([SessionTranscriptBuilder.LogicalBlock])
+        /// The L0 header of a run of two or more tool invocations.
+        case toolGroupHeader(ToolGroupHeaderModel)
+        /// One tool invocation (call plus outputs), solo or inside a group.
+        case toolInvocation(ToolInvocationRowModel)
     }
 
     /// `globalBlockIndex` of the first block — stable across window widening.
+    /// An invocation row's id is its invocation id; a group header's is
+    /// `TranscriptToolRows.groupHeaderRowID(forGroup:)`.
     var id: Int
     var content: Content
 
@@ -50,6 +61,7 @@ struct BlockRowModel: Identifiable, Equatable {
         switch content {
         case .message(let b): return b
         case .toolGroup(let blocks): return blocks.first ?? Self.emptyBlock
+        case .toolGroupHeader, .toolInvocation: return Self.emptyBlock
         }
     }
 
@@ -58,6 +70,7 @@ struct BlockRowModel: Identifiable, Equatable {
         switch content {
         case .message(let b): return b.text
         case .toolGroup(let blocks): return blocks.map(\.text).joined(separator: "\n\n")
+        case .toolGroupHeader, .toolInvocation: return ""
         }
     }
 
@@ -67,6 +80,16 @@ struct BlockRowModel: Identifiable, Equatable {
         switch content {
         case .toolGroup: return true
         case .message(let b): return b.kind.isTool
+        case .toolGroupHeader, .toolInvocation: return false
+        }
+    }
+
+    /// True for a `.toolGroupHeader` or `.toolInvocation` row. `classifyChange`
+    /// reloads such rows in place when only their content changed.
+    var isToolRow: Bool {
+        switch content {
+        case .toolGroupHeader, .toolInvocation: return true
+        case .message, .toolGroup: return false
         }
     }
 
@@ -92,6 +115,7 @@ struct BlockRowModel: Identifiable, Equatable {
         switch content {
         case .message(let b): return [b]
         case .toolGroup(let blocks): return blocks
+        case .toolGroupHeader, .toolInvocation: return []
         }
     }
 
@@ -1412,6 +1436,36 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // Sticky ⇒ ride the tail. Scrolled up ⇒ do NOT move (and, per brief,
             // no unseen-updates affordance here — that's a later task's concern).
             if sticky { scrollToBottom() }
+        case .appendWithReload(let appendedCount, let reloadRows):
+            // Tool rows changed in place (an output arrived or grew, a group
+            // gained a call) and `appendedCount` rows (maybe 0) were appended.
+            // Ordinals stay valid, but reloaded rows render new text, so a live
+            // cross-block selection is cleared, like any text-changing toggle.
+            clearCrossBlockSelection()
+            let firstNew = rows.count
+            // Same anchor rule as the appendOnly path: sticky rides the tail. A
+            // scrolled-up reader keeps the viewport, which only moves when a
+            // reloaded row above it changes height.
+            let visible = table.rows(in: table.visibleRect)
+            let reloadsAboveViewport = visible.length > 0
+                && (reloadRows.first ?? Int.max) < visible.lowerBound
+            let anchor = !sticky && reloadsAboveViewport ? captureScrollAnchor() : nil
+            rows = newRows
+            dropCachedHeights(forRowIDs: Set(reloadRows.map { newRows[$0].id }))
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0
+                if appendedCount > 0 {
+                    table.insertRows(at: IndexSet(integersIn: firstNew..<(firstNew + appendedCount)),
+                                     withAnimation: [])
+                }
+                table.reloadData(forRowIndexes: reloadRows, columnIndexes: IndexSet(integer: 0))
+                table.noteHeightOfRows(withIndexesChanged: reloadRows)
+            }
+            if sticky {
+                scrollToBottom()
+            } else {
+                restoreScrollAnchor(anchor)
+            }
         case .wholesale:
             // Wholesale reorder/replacement invalidates every selection ordinal.
             clearCrossBlockSelection()
@@ -1498,22 +1552,37 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     enum ChangeKind: Equatable {
         case identical
         case appendOnly(count: Int)
+        case appendWithReload(count: Int, reloadRows: IndexSet)
         case wholesale
     }
 
     /// Pure diff used to pick the cheapest table op. Append-only means `new`
     /// starts with exactly `old` (by id) and has extra rows at the tail.
+    ///
+    /// Append-with-reload (tool rendering Task 12): the first `old.count` rows of
+    /// `new` have `old`'s ids, every row among them whose content changed is a
+    /// tool row (`isToolRow`, header or invocation), and at least one changed.
+    /// `reloadRows` are those rows' indexes; `count` is the appended rows (may be
+    /// 0). Legacy `.toolGroup` rows are not tool rows. Every other change keeps
+    /// the result it had before (identical / appendOnly / wholesale).
     static func classifyChange(old: [BlockRowModel], new: [BlockRowModel]) -> ChangeKind {
         if old == new { return .identical }
-        if new.count > old.count {
-            var prefixMatches = true
-            for i in old.indices where old[i] != new[i] {
-                prefixMatches = false
-                break
-            }
-            if prefixMatches { return .appendOnly(count: new.count - old.count) }
+        guard new.count >= old.count else { return .wholesale }
+        var reloadRows = IndexSet()
+        for i in old.indices where old[i] != new[i] {
+            guard old[i].id == new[i].id, old[i].isToolRow, new[i].isToolRow else { return .wholesale }
+            reloadRows.insert(i)
         }
-        return .wholesale
+        // Rows unequal and the prefix equal ⇒ `new` is longer.
+        if reloadRows.isEmpty { return .appendOnly(count: new.count - old.count) }
+        return .appendWithReload(count: new.count - old.count, reloadRows: reloadRows)
+    }
+
+    /// Drop the cached heights of rows whose content changed in place.
+    private func dropCachedHeights(forRowIDs rowIDs: Set<Int>) {
+        guard !rowIDs.isEmpty else { return }
+        let stale = heightCache.keys.filter { rowIDs.contains($0.rowID) }
+        for key in stale { heightCache.removeValue(forKey: key) }
     }
 
     // MARK: Prepend (load-older) boundary diff
