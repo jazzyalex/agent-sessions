@@ -740,7 +740,8 @@ enum ToolInvocationBuilder {
 
     /// An input field's value in plain text: a string as is (unescaped, newlines kept), a scalar
     /// as JSON writes it, an array or object as compact JSON (sorted keys, no slash escaping).
-    private static func plainValue(_ value: ToolPayloadValue) -> String {
+    /// The L2 generic list (`ToolDetailRenderer`) shows the same text.
+    static func plainValue(_ value: ToolPayloadValue) -> String {
         switch value {
         case .string(let s): return s
         case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? String(Int(n)) : String(n)

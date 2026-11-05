@@ -63,6 +63,18 @@ enum ToolTextBudget {
         width(of: line, stopping: Int.max).width
     }
 
+    /// End of the part of a cut long line that stays visible: the first `columns * longLineVisualLines`
+    /// visual columns, whole Characters. `.longLineCut(hiddenChars:)` counts the Characters after this
+    /// index, so the shown prefix and `hiddenChars` always agree. Pass the line the way `fold` sees
+    /// it: the UTF-8 bytes between two "\n", decoded on their own (a "\r" before the "\n" stays).
+    static func keptPrefixEnd(of line: Substring, columns: Int) -> String.Index {
+        let limit = max(1, columns) * longLineVisualLines
+        if line.utf8.allSatisfy({ $0 >= 0x20 && $0 < 0x80 }) {
+            return line.utf8.index(line.startIndex, offsetBy: min(limit, line.utf8.count))
+        }
+        return line.index(line.startIndex, offsetBy: width(of: line, stopping: limit).kept)
+    }
+
     static func fold(_ text: String, columns: Int, isError: Bool, state: FoldState) -> FoldedText {
         var text = text
         let columns = max(1, columns)
@@ -221,13 +233,13 @@ enum ToolTextBudget {
             return out
         }
 
-        /// Characters after the first `columns * 4` visual columns of line `i`.
+        /// Characters after the first `columns * 4` visual columns of line `i` (`keptPrefixEnd`'s rule;
+        /// a plain line takes the byte shortcut of its ASCII branch).
         func hiddenChars(afterCutOf i: Int) -> Int {
             let limit = columns * ToolTextBudget.longLineVisualLines
             if plain[i] { return max(0, ends[i] - starts[i] - limit) }
-            let line = String(decoding: UnsafeBufferPointer(rebasing: bytes[starts[i]..<ends[i]]), as: UTF8.self)
-            let result = ToolTextBudget.width(of: Substring(line), stopping: limit)
-            return max(0, line.count - result.kept)
+            let line = Substring(String(decoding: UnsafeBufferPointer(rebasing: bytes[starts[i]..<ends[i]]), as: UTF8.self))
+            return line.distance(from: ToolTextBudget.keptPrefixEnd(of: line, columns: columns), to: line.endIndex)
         }
     }
 
