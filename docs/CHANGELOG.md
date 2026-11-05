@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Tool calls in the transcript are easier to read.** Paths and URLs no longer show escaped slashes (`\/`). A call is labelled by its command or path, for example `exec pwd`. A group of tool calls now counts the calls it holds. MCP calls keep their server name, and web searches show their query.
+- **Codex tool output shows as text.** Output that Codex stores as a list of text items now appears with real line breaks instead of raw JSON.
+- **Parallel tool outputs stay separate.** Outputs of different tool calls no longer merge into one block.
+
 ## [6.3] - 2026-11-03
 
 ### Highlights
