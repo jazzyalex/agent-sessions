@@ -533,7 +533,8 @@ struct ToolAction: Equatable, Sendable {
     var objectIsAgentLabel: Bool         // spec §14 Q1: system font when true
     var objectDetail: String?
     var context: [ToolContextItem]
-    var command: String?                 // exact command text for shell actions (never rewritten); first line only when a heredoc is split off
+    var command: String?                 // display command for shell actions (after wrapper/cd lift); first line only when a heredoc is split off
+    var exactCommand: String?            // the command exactly as the agent sent it (before any lift); used by plainText and Copy Command
     var heredoc: DecodedText?            // body of `<<'EOF'` / `<<EOF` / `<<-EOF`, shown as its own pane with a gutter
     var inputFields: [ToolField]         // generic renderer; ordered: primary-argument keys first, then alphabetical
     var output: DecodedText?
@@ -545,8 +546,9 @@ struct ToolAction: Equatable, Sendable {
 struct ToolInvocation: Equatable, Sendable {
     var ref: ToolInvocationRef
     var displayToolName: String
-    var actions: [ToolAction]            // ≥ 1
+    var actions: [ToolAction]            // ≥ 1; same count and order as rowSummary.actions
     var scriptSource: String?            // Codex exec JS, for "Show script"
+    var scriptOutput: DecodedText?       // code-mode output not assigned to a command (loose text / unassigned chunks), shown under the script; never an action
     var durationSeconds: Double?
 }
 enum ToolInvocationBuilder {
@@ -556,10 +558,10 @@ enum ToolInvocationBuilder {
                            index: ToolInvocationIndex, source: SessionSource) -> ToolRowSummary   // L1 only; must not decode output bodies
     // `blocks` is always the full session block array (globalBlockIndex == position), never a window slice.
 }
-struct ToolRowAction: Equatable, Sendable { var category: ToolCategory; var verbKey: String; var object: String; var objectIsAgentLabel: Bool; var objectDetail: String? }
+struct ToolRowAction: Equatable, Sendable { var category: ToolCategory; var verbKey: String; var object: String; var objectIsAgentLabel: Bool; var objectDetail: String?; var status: ToolStatus; var chips: [String] }   // per-action status/chips: code-mode actions read their own chunk's exit code from the metadata-only scan (ToolStatusProbe), others = ref.status
 struct ToolRowSummary: Equatable, Sendable {
     var actions: [ToolRowAction]
-    var chips: [String]   // pre-formatted: "exit 65", "412 lines", "no output", "cut by Codex", "error"
+    var chips: [String]   // invocation-level, pre-formatted from ref.status only: "exit 65", "no output", "error", …
 }
 ```
 
@@ -575,7 +577,8 @@ struct ToolRowSummary: Equatable, Sendable {
     - Context gets "exec script · command i of n" when n > 1. Chunks attach per `CodexExecOutput.assign`.
     - No parsed script → one action, verbKey "tool.verb.ranScript", with the script as `command`.
   - **Every other tool** gets one action. The category comes from the map. In P1, non-shell categories use the generic renderer, but keep their own verb and icon.
-  - **`plainText`.** `$ <command>` (or `<verb> <object>`), then `[exit N · 1.2s]` when known, then the decoded output with folds open and no gutter. Actions are joined by a blank line.
+  - **`plainText`.** Shell: `$ <exact original command>` (before any wrapper/`cd` lift; the lifted form is display-only). Other categories: `<verb> <object>`, then one `key: value` line per input field (strings unescaped, nested values as compact JSON) so Copy, export and Find reach the arguments (G7). Then `[exit N · 48s]` when known (duration via `TranscriptTurnTiming.formatDuration`), then the decoded output with folds open and no gutter. Actions are joined by a blank line. `ToolInvocation.plainText` appends `scriptOutput` when present.
+  - **`build` cost.** `build` decodes outputs and can take hundreds of ms on MB outputs: it must never run on the main thread. Callers (Tasks 11, 13, 15) run it off-main and cache the result.
   - **Ciphertext.** Any string value with prefix `gAAAAA` and length > 40 renders as `message encrypted in the log (N chars)` everywhere: object, fields, `plainText`.
 
 - [ ] **Step 1: Write failing tests**
