@@ -739,6 +739,10 @@ struct SessionTranscriptBuilder {
 
     private static func renderToolCallLabel(name: String?, args: String?) -> String {
         var label = name ?? "?"
+        if let primary = TranscriptToolSummary.callLabelArgument(toolName: name, toolInput: args) {
+            let oneLine = primary.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+            return truncateTo(label + " " + oneLine, max: 120)
+        }
         if let a = args, !a.isEmpty {
             let compact = compactJSONOneLine(a)
             let truncated = truncateTo(compact, max: 120)

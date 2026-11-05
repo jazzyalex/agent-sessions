@@ -16,6 +16,9 @@ enum TranscriptToolSummary {
     /// toolInput is JSON; when it isn't parseable, junk shouldn't beat a
     /// real tool name, but the raw-line rung still serves nameless tools.
     static func summary(toolName: String?, toolInput: String?) -> String {
+        if toolName == "exec", let input = toolInput, let cmd = execScriptCommand(input) {
+            return cmd
+        }
         if let input = toolInput, let json = parseJSON(input) {
             if let command = commandSummary(from: json) {
                 return command
@@ -46,6 +49,32 @@ enum TranscriptToolSummary {
         }
 
         return "Tool call"
+    }
+
+    /// Primary argument shown in a tool-call label (not the summary): the first
+    /// non-empty string among `command`, `cmd`, `file_path`, `path`, `filePath`,
+    /// `target_file`, `pattern`, `query`, `url`, `description`. For a Codex `exec`
+    /// script it is the first call's `cmd`. Nil when there is none.
+    static func callLabelArgument(toolName: String?, toolInput: String?) -> String? {
+        guard let input = toolInput, !input.isEmpty else { return nil }
+        if toolName == "exec", let cmd = execScriptCommand(input) {
+            return cmd
+        }
+        guard let json = parseJSON(input) else { return nil }
+        if let command = commandSummary(from: json) {
+            return command
+        }
+        for key in ["file_path", "path", "filePath", "target_file", "pattern", "query", "url", "description"] {
+            if let value = string(json[key]), !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    /// First non-empty `cmd` of a Codex `exec` script, or nil when the script does not parse.
+    private static func execScriptCommand(_ script: String) -> String? {
+        guard let parsed = CodexExecScript.parse(script) else { return nil }
+        guard let cmd = parsed.calls.first?.arguments["cmd"]?.stringValue, !cmd.isEmpty else { return nil }
+        return cmd
     }
 
     /// Fold consecutive `.toolCall`/`.toolOut` rows (run length >= 2) into a
@@ -99,7 +128,7 @@ enum TranscriptToolSummary {
     /// and join the remainder — that remainder is normally the single
     /// human-readable command string emitted by `bash -lc "..."` invocations.
     private static func commandSummary(from json: [String: Any]) -> String? {
-        guard let raw = json["command"] else { return nil }
+        guard let raw = json["command"] ?? json["cmd"] else { return nil }
 
         if let str = raw as? String, !str.isEmpty {
             return str

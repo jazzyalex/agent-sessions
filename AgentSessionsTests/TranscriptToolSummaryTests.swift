@@ -194,4 +194,50 @@ final class TranscriptToolSummaryTests: XCTestCase {
         let blocks = [toolBlock("a", index: 0), toolBlock("b", index: 1)]
         XCTAssertEqual(BlockCardCellView.expandedToolBodyOffset(blocks: blocks, ownerIndex: 5), 0)
     }
+
+    // MARK: - Codex cmd / exec script summaries and call labels (transcript tool rendering)
+
+    func testCodexExecCommandUsesCmd() {
+        XCTAssertEqual(TranscriptToolSummary.summary(toolName: "exec_command", toolInput: #"{"cmd":"git status","workdir":"/x"}"#), "git status")
+    }
+
+    func testCodexExecScriptUsesFirstCommand() {
+        XCTAssertEqual(TranscriptToolSummary.summary(toolName: "exec", toolInput: #"text(await tools.exec_command({cmd:"pwd; rg x"}));"#), "pwd; rg x")
+    }
+
+    private func callLabel(toolName: String, input: String) -> String {
+        SessionTranscriptBuilder._testResetCoalesceCache()
+        let event = TranscriptTestFixtures.toolCallEvent("e1", toolName: toolName, input: input)
+        let session = Session(id: "label-\(UUID().uuidString)", source: .codex, startTime: nil, endTime: nil,
+                              model: "test", filePath: "/tmp/x.jsonl", fileSizeBytes: nil,
+                              eventCount: 1, events: [event])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        return blocks.map(\.text).joined(separator: "\n")
+    }
+
+    func testCallLabelShowsPrimaryArgumentFirst() {
+        // description must not hide the command
+        XCTAssertEqual(callLabel(toolName: "Bash", input: #"{"description":"List","command":"ls -la"}"#), "Bash ls -la")
+    }
+
+    func testCallLabelForReadIsPath() {
+        XCTAssertEqual(callLabel(toolName: "Read", input: #"{"file_path":"/tmp/a.txt"}"#), "Read /tmp/a.txt")
+    }
+
+    func testCallLabelCollapsesNewlinesAndCutsAt120() {
+        XCTAssertEqual(callLabel(toolName: "Bash", input: #"{"command":"echo a\necho b"}"#), "Bash echo a echo b")
+        let long = String(repeating: "x", count: 300)
+        let cut = callLabel(toolName: "Bash", input: "{\"command\":\"\(long)\"}")
+        XCTAssertEqual(cut.count, 121)
+        XCTAssertTrue(cut.hasSuffix("…"))
+        XCTAssertTrue(cut.hasPrefix("Bash xxx"))
+    }
+
+    func testCallLabelWithoutPrimaryArgumentKeepsCompactJSON() {
+        XCTAssertEqual(callLabel(toolName: "Foo", input: #"{"b": 2, "a": "/x"}"#), #"Foo {"a":"/x","b":2}"#)
+    }
+
+    func testCallLabelForExecScriptIsFirstCmd() {
+        XCTAssertEqual(callLabel(toolName: "exec", input: #"text(await tools.exec_command({cmd:"pwd; rg x"}));"#), "exec pwd; rg x")
+    }
 }
