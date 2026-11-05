@@ -36,6 +36,13 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Agent Sessions 找不到已保存的 Codex 凭据。" } }
       }
     },
+    "binary data (%lld KB)": {
+      "comment": "Transcript placeholder shown in place of base64 binary tool output. %lld is the decoded size in kilobytes.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "binary data (%lld KB)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "二进制数据（%lld KB）" } }
+      }
+    },
     "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem.": {
       "comment": "Codex quota fetch recovery step for HTTP 401/403. 'codex login' is a command and stays verbatim.",
       "localizations": {
