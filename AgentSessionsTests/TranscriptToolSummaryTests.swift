@@ -220,6 +220,10 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertEqual(callLabel(toolName: "Bash", input: #"{"description":"List","command":"ls -la"}"#), "Bash ls -la")
     }
 
+    func testGrepLabelShowsPatternNotPath() {
+        XCTAssertEqual(callLabel(toolName: "Grep", input: #"{"pattern":"foo","path":"/repo"}"#), "Grep foo")
+    }
+
     func testCallLabelForReadIsPath() {
         XCTAssertEqual(callLabel(toolName: "Read", input: #"{"file_path":"/tmp/a.txt"}"#), "Read /tmp/a.txt")
     }

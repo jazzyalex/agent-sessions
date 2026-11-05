@@ -64,7 +64,8 @@ enum TranscriptToolSummary {
         if let command = commandSummary(from: json) {
             return command
         }
-        for key in ["file_path", "path", "filePath", "target_file", "pattern", "query", "url", "description"] {
+        // `path` ranks after `pattern`/`query`/`url` so `Grep {pattern, path}` reads as the pattern.
+        for key in ["file_path", "filePath", "target_file", "pattern", "query", "url", "path", "description"] {
             if let value = string(json[key]), !value.isEmpty { return value }
         }
         return nil
@@ -72,7 +73,7 @@ enum TranscriptToolSummary {
 
     /// First non-empty `cmd` of a Codex `exec` script, or nil when the script does not parse.
     private static func execScriptCommand(_ script: String) -> String? {
-        guard let parsed = CodexExecScript.parse(script) else { return nil }
+        guard let parsed = CodexExecScript.parse(script, maxCalls: 1) else { return nil }
         guard let cmd = parsed.calls.first?.arguments["cmd"]?.stringValue, !cmd.isEmpty else { return nil }
         return cmd
     }

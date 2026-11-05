@@ -65,6 +65,44 @@ final class CodexExecScriptTests: XCTestCase {
         XCTAssertNil(CodexExecScript.parse("tools."))
     }
 
+    func testDeepNestingDoesNotCrash() {
+        let sources = [
+            "tools.a({x:" + String(repeating: "[", count: 100_000),
+            "tools.a({x:" + String(repeating: "{a:", count: 100_000),
+            "tools.a({x:" + String(repeating: "`${", count: 100_000)
+        ]
+        let done = expectation(description: "parsed on a small stack")
+        var results: [Int?] = []
+        let thread = Thread {
+            results = sources.map { CodexExecScript.parse($0)?.calls.count }
+            done.fulfill()
+        }
+        thread.stackSize = 512 * 1024
+        thread.start()
+        wait(for: [done], timeout: 30)
+        XCTAssertEqual(results, [1, 1, 1])
+    }
+
+    func testDeepButBalancedNestingKeepsText() throws {
+        let deep = String(repeating: "[", count: 100) + String(repeating: "]", count: 100)
+        let s = try XCTUnwrap(CodexExecScript.parse("tools.a({x:\(deep), y:1})"))
+        XCTAssertEqual(s.calls[0].arguments["y"], .number(1))
+        XCTAssertNotNil(s.calls[0].arguments["x"])
+    }
+
+    func testLiteralFollowedByExpressionKeepsSourceText() throws {
+        let s = try XCTUnwrap(CodexExecScript.parse(#"tools.exec_command({cmd: "cd " + dir + " && ls", w: 1})"#))
+        XCTAssertEqual(s.calls[0].arguments["cmd"], .string(#""cd " + dir + " && ls""#))
+        XCTAssertEqual(s.calls[0].arguments["w"], .number(1))
+    }
+
+    func testMaxCallsStopsAfterFirstCall() throws {
+        let src = #"tools.exec_command({cmd:"a"});tools.exec_command({cmd:"b"});"#
+        let s = try XCTUnwrap(CodexExecScript.parse(src, maxCalls: 1))
+        XCTAssertEqual(s.calls.count, 1)
+        XCTAssertEqual(s.calls[0].arguments["cmd"], .string("a"))
+    }
+
     func testPayloadValueFromJSONObject() throws {
         let obj = try JSONSerialization.jsonObject(with: Data(#"{"a":true,"b":2,"c":null,"d":["x"]}"#.utf8))
         let v = try XCTUnwrap(ToolPayloadValue(jsonObject: obj))

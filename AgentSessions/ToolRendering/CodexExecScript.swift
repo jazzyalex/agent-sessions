@@ -21,8 +21,13 @@ struct CodexExecScript: Equatable, Sendable {
     var calls: [Call]
 
     static func parse(_ source: String) -> CodexExecScript? {
+        parse(source, maxCalls: Int.max)
+    }
+
+    /// Stops after `maxCalls` calls. Labels and summaries need only the first call.
+    static func parse(_ source: String, maxCalls: Int) -> CodexExecScript? {
         var reader = ScriptReader(source)
-        let calls = reader.readCalls()
+        let calls = reader.readCalls(maxCalls: maxCalls)
         return calls.isEmpty ? nil : CodexExecScript(calls: calls)
     }
 }
@@ -32,6 +37,10 @@ private struct ScriptReader {
 
     let s: String
     var i: String.Index
+    /// Recursion limits: session files are untrusted and the builder runs on a small stack.
+    static let maxDepth = 64
+    var depth = 0
+    var templateDepth = 0
 
     init(_ source: String) {
         s = source
@@ -55,11 +64,11 @@ private struct ScriptReader {
 
     // MARK: Calls
 
-    mutating func readCalls() -> [CodexExecScript.Call] {
+    mutating func readCalls(maxCalls: Int) -> [CodexExecScript.Call] {
         var calls: [CodexExecScript.Call] = []
         var search = s.startIndex
-        while search < s.endIndex,
-              let hit = s.range(of: "tools.", range: search..<s.endIndex) {
+        while search < s.endIndex, calls.count < maxCalls,
+              let hit = s.range(of: "tools.", options: .literal, range: search..<s.endIndex) {
             let start = hit.lowerBound
             // Must not be the tail of a longer identifier or a member access.
             if start > s.startIndex {
@@ -173,25 +182,30 @@ private struct ScriptReader {
     private mutating func readValue() throws -> ToolPayloadValue {
         skipTrivia()
         guard let c = cur else { throw Failure() }
+        let from = i
         switch c {
         case "\"", "'":
-            return try literalOrExpression(.string(try readQuoted()))
+            return try literalOrExpression(.string(try readQuoted()), from: from)
         case "`":
-            let from = i
             let interpolated = try skipTemplate()
-            if interpolated { return try literalOrExpression(.string(String(s[from..<i]))) }
+            if interpolated { return try literalOrExpression(.string(String(s[from..<i])), from: from) }
             let body = String(s[s.index(after: from)..<s.index(before: i)])
-            return try literalOrExpression(.string(decodeTemplate(body)))
-        case "{":
+            return try literalOrExpression(.string(decodeTemplate(body)), from: from)
+        case "{", "[":
+            if depth >= Self.maxDepth {
+                // Too deep to recurse: skip the rest of this value without recursion, keep its text.
+                try skipExpression(stopAtComma: true)
+                return .string(String(s[from..<i]).trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            depth += 1
+            defer { depth -= 1 }
+            if c == "[" { return .array(try readArray()) }
             var d: [String: ToolPayloadValue] = [:]
             try readObject(into: &d)
             return .object(d)
-        case "[":
-            return .array(try readArray())
         default:
             break
         }
-        let from = i
         try skipExpression(stopAtComma: true)
         let text = String(s[from..<i]).trimmingCharacters(in: .whitespacesAndNewlines)
         switch text {
@@ -209,13 +223,11 @@ private struct ScriptReader {
 
     /// After a string literal the value may continue as an expression (`"a" + b`).
     /// Then the whole value is unreadable; keep the literal followed by the rest as text.
-    private mutating func literalOrExpression(_ literal: ToolPayloadValue) throws -> ToolPayloadValue {
-        let afterLiteral = i
+    private mutating func literalOrExpression(_ literal: ToolPayloadValue, from litStart: String.Index) throws -> ToolPayloadValue {
         skipTrivia()
         guard let c = cur, c != ",", c != "}", c != "]", c != ")" else { return literal }
         try skipExpression(stopAtComma: true)
-        let rest = String(s[afterLiteral..<i]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return .string((literal.stringValue ?? "") + " " + rest)
+        return .string(String(s[litStart..<i]).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     // MARK: Strings
@@ -309,6 +321,10 @@ private struct ScriptReader {
             } else if c == "$", peekNext() == "{" {
                 interpolated = true
                 advance(); advance()
+                // Nested `${`${…`}`}` recurses; refuse past the limit instead of overflowing the stack.
+                guard templateDepth < Self.maxDepth else { throw Failure() }
+                templateDepth += 1
+                defer { templateDepth -= 1 }
                 try skipExpression(stopAtComma: false)
                 guard cur == "}" else { throw Failure() }
                 advance()
