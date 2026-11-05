@@ -35,16 +35,17 @@
   - Pairing is one pass over the blocks.
 - Every user-facing string is in `AgentSessions/Resources/Localizable.xcstrings`.
 - New Swift files: `./scripts/xcode_add_file.rb AgentSessions.xcodeproj <Target> <file> <group>`. A file in an existing group adds exactly 4 pbxproj lines.
-- Tests live in `AgentSessionsTests`. Run one class: `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/<Class>`. Run the full suite at the end of each phase. The passed count must only grow from `test-count-baseline.txt`.
-- Subagents edit only; one central session runs `xcodebuild` (repo rule).
+- Tests live in `AgentSessionsTests`. Run one class: `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/<Class>`. Run the full suite at the end of each phase. The branch baseline is 3942 executed tests, 0 failures (measured on this worktree before Task 1); the executed count only grows and failures stay 0. Do not edit `tools/release/test-count-baseline.txt` (release flow only).
+- Test seams: one Codex line parses through `SessionIndexer.parseLine(_:eventID:)` (see `SessionParserTests`). Claude has no single-line seam: write the lines to a temp `.jsonl` and call `ClaudeSessionParser.parseFileFull(at:)`. Tests that call `SessionTranscriptBuilder.coalescedBlocks` reset its cache in `setUp` (`SessionTranscriptBuilder._testResetCoalesceCache()`) or give each session a unique id, because the cache key is `id|events.count|fileSize|includeMeta`.
+- Only one `xcodebuild` runs at a time (repo rule). Task implementers run sequentially, never in parallel, so each implementer runs the tests its task names.
 - Git:
-  - Commits need the owner's explicit go-ahead (CLAUDE.md), so ask once at the start of execution. Branch creation also needs approval.
-  - Commit with `git commit -- <paths>`. Use Conventional Commits with `Tool:` / `Model:` / `Why:` trailers and no AI co-author.
+  - Owner approved (2026-11-04): branch `feature/transcript-tool-rendering` in a worktree, and local per-task commits. No push, no merge.
+  - Commit with `git commit -- <paths>`. Use Conventional Commits with a `Why:` trailer. No `Tool:`/`Model:` trailers and no AI co-author (harness rule: no attribution lines).
 - Never print, log or render the ciphertext of Codex `collaboration::*` messages (values starting `gAAAAA`).
 
 ## Review Focus
 
-1. **Claude parallel outputs merged into one block.** `SessionTranscriptBuilder.canMerge` merges consecutive `.toolOut` blocks that share `messageID`. Several parsers put the call id or the line uuid in `messageID`, so outputs of parallel calls can fuse. Expect two outputs with different call ids to stay two blocks. Test: Task 4, `testOutputsWithDifferentCallIDsNeverMerge`.
+1. **Parallel outputs merged into one block.** `SessionTranscriptBuilder.canMerge` merges consecutive `.toolOut` blocks that share `messageID`. Claude puts the line `uuid` in `messageID`, so several `tool_result` items in one line fuse. (Parsers that put the call id in `messageID` cannot fuse different calls.) Expect two outputs with different call ids to stay two blocks. Test: Task 4, `testOutputsWithDifferentCallIDsNeverMerge`.
 2. **A code-mode script whose printed text does not match its child calls** (`text(\`---${i}---\n${r.output}\`)` over `Promise.all`). Expect the decoded items under the script, child rows with commands only, and no chunk given to the wrong command. Test: Task 8, `testPromiseAllWithCustomPrintingDoesNotAssignChunks`.
 3. **Live tail while a group is open.** New calls append to the last group while the user reads it. Expect the group to stay open, new rows to append without a full reload, and the scroll position to hold. Test: Task 12, `testAppendingCallToOpenGroupIsAppendOnly`.
 4. **A Find query typed before the background decode finishes.** Expect results on raw text first, then one re-run on decoded text, with the find bar's "Searching tool output…" state between. Test: Task 15, `testFindRerunsOnceWhenDecodePassCompletes`.
@@ -58,8 +59,8 @@
 
 **Files:**
 - Create: `AgentSessions/Utilities/ToolJSON.swift`
-- Modify (route display serialization through `ToolJSON`): `AgentSessions/Utilities/PrettyJSON.swift:8`, `AgentSessions/Services/SessionTranscriptBuilder.swift:753`, `AgentSessions/Services/ToolTextBlockNormalizer.swift:985,1657,1666`, `AgentSessions/Services/SessionIndexer.swift` (its `stringifyJSON`), and each parser's tool input/output stringify: `ClaudeSessionParser.swift:1263,1274`, `OpenCodeSessionParser.swift:995`, `ClineSessionParser.swift:401`, `KimiSessionParser.swift:310`, `GrokSessionParser.swift:347`, `CursorSessionParser.swift:561,595`, `DevinSessionParser.swift:125`, `HermesSessionParser.swift:333,696`, `CopilotSessionParser.swift:379,386`, `QwenSessionParser.swift:792`, `DroidSessionParser.swift:921,929`, `OpenClawSessionParser.swift:794,804`, `DeepSeekHarness/DeepSeekHarnessSessionParser.swift:773,790`
-- Do not touch: `rawJSON` re-encoding (`ClaudeSessionParser.swift:1306`), pricing, OAuth, telemetry, archive serialization.
+- Modify (route display serialization through `ToolJSON`): `AgentSessions/Utilities/PrettyJSON.swift:8`, `AgentSessions/Services/SessionTranscriptBuilder.swift:753`, `AgentSessions/Services/ToolTextBlockNormalizer.swift:985,1657,1666`, `AgentSessions/Services/SessionIndexer.swift` (its `stringifyJSON`), and each parser's tool input/output stringify: `ClaudeSessionParser.swift:1263,1274`, `OpenCodeSessionParser.swift:995`, `ClineSessionParser.swift:401`, `KimiSessionParser.swift:310`, `GrokSessionParser.swift:347`, `CursorSessionParser.swift:561`, `DevinSessionParser.swift:125`, `HermesSessionParser.swift:333`, `CopilotSessionParser.swift:379`, `QwenSessionParser.swift:792`, `DroidSessionParser.swift:921`, `OpenClawSessionParser.swift:804`, `DeepSeekHarness/DeepSeekHarnessSessionParser.swift:773`; also `FxSessionParser.swift` (`jsonEncode`, ~810) and `AntigravityTranscriptParser.swift` (~78) when they feed `toolInput`/`toolOutput`. Pi has no such site.
+- Do not touch: any `rawJSON` / `rawJSONBase64` / `boundedRaw` encoder (`ClaudeSessionParser.swift:1306`, `CopilotSessionParser.swift:386`, `CursorSessionParser.swift:595`, `DroidSessionParser.swift:929`, `OpenClawSessionParser.swift:794`, `HermesSessionParser.swift:696`, `DeepSeekHarnessSessionParser.swift:790`; `DeepSeekHarnessSessionParserTests` asserts rawJSON keeps `\/`), pricing, OAuth, telemetry, archive serialization.
 - Test: `AgentSessionsTests/ToolJSONTests.swift`
 
 **Interfaces:**
@@ -83,11 +84,11 @@ func testCallLabelHasNoEscapedSlash() {
 }
 ```
 
-`parseClaudeLine` and `blockText` are small private helpers in the test file. They call the public parse entry point and `SessionTranscriptBuilder.coalescedBlocks`.
+`parseClaudeLine` and `blockText` are small private helpers in the test file. `parseClaudeLine` writes the line to a temp `.jsonl` and calls `ClaudeSessionParser.parseFileFull(at:)` (see Global Constraints → Test seams). `blockText` calls `SessionTranscriptBuilder.coalescedBlocks` with a unique session id.
 
 - [ ] **Step 2: Run** `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/ToolJSONTests`. Expected: FAIL (`ToolJSON` not defined).
 - [ ] **Step 3: Implement `ToolJSON.string(from:pretty:)` and switch every listed site to it.** Keep each site's current pretty/compact choice.
-- [ ] **Step 4: Run** `ToolJSONTests`, `TranscriptGoldenFixtureTests`, `ToolTextBlockNormalizerTests`, `ToolTextBlockNormalizerRegressionTests` and every `*SessionParserTests`. Expected: PASS, except golden or normalizer expectations that contain `\/`. Update those expectations, and only the `\/` → `/` difference. Any other golden diff is a bug.
+- [ ] **Step 4: Run** `ToolJSONTests`, `TranscriptGoldenFixtureTests`, `ToolTextBlockNormalizerTests`, `ToolTextBlockNormalizerRegressionTests` and every `*SessionParserTests`. Expected: PASS, except golden, normalizer or `*SessionParserTests` expectations on `toolInput`/`toolOutput` that contain `\/` (for example `DevinSessionParserTests` `"path":"\\/tmp\\/a.png"`). Update those expectations, and only the `\/` → `/` difference. Any other diff is a bug. rawJSON expectations stay unchanged.
 - [ ] **Step 5: Commit** `fix(transcript): stop escaping slashes in tool JSON`.
 
 ### Task 2: Readable call labels and summaries
@@ -126,7 +127,8 @@ indirect enum ToolPayloadValue: Codable, Equatable, Sendable {
 
 The parser reads JavaScript object literals: unquoted keys, JSON strings with `\"` escapes, single-quoted strings, template literals without `${}`, numbers, booleans, nested objects and arrays. `Promise.all([...])` and several `text(await tools.x({...}))` statements give several calls in source order. A value it cannot read (identifier, `${}` template, function call) is stored as `.string("<expr>")`, and the parse still succeeds.
 
-- Primary-argument rule (used by both the label and the summary): the first non-empty string among the keys `command`, `cmd`, `file_path`, `path`, `filePath`, `target_file`, `pattern`, `query`, `url`, `description`. An argv array (`command: ["bash","-lc","ls"]`) is joined after leading wrapper tokens are dropped (existing rule).
+- Primary-argument rule (used by the call label only): the first non-empty string among the keys `command`, `cmd`, `file_path`, `path`, `filePath`, `target_file`, `pattern`, `query`, `url`, `description`. An argv array (`command: ["bash","-lc","ls"]`) is joined after leading wrapper tokens are dropped (existing rule).
+- `TranscriptToolSummary.summary` keeps its current key order (description before file path, spec §14 Q1) and its `lastPathComponent` rule, so `testDescriptionBeatsFilePath` and `testFilePathSummary` stay unchanged. It only gains: `cmd` where it reads `command`, and for `exec` the first call's `cmd`.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -159,7 +161,7 @@ func testCallLabelShowsPrimaryArgumentFirst() {
 ```
 
 - [ ] **Step 2: Run** `CodexExecScriptTests` and `TranscriptToolSummaryTests`. Expected: FAIL.
-- [ ] **Step 3: Implement `CodexExecScript.parse`.** Change `renderToolCallLabel` to `name + " " + primaryArgument` (newlines collapsed to spaces, cut at 120 + "…"). When there is no primary argument, the label keeps today's compact JSON. For `exec` with a parsable script, the label is `exec ` + the first call's `cmd`. In `TranscriptToolSummary.summary`, apply the same primary-argument rule, and use the first `cmd` for `exec`.
+- [ ] **Step 3: Implement `CodexExecScript.parse`.** Change `renderToolCallLabel` to `name + " " + primaryArgument` (newlines collapsed to spaces, cut at 120 + "…"). When there is no primary argument, the label keeps today's compact JSON. For `exec` with a parsable script, the label is `exec ` + the first call's `cmd`. In `TranscriptToolSummary.summary`, read `cmd` like `command`, and use the first `cmd` for `exec` (existing order otherwise). Decision (spec §11 P0 row updated): the label carries only the primary argument; other keys (`workdir`, `timeout`, …) leave the label. They were already lost to the 120-char compact-JSON cut, and P1 shows them in L2.
 - [ ] **Step 4: Run** both classes and `TranscriptBuilderTests`. Expected: PASS.
 - [ ] **Step 5: Commit** `fix(transcript): label tool calls by their command or path`.
 
@@ -234,8 +236,9 @@ func testOutputsWithDifferentCallIDsNeverMerge() {
     XCTAssertEqual(blocks.map(\.text), ["one", "two"])
 }
 func testDeltaOutputsOfOneCallStillMerge() {
-    let a = resultEvent(id: "r1", output: "on", messageID: "m", callID: "t1", isDelta: true)
-    let b = resultEvent(id: "r2", output: "e", messageID: "m", callID: "t1", isDelta: true)
+    // messageID nil so canMerge reaches its isDelta branch (equal messageIDs return early)
+    let a = resultEvent(id: "r1", output: "on", messageID: nil, callID: "t1", isDelta: true)
+    let b = resultEvent(id: "r2", output: "e", messageID: nil, callID: "t1", isDelta: true)
     XCTAssertEqual(SessionTranscriptBuilder.coalescedBlocks(for: session([a, b]), includeMeta: false).map(\.text), ["one"])
 }
 ```
@@ -244,8 +247,9 @@ func testDeltaOutputsOfOneCallStillMerge() {
 - [ ] **Step 3: Implement.**
   - Indexer: `toolCallID` = payload `call_id`. When `output` is a content-item array, `toolOutput` = `joinedContentItemText` (instead of pretty JSON).
   - `canMerge`: return false when both blocks have a non-nil `toolCallID` and the ids differ.
-- [ ] **Step 4: Run** the full suite (`./scripts/xcode_test_stable.sh`). Expected: PASS. The passed count is ≥ baseline + new tests. Update `test-count-baseline.txt` only through the release flow.
-- [ ] **Step 5: Commit** `fix(transcript): show Codex content items as text; never merge outputs of different calls`.
+- [ ] **Step 4: Run** the full suite (`./scripts/xcode_test_stable.sh`). Expected: 0 failures; executed count = 3942 + the new tests of Tasks 1–4.
+- [ ] **Step 5: Docs (agents.md "User-visible changes").** Add P0 bullets under `[Unreleased]` in `docs/CHANGELOG.md` and a note in `docs/summaries/2026-11.md` (create it in that folder's existing format if missing): slashes no longer escaped, calls labelled by command or path, the group counts calls, MCP server names and web-search queries shown, Codex outputs shown as text, parallel outputs no longer fused.
+- [ ] **Step 6: Commit** `fix(transcript): show Codex content items as text; never merge outputs of different calls`.
 
 **P0 exit check:** open the screenshot's session (`~/.codex/sessions/2026/11/04/rollout-2026-11-04T11-32-12-01a1a80c-…jsonl`) in a Debug build:
 - The group says "6 tool calls".
@@ -262,7 +266,7 @@ The owner runs it (owner QA rule). P0 can ship as a point release.
 
 **Files:**
 - Modify: `AgentSessions/Model/ToolEventFields.swift` (add `ToolSidecar`, `ToolDisposition`), `AgentSessions/Model/SessionEvent.swift` (add `toolOutputValue`, `toolSidecar`, `toolDisposition`), `AgentSessions/Services/SessionTranscriptBuilder.swift` (`LogicalBlock` copies them; merge keeps the first non-nil), and the 17 parsers listed below.
-- Test: `AgentSessionsTests/ToolEventFieldsParserTests.swift` (one test per source; use the existing fixtures in `Resources/Fixtures/stage0/agents/<agent>/` and the inline lines shown in `*SessionParserTests`)
+- Test: `AgentSessionsTests/ToolEventFieldsParserTests.swift` (one test per source, with inline lines or small temp files modelled on each source's `*SessionParserTests`; only Codex and DeepSeek Harness have `stage0/agents/` fixtures. The four sidecar tests write their lines from the spec §7.3 shapes, because no fixture has those keys yet.)
 
 **Interfaces:**
 - Produces:
@@ -300,13 +304,14 @@ var toolDisposition: ToolDisposition?
 | fx | `tool_call_id` | sidecar exitCode = `command_process_presentation.exit_code` |
 | Cline | `tool_use_id` | — |
 | DSH | `callId` | — |
-| Antigravity | synthesized `"ag:<step_index>:<k>"` | the k-th tool call of a planner step; the result takes the same id through the existing position queue; agentLabel = `toolSummary` after one JSON-string decode |
+| Antigravity | synthesized `"ag:<step_index>:<k>"` | the k-th tool call of a planner step; the result takes the same id through the existing position queue (`pendingToolNames` in `AntigravityTranscriptParser.swift`); agentLabel = `toolSummary` after one JSON-string decode |
 
 - [ ] **Step 1: Write one failing test per source** that parses a fixture or inline line with one call and its result, then asserts `call.toolCallID == result.toolCallID != nil`. Cursor is the exception: its test asserts nil. Add these sidecar tests:
 
 ```swift
 func testClaudeBashSidecarSplitsStdoutStderr() // toolUseResult {stdout:"a", stderr:"b"} → sidecar.stdout == "a", .stderr == "b"
-func testClaudeRejectionRecordsDisposition()   // "User rejected tool use" → toolDisposition == .rejected, kind still .meta
+func testClaudeRejectionRecordsDisposition()   // tool_result with "is_error":true and content "The user doesn't want to proceed with this tool use. …" → toolDisposition == .rejected, kind still .meta
+func testClaudeRuntimeErrorKeepsCallID()       // tool_result "is_error":true, content "Error: boom" → toolDisposition == .runtimeError, toolCallID == the tool_use_id
 func testOpenCodeBashSidecarHasExitAndTitle()  // state.metadata.exit 2, state.title "List files" → sidecar.exitCode == 2, .agentLabel == "List files"
 func testAntigravityToolSummaryDecodedOnce()   // args.toolSummary "\"Run date command\"" → agentLabel "Run date command"
 func testCodexOutputValueKeptForArrays()       // content-item array → toolOutputValue is .array; plain string output → toolOutputValue nil
@@ -322,8 +327,8 @@ func testLargeOutputValueDropped()             // 300 KB array → toolOutputVal
 
 **Files:**
 - Create: `AgentSessions/ToolRendering/ToolInvocationPairing.swift`, `AgentSessions/ToolRendering/ToolStatusProbe.swift`
-- Modify: `AgentSessions/Services/TranscriptTurnTiming.swift` (tool durations use pairing), `AgentSessions/Services/TranscriptDerivedState.swift` (`Snapshot` gains the index; `errorBlockIndices` stays block-based, and `failedInvocationIDs` is added)
-- Test: `AgentSessionsTests/ToolInvocationPairingTests.swift`, `AgentSessionsTests/ToolStatusProbeTests.swift`, `AgentSessionsTests/TranscriptTurnTimingTests.swift` (extend)
+- Modify: `AgentSessions/Services/TranscriptTurnTiming.swift` (tool durations use pairing), `AgentSessions/Services/TranscriptDerivedState.swift` (`Snapshot` gains the index; `errorBlockIndices` stays block-based, and `failedInvocationIDs` is added), `AgentSessions/Views/TranscriptPlainView.swift` (the representable passes the snapshot's index and failed ids to the controller, next to `snapshot.blocks`, ~:857), `AgentSessions/Views/TranscriptBlockListView.swift` (`BlockTableController.apply(...)` gains `invocationIndex: ToolInvocationIndex = .empty` and `failedInvocationIDs: Set<Int> = []`, stored next to `allBlocksCache`; the timing call at ~:1339 passes the stored index)
+- Test: `AgentSessionsTests/ToolInvocationPairingTests.swift`, `AgentSessionsTests/ToolStatusProbeTests.swift`, `AgentSessionsTests/TranscriptTurnTimingTests.swift` (extend; rewrite `testNestedToolPairsMatchLIFONearestPrecedingUnmatched`, see Pairing order)
 
 **Interfaces:**
 - Produces:
@@ -342,21 +347,25 @@ struct ToolInvocationIndex: Sendable {
     var invocations: [ToolInvocationRef]            // in id order
     var invocationIDByBlock: [Int: Int]             // every tool block → its invocation id
     var processOwnerBySessionID: [String: Int]      // "Process running with session ID N" / "Script running with cell ID N" → invocation id (substring scan)
+    static let empty = ToolInvocationIndex(invocations: [], invocationIDByBlock: [:], processOwnerBySessionID: [:])
     static func build(blocks: [SessionTranscriptBuilder.LogicalBlock], source: SessionSource) -> ToolInvocationIndex
 }
+// TranscriptTurnTiming: compute(blocks:index:) is the real entry; compute(blocks:) stays as a wrapper that builds the index itself (source .codex), so existing callers and tests compile.
 enum ToolStatusProbe {
     static func status(call: SessionTranscriptBuilder.LogicalBlock?, outputs: [SessionTranscriptBuilder.LogicalBlock],
                        source: SessionSource, laterBlocksExist: Bool, turnAbortedAfter: Bool) -> ToolStatus
 }
-// TranscriptDerivedState.Snapshot:
-var invocationIndex: ToolInvocationIndex
-var failedInvocationIDs: Set<Int>
+// TranscriptDerivedState.Snapshot (defaults keep `Snapshot()` compiling):
+var invocationIndex: ToolInvocationIndex = .empty
+var failedInvocationIDs: Set<Int> = []
 ```
 
+- Tool blocks for pairing: `.toolCall`, `.toolOut`, and `.error` blocks that carry a `toolCallID` (Claude runtime errors after Task 5). Such an `.error` block is an output of its call, and the invocation's status is failed (spec §7.4: a runtime error stays a tool output).
 - Pairing order:
   1. Pair by equal `toolCallID`.
-  2. For blocks without ids, pair FIFO within the same turn: a turn is a user block plus everything up to the next user block.
-  3. Then use the stack match only for what remains.
+  2. For blocks without ids, pair FIFO within the same turn: a turn is a user block plus everything up to the next user block (spec §6.2; parallel calls are far more common than nested ones).
+  3. Then use the stack match only for what remains (an output with no unmatched call in its own turn takes the nearest preceding unmatched call).
+- The existing `testNestedToolPairsMatchLIFONearestPrecedingUnmatched` fixture (one turn, `call call out out`, no ids) is the parallel shape. Rename it `testIDlessCallsInOneTurnPairFIFO` and change its expected durations to the FIFO pairing (out1↔call1, out2↔call2). Update the LIFO wording in `TranscriptTurnTiming.swift`'s header comment.
 - Status rules come from spec §6.2 and §9:
   - Exit code first, from the sidecar or from the output's first-line forms: `Exit code N`, `Process exited with code N`, `exit: N`, `Command exited with code N.`, `Error: Command failed (exit code: N)`, `<exit_code>N</exit_code>`.
   - Codex code mode is failed when it has `"exit_code":` with a value other than 0, or a `Script failed` header. Use a substring scan only.
@@ -369,7 +378,8 @@ var failedInvocationIDs: Set<Int>
 ```swift
 func testParallelCallsPairByID()          // c1 c2 c3 o1 o2 o3 (ids t1..t3) → o1↔c1, o2↔c2, o3↔c3
 func testParallelCallsWithoutIDsPairFIFOInTurn() // same shape, ids nil → FIFO
-func testNestedWithoutIDsFallsBackToStack()      // c1 c2 o2 o1 across two turns' boundary rules
+func testOutputWithoutCallInItsTurnFallsBackToStack() // turn 1: c1 · turn 2: c2 o2 o1 (no ids) → o2↔c2 (FIFO in turn 2), o1↔c1 (stack)
+func testRuntimeErrorBlockPairsAsFailedOutput()  // c1 (id t1) + .error block (toolCallID t1) → one invocation, status .failed
 func testOrphanOutputBecomesOwnInvocation()      // o1 with no call → ref.callBlockIndex == nil, id == o1 index
 func testCallWithoutOutputAtSessionEndIsPending()
 func testInterruptedByTurnAbortedNotice()
@@ -380,7 +390,7 @@ func testToolDurationUsesPairing()         // TranscriptTurnTimingTests: c1 c2 o
 ```
 
 - [ ] **Step 2: Run** the three classes. Expected: FAIL.
-- [ ] **Step 3: Implement.** Build the index inside `TranscriptDerivedState.computeSnapshot`, which already runs off the main actor. `TranscriptTurnTiming.compute` takes the index instead of its own stack.
+- [ ] **Step 3: Implement.** Build the index inside `TranscriptDerivedState.computeSnapshot`, which already runs off the main actor. `TranscriptTurnTiming.compute(blocks:index:)` uses the index instead of its own stack. Thread the index and failed ids from the snapshot through `TranscriptPlainView` into `BlockTableController.apply`.
 - [ ] **Step 4: Run** the three classes, plus `TranscriptDerivedStateTests` and `Stage0PerfHarnessTests`. Expected: PASS. The Stage0 snapshot time grows by at most 5%.
 - [ ] **Step 5: Commit** `feat(transcript): pair tool calls by id and probe status`.
 
@@ -403,7 +413,7 @@ struct DecodedText: Equatable, Sendable {
 }
 enum ToolTextDecoding {
     static func decode(value: ToolPayloadValue?, fallback: String?) -> DecodedText   // pipeline steps 2–4, 6–7 of spec §6.4
-    static func normalize(_ s: String) -> String          // CRLF→LF, strip ANSI CSI/OSC, trim trailing blank lines
+    static func normalize(_ s: String) -> String          // CRLF→LF, strip ANSI CSI/OSC, trim trailing blank lines (tabs stay; budgets and panes use 4-column stops)
     static func decodeJSONString(_ s: String, maxDepth: Int) -> ToolPayloadValue?   // whole-string only, depth ≤ 3
     static func stripLineNumbers(_ s: String) -> (text: String, gutter: [Int?])?    // forms: "  N→", "N\t", "N:", "N|", "N | "
 }
@@ -453,7 +463,7 @@ func testBinaryTextObjectBecomesPlaceholder()  // {"encoding":"base64","data":"�
 ```
 
 - [ ] **Step 2: Run** both classes. Expected: FAIL.
-- [ ] **Step 3: Implement** the pipeline per spec §6.4. A decode failure at any step returns the input unchanged (anti-goal A2).
+- [ ] **Step 3: Implement** the pipeline per spec §6.4. A decode failure at any step returns the input unchanged (anti-goal A2). The content-item join reuses Task 4's rule (text parts joined with no separator, each image item → the line `[image]`) through one shared implementation; do not write a second copy of the join.
 - [ ] **Step 4: Run** both classes. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(transcript): tool output decoders and envelope facts`.
 
@@ -541,9 +551,10 @@ struct ToolInvocation: Equatable, Sendable {
 }
 enum ToolInvocationBuilder {
     static func build(_ ref: ToolInvocationRef, blocks: [SessionTranscriptBuilder.LogicalBlock],
-                      source: SessionSource, duration: Double?) -> ToolInvocation
+                      index: ToolInvocationIndex, source: SessionSource, duration: Double?) -> ToolInvocation
     static func rowSummary(_ ref: ToolInvocationRef, blocks: [SessionTranscriptBuilder.LogicalBlock],
-                           source: SessionSource) -> ToolRowSummary   // L1 only; must not decode output bodies
+                           index: ToolInvocationIndex, source: SessionSource) -> ToolRowSummary   // L1 only; must not decode output bodies
+    // `blocks` is always the full session block array (globalBlockIndex == position), never a window slice.
 }
 struct ToolRowAction: Equatable, Sendable { var category: ToolCategory; var verbKey: String; var object: String; var objectIsAgentLabel: Bool; var objectDetail: String? }
 struct ToolRowSummary: Equatable, Sendable {
@@ -586,7 +597,7 @@ func testRowSummaryDoesNotDecodeOutput()       // rowSummary on a block whose ou
 ```
 
 - [ ] **Step 2: Run** both classes. Expected: FAIL.
-- [ ] **Step 3: Implement.** Add each `tool.verb.*` and chip string to `Localizable.xcstrings`: Ran, Polled, Sent input, Ran script, Read, Created, Edited, Searched, Listed, Fetched, Searched the web, Updated plan, Subagent, Asked, Screenshot, Output. Chips: "exit %d", "error", "%d lines", "no output", "no matches", "cut by %@", "rejected by you", "interrupted", "no result recorded", "no result yet". Polls resolve their object through `ToolInvocationIndex.processOwnerBySessionID`.
+- [ ] **Step 3: Implement.** Add each `tool.verb.*` and chip string to `Localizable.xcstrings`: Ran, Polled, Sent input, Ran script, Read, Created, Edited, Searched, Listed, Fetched, Searched the web, Updated plan, Subagent, Asked, Screenshot, Output. Chips: "exit %d", "error", "%d lines", "no output", "no matches", "cut by %@", "rejected by you", "interrupted", "no result recorded", "no result yet". Polls resolve their object through `ToolInvocationIndex.processOwnerBySessionID` (the poll's `session_id` argument → owner invocation → its command). When the owner is a parsed exec script, use the command of the chunk whose output contains that session id, else the script's first command.
 - [ ] **Step 4: Run.** Expected: PASS.
 - [ ] **Step 5: Commit** `feat(transcript): tool invocation model with shell and generic adapters`.
 
@@ -600,7 +611,7 @@ func testRowSummaryDoesNotDecodeOutput()       // rowSummary on a block whose ou
 - Produces:
 
 ```swift
-struct FoldState: Equatable, Sendable { var extraLinesShown: Int = 0; var showAll = false; var openedLongLines: Set<Int> = [] }
+struct FoldState: Equatable, Sendable { var extraLinesShown: Int = 0; var showAll = false; var openedLongLines: Set<Int> = []; var commandShowAll = false }
 struct FoldedText: Equatable, Sendable {
     enum Segment: Equatable, Sendable { case lines(Range<Int>), fold(hiddenLines: Int), longLineCut(line: Int, hiddenChars: Int) }
     var segments: [Segment]
@@ -609,11 +620,15 @@ struct FoldedText: Equatable, Sendable {
 enum ToolTextBudget {
     static let headLines = 12, tailLines = 4, errorTailLines = 18, longLineVisualLines = 4
     static let showMoreStep = 500, showAllLineCap = 20_000, showAllByteCap = 2 * 1024 * 1024
+    static let commandLines = 12                                       // command input / heredoc pane budget (spec §6.5)
     static func columns(width: CGFloat, font: NSFont) -> Int          // floor(width / advance of "0")
-    static func visualWidth(of line: Substring) -> Int                 // East Asian Wide/Fullwidth and emoji count 2
+    static func visualWidth(of line: Substring) -> Int                 // East Asian Wide/Fullwidth and emoji count 2; a tab advances to the next multiple of 4
     static func fold(_ text: String, columns: Int, isError: Bool, state: FoldState) -> FoldedText
+    static func foldCommand(_ text: String, columns: Int, state: FoldState) -> FoldedText   // full up to 12 visual lines, else first 12 + fold (no tail); unfolded when state.commandShowAll
 }
 ```
+
+- A long line is cut to 4 visual lines first; the head/tail budget then counts the cut line as 4 visual lines (what is shown).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -621,7 +636,9 @@ enum ToolTextBudget {
 func testShortTextUnfolded()
 func testHeadAndTailFold()                    // 100 lines → lines 0..<12, fold(84), lines 96..<100
 func testErrorShowsTail()                     // isError → fold first, last 18 lines visible
-func testVisualLinesCountWrappedLines()       // 3 lines of 500 chars at 80 columns → budget counts 7 visual lines each
+func testVisualLinesCountWrappedLines()       // 5 lines of 300 chars at 80 columns (4 visual lines each, 20 total) → lines(0..<3), fold(hiddenLines: 1), lines(4..<5)
+func testTabAdvancesToFourColumnStop()        // "a\tb" → visualWidth 5
+func testCommandFoldsAfterTwelveVisualLines() // 20-line command → lines(0..<12), fold(hiddenLines: 8); 12-line command unfolded
 func testLongLineCut()                        // one 10,000-char line at 80 cols → longLineCut(line:0, hiddenChars: 10000-320)
 func testWideCharactersCountTwoColumns()      // 100 CJK chars at 80 cols = 3 visual lines
 func testShowMoreAdds500()
@@ -637,6 +654,7 @@ func testShowAllCapped()                      // 30,000 lines + showAll → hitS
 
 **Files:**
 - Create: `AgentSessions/ToolRendering/ToolDetailRenderer.swift`
+- Modify: `AgentSessions/Views/MarkdownBodyRenderer.swift:~880` — `private enum MarkdownStyle` becomes internal (drop `private`), so the renderer can use `MarkdownStyle.codeBlockBackground`. No other change there.
 - Test: `AgentSessionsTests/ToolDetailRendererTests.swift`
 
 **Interfaces:**
@@ -650,7 +668,8 @@ struct RenderedToolBody {
     var sourceMap: [(rendered: NSRange, actionIndex: Int, source: NSRange)]   // into ToolAction.plainText
     var foldLinks: [(range: NSRange, action: ToolFoldLink)]
 }
-enum ToolFoldLink: Hashable { case showMore(action: Int), showAll(action: Int), openLongLine(action: Int, line: Int), showScript, copyOutput(action: Int) }
+enum ToolFoldLink: Hashable { case showMore(action: Int), showAll(action: Int), openLongLine(action: Int, line: Int), showFullCommand(action: Int), showScript, copyOutput(action: Int) }
+// showFullCommand sets FoldState.commandShowAll for that action (command and heredoc panes).
 enum ToolDetailRenderer {
     static func render(_ invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat,
                        folds: [Int: FoldState], appearance: NSAppearance) -> RenderedToolBody
@@ -688,33 +707,36 @@ func testRenderIsFastForHugeOutput()    // 20,000-line output with showAll → r
 
 **Files:**
 - Create: `AgentSessions/ToolRendering/TranscriptToolRows.swift`
-- Modify: `AgentSessions/Views/TranscriptBlockListView.swift`:
-  - `BlockRowModel.Content` replaces `.toolGroup` with `.toolGroupHeader(ToolGroupHeaderModel)` and `.toolInvocation(ToolInvocationRowModel)`;
-  - `rowsWithTelemetry` calls `TranscriptToolRows.emit` instead of `TranscriptToolSummary.mergeToolRuns`;
-  - `prependDiff` and `classifyChange` keep working on ids;
-  - `isToolCard`, `toolBlocks` and `bodyText` are updated.
-- Modify: `AgentSessions/Services/TranscriptToolSummary.swift` (delete `mergeToolRuns` once there are no callers)
-- Test: `AgentSessionsTests/TranscriptToolRowsTests.swift`, update `TranscriptBlockWindowingTests`
+- Modify: `AgentSessions/Views/TranscriptBlockListView.swift` — **additive only** (Task 13 switches the live path, so every commit compiles and the app keeps today's tool cards until the new cells exist):
+  - `BlockRowModel.Content` gains `.toolGroupHeader(ToolGroupHeaderModel)` and `.toolInvocation(ToolInvocationRowModel)`; `.toolGroup` stays for now;
+  - exhaustive switches (`primaryBlock`, `bodyText`, `isToolCard`, `toolBlocks`, `tableView(_:viewFor:)`, `configure`) handle the new cases minimally (no production code emits them yet);
+  - `ChangeKind` gains `case appendWithReload(count: Int, reloadRows: IndexSet)`; `classifyChange` returns it when the first `old.count` row ids of `new` equal `old`'s ids, every content-changed row in that prefix is a tool row (header or invocation), and at least one row changed. Any other change keeps today's result. The controller's apply path handles the new case: `insertRows` for the tail, `reloadData(forRowIndexes:)` + `noteHeightOfRows` for `reloadRows`, scroll anchor kept;
+  - `rowsWithTelemetry` and `mergeToolRuns` are unchanged in this task.
+- Test: `AgentSessionsTests/TranscriptToolRowsTests.swift`; `TranscriptBlockWindowingTests` gains the `classifyChange` cases
 
 **Interfaces:**
-- Consumes: `ToolInvocationIndex` (Task 6), `ToolRowSummary` (Task 9)
+- Consumes: `ToolInvocationIndex` (Task 6), `ToolRowSummary` and `ToolInvocationBuilder.rowSummary` (Task 9)
 - Produces:
 
 ```swift
 struct VerbCount: Equatable { var verbKey: String; var count: Int }
 struct ToolGroupHeaderModel: Equatable { var groupID: Int; var callCount: Int; var verbDigest: [VerbCount]; var failedCount: Int; var durationSeconds: Double?; var timestamp: Date?; var isOpen: Bool }
-struct ToolInvocationRowModel: Equatable { var invocationID: Int; var groupID: Int?; var position: CardPosition; var isOpen: Bool }
+struct ToolInvocationRowModel: Equatable { var invocationID: Int; var groupID: Int?; var position: CardPosition; var isOpen: Bool; var contentStamp: Int }   // contentStamp = hash of (member block count, total UTF-16 length of member block texts), so an arriving output changes the row
 enum CardPosition: Equatable { case solo, first, middle, last }
 enum TranscriptToolRows {
     static func groupHeaderRowID(forGroup groupID: Int) -> Int    // Int.min / 2 + groupID (never collides with block ids or telemetry -i-1 ids)
     static func emit(blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>, index: ToolInvocationIndex,
+                     rowSummary: (ToolInvocationRef) -> ToolRowSummary,   // controller passes a cached closure over the FULL block array
                      openGroups: Set<Int>, openInvocations: Set<Int>, activeRoles: Set<TranscriptRoleFilter>,
                      failedInvocationIDs: Set<Int>) -> [BlockRowModel]
+    static func seedOpenState(newGroups: [ToolGroupHeaderModel], index: ToolInvocationIndex,
+                              failedInvocationIDs: Set<Int>) -> (groups: Set<Int>, invocations: Set<Int>)
 }
 ```
 
 - Rules:
-  - A run is consecutive tool blocks.
+  - Header `durationSeconds` = wall span from the group's first to its last block timestamp; nil when fewer than 2 timestamps (a sum would overstate parallel calls). `timestamp` = the first block's.
+  - A run is consecutive tool blocks (`.toolCall`, `.toolOut`, and `.error` blocks that belong to an invocation per `index.invocationIDByBlock`).
   - A run with one invocation emits one `.toolInvocation` row with position `.solo` and no header.
   - A run with ≥ 2 invocations emits a header row (`groupID` = the first invocation id). When the group is open, it also emits one row per invocation (`first/middle/last`).
   - Default open: a group with any failed invocation starts open, and its failed invocations start open at L2. The controller seeds `openGroups` and `openInvocations` once per new group id and does not reseed after user toggles.
@@ -723,7 +745,7 @@ enum TranscriptToolRows {
     - A header shows when any of its rows would show.
     - With all roles active, everything shows.
   - A group split by the window edge uses the group id of its first loaded invocation (same as today's re-keying on prepend).
-  - An invocation whose call lies before the loaded window is emitted at its first output's position, with id = invocation id. The builder reads the call from the controller's full block array (`allBlocksCache`), so the row is complete. No "Load call" control is needed. Update spec §9 to match.
+  - An invocation whose call lies before the loaded window is emitted at its first output's position, with id = invocation id. `rowSummary` reads the call from the full block array (`allBlocksCache`), so the row is complete. No "Load call" control is needed (spec §9 already says so).
   - Verb digest: count actions by `verbKey`, sort by count (ties by first appearance), and show at most 3 followed by "…".
 
 - [ ] **Step 1: Write failing tests**
@@ -732,24 +754,30 @@ enum TranscriptToolRows {
 func testSoloInvocationHasNoHeader()
 func testClosedGroupEmitsHeaderOnly()
 func testOpenGroupEmitsRowsWithPositions()
-func testFailedGroupSeedsOpen()                // controller seeding helper: seedOpenState(newGroups:…) returns failed group + failed invocation
+func testFailedGroupSeedsOpen()                // seedOpenState(newGroups:…) returns failed group + failed invocation
 func testErrorsOnlyFilterShowsFailedInvocations()
 func testHeaderRowIDNeverCollides()            // for ids 0…10_000 and telemetry ids
-func testAppendingCallToOpenGroupIsAppendOnly() // classifyChange(old, new) == .appendOnly when a call+output append to the last open group
+func testAppendingCallToOpenGroupIsAppendOnly() // call+output appended to the last open group → classifyChange == .appendWithReload(count: 1, reloadRows: [header row, previous last row])
+func testOutputArrivalReloadsOnlyItsRow()       // output appended to the last invocation → .appendWithReload(count: 0, reloadRows: [that row])
+func testNonToolContentChangeStaysWholesale()   // a changed assistant row in the prefix → .wholesale (unchanged behaviour)
 func testPrependAcrossGroupBoundaryFallsBackSafely() // prependDiff reports droppedRowIDs for the re-keyed header
 func testCallOutsideWindowStillEmitsCompleteRow()    // window starts at the output block → one row, id == call index, summary has the call's command
 ```
 
 - [ ] **Step 2: Run** `TranscriptToolRowsTests` and `TranscriptBlockWindowingTests`. Expected: FAIL.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run.** Expected: PASS.
+- [ ] **Step 4: Run** both classes plus `TranscriptToolSummaryTests` and `TranscriptTelemetryPresentationTests`. Expected: PASS (the last two unchanged).
 - [ ] **Step 5: Commit** `feat(transcript): emit group headers and one row per invocation`.
 
-### Task 13: Cells, toggles, links, context menu
+### Task 13: Cells, toggles, links, context menu, and the switch to the new rows
 
 **Files:**
 - Create: `AgentSessions/Views/TranscriptToolCells.swift` (contains `ToolGroupHeaderCellView`, `ToolInvocationCellView`, and the SwiftUI views `ToolGroupHeaderView` and `ToolActionRowHeader`)
+- Modify: `AgentSessions/Services/TranscriptToolSummary.swift` (delete `mergeToolRuns` once there are no callers)
 - Modify: `AgentSessions/Views/TranscriptBlockListView.swift`:
+  - **The switch (moved here from Task 12):** `rowsWithTelemetry` calls `TranscriptToolRows.emit` instead of `TranscriptToolSummary.mergeToolRuns` (it gains the index, the `rowSummary` closure, the open sets and failed ids; the controller supplies them from the state stored in Task 6). Remove `.toolGroup` from `BlockRowModel.Content` and every switch. Update `primaryBlock` (a header row's chrome/timestamp/height come from its first invocation's first block), `isToolCard`, `toolBlocks` and `bodyText`.
+  - `rowIndex(forBlock:)` resolves a tool block through `invocationIndex.invocationIDByBlock` to its invocation row; when that row is hidden inside a closed group, it returns the group header row. Find scrolling, `scrollToBlock`, `flashRow` and `autoExpandCollapsedMatch` use it.
+  - The controller seeds `openGroups`/`openInvocations` through `TranscriptToolRows.seedOpenState` once per new group id.
   - Extract protocol `TranscriptRowCell` (`bodyText`, `wireSelection`, `applySelectionRange`, `clearFindHighlights`, `setFlashAlpha`) from `BlockCardCellView`, and use it in `forEachVisibleCell`.
   - `tableView(_:viewFor:)` picks the cell by row content.
   - `measuredHeight` gains the new row kinds: header 24 pt + 4 pt gap; invocation = 24 pt × actions + rendered body height when open.
@@ -760,10 +788,10 @@ func testCallOutsideWindowStillEmitsCompleteRow()    // window starts at the out
   - `toggleGroup(_:option:)` and `toggleInvocation(_:option:)` recompute rows through `emit` and apply `insertRows` / `removeRows`. Both clear cross-block selection, keep the scroll anchor, and implement Option-click (all rows in the group).
   - `textView(_:clickedOnLink:at:)` handles `toolfold:` payloads.
   - Context menu for invocation rows: Copy, Copy Command, Copy Output, Copy as Markdown, Show Raw Event, Expand All in Group, Speak, Stop Speaking. Show Raw Event opens a popover with the pretty `rawJSON` of the call and its outputs. When the text contains `[OMITTED bytes=`, the popover says "Large strings were shortened when the app stored this event."
-- Test: `AgentSessionsTests/TranscriptToolCellsTests.swift`
+- Test: `AgentSessionsTests/TranscriptToolCellsTests.swift`; rewrite the group assertions in `TranscriptToolSummaryTests` (`testMergeConsecutiveToolRuns`, `testLoneToolBlockStaysMessage` → against `emit`), `TranscriptTelemetryPresentationTests` (`.toolGroup` references, `rowsWithTelemetry` calls) and `TranscriptBlockWindowingTests` (`groupRow` helper builds the new rows).
 
 **Interfaces:**
-- Consumes: Tasks 9, 11 and 12.
+- Consumes: Tasks 6, 9, 11 and 12.
 - Produces: `BlockTableController.toggleGroup(groupID: Int, allRows: Bool)`, `toggleInvocation(invocationID: Int, allInGroup: Bool)`, and `handleToolFoldLink(_ link: ToolFoldLink, invocationID: Int)`.
 - Row header layout (SwiftUI, fixed 24 pt):
   - chevron;
@@ -777,10 +805,11 @@ func testCallOutsideWindowStillEmitsCompleteRow()    // window starts at the out
 - Card chrome by `CardPosition`: `solo` = full rounded card; `first` = top corners; `middle` = none; `last` = bottom corners. The accent bar is continuous across rows.
 - Increase Contrast (`NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`): pane borders use `separatorColor`, and the pane fill alpha ×1.5.
 
-- [ ] **Step 1: Write failing tests** (controller-level, with an `NSTableView` in a window as the existing `TranscriptBlockListLinkifyTests` do)
+- [ ] **Step 1: Write failing tests** (controller-level). No existing test hosts a table: add a test helper that builds `NSWindow` + `NSScrollView` + `NSTableView`, attaches a `BlockTableController`, and calls `apply(...)` with fixture blocks and an index. This helper is part of the task's work.
 
 ```swift
 func testToggleGroupInsertsRows()            // rows.count grows by invocation count; table.numberOfRows matches
+func testRowIndexForOutputBlockFindsInvocationRow() // output block index → its invocation row; inside a closed group → the header row
 func testOptionToggleOpensAllInvocations()
 func testFoldLinkShowAllGrowsHeight()
 func testCopyReturnsPlainText()              // menu Copy on an open invocation → pasteboard == action.plainText
@@ -791,7 +820,7 @@ func testCardPositionsDrawContinuousBar()    // first/middle/last cells: accent 
 
 - [ ] **Step 2: Run** `TranscriptToolCellsTests`. Expected: FAIL.
 - [ ] **Step 3: Implement.** Remove the old tool path from `BlockCardCellView` (`configureToolCard`, `expandedToolBodyText`, `ShowAllRow` use for tools) once nothing calls it.
-- [ ] **Step 4: Run** `TranscriptToolCellsTests`, `TranscriptBlockListLinkifyTests`, `TranscriptBlockListReviewCardTests`, `TranscriptSelectionCoordinatorTests` and `TranscriptBlockWindowingTests`. Expected: PASS.
+- [ ] **Step 4: Run** `TranscriptToolCellsTests`, `TranscriptToolRowsTests`, `TranscriptToolSummaryTests`, `TranscriptTelemetryPresentationTests`, `TranscriptBlockListLinkifyTests`, `TranscriptBlockListReviewCardTests`, `TranscriptSelectionCoordinatorTests` and `TranscriptBlockWindowingTests`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(transcript): tool group and invocation cells`.
 
 ### Task 14: Selection and copy across invocation rows
@@ -842,7 +871,7 @@ func testOpenRowCopiesVisibleTextWithoutGutter()
 final class ToolSearchTextStore: @unchecked Sendable {   // lock-protected dictionary
     func start(blocks: [SessionTranscriptBuilder.LogicalBlock], index: ToolInvocationIndex, source: SessionSource,
                viewportBlock: Int, onComplete: @escaping @MainActor () -> Void)   // utility QoS, viewport-outward order
-    func text(forBlock globalBlockIndex: Int) -> String?    // the owning action's plainText segment for this block
+    func text(forBlock globalBlockIndex: Int) -> String?    // for the invocation's id block: its actions' plainText joined by a blank line, plus footer facts; "" for the invocation's other member blocks (each match is reported once, at the row that shows it); nil when not decoded yet
     var isComplete: Bool { get }
     func cancel()
 }
@@ -866,7 +895,8 @@ func testOpeningSessionDoesNotWaitForDecodePass() // computeSnapshot returns bef
 ### Task 16: Errors filter and ▲▼ jumps per invocation
 
 **Files:**
-- Modify: `AgentSessions/Services/TranscriptDerivedState.swift` (`Snapshot.toolJumpIDs: [Int]` = invocation ids in order; `Snapshot.errorJumpIDs` = `.error` block indices merged with failed invocation ids, sorted), `AgentSessions/Views/TranscriptBlockListView.swift` (`handleRoleJumpIntent` uses them; a jump to an id inside a closed group opens the group)
+- Modify: `AgentSessions/Services/TranscriptDerivedState.swift` (`Snapshot.toolJumpIDs: [Int] = []` = invocation ids in order; `Snapshot.errorJumpIDs: [Int] = []` = `.error` block indices that belong to no invocation, merged with failed invocation ids, sorted), `AgentSessions/Views/TranscriptBlockListView.swift` (`apply` receives both arrays next to the index; `handleRoleJumpIntent` uses them; a jump to an id inside a closed group opens the group), `AgentSessions/Views/TranscriptPlainView.swift` (passes them; `roleOccurrenceCount` uses `toolJumpIDs.count` / `errorJumpIDs.count`, so the ▲▼ enabled state matches the jump list)
+- Scope: P1 steps once per invocation row. Per-action stops inside a flattened Codex script row move to P2 with `ToolInvocation.calls` (spec §6.8 and §11 updated).
 - Test: `AgentSessionsTests/TranscriptDerivedStateTests.swift` (extend), `AgentSessionsTests/TranscriptToolRowsTests.swift` (extend)
 
 - [ ] **Step 1: Write failing tests**
@@ -874,6 +904,7 @@ func testOpeningSessionDoesNotWaitForDecodePass() // computeSnapshot returns bef
 ```swift
 func testToolJumpStepsPerInvocation()       // c1 o1 c2 o2 → toolJumpIDs == [c1, c2]
 func testErrorJumpIncludesFailedInvocations()
+func testRuntimeErrorBlockIsOneErrorStop()   // c1 + paired .error block → errorJumpIDs == [c1], not [c1, errorBlock]
 func testJumpIntoClosedGroupOpensIt()
 ```
 
@@ -893,7 +924,7 @@ func testJumpIntoClosedGroupOpensIt()
 - Gate: `AS_TOOL_CORPUS_CHECK=1` (pass it through `scripts/xcode_test_stable.sh` the way `AS_REAL_SESSION_REPLAY` is passed). The structure follows `RealSessionReplayTests`:
   - a watchdog of 600 s;
   - stdout muted;
-  - for each `SessionSource.allCases` with a `SessionSourceRegistry.descriptor(for:).parseFullByPath`, discover files, newest first, at most 200 per source;
+  - for each `SessionSource.allCases`, discover sessions newest first, at most 200 per source: through `parseFullByPath` on discovered files, or through `parseFullByIdentity` for identity-only sources (Hermes, Devin), driven by their discovery the way `RealSessionReplayTests` drives OpenCode;
   - sources with no discovery seam are listed under `not_covered` in the report, never skipped silently.
 - Output: `scripts/probe_scan_output/tool_corpus/report.json` with counts per source and per tool family.
 - Fails when any of these is above 0. Every "rendered" check uses `ToolDetailRenderer` with all folds open:
@@ -914,8 +945,9 @@ func testJumpIntoClosedGroupOpensIt()
 
 **Files:** none new.
 
-- [ ] **Step 1: Perf.** Run `TEST_RUNNER_AGENT_SESSIONS_PERF=1 ./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/Stage0PerfHarnessTests -only-testing:AgentSessionsTests/TranscriptWindowedBuildTests`. Expected: open/snapshot timings within +5% of `main` at the P0 commit. Record both numbers in the commit body.
-- [ ] **Step 2: Full suite.** Run `./scripts/xcode_test_stable.sh`. Expected: 0 failures, and the passed count = previous passed + new tests.
+- [ ] **Step 1: Perf.** Run `TEST_RUNNER_AGENTSESSIONS_PERF=1 ./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/Stage0PerfHarnessTests -only-testing:AgentSessionsTests/TranscriptWindowedBuildTests` (the harness reads `AGENTSESSIONS_PERF`; `TranscriptWindowedBuildTests` has no gate). Confirm the perf tests ran, not skipped. Expected: open/snapshot timings within +5% of `main` at the P0 commit (measure both in this step). Record both numbers in the commit body.
+- [ ] **Step 2: Full suite.** Run `./scripts/xcode_test_stable.sh`. Expected: 0 failures, and the executed count = 3942 + every new test of this branch.
+- [ ] **Step 2b: Docs.** Add P1 bullets under `[Unreleased]` in `docs/CHANGELOG.md` and to `docs/summaries/2026-11.md` (agents.md "User-visible changes").
 - [ ] **Step 3: Owner QA build.** Build Debug to a build-only derived-data path (`-derivedDataPath .deriveddata-run`, never the test path). Give the owner this checklist:
   - the screenshot session;
   - a Claude session with parallel Bash calls;
