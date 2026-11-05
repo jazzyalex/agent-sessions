@@ -33,7 +33,7 @@
   - Opening the largest local session takes main's time ±5%.
   - Opening an L2 row never blocks the main thread for more than 50 ms.
   - Pairing is one pass over the blocks.
-- Every user-facing string is in `AgentSessions/Resources/Localizable.xcstrings`.
+- Every user-facing string is in `AgentSessions/Resources/Localizable.xcstrings`, with a real zh-Hans value. A task that adds keys also raises `EXPECTED_LOCALIZABLE_KEY_COUNT` and `EXPECTED_LOCALIZABLE_KEY_SHA256` in `scripts/validate_localization_catalogs.py` and the count in `scripts/tests/test_validate_localization_catalogs.py`, in the same task, and shows `python3 -I scripts/validate_localization_catalogs.py` exiting 0.
 - New Swift files: `./scripts/xcode_add_file.rb AgentSessions.xcodeproj <Target> <file> <group>`. A file in an existing group adds exactly 4 pbxproj lines.
 - Tests live in `AgentSessionsTests`. Run one class: `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/<Class>`. Run the full suite at the end of each phase. The branch baseline is 3942 executed tests, 0 failures (measured on this worktree before Task 1); the executed count only grows and failures stay 0. Do not edit `tools/release/test-count-baseline.txt` (release flow only).
 - Test seams: one Codex line parses through `SessionIndexer.parseLine(_:eventID:)` (see `SessionParserTests`). Claude has no single-line seam: write the lines to a temp `.jsonl` and call `ClaudeSessionParser.parseFileFull(at:)`. Tests that call `SessionTranscriptBuilder.coalescedBlocks` reset its cache in `setUp` (`SessionTranscriptBuilder._testResetCoalesceCache()`) or give each session a unique id, because the cache key is `id|events.count|fileSize|includeMeta`.
