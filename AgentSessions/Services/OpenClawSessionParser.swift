@@ -801,13 +801,14 @@ final class OpenClawSessionParser {
         guard let any else { return nil }
         if let s = any as? String { return s }
         guard JSONSerialization.isValidJSONObject(any) else { return String(describing: any) }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: any, pretty: false) else {
             return String(describing: any)
         }
-        if data.count > 32_768 {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func eventID(for url: URL, index: Int) -> String {

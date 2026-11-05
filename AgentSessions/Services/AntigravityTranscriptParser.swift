@@ -75,7 +75,7 @@ enum AntigravityTranscriptParser {
                             let name = call["name"] as? String
                             lastToolName = name
                             let input = (call["args"] as? [String: Any]).map {
-                                (try? JSONSerialization.data(withJSONObject: $0)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                                ToolJSON.string(from: $0, pretty: false) ?? ""
                             }
                             events.append(makeEvent(sid, "\(eventID(idx))-t\(ci)", ts, .tool_call, "assistant", nil, name, input, nil, raw))
                         }

@@ -397,12 +397,12 @@ enum ClineSessionParser {
     private static func jsonString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
-        if data.count > 32_768 {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func jsonEncode(_ object: Any) -> String {

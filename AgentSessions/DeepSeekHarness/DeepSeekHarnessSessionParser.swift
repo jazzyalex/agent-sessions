@@ -769,9 +769,7 @@ enum DeepSeekHarnessSessionParser {
     private static func argumentsString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let text = value as? String { return text }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
-        return String(data: data, encoding: .utf8)
+        return ToolJSON.string(from: value, pretty: false)
     }
 
     /// Caps pathological payloads before UI construction, mirroring the

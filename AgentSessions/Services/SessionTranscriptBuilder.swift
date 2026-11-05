@@ -750,8 +750,8 @@ struct SessionTranscriptBuilder {
     private static func compactJSONOneLine(_ s: String) -> String {
         guard let data = s.data(using: .utf8) else { return s }
         if let obj = try? JSONSerialization.jsonObject(with: data, options: []) {
-            if let min = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
-                return String(data: min, encoding: .utf8) ?? s
+            if let min = ToolJSON.string(from: obj, pretty: false) {
+                return min
             }
         }
         // Not JSON – compress whitespace by splitting on whitespace/newlines

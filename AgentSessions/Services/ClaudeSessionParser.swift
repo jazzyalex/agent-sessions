@@ -1259,11 +1259,8 @@ final class ClaudeSessionParser {
 
     private static func stringifyJSON(_ any: Any) -> String? {
         if let str = any as? String { return str }
-        if JSONSerialization.isValidJSONObject(any) {
-            if let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
-               let str = String(data: data, encoding: .utf8) {
-                return str
-            }
+        if let str = ToolJSON.string(from: any, pretty: true) {
+            return str
         }
         return String(describing: any)
     }
@@ -1271,13 +1268,14 @@ final class ClaudeSessionParser {
     private static func stringifyJSONBounded(_ any: Any) -> String? {
         if let str = any as? String { return str }
         guard JSONSerialization.isValidJSONObject(any) else { return String(describing: any) }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: any, pretty: false) else {
             return String(describing: any)
         }
-        if data.count > maxFallbackStringifyBytes {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        let byteCount = text.utf8.count
+        if byteCount > maxFallbackStringifyBytes {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func sanitizeLargeStrings(in any: Any) -> Any {

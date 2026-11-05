@@ -557,14 +557,11 @@ final class CursorSessionParser {
 
     private static func stringifyJSON(_ any: Any) -> String? {
         if let str = any as? String { return str }
-        if JSONSerialization.isValidJSONObject(any) {
-            if let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
-               let str = String(data: data, encoding: .utf8) {
-                if str.utf8.count > maxRawJSONFieldBytes {
-                    return "[OMITTED large JSON bytes=\(str.utf8.count)]"
-                }
-                return str
+        if let str = ToolJSON.string(from: any, pretty: true) {
+            if str.utf8.count > maxRawJSONFieldBytes {
+                return "[OMITTED large JSON bytes=\(str.utf8.count)]"
             }
+            return str
         }
         return String(describing: any)
     }

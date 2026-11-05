@@ -5,8 +5,7 @@ enum PrettyJSON {
         guard let data = json.data(using: .utf8) else { return json }
         do {
             let obj = try JSONSerialization.jsonObject(with: data, options: [])
-            let pretty = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
-            return String(data: pretty, encoding: .utf8) ?? json
+            return ToolJSON.string(from: obj, pretty: true) ?? json
         } catch {
             return json
         }

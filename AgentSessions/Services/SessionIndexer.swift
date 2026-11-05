@@ -3499,8 +3499,8 @@ final class SessionIndexer: ObservableObject {
         if let s = any as? String { return s }
         // Numbers, bools, arrays, dicts → JSON text
         if JSONSerialization.isValidJSONObject(any) {
-            if let data = try? JSONSerialization.data(withJSONObject: any, options: pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]) {
-                return String(data: data, encoding: .utf8)
+            if let text = ToolJSON.string(from: any, pretty: pretty) {
+                return text
             }
         } else {
             // Wrap simple types into JSON-compatible representation

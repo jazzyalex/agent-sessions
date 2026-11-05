@@ -918,10 +918,10 @@ final class DroidSessionParser {
     private static func stringifyJSON(_ any: Any?) -> String? {
         guard let any else { return nil }
         if let s = any as? String { return s }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: any, pretty: false) else {
             return String(describing: any)
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func rawJSONBase64(_ obj: Any) -> String {

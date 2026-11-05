@@ -330,8 +330,7 @@ final class HermesSessionParser {
             var body = (result["summary"] as? String) ?? (result["result"] as? String) ?? ""
             if let inner = body.data(using: .utf8),
                let decoded = try? JSONSerialization.jsonObject(with: inner),
-               let pretty = try? JSONSerialization.data(withJSONObject: decoded, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: pretty, encoding: .utf8) {
+               let text = ToolJSON.string(from: decoded, pretty: true) {
                 body = text
             }
             body = body.trimmingCharacters(in: .whitespacesAndNewlines)

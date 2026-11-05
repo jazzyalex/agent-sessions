@@ -991,9 +991,7 @@ final class OpenCodeSessionParser {
     static func stringifyJSON(_ any: Any?) -> String? {
         guard let any else { return nil }
         if let str = any as? String { return str }
-        if JSONSerialization.isValidJSONObject(any),
-           let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
-           let str = String(data: data, encoding: .utf8) {
+        if let str = ToolJSON.string(from: any, pretty: true) {
             return str
         }
         return String(describing: any)

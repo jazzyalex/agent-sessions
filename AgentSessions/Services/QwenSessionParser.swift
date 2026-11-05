@@ -788,12 +788,12 @@ enum QwenSessionParser {
     private static func jsonString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: value, pretty: false) else {
             return nil
         }
-        if data.count > 32_768 { return "[OMITTED large JSON payload bytes=\(data.count)]" }
-        return String(data: data, encoding: .utf8)
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 { return "[OMITTED large JSON payload bytes=\(byteCount)]" }
+        return text
     }
 
     private static func model(from record: Record) -> String? {

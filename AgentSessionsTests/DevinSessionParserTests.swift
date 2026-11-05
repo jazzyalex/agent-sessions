@@ -65,7 +65,7 @@ final class DevinSessionParserTests: XCTestCase {
         XCTAssertEqual(events[1].text, "done")
         XCTAssertEqual(events[2].toolName, "browser.screenshot")
         // Arguments are serialised from the object with sorted keys.
-        let expected = "{\"full_page\":true,\"path\":\"\\/tmp\\/a.png\"}"
+        let expected = "{\"full_page\":true,\"path\":\"/tmp/a.png\"}"
         XCTAssertEqual(events[2].toolInput, expected)
         XCTAssertEqual(events[2].messageID, "call_9")
     }
