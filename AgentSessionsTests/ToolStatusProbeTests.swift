@@ -44,6 +44,53 @@ final class ToolStatusProbeTests: XCTestCase {
 
         // Not code mode outside Codex: the same text has no header exit form.
         XCTAssertEqual(status(call: exec, outputs: [out(failing)], source: .claude), .success)
+
+        // Real shape: content items are joined with no separator, so chunk objects follow each other.
+        let joined = header
+            + #"{"chunk_id":"a","exit_code":0,"original_token_count":3,"output":"README.md\n"}"#
+            + #"{"chunk_id":"b","exit_code":2,"original_token_count":1,"output":"boom"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(joined)]), .failed(exitCode: 2))
+    }
+
+    func testCodeModeStdoutMentioningExitCodeIsNotAFailure() {
+        let exec = F.block(.toolCall, toolName: "exec", toolInput: "await tools.exec_command({cmd: \"cat x\"})")
+        let header = "Script completed\nWall time 0.4 seconds\nOutput:\n"
+        // Only the chunk metadata before `output` is read.
+        let plain = header + #"{"chunk_id":"a","exit_code":0,"output":"{\"exit_code\":2}"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(plain)]), .success)
+        // A body that starts with a chunk object is not a chunk.
+        let nested = header + #"{"chunk_id":"a","exit_code":0,"output":"{\"chunk_id\":\"z\",\"exit_code\":2}"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(nested)]), .success)
+        // The same inside a JSON-encoded string item.
+        let encoded = header + #""{\"chunk_id\":\"a\",\"exit_code\":0,\"output\":\"{\\\"exit_code\\\":2}\"}""#
+        XCTAssertEqual(status(call: exec, outputs: [out(encoded)]), .success)
+    }
+
+    func testCodeModeGrepNoMatchChunkIsSuccess() {
+        let exec = F.block(.toolCall, toolName: "exec", toolInput: "await tools.exec_command({cmd: \"rg foo\"})")
+        let header = "Script completed\nWall time 0.3 seconds\nOutput:\n"
+        let noMatch = header
+            + #"{"chunk_id":"042765","exit_code":0,"original_token_count":4,"output":"master\n"}"#
+            + #"{"chunk_id":"ccdd45","wall_time_seconds":0.00003,"exit_code":1,"original_token_count":0,"output":""}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(noMatch)]), .success)
+        let encodedNoMatch = header + #""{\"chunk_id\":\"c\",\"exit_code\":1,\"output\":\"\"}""#
+        XCTAssertEqual(status(call: exec, outputs: [out(encodedNoMatch)]), .success)
+
+        // Exit 1 with output, or another code with empty output, still fails.
+        let exitOneWithOutput = header + #"{"chunk_id":"d","exit_code":1,"output":"rg: error"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(exitOneWithOutput)]), .failed(exitCode: 1))
+        let exitTwoEmpty = header + #"{"chunk_id":"e","exit_code":2,"output":""}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(exitTwoEmpty)]), .failed(exitCode: 2))
+    }
+
+    func testCodeModeSessionChunkIsPending() {
+        let exec = F.block(.toolCall, toolName: "exec", toolInput: "await tools.exec_command({cmd: \"npm run dev\"})")
+        let header = "Script completed\nWall time 10.0 seconds\nOutput:\n"
+        let running = header + #"{"chunk_id":"df07ab","wall_time_seconds":10.0,"session_id":90623,"output":"…"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(running)]), .pending)
+        // With an exit code the process has ended.
+        let ended = header + #"{"chunk_id":"df07ac","session_id":90623,"exit_code":0,"output":"done"}"#
+        XCTAssertEqual(status(call: exec, outputs: [out(ended)]), .success)
     }
 
     // MARK: - Grep family

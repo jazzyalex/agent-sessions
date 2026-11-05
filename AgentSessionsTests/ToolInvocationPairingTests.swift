@@ -105,17 +105,70 @@ final class ToolInvocationPairingTests: XCTestCase {
         XCTAssertEqual(index.invocationIDByBlock[2], 1)
     }
 
-    func testErrorBlockWithoutMatchingCallStaysOutOfIndex() {
-        // An `.error` block joins only the call its id names; with no such call it stays a plain error.
+    func testErrorBlockWithoutMatchingCallIsFailedOrphan() {
+        // A runtime error stays a tool output (spec §7.4): with no call it is an orphan invocation.
+        // An `.error` block without an id is a plain error, not a tool block.
         let blocks = F.sequence([
             F.block(.user, text: "go"),
-            F.block(.error, id: "nope", text: "boom", isError: true),
+            F.block(.error, id: "nope", text: "boom", isError: true, disposition: .runtimeError),
             F.block(.error, text: "plain error", isError: true),
         ])
         let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
 
-        XCTAssertTrue(index.invocations.isEmpty)
-        XCTAssertTrue(index.invocationIDByBlock.isEmpty)
+        XCTAssertEqual(index.invocations.map(\.id), [1])
+        XCTAssertEqual(index.invocations.first?.callBlockIndex, nil)
+        XCTAssertEqual(index.invocations.first?.outputBlockIndices, [1])
+        XCTAssertEqual(index.invocations.first?.status, .failed(exitCode: nil))
+        XCTAssertEqual(index.invocationIDByBlock, [1: 1])
+    }
+
+    func testIDlessOutputTakesOpenIDCallInItsTurn() {
+        // c1 (id "a") · o (no id) in one turn → paired.
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "a"),
+            F.block(.toolOut, text: "result"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .antigravity)
+        XCTAssertEqual(index.invocations.count, 1)
+        XCTAssertEqual(index.invocations.first?.outputBlockIndices, [2])
+
+        // An open id-less call in the turn still comes first.
+        let mixed = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "a"),
+            F.block(.toolCall),
+            F.block(.toolOut, text: "result"),
+        ])
+        let mixedIndex = ToolInvocationIndex.build(blocks: mixed, source: .antigravity)
+        XCTAssertEqual(invocation(mixedIndex, containing: 3)?.callBlockIndex, 2)
+
+        // The open id call of its own turn beats the cross-turn stack.
+        let crossTurn = F.sequence([
+            F.block(.user, text: "one"),
+            F.block(.toolCall),                    // 1: id-less, open, earlier turn
+            F.block(.user, text: "two"),
+            F.block(.toolCall, id: "a"),           // 3: open id call in this turn
+            F.block(.toolOut, text: "result"),     // 4
+        ])
+        let crossIndex = ToolInvocationIndex.build(blocks: crossTurn, source: .antigravity)
+        XCTAssertEqual(invocation(crossIndex, containing: 4)?.callBlockIndex, 3)
+    }
+
+    func testRepeatedIDsPairInOrder() {
+        // c(t) c(t) o(t) o(t) → 1:1 in order; an extra o(t) joins the latest call.
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t"),
+            F.block(.toolCall, id: "t"),
+            F.block(.toolOut, id: "t", text: "first"),
+            F.block(.toolOut, id: "t", text: "second"),
+            F.block(.toolOut, id: "t", text: "third"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+
+        XCTAssertEqual(index.invocations.map(\.id), [1, 2])
+        XCTAssertEqual(index.invocations.map(\.outputBlockIndices), [[3], [4, 5]])
     }
 
     func testOrphanOutputBecomesOwnInvocation() {
@@ -245,6 +298,43 @@ final class ToolInvocationPairingTests: XCTestCase {
         XCTAssertEqual(index.processOwnerBySessionID["7"], 3)
         XCTAssertNil(index.processOwnerBySessionID["99"])
         XCTAssertEqual(index.processOwnerBySessionID.count, 2)
+    }
+
+    func testPollsDoNotTakeOwnership() {
+        let running = "Chunk ID: ab12\nWall time: 10.0 seconds\nProcess running with session ID 42437\n"
+            + "Original token count: 0\nOutput:\n"
+        let blocks = F.sequence([
+            F.block(.user, text: "start the dev server"),
+            F.block(.toolCall, id: "t1", toolName: "exec_command", toolInput: #"{"cmd":"npm run dev"}"#), // 1
+            F.block(.toolOut, id: "t1", text: running),                                                // 2
+            F.block(.toolCall, id: "t2", toolName: "write_stdin", toolInput: #"{"session_id":42437,"chars":""}"#), // 3
+            F.block(.toolOut, id: "t2", text: running),                                                // 4
+            F.block(.toolCall, id: "t3", toolName: "wait", toolInput: #"{"session_id":42437}"#),        // 5
+            F.block(.toolOut, id: "t3", text: running),                                                // 6
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+        XCTAssertEqual(index.processOwnerBySessionID["42437"], 1, "polls never take ownership")
+
+        // A later non-poll owner of the same id still overwrites (Codex reuses session ids).
+        let reused = F.sequence(blocks + [
+            F.block(.toolCall, id: "t4", toolName: "exec_command", toolInput: #"{"cmd":"make watch"}"#), // 7
+            F.block(.toolOut, id: "t4", text: running),                                                 // 8
+        ])
+        XCTAssertEqual(ToolInvocationIndex.build(blocks: reused, source: .codex).processOwnerBySessionID["42437"], 7)
+    }
+
+    func testCodeModeChunkSessionIDRegistersOwner() {
+        let chunk = "Script completed\nWall time 10.0 seconds\nOutput:\n"
+            + #"{"chunk_id":"df07ab","wall_time_seconds":10.0,"session_id":90623,"output":"…"}"#
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec", toolInput: "await tools.exec_command({cmd: \"npm run dev\"})"),
+            F.block(.toolOut, id: "t1", text: chunk),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.processOwnerBySessionID["90623"], 1)
+        XCTAssertEqual(index.invocations.first?.status, .pending)
     }
 
     func testEmptyIndex() {

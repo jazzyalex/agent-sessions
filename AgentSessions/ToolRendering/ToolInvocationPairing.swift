@@ -17,23 +17,29 @@ struct ToolInvocationRef: Equatable, Sendable {
 ///
 /// Tool blocks: `.toolCall`, `.toolOut`, and `.error` blocks that carry a `toolCallID`
 /// (Claude runtime errors). Such an `.error` block is an output of the call its id names; with
-/// no such call it stays a plain error and is not indexed.
+/// no such call it is an orphan invocation (a runtime error stays a tool output, spec §7.4).
+/// An `.error` block without an id is a plain error and is not indexed.
 ///
 /// Pairing order, in one pass over the blocks:
-/// 1. Equal `toolCallID` (session-wide; a repeated call id goes to the latest call).
-/// 2. Blocks without ids: FIFO inside the turn. A turn is a `.user` block plus everything up to
-///    the next `.user` block; blocks before the first `.user` block form turn 0.
-/// 3. Stack fallback: an id-less output with no open id-less call in its own turn takes the
-///    nearest preceding unmatched id-less call of an earlier turn.
+/// 1. Equal `toolCallID`, session-wide, FIFO per id: an output goes to the earliest call with
+///    its id that has no output yet; when every such call has one, to the latest of them.
+/// 2. An output without an id: the earliest open id-less call of its turn (FIFO). A turn is a
+///    `.user` block plus everything up to the next `.user` block; blocks before the first
+///    `.user` block form turn 0.
+/// 3. Then the earliest call of its turn that has an id but no output yet (agents that drop the
+///    id on some results: Antigravity's tool-name fallback, DSH results without a call id).
+/// 4. Stack fallback: the nearest preceding unmatched id-less call of an earlier turn.
 /// An output that pairs with nothing becomes its own invocation (an orphan, `callBlockIndex` nil).
 struct ToolInvocationIndex: Sendable {
     /// In id order.
     var invocations: [ToolInvocationRef]
     /// Every member block (call, outputs, paired `.error` blocks) → its invocation id.
     var invocationIDByBlock: [Int: Int]
-    /// "Process running with session ID N" / "Script running with cell ID N" in an output's
-    /// header (first `ToolStatusProbe.headerScanLimit` bytes) → that output's invocation id.
-    /// Keyed by N as written. A later owner of the same N overwrites an earlier one.
+    /// Process or cell id → the invocation that started it. Read from an output's header
+    /// ("Process running with session ID N" / "Script running with cell ID N" in the first
+    /// `ToolStatusProbe.headerScanLimit` bytes) and from Codex code-mode chunk metadata
+    /// (`"session_id":N`). Keyed by N as written. Polls (`write_stdin`, `wait`) never own.
+    /// A later owner of the same N overwrites an earlier one (Codex reuses ids).
     var processOwnerBySessionID: [String: Int]
 
     static let empty = ToolInvocationIndex(invocations: [], invocationIDByBlock: [:], processOwnerBySessionID: [:])
@@ -45,15 +51,32 @@ struct ToolInvocationIndex: Sendable {
         struct Slot {
             var id: Int
             var callPosition: Int?
-            var outputPositions: [Int]
+            var outputPositions: [Int] = []
             var turn: Int
+            /// The call is a poll (`write_stdin`, `wait`): it never owns a process.
+            var isPoll = false
+            /// The call is Codex code mode: `codeModeFacts` holds one entry per output.
+            var isCodeMode = false
+            var codeModeFacts: [ToolStatusProbe.CodeModeFacts] = []
+            /// The next slot (call or orphan) with the same `toolCallID`.
+            var nextWithSameID: Int?
+        }
+        /// Slots that share one `toolCallID`, linked through `nextWithSameID`. `head` moves past
+        /// slots that already have an output.
+        struct IDQueue {
+            var head: Int
+            var tail: Int
         }
 
         var slots: [Slot] = []
-        var slotByCallID: [String: Int] = [:]
+        var queueByCallID: [String: IDQueue] = [:]
         // Id-less calls of the current turn, consumed FIFO from `turnHead`.
         var turnCalls: [Int] = []
         var turnHead = 0
+        // Calls with an id in the current turn, for id-less outputs (step 3); `turnIDHead` skips
+        // calls that already have an output.
+        var turnIDCalls: [Int] = []
+        var turnIDHead = 0
         // Unmatched id-less calls of earlier turns, matched as a stack.
         var earlierCalls: [Int] = []
         var turn = 0
@@ -62,6 +85,46 @@ struct ToolInvocationIndex: Sendable {
         var invocationIDByBlock: [Int: Int] = [:]
         invocationIDByBlock.reserveCapacity(blocks.count / 2)
         var processOwners: [String: Int] = [:]
+
+        func enqueue(_ slot: Int, callID: String) {
+            if var queue = queueByCallID[callID] {
+                slots[queue.tail].nextWithSameID = slot
+                queue.tail = slot
+                queueByCallID[callID] = queue
+            } else {
+                queueByCallID[callID] = IDQueue(head: slot, tail: slot)
+            }
+        }
+
+        /// Step 1: the earliest slot with `callID` and no output, else the latest slot with it.
+        func slotForCallID(_ callID: String) -> Int? {
+            guard var queue = queueByCallID[callID] else { return nil }
+            var current = queue.head
+            while !slots[current].outputPositions.isEmpty, let next = slots[current].nextWithSameID {
+                current = next
+            }
+            if current != queue.head {
+                queue.head = current
+                queueByCallID[callID] = queue
+            }
+            return current
+        }
+
+        /// Steps 2–4 for an output without an id.
+        func slotForOutputWithoutID() -> Int? {
+            if turnHead < turnCalls.count {
+                turnHead += 1
+                return turnCalls[turnHead - 1]
+            }
+            while turnIDHead < turnIDCalls.count, !slots[turnIDCalls[turnIDHead]].outputPositions.isEmpty {
+                turnIDHead += 1
+            }
+            if turnIDHead < turnIDCalls.count {
+                turnIDHead += 1
+                return turnIDCalls[turnIDHead - 1]
+            }
+            return earlierCalls.popLast()
+        }
 
         // Fields are read in place (`blocks[position].x`): copying each block would retain
         // every string it holds.
@@ -75,15 +138,21 @@ struct ToolInvocationIndex: Sendable {
                 earlierCalls.append(contentsOf: turnCalls[turnHead...])
                 turnCalls.removeAll(keepingCapacity: true)
                 turnHead = 0
+                turnIDCalls.removeAll(keepingCapacity: true)
+                turnIDHead = 0
                 turn += 1
             case .meta:
                 if isTurnAbortedNotice(blocks[position].text) { noticeByTurn[turn] = position }
             case .toolCall:
                 let slot = slots.count
-                slots.append(Slot(id: globalIndex, callPosition: position, outputPositions: [], turn: turn))
+                let toolName = blocks[position].toolName
+                slots.append(Slot(id: globalIndex, callPosition: position, turn: turn,
+                                  isPoll: ToolStatusProbe.isPoll(toolName: toolName),
+                                  isCodeMode: ToolStatusProbe.isCodeMode(toolName: toolName, source: source)))
                 invocationIDByBlock[globalIndex] = globalIndex
                 if let callID = blocks[position].toolCallID {
-                    slotByCallID[callID] = slot
+                    enqueue(slot, callID: callID)
+                    turnIDCalls.append(slot)
                 } else {
                     turnCalls.append(slot)
                 }
@@ -91,28 +160,31 @@ struct ToolInvocationIndex: Sendable {
                 let callID = blocks[position].toolCallID
                 var target: Int?
                 if let callID {
-                    target = slotByCallID[callID]
+                    target = slotForCallID(callID)
                 } else if kind == .toolOut {
-                    if turnHead < turnCalls.count {
-                        target = turnCalls[turnHead]
-                        turnHead += 1
-                    } else {
-                        target = earlierCalls.popLast()
-                    }
+                    target = slotForOutputWithoutID()
+                } else {
+                    continue   // an `.error` block without an id is a plain error
                 }
                 if target == nil {
-                    // An `.error` block joins only the call its id names.
-                    guard kind == .toolOut else { continue }
                     target = slots.count
-                    slots.append(Slot(id: globalIndex, callPosition: nil, outputPositions: [], turn: turn))
-                    if let callID { slotByCallID[callID] = target }
+                    slots.append(Slot(id: globalIndex, callPosition: nil, turn: turn))
+                    if let callID { enqueue(slots.count - 1, callID: callID) }
                 }
                 guard let slot = target else { continue }
                 slots[slot].outputPositions.append(position)
                 let invocationID = slots[slot].id
                 invocationIDByBlock[globalIndex] = invocationID
-                if let processID = ToolStatusProbe.runningProcessID(in: blocks[position].text) {
+                let ownsProcesses = !slots[slot].isPoll
+                if ownsProcesses, let processID = ToolStatusProbe.runningProcessID(in: blocks[position].text) {
                     processOwners[processID] = invocationID
+                }
+                if slots[slot].isCodeMode {
+                    let facts = ToolStatusProbe.codeModeFacts(in: blocks[position].text)
+                    slots[slot].codeModeFacts.append(facts)
+                    if ownsProcesses {
+                        for sessionID in facts.sessionIDs { processOwners[sessionID] = invocationID }
+                    }
                 }
             case .assistant:
                 break
@@ -133,7 +205,8 @@ struct ToolInvocationIndex: Sendable {
                                                 outputs: outputs,
                                                 source: source,
                                                 laterBlocksExist: slot.turn < lastTurn,
-                                                turnAbortedAfter: abortedAfter)
+                                                turnAbortedAfter: abortedAfter,
+                                                precomputedCodeModeFacts: slot.isCodeMode ? slot.codeModeFacts : nil)
             invocations.append(ToolInvocationRef(id: slot.id,
                                                  callBlockIndex: call?.globalBlockIndex,
                                                  outputBlockIndices: outputs.map(\.globalBlockIndex),

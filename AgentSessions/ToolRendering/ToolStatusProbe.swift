@@ -6,22 +6,24 @@ enum ToolStatus: Equatable, Sendable {
 }
 
 /// The cheap status pass (spec §6.2 pass 1, §6.8 Errors filter). It reads sidecars, flags,
-/// dispositions and short header lines. It decodes no output body. The one whole-text read is
-/// the Codex code-mode `"exit_code":` substring scan (spec §6.8).
+/// dispositions and short header lines. It decodes no output body. Codex code mode reads only
+/// each chunk's metadata, the keys before its `output` (spec §6.8).
 ///
 /// Precedence:
 /// 1. No output: Cursor → `unknown`. A turn_aborted or interrupt notice after the call in its
 ///    turn → `interrupted`. No later turn in the session → `pending`. Otherwise `noResult`.
-/// 2. Exit code. A sidecar `exitCode` on any member block wins. Codex code mode (`exec`): any
-///    non-zero `"exit_code":` value → `failed(exitCode: N)`, a `Script failed` header →
-///    `failed(exitCode: nil)`. Other tools: the exit forms on the first line of each output
-///    (Codex `Chunk ID:` / `Wall time:` envelope lines before it are skipped), and
-///    `<exit_code>N</exit_code>` in the first 200 bytes. Exit 0 → `success`. A grep-family
-///    command with exit 1 and an empty body → `success` ("no matches"). Other codes → `failed`.
+/// 2. Exit code. A sidecar `exitCode` on any member block wins. Codex code mode (`exec`): the
+///    first chunk with a non-zero `exit_code` → `failed(exitCode: N)`, except exit 1 with an
+///    empty `output` (no matches); a `Script failed` header → `failed(exitCode: nil)`. Other
+///    tools: the exit forms on the first line of each output (Codex `Chunk ID:` / `Wall time:`
+///    envelope lines before it are skipped), and `<exit_code>N</exit_code>` in the first 200
+///    bytes. Exit 0 → `success`. A grep-family command with exit 1 and an empty body →
+///    `success` ("no matches"). Other codes → `failed`.
 /// 3. A `rejected` disposition → `rejected`.
 /// 4. `isErrorOutput`, a `runtimeError` disposition or `sidecar.isError` → `failed(exitCode: nil)`.
 /// 5. `sidecar.interrupted` → `interrupted`.
-/// 6. A "Process running with session ID" / "Script running with cell ID" header → `pending` (spec §7.4).
+/// 6. A "Process running with session ID" / "Script running with cell ID" header, or a code-mode
+///    chunk with a `session_id` and no `exit_code` → `pending` (spec §7.4).
 /// 7. Otherwise `success`.
 enum ToolStatusProbe {
 
@@ -33,21 +35,34 @@ enum ToolStatusProbe {
                        source: SessionSource,
                        laterBlocksExist: Bool,
                        turnAbortedAfter: Bool) -> ToolStatus {
+        status(call: call, outputs: outputs, source: source, laterBlocksExist: laterBlocksExist,
+               turnAbortedAfter: turnAbortedAfter, precomputedCodeModeFacts: nil)
+    }
+
+    /// `precomputedCodeModeFacts`: one entry per output, already read by
+    /// `ToolInvocationIndex.build` for a code-mode call, so the chunks are scanned once.
+    static func status(call: SessionTranscriptBuilder.LogicalBlock?,
+                       outputs: [SessionTranscriptBuilder.LogicalBlock],
+                       source: SessionSource,
+                       laterBlocksExist: Bool,
+                       turnAbortedAfter: Bool,
+                       precomputedCodeModeFacts: [CodeModeFacts]?) -> ToolStatus {
         guard !outputs.isEmpty else {
             if source == .cursor { return .unknown }
             if turnAbortedAfter { return .interrupted }
             return laterBlocksExist ? .noResult : .pending
         }
 
-        let isCodeMode = source == .codex && call?.toolName == "exec"
+        let codeMode = isCodeMode(toolName: call?.toolName, source: source)
         if let code = sidecarExitCode(call: call, outputs: outputs) {
-            return status(exitCode: code, call: call, outputs: outputs, isCodeMode: isCodeMode)
+            return status(exitCode: code, call: call, outputs: outputs, isCodeMode: codeMode)
         }
-        if isCodeMode {
-            for output in outputs {
-                if let code = codeModeNonZeroExitCode(in: output.text) { return .failed(exitCode: code) }
-            }
+        var hasRunningChunk = false
+        if codeMode {
+            let facts = precomputedCodeModeFacts ?? outputs.map { codeModeFacts(in: $0.text) }
+            if let code = facts.lazy.compactMap(\.failureExitCode).first { return .failed(exitCode: code) }
             if outputs.contains(where: { hasScriptFailedHeader($0.text) }) { return .failed(exitCode: nil) }
+            hasRunningChunk = facts.contains { $0.hasRunningChunk }
         } else if let code = headerExitCode(outputs: outputs) {
             return status(exitCode: code, call: call, outputs: outputs, isCodeMode: false)
         }
@@ -61,8 +76,19 @@ enum ToolStatusProbe {
             || outputs.contains(where: { $0.toolSidecar?.interrupted == true }) {
             return .interrupted
         }
-        if outputs.contains(where: { runningProcessID(in: $0.text) != nil }) { return .pending }
+        if hasRunningChunk || outputs.contains(where: { runningProcessID(in: $0.text) != nil }) { return .pending }
         return .success
+    }
+
+    /// Codex code mode: the custom tool `exec`, whose output is a header plus JSON chunk items.
+    static func isCodeMode(toolName: String?, source: SessionSource) -> Bool {
+        source == .codex && toolName == "exec"
+    }
+
+    /// Calls that poll a running process or cell. They never own a process (Task 9 resolves a
+    /// poll to the command that started the process).
+    static func isPoll(toolName: String?) -> Bool {
+        toolName == "write_stdin" || toolName == "wait"
     }
 
     // MARK: Exit codes
@@ -179,39 +205,119 @@ enum ToolStatusProbe {
 
     // MARK: Codex code mode
 
-    private static let exitCodeKey = Array("exit_code".utf8)
     private static let scriptFailedHeader = Array("script failed".utf8)
 
-    /// The first non-zero `"exit_code": N` value in `text` (also inside a JSON-encoded string,
-    /// `\"exit_code\":N`). A substring scan: no JSON decode. It jumps between `x` bytes (rare in
-    /// real Codex output) with `memchr`, which is about 5x faster than `memmem` there.
-    static func codeModeNonZeroExitCode(in text: String) -> Int? {
-        let key = exitCodeKey
-        return withUTF8(text) { buf -> Int? in
-            guard let base = buf.baseAddress else { return nil }
-            let anchorOffset = 1   // the `x` of "exit_code"
-            var from = anchorOffset
+    /// What the probe reads from one code-mode output's chunk metadata.
+    struct CodeModeFacts: Equatable, Sendable {
+        /// The first chunk exit code that is a failure: non-zero, and not exit 1 with an empty
+        /// `output` (a grep-family "no matches").
+        var failureExitCode: Int?
+        /// A chunk has a `session_id` and no `exit_code`: its process still runs.
+        var hasRunningChunk = false
+        /// Every chunk `session_id`, in order.
+        var sessionIDs: [String] = []
+    }
+
+    /// Chunk metadata is short; a chunk's `output` key past this many bytes ends its metadata.
+    private static let chunkMetadataLimit = 512
+    /// `"chunk_id"` and `\"chunk_id\"` after the opening `{` of a chunk item.
+    private static let plainChunkTail = Array(#""chunk_id""#.utf8)
+    private static let encodedChunkTail = Array(#"\"chunk_id\""#.utf8)
+    private static let plainOutputKey = Array(#""output":"#.utf8)
+    private static let encodedOutputKey = Array(#"\"output\":"#.utf8)
+    private static let plainEmptyString = Array("\"\"".utf8)
+    private static let encodedEmptyString = Array(#"\"\""#.utf8)
+    private static let exitCodeName = Array("exit_code".utf8)
+    private static let sessionIDName = Array("session_id".utf8)
+
+    /// Reads every chunk item in a code-mode output: `{"chunk_id":…}` and the JSON-encoded string
+    /// form `"{\"chunk_id\":…}"`. Content items are joined with no separator, so a chunk can
+    /// start anywhere. Only the metadata before the chunk's `output` key is read (Codex writes
+    /// `exit_code` and `session_id` there), so text inside an output body is never taken for a
+    /// chunk fact. The scan jumps between `{` bytes (rare) with `memchr`.
+    static func codeModeFacts(in text: String) -> CodeModeFacts {
+        withUTF8(text) { buf -> CodeModeFacts in
+            var facts = CodeModeFacts()
+            guard let base = buf.baseAddress else { return facts }
+            var from = 0
             while from < buf.count,
-                  let found = memchr(base + from, Int32(UInt8(ascii: "x")), buf.count - from) {
-                let anchor = UnsafeRawPointer(base).distance(to: UnsafeRawPointer(found))
-                from = anchor + 1
-                let hit = anchor - anchorOffset
-                guard hit + key.count <= buf.count, buf[hit + 4] == UInt8(ascii: "_"),
-                      key.withUnsafeBufferPointer({ memcmp(base + hit, $0.baseAddress!, $0.count) }) == 0
-                else { continue }
-                guard hit > 0, buf[hit - 1] == quote else { continue }
-                var i = hit + key.count
-                if i < buf.count, buf[i] == backslash { i += 1 }
-                guard i < buf.count, buf[i] == quote else { continue }
-                i += 1
-                skipSpaces(buf, &i, end: buf.count)
-                guard i < buf.count, buf[i] == colon else { continue }
-                i += 1
-                skipSpaces(buf, &i, end: buf.count)
-                if let code = parseInt(buf, &i, end: buf.count), code != 0 { return code }
+                  let found = memchr(base + from, Int32(UInt8(ascii: "{")), buf.count - from) {
+                let brace = UnsafeRawPointer(base).distance(to: UnsafeRawPointer(found))
+                from = brace + 1
+                guard let chunk = chunkStart(buf, brace: brace) else { continue }
+                let window = min(buf.count, chunk.start + chunkMetadataLimit)
+                let outputKey = chunk.encoded ? encodedOutputKey : plainOutputKey
+                let outputAt = find(outputKey, in: buf, from: chunk.start, to: window)
+                let metadata = chunk.start..<(outputAt ?? window)
+                let exitCode = chunkValueStart(buf, metadata, key: exitCodeName).flatMap { start -> Int? in
+                    var i = start
+                    return parseInt(buf, &i, end: metadata.upperBound)
+                }
+                let sessionID = chunkValueStart(buf, metadata, key: sessionIDName).flatMap {
+                    chunkToken(buf, from: $0, end: metadata.upperBound)
+                }
+                var outputIsEmpty = false
+                if let outputAt {
+                    var i = outputAt + outputKey.count
+                    skipSpaces(buf, &i, end: buf.count)
+                    outputIsEmpty = matches(buf, at: i, chunk.encoded ? encodedEmptyString : plainEmptyString)
+                }
+                if let exitCode, exitCode != 0, !(exitCode == 1 && outputIsEmpty), facts.failureExitCode == nil {
+                    facts.failureExitCode = exitCode
+                }
+                if let sessionID {
+                    facts.sessionIDs.append(sessionID)
+                    if exitCode == nil { facts.hasRunningChunk = true }
+                }
+                from = max(from, metadata.upperBound)
             }
-            return nil
+            return facts
         }
+    }
+
+    /// The start of a chunk item whose `{` sits at `brace`. A plain item is `{"chunk_id"` (an
+    /// output body cannot hold that: its quotes are escaped). A JSON-encoded item is
+    /// `"{\"chunk_id\"` that opens an item: at the start, after a newline, or right after the
+    /// previous item's closing `}` or `"`. That rules out a body that starts with the same text.
+    private static func chunkStart(_ buf: UnsafeBufferPointer<UInt8>, brace: Int) -> (start: Int, encoded: Bool)? {
+        if matches(buf, at: brace + 1, plainChunkTail) { return (brace, false) }
+        guard brace >= 1, buf[brace - 1] == quote, matches(buf, at: brace + 1, encodedChunkTail) else { return nil }
+        if brace >= 2 {
+            let before = buf[brace - 2]
+            guard before == newline || before == closingBrace || before == quote else { return nil }
+        }
+        return (brace - 1, true)
+    }
+
+    /// Where the value of `key` starts inside chunk metadata: after `"key":` or `\"key\":`.
+    private static func chunkValueStart(_ buf: UnsafeBufferPointer<UInt8>, _ metadata: Range<Int>,
+                                        key: [UInt8]) -> Int? {
+        var from = metadata.lowerBound
+        while let hit = find(key, in: buf, from: from, to: metadata.upperBound) {
+            from = hit + 1
+            guard hit > metadata.lowerBound, buf[hit - 1] == quote else { continue }
+            var i = hit + key.count
+            if i < metadata.upperBound, buf[i] == backslash { i += 1 }
+            guard i < metadata.upperBound, buf[i] == quote else { continue }
+            i += 1
+            skipSpaces(buf, &i, end: metadata.upperBound)
+            guard i < metadata.upperBound, buf[i] == colon else { continue }
+            i += 1
+            skipSpaces(buf, &i, end: metadata.upperBound)
+            return i
+        }
+        return nil
+    }
+
+    /// A number or (escaped) string value token at `from`.
+    private static func chunkToken(_ buf: UnsafeBufferPointer<UInt8>, from: Int, end: Int) -> String? {
+        var start = from
+        if start < end, buf[start] == backslash { start += 1 }
+        if start < end, buf[start] == quote { start += 1 }
+        var stop = start
+        while stop < end, isTokenByte(buf[stop]) { stop += 1 }
+        guard stop > start else { return nil }
+        return String(decoding: UnsafeBufferPointer(rebasing: buf[start..<stop]), as: UTF8.self)
     }
 
     /// True when `text` starts (after whitespace) with the code-mode `Script failed` header.
@@ -321,8 +427,20 @@ enum ToolStatusProbe {
     private static let colon = UInt8(ascii: ":")
     private static let quote = UInt8(ascii: "\"")
     private static let backslash = UInt8(ascii: "\\")
+    private static let closingBrace = UInt8(ascii: "}")
 
     private static func isSpace(_ byte: UInt8) -> Bool { byte == 0x20 || byte == 0x09 }
+
+    /// Exact byte match of `bytes` at `index`.
+    private static func matches(_ buf: UnsafeBufferPointer<UInt8>, at index: Int, _ bytes: [UInt8]) -> Bool {
+        guard index >= 0, index + bytes.count <= buf.count else { return false }
+        var k = 0
+        while k < bytes.count {
+            if buf[index + k] != bytes[k] { return false }
+            k += 1
+        }
+        return true
+    }
 
     private static func lower(_ byte: UInt8) -> UInt8 { (byte >= 0x41 && byte <= 0x5A) ? byte + 0x20 : byte }
 
@@ -376,11 +494,12 @@ enum ToolStatusProbe {
         return UnsafeRawPointer(base).distance(to: UnsafeRawPointer(hit))
     }
 
-    /// The first offset of `needle` in `buf` at or after `from` (`memmem`).
-    private static func find(_ needle: [UInt8], in buf: UnsafeBufferPointer<UInt8>, from: Int) -> Int? {
-        guard let base = buf.baseAddress, from >= 0, from < buf.count, !needle.isEmpty else { return nil }
+    /// The first offset of `needle` in `buf[from..<end]` (`memmem`); `end` defaults to the buffer end.
+    private static func find(_ needle: [UInt8], in buf: UnsafeBufferPointer<UInt8>, from: Int, to end: Int? = nil) -> Int? {
+        let stop = min(end ?? buf.count, buf.count)
+        guard let base = buf.baseAddress, from >= 0, from < stop, !needle.isEmpty else { return nil }
         return needle.withUnsafeBytes { little -> Int? in
-            guard let hit = memmem(base + from, buf.count - from, little.baseAddress, little.count) else {
+            guard let hit = memmem(base + from, stop - from, little.baseAddress, little.count) else {
                 return nil
             }
             return UnsafeRawPointer(base).distance(to: UnsafeRawPointer(hit))
