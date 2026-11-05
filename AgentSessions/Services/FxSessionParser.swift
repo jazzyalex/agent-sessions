@@ -416,6 +416,7 @@ enum FxSessionParser {
                                            toolName: durableString(payload["tool_name"]),
                                            // `arguments_json` is already a JSON string on the wire.
                                            toolInput: durableString(payload["arguments_json"]),
+                                           toolCallID: durableString(payload["call_id"]).flatMap { ToolCallID.from($0) },
                                            messageID: durableString(payload["call_id"]),
                                            time: time, raw: line))
 
@@ -425,6 +426,8 @@ enum FxSessionParser {
                                              toolName: durableString(payload["tool_name"]),
                                              toolOutput: eventLogToolOutput(payload, sessionFile: url,
                                                                             readArtifact: readArtifacts),
+                                             toolCallID: durableString(payload["call_id"]).flatMap { ToolCallID.from($0) },
+                                             toolSidecar: ToolSidecar(exitCode: commandExitCode(payload["command_process_presentation"])).orNilIfEmpty,
                                              messageID: durableString(payload["call_id"]),
                                              time: created ?? time, raw: line))
 
@@ -545,6 +548,8 @@ enum FxSessionParser {
     private static func retimed(_ event: SessionEvent, to time: Date) -> SessionEvent {
         SessionEvent(id: event.id, timestamp: time, kind: event.kind, role: event.role, text: event.text,
                      toolName: event.toolName, toolInput: event.toolInput, toolOutput: event.toolOutput,
+                     toolCallID: event.toolCallID, toolOutputValue: event.toolOutputValue,
+                     toolSidecar: event.toolSidecar, toolDisposition: event.toolDisposition,
                      messageID: event.messageID, parentID: event.parentID, isDelta: event.isDelta,
                      rawJSON: event.rawJSON)
     }
@@ -686,6 +691,7 @@ enum FxSessionParser {
               // `arguments_json` is already a JSON string on the wire.
               toolInput: durableString(call["arguments_json"]),
               toolOutput: nil,
+              toolCallID: durableString(call["id"]).flatMap { ToolCallID.from($0) },
               messageID: durableString(call["id"]),
               raw: jsonEncode(call))
     }
@@ -700,6 +706,8 @@ enum FxSessionParser {
                      toolName: durableString(result["tool_name"]),
                      toolInput: nil,
                      toolOutput: output,
+                     toolCallID: durableString(result["tool_call_id"]).flatMap { ToolCallID.from($0) },
+                     toolSidecar: ToolSidecar(exitCode: commandExitCode(result["command_process_presentation"])).orNilIfEmpty,
                      messageID: durableString(result["tool_call_id"]),
                      time: (result["created_at_ms"] as? NSNumber).flatMap { msDate($0.int64Value) },
                      raw: jsonEncode(result))
@@ -750,12 +758,24 @@ enum FxSessionParser {
                               toolName: String? = nil,
                               toolInput: String? = nil,
                               toolOutput: String? = nil,
+                              toolCallID: String? = nil,
+                              toolSidecar: ToolSidecar? = nil,
                               messageID: String?,
                               time: Date? = nil,
                               raw: String) -> SessionEvent {
         SessionEvent(id: "\(idPrefix)-\(suffix)", timestamp: time, kind: kind, role: role, text: text,
                      toolName: toolName, toolInput: toolInput, toolOutput: toolOutput,
+                     toolCallID: toolCallID, toolSidecar: toolSidecar,
                      messageID: messageID, parentID: nil, isDelta: false, rawJSON: raw)
+    }
+
+    /// The process exit code of a tool result's `command_process_presentation`. fx writes it as
+    /// `{"kind":"exit_code","value":N}` (schema 3+) or `{"exit_code":N}`; any other kind carries none.
+    private static func commandExitCode(_ presentation: Any?) -> Int? {
+        guard let dict = presentation as? [String: Any] else { return nil }
+        if let code = ToolSidecar.exitCode(from: dict["exit_code"]) { return code }
+        guard (dict["kind"] as? String) == "exit_code" else { return nil }
+        return ToolSidecar.exitCode(from: dict["value"])
     }
 
     /// fx timestamps are epoch milliseconds, like OpenCode's and unlike Devin's seconds.

@@ -659,6 +659,8 @@ enum QwenSessionParser {
                               parentID: String?) -> SessionEvent {
         SessionEvent(id: id, timestamp: timestamp, kind: kind, role: role, text: text,
                      toolName: toolName, toolInput: toolInput, toolOutput: toolOutput,
+                     // Only tool events pass a messageID: `functionCall.id` / `functionResponse.id` / `callId`.
+                     toolCallID: (kind == .tool_call || kind == .tool_result || kind == .error) ? ToolCallID.from(messageID) : nil,
                      messageID: messageID, parentID: parentID, isDelta: false, rawJSON: rawJSON)
     }
 

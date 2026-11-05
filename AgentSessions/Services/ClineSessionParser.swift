@@ -334,6 +334,7 @@ enum ClineSessionParser {
                                  toolName: block["name"] as? String,
                                  toolInput: jsonString(block["input"]),
                                  toolOutput: nil,
+                                 toolCallID: ToolCallID.from(block["id"]),
                                  messageID: block["id"] as? String ?? messageID,
                                  parentID: messageID, isDelta: false, rawJSON: raw)]
         case "tool_result":
@@ -343,6 +344,7 @@ enum ClineSessionParser {
                                  toolName: block["name"] as? String,
                                  toolInput: nil,
                                  toolOutput: output,
+                                 toolCallID: ToolCallID.from(block["tool_use_id"]),
                                  messageID: block["tool_use_id"] as? String ?? messageID,
                                  parentID: messageID, isDelta: false, rawJSON: raw)]
         default:

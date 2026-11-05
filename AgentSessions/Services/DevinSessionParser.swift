@@ -60,6 +60,7 @@ enum DevinSessionParser {
                                         toolName: call["name"] as? String,
                                         toolInput: jsonString(call["arguments"]),
                                         toolOutput: nil,
+                                        toolCallID: ToolCallID.from(call["id"]),
                                         messageID: call["id"] as? String,
                                         parentID: messageID, isDelta: false, rawJSON: json))
             }
@@ -78,6 +79,7 @@ enum DevinSessionParser {
             }
             return [SessionEvent(id: "\(nodeID)-r", timestamp: time, kind: .tool_result, role: role, text: nil,
                                  toolName: nil, toolInput: nil, toolOutput: output,
+                                 toolCallID: ToolCallID.from(object["tool_call_id"]),
                                  messageID: object["tool_call_id"] as? String,
                                  parentID: nil, isDelta: false, rawJSON: json)]
 

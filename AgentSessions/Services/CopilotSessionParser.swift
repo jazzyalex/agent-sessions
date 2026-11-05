@@ -124,6 +124,9 @@ final class CopilotSessionParser {
         var toolByCallID: [String: (name: String?, args: Any?)] = [:]
         // Track toolCalls we emitted so we can attach args to results even if execution events come first.
         var seenToolCallIDs: Set<String> = []
+        // `toolTitle` (the agent's label for a call) arrives on toolRequests / tool.execution_start,
+        // but the result event that carries the exit code does not repeat it.
+        var toolTitleByCallID: [String: String] = [:]
 
         do {
             try reader.forEachLine { rawLine in
@@ -206,6 +209,8 @@ final class CopilotSessionParser {
                                 toolByCallID[toolCallId] = (name: name, args: args)
                                 seenToolCallIDs.insert(toolCallId)
                             }
+                            let title = ToolCallID.from(tr["toolTitle"])
+                            if let toolCallId, !toolCallId.isEmpty, let title { toolTitleByCallID[toolCallId] = title }
 
                             events.append(SessionEvent(
                                 id: baseID + String(format: "-t%02d", tci),
@@ -216,6 +221,8 @@ final class CopilotSessionParser {
                                 toolName: name,
                                 toolInput: stringifyJSON(args),
                                 toolOutput: nil,
+                                toolCallID: ToolCallID.from(toolCallId),
+                                toolSidecar: ToolSidecar(agentLabel: title).orNilIfEmpty,
                                 messageID: toolCallId,
                                 parentID: messageID,
                                 isDelta: false,
@@ -237,6 +244,10 @@ final class CopilotSessionParser {
                         toolByCallID[toolCallId] = (name: toolName, args: args)
                     }
 
+                    if let title = ToolCallID.from(data["toolTitle"]), toolTitleByCallID[toolCallId] == nil {
+                        toolTitleByCallID[toolCallId] = title
+                    }
+
                     // Keep as meta unless we need it to backfill a missing toolRequests entry.
                     if !seenToolCallIDs.contains(toolCallId) {
                         seenToolCallIDs.insert(toolCallId)
@@ -249,6 +260,8 @@ final class CopilotSessionParser {
                             toolName: toolName,
                             toolInput: stringifyJSON(args),
                             toolOutput: nil,
+                            toolCallID: ToolCallID.from(toolCallId),
+                            toolSidecar: ToolSidecar(agentLabel: toolTitleByCallID[toolCallId]).orNilIfEmpty,
                             messageID: toolCallId,
                             parentID: messageID,
                             isDelta: false,
@@ -281,6 +294,11 @@ final class CopilotSessionParser {
                         toolName: toolName,
                         toolInput: toolInput,
                         toolOutput: output,
+                        toolCallID: ToolCallID.from(toolCallId),
+                        toolSidecar: ToolSidecar(
+                            exitCode: ToolSidecar.exitCode(from: (data["shellExecution"] as? [String: Any])?["exitCode"]),
+                            agentLabel: toolCallId.flatMap { toolTitleByCallID[$0] }
+                        ).orNilIfEmpty,
                         messageID: toolCallId,
                         parentID: toolCallId,
                         isDelta: false,

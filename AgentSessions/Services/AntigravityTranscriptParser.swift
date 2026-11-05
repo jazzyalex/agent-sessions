@@ -27,7 +27,9 @@ enum AntigravityTranscriptParser {
         var lastToolName: String? = nil
         // Tool results follow their PLANNER_RESPONSE in call order, so the names of
         // the calls not yet answered pair each result with the call that made it.
-        var pendingToolNames: [String?] = []
+        // Each entry also holds the synthesized call id ("ag:<step_index>:<k>") and the agent's label,
+        // so the result takes the same id and label as its call.
+        var pendingToolNames: [(name: String?, id: String, label: String?)] = []
         var firstDate: Date? = nil
         var lastDate: Date? = nil
         var count = 0
@@ -70,14 +72,21 @@ enum AntigravityTranscriptParser {
                                             markTruncated(assistantText, contentTruncated && content != nil),
                                             nil, nil, nil, raw))
                     if let calls = obj["tool_calls"] as? [[String: Any]] {
-                        pendingToolNames = calls.map { $0["name"] as? String }
+                        let stepIndex = (obj["step_index"] as? Int) ?? idx
+                        pendingToolNames = calls.enumerated().map { ci, call in
+                            (name: call["name"] as? String,
+                             id: "ag:\(stepIndex):\(ci)",
+                             label: toolSummaryLabel(call["args"] as? [String: Any]))
+                        }
                         for (ci, call) in calls.enumerated() {
                             let name = call["name"] as? String
                             lastToolName = name
                             let input = (call["args"] as? [String: Any]).map {
                                 ToolJSON.string(from: $0, pretty: false) ?? ""
                             }
-                            events.append(makeEvent(sid, "\(eventID(idx))-t\(ci)", ts, .tool_call, "assistant", nil, name, input, nil, raw))
+                            events.append(makeEvent(sid, "\(eventID(idx))-t\(ci)", ts, .tool_call, "assistant", nil, name, input, nil, raw,
+                                                    toolCallID: pendingToolNames[ci].id,
+                                                    toolSidecar: ToolSidecar(agentLabel: pendingToolNames[ci].label).orNilIfEmpty))
                         }
                     }
                 }
@@ -89,9 +98,12 @@ enum AntigravityTranscriptParser {
             // GREP_SEARCH were too, and they are most of the tool results on disk.
             case _ where isToolResult(type: type, source: obj["source"] as? String):
                 if includeEvents {
-                    let name = pendingToolNames.isEmpty ? lastToolName : (pendingToolNames.removeFirst() ?? lastToolName)
+                    let paired = pendingToolNames.isEmpty ? nil : pendingToolNames.removeFirst()
+                    let name = paired?.name ?? lastToolName
                     events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, name, nil,
-                                            markTruncated(content, contentTruncated), raw))
+                                            markTruncated(content, contentTruncated), raw,
+                                            toolCallID: paired?.id,
+                                            toolSidecar: ToolSidecar(agentLabel: paired?.label).orNilIfEmpty))
                 }
             default: // CHECKPOINT, CONVERSATION_HISTORY, SYSTEM_MESSAGE, unknown SYSTEM records
                 if includeEvents {
@@ -224,10 +236,25 @@ enum AntigravityTranscriptParser {
 
     private static func makeEvent(_ sid: String, _ idSuffix: String, _ ts: Date?, _ kind: SessionEventKind,
                                   _ role: String, _ text: String?, _ tool: String?, _ input: String?,
-                                  _ output: String?, _ raw: String) -> SessionEvent {
+                                  _ output: String?, _ raw: String,
+                                  toolCallID: String? = nil, toolSidecar: ToolSidecar? = nil) -> SessionEvent {
         SessionEvent(id: "\(sid)-\(idSuffix)", timestamp: ts, kind: kind, role: role,
                      text: text, toolName: tool, toolInput: input, toolOutput: output,
+                     toolCallID: toolCallID, toolSidecar: toolSidecar,
                      messageID: nil, parentID: nil, isDelta: false, rawJSON: raw)
+    }
+
+    /// `args.toolSummary` is itself a JSON string ("\"Run date command\""); decode it once.
+    /// A value that is not a JSON string is used as written.
+    private static func toolSummaryLabel(_ args: [String: Any]?) -> String? {
+        guard let summary = args?["toolSummary"] as? String else { return nil }
+        var text = summary
+        if let data = summary.data(using: .utf8),
+           let decoded = (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) as? String {
+            text = decoded
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func sha256(path: String) -> String {

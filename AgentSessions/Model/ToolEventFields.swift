@@ -107,3 +107,30 @@ struct ToolSidecar: Codable, Equatable, Sendable {
 
 /// How a tool result ended when the parser classified it as other than a normal output.
 enum ToolDisposition: String, Codable, Sendable { case runtimeError, rejected }
+
+extension ToolSidecar {
+    /// This sidecar, or nil when no field is set (a parser records a sidecar only when it found a fact).
+    var orNilIfEmpty: ToolSidecar? { self == ToolSidecar() ? nil : self }
+
+    /// An exit code from a parsed JSON value: an integer, a whole-number double or a numeric string.
+    /// Booleans and anything else give nil.
+    static func exitCode(from raw: Any?) -> Int? {
+        guard let raw else { return nil }
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+            let double = number.doubleValue
+            return double == double.rounded() && abs(double) < 1e9 ? number.intValue : nil
+        }
+        if let text = raw as? String { return Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return nil
+    }
+}
+
+/// The `toolCallID` a parser records: the agent's own call id, never an empty string
+/// (two empty ids would pair unrelated calls).
+enum ToolCallID {
+    static func from(_ raw: Any?) -> String? {
+        guard let text = raw as? String, !text.isEmpty else { return nil }
+        return text
+    }
+}

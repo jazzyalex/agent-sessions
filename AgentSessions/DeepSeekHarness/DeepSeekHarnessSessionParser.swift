@@ -542,7 +542,8 @@ enum DeepSeekHarnessSessionParser {
         rows.append(makeEvent(id: "dsh-\(sequence)-result", timestamp: timestamp,
                               kind: .tool_result, role: "tool", text: nil,
                               toolName: resultOwner[sequence].flatMap { invocations[$0].name },
-                              toolOutput: output, messageID: callID ?? (message["id"] as? String),
+                              toolOutput: output, toolCallID: ToolCallID.from(callID),
+                              messageID: callID ?? (message["id"] as? String),
                               raw: raw))
     }
 
@@ -562,6 +563,7 @@ enum DeepSeekHarnessSessionParser {
                          kind: .tool_call, role: "assistant", text: nil,
                          toolName: invocation.name,
                          toolInput: invocation.arguments.flatMap { capped($0) },
+                         toolCallID: ToolCallID.from(invocation.callID),
                          messageID: invocation.callID, parentID: invocation.blockMessageID, raw: raw)
     }
 
@@ -793,10 +795,12 @@ enum DeepSeekHarnessSessionParser {
 
     private static func makeEvent(id: String, timestamp: Date?, kind: SessionEventKind, role: String?,
                                   text: String?, toolName: String? = nil, toolInput: String? = nil,
-                                  toolOutput: String? = nil, messageID: String? = nil,
+                                  toolOutput: String? = nil, toolCallID: String? = nil,
+                                  messageID: String? = nil,
                                   parentID: String? = nil, raw: String) -> SessionEvent {
         SessionEvent(id: id, timestamp: timestamp, kind: kind, role: role, text: text,
                      toolName: toolName, toolInput: toolInput, toolOutput: toolOutput,
+                     toolCallID: toolCallID,
                      messageID: messageID, parentID: parentID, isDelta: false, rawJSON: raw)
     }
 }

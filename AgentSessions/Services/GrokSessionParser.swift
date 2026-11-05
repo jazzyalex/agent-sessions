@@ -273,6 +273,7 @@ enum GrokSessionParser {
                                         // `arguments` is already a JSON string on the wire.
                                         toolInput: call["arguments"] as? String,
                                         toolOutput: nil,
+                                        toolCallID: ToolCallID.from(call["id"]),
                                         messageID: call["id"] as? String, parentID: nil, isDelta: false, rawJSON: line))
             }
             if out.isEmpty { out.append(meta(index: index, suffix: "m", role: "assistant", text: nil, time: time, line: line)) }
@@ -282,6 +283,7 @@ enum GrokSessionParser {
             return [SessionEvent(id: eventID(lineIndex: index, suffix: "r"), timestamp: time, kind: .tool_result, role: "tool", text: nil,
                                  toolName: nil, toolInput: nil,
                                  toolOutput: object["content"] as? String,
+                                 toolCallID: ToolCallID.from(object["tool_call_id"]),
                                  messageID: object["tool_call_id"] as? String,
                                  parentID: nil, isDelta: false, rawJSON: line)]
 
