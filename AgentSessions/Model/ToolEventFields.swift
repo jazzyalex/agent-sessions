@@ -74,3 +74,36 @@ indirect enum ToolPayloadValue: Codable, Equatable, Sendable {
         }
     }
 }
+
+extension ToolPayloadValue {
+    /// Largest minified size of a structured tool output kept as `SessionEvent.toolOutputValue` (spec §6.5).
+    static let outputValueMaxBytes = 256 * 1024
+
+    /// The `toolOutputValue` for a raw parsed output: only an array or object whose minified
+    /// `ToolJSON` form is at most `outputValueMaxBytes`. Strings, scalars and larger values give nil.
+    /// `sourceBytes` is the UTF-8 size of the JSON text the output was parsed from (e.g. the JSONL line),
+    /// when known: a minified re-serialization of a sub-value is no longer than that text (bar float
+    /// re-formatting), so a source within the budget skips the extra encode on the parse hot path.
+    static func outputValue(fromRawOutput raw: Any, sourceBytes: Int? = nil) -> ToolPayloadValue? {
+        guard raw is [Any] || raw is [String: Any] else { return nil }
+        if let sourceBytes, sourceBytes <= outputValueMaxBytes {
+            return ToolPayloadValue(jsonObject: raw)
+        }
+        guard let json = ToolJSON.string(from: raw, pretty: false),
+              json.utf8.count <= outputValueMaxBytes else { return nil }
+        return ToolPayloadValue(jsonObject: raw)
+    }
+}
+
+/// Structured facts an agent records next to a tool result's text (spec §7.1 item 7).
+/// P1 fields only; P2/P3 add diff, persisted-output, subagent stats and image refs.
+struct ToolSidecar: Codable, Equatable, Sendable {
+    var stdout: String?, stderr: String?
+    var exitCode: Int?, isError: Bool?, interrupted: Bool?
+    /// Agent-written label for the call: Antigravity toolSummary (decoded once), OpenCode state.title,
+    /// Copilot toolTitle, Kimi display summary.
+    var agentLabel: String?
+}
+
+/// How a tool result ended when the parser classified it as other than a normal output.
+enum ToolDisposition: String, Codable, Sendable { case runtimeError, rejected }

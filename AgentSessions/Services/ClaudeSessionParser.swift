@@ -608,6 +608,7 @@ final class ClaudeSessionParser {
                             toolName: toolName,
                             toolInput: toolInput,
                             toolOutput: nil,
+                            toolCallID: nonEmptyString(block["id"]),
                             messageID: messageID,
                             parentID: parentID,
                             isDelta: false,
@@ -622,34 +623,40 @@ final class ClaudeSessionParser {
                     let role: String?
                     let text: String?
                     let toolOutputField: String?
+                    let toolDisposition: ToolDisposition?
                     switch disposition {
                     case .runtimeError:
                         kind = .error
                         role = "tool"
                         text = toolOutput
                         toolOutputField = nil
+                        toolDisposition = .runtimeError
                     case .rejectedOrPermissions:
                         // Hide by default (meta is off), but keep for JSON inspection.
                         kind = .meta
                         role = "system"
                         text = toolOutput.flatMap { "Rejected tool use: " + $0 }
                         toolOutputField = nil
+                        toolDisposition = .rejected
                     case .notFoundOrMismatch:
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     case .otherToolFailure:
                         // Keep visible as tool output unless we can confidently call it runtime-ish.
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     case .ok:
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     }
                     out.append(
                         SessionEvent(
@@ -661,6 +668,9 @@ final class ClaudeSessionParser {
                             toolName: (block["name"] as? String) ?? (block["tool"] as? String),
                             toolInput: nil,
                             toolOutput: toolOutputField,
+                            toolCallID: nonEmptyString(block["tool_use_id"]),
+                            toolSidecar: toolResultSidecar(from: obj, block: block),
+                            toolDisposition: toolDisposition,
                             messageID: messageID,
                             parentID: parentID,
                             isDelta: false,
@@ -720,6 +730,24 @@ final class ClaudeSessionParser {
                 rawJSON: rawJSON
             )
         ]
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let s = value as? String, !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Sidecar for a tool_result: `stdout`/`stderr`/`interrupted` from a `toolUseResult` object
+    /// (empty strings kept as ""), `isError` from the block's `is_error`. Nil when none is present.
+    private static func toolResultSidecar(from obj: [String: Any], block: [String: Any]) -> ToolSidecar? {
+        var sidecar = ToolSidecar()
+        if let result = obj["toolUseResult"] as? [String: Any] {
+            sidecar.stdout = result["stdout"] as? String
+            sidecar.stderr = result["stderr"] as? String
+            sidecar.interrupted = result["interrupted"] as? Bool
+        }
+        sidecar.isError = block["is_error"] as? Bool
+        return sidecar == ToolSidecar() ? nil : sidecar
     }
 
     private enum ToolResultDisposition {

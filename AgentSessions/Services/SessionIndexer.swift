@@ -3081,6 +3081,7 @@ final class SessionIndexer: ObservableObject {
         var toolOutput: String? = nil
         var toolNamespace: String? = nil
         var toolCallID: String? = nil
+        var toolOutputValue: ToolPayloadValue? = nil
         var model: String? = nil
         var messageID: String? = nil
         var parentID: String? = nil
@@ -3222,6 +3223,10 @@ final class SessionIndexer: ObservableObject {
                 } else {
                     outputs.append(Self.stringifyJSON(output, pretty: true) ?? String(describing: output))
                 }
+                // Array/object outputs also keep their structure (≤ 256 KB); strings stay text only.
+                if output is [Any] || output is [String: Any] {
+                    toolOutputValue = ToolPayloadValue.outputValue(fromRawOutput: output, sourceBytes: line.utf8.count)
+                }
             }
             if !outputs.isEmpty {
                 toolOutput = outputs.joined(separator: "\n")
@@ -3243,6 +3248,7 @@ final class SessionIndexer: ObservableObject {
             toolOutput: toolOutput,
             toolNamespace: toolNamespace,
             toolCallID: toolCallID,
+            toolOutputValue: toolOutputValue,
             messageID: messageID,
             parentID: parentID,
             isDelta: isDelta,
@@ -3404,7 +3410,11 @@ final class SessionIndexer: ObservableObject {
         // For extremely long lines (>5MB UTF-8 bytes), skip entirely
         let utf8Count = line.utf8.count
         if utf8Count > 5_000_000 {
-            // Just return a minimal JSON stub - the line is too large to parse usefully anyway
+            // Just return a minimal JSON stub - the line is too large to parse usefully anyway.
+            // The stub keeps `call_id`, so the omitted output still pairs with its call.
+            if let callID = rawCallID(in: line) {
+                return #"{"type":"omitted","call_id":"\#(callID)","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
+            }
             return #"{"type":"omitted","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
         }
 
@@ -3442,6 +3452,23 @@ final class SessionIndexer: ObservableObject {
         }
 
         return result
+    }
+
+    private static let rawCallIDKey = Array(#""call_id":""#.utf8)
+
+    /// The first `"call_id":"…"` value in a raw JSONL line, found without a JSON parse.
+    /// Codex writes `call_id` before `output`, so the first match is the payload's own id.
+    /// Returns nil when the key is missing or the value is empty, longer than 256 bytes,
+    /// or holds an escape or control byte (the value is embedded in a stub unescaped).
+    static func rawCallID(in line: String) -> String? {
+        let utf8 = line.utf8
+        guard let key = utf8.firstRange(of: rawCallIDKey) else { return nil }
+        let tail = utf8[key.upperBound...].prefix(257)
+        guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+        let value = utf8[key.upperBound..<end]
+        guard !value.isEmpty,
+              !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
+        return String(decoding: value, as: UTF8.self)
     }
 
     /// Composite sanitizer for unusually large JSONL lines.

@@ -22,6 +22,13 @@ public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     public var toolNamespace: String? = nil
     /// Provider call id linking a tool call to its output (Codex `call_id`); nil when unknown.
     public var toolCallID: String? = nil
+    // Internal (not `public`): the payload types are module-internal.
+    /// Structured tool output, set only when the original output is an array/object of at most 256 KB minified.
+    var toolOutputValue: ToolPayloadValue? = nil
+    /// Structured facts recorded next to the result text (stdout/stderr split, exit code, agent label).
+    var toolSidecar: ToolSidecar? = nil
+    /// Set when the parser classified the result as a runtime error or a user rejection.
+    var toolDisposition: ToolDisposition? = nil
     // Delta/stream grouping
     public let messageID: String?
     public let parentID: String?

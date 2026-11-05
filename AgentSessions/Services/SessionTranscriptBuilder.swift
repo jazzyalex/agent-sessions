@@ -309,6 +309,12 @@ struct SessionTranscriptBuilder {
         var toolNamespace: String? = nil
         /// Provider call id of the originating tool call/result; outputs with different ids never merge.
         var toolCallID: String? = nil
+        /// Structured output of the originating result (array/object, ≤ 256 KB minified).
+        var toolOutputValue: ToolPayloadValue? = nil
+        /// Structured facts recorded next to the originating result.
+        var toolSidecar: ToolSidecar? = nil
+        /// Runtime error or user rejection, when the parser classified the result as one.
+        var toolDisposition: ToolDisposition? = nil
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
@@ -348,7 +354,10 @@ struct SessionTranscriptBuilder {
                                 eventID: e.id,
                                 rawJSON: e.rawJSON,
                                 toolNamespace: e.toolNamespace,
-                                toolCallID: e.toolCallID)
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .tool_result:
             let outputText = e.toolOutput ?? e.text ?? ""
             let exitCode = ToolTextBlockNormalizer.exitCode(from: e.rawJSON)
@@ -364,7 +373,10 @@ struct SessionTranscriptBuilder {
                                 eventID: e.id,
                                 rawJSON: e.rawJSON,
                                 toolNamespace: e.toolNamespace,
-                                toolCallID: e.toolCallID)
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .error:
             if e.toolName != nil || e.toolOutput != nil {
                 let outputText = e.toolOutput ?? e.text ?? ""
@@ -379,10 +391,15 @@ struct SessionTranscriptBuilder {
                                     eventID: e.id,
                                     rawJSON: e.rawJSON,
                                     toolNamespace: e.toolNamespace,
-                                    toolCallID: e.toolCallID)
+                                    toolCallID: e.toolCallID,
+                                    toolOutputValue: e.toolOutputValue,
+                                    toolSidecar: e.toolSidecar,
+                                    toolDisposition: e.toolDisposition)
             }
             // If text is empty, fall back to pretty textified raw JSON
             let txt = (e.text?.isEmpty == false) ? e.text! : PrettyJSON.prettyPrinted(e.rawJSON)
+            // A Claude runtime error lands here (no tool name); its call id lets pairing
+            // treat the block as that call's output.
             return LogicalBlock(kind: .error,
                                 text: txt,
                                 timestamp: e.timestamp,
@@ -392,9 +409,15 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: true,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .meta:
             let txt = e.text ?? PrettyJSON.prettyPrinted(e.rawJSON)
+            // A Claude user rejection is a meta event in P1; it keeps its call id and disposition.
             return LogicalBlock(kind: .meta,
                                 text: txt,
                                 timestamp: e.timestamp,
@@ -404,7 +427,12 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: false,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         }
     }
 
@@ -541,6 +569,9 @@ struct SessionTranscriptBuilder {
                     if blocks[i].toolInput == nil { blocks[i].toolInput = b.toolInput }
                     if blocks[i].toolNamespace == nil { blocks[i].toolNamespace = b.toolNamespace }
                     if blocks[i].toolCallID == nil { blocks[i].toolCallID = b.toolCallID }
+                    if blocks[i].toolOutputValue == nil { blocks[i].toolOutputValue = b.toolOutputValue }
+                    if blocks[i].toolSidecar == nil { blocks[i].toolSidecar = b.toolSidecar }
+                    if blocks[i].toolDisposition == nil { blocks[i].toolDisposition = b.toolDisposition }
                     blocks[i].isErrorOutput = blocks[i].isErrorOutput || b.isErrorOutput
                     // firstEventIndex stays the merge chain's FIRST event (already set).
                 } else {
