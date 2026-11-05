@@ -216,6 +216,25 @@ enum ToolStatusProbe {
         var hasRunningChunk = false
         /// Every chunk `session_id`, in order.
         var sessionIDs: [String] = []
+        /// Every chunk's metadata, in order (Task 9: per-command status and poll targets).
+        var chunks: [ChunkFacts] = []
+    }
+
+    /// The metadata of one code-mode chunk: the keys before its `output`.
+    struct ChunkFacts: Equatable, Sendable {
+        var exitCode: Int?
+        var sessionID: String?
+        /// The chunk's `output` is the empty string.
+        var outputIsEmpty = false
+
+        /// The chunk's own status: exit 0, or exit 1 with an empty `output` (a search with no
+        /// matches), is a success; another code is a failure. Nil without an exit code (the
+        /// process still runs, or the chunk does not say).
+        var status: ToolStatus? {
+            guard let exitCode else { return nil }
+            if exitCode == 0 || (exitCode == 1 && outputIsEmpty) { return .success }
+            return .failed(exitCode: exitCode)
+        }
     }
 
     /// Chunk metadata is short; a chunk's `output` key past this many bytes ends its metadata.
@@ -269,6 +288,7 @@ enum ToolStatusProbe {
                     facts.sessionIDs.append(sessionID)
                     if exitCode == nil { facts.hasRunningChunk = true }
                 }
+                facts.chunks.append(ChunkFacts(exitCode: exitCode, sessionID: sessionID, outputIsEmpty: outputIsEmpty))
                 from = max(from, metadata.upperBound)
             }
             return facts

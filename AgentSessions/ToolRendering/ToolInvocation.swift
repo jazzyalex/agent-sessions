@@ -27,9 +27,12 @@ struct ToolAction: Equatable, Sendable {
     var objectIsAgentLabel: Bool
     var objectDetail: String?
     var context: [ToolContextItem]
-    /// Exact command text for shell actions, after the wrapper and leading `cd` moved to the
-    /// context; first line only when a heredoc is split off.
+    /// Display form of a shell action's command (the L2 command pane): the agent's text after the
+    /// wrapper and a leading `cd` moved to the context; first line only when a heredoc is split off.
     var command: String?
+    /// The command exactly as the agent sent it, before any lift or split (an argv array is joined
+    /// with shell quoting). `plainText` and Copy Command use this form. Nil for non-shell actions.
+    var exactCommand: String?
     /// Body of a `<<'EOF'` / `<<EOF` / `<<-EOF` heredoc, shown as its own pane with a gutter.
     var heredoc: DecodedText?
     /// Generic renderer input; primary-argument keys first, then alphabetical. Empty for shell
@@ -39,25 +42,33 @@ struct ToolAction: Equatable, Sendable {
     var facts: [AgentFact]
     var hiddenNotes: [String]
     var status: ToolStatus
-    /// Spec §8 form: `$ <command>` (or `<verb> <object>`), `[exit N · 1.2s]` when known, then the
-    /// decoded output with folds open and no gutter.
+    /// Spec §8 form. Shell: `$ <exactCommand>`. Others: `<verb> <object>`, then one `key: value`
+    /// line per input field. Then `[exit N · 48s]` when known, then the decoded output with folds
+    /// open and no gutter.
     var plainText: String
 }
 
 struct ToolInvocation: Equatable, Sendable {
     var ref: ToolInvocationRef
     var displayToolName: String
-    /// At least one. A code-mode script whose output is not assigned to its commands ends with one
-    /// extra `ToolVerb.output` action that holds that output (spec §9); `rowSummary` never has it.
+    /// At least one; the same count and order as `ToolInvocationBuilder.rowSummary(…).actions`.
     var actions: [ToolAction]
     /// Codex exec JavaScript, for "Show script".
     var scriptSource: String?
+    /// Code-mode output not assigned to a command (loose text, or every chunk when chunks do not
+    /// map to commands), shown under the script (spec §9). Never an action.
+    var scriptOutput: DecodedText?
     var durationSeconds: Double?
 }
 
 extension ToolInvocation {
-    /// The invocation's plain form: its actions' `plainText` joined by a blank line.
-    var plainText: String { actions.map(\.plainText).joined(separator: "\n\n") }
+    /// The invocation's plain form: its actions' `plainText` joined by a blank line, then
+    /// `scriptOutput` when present.
+    var plainText: String {
+        var parts = actions.map(\.plainText)
+        if let script = scriptOutput?.text, !script.isEmpty { parts.append(script) }
+        return parts.joined(separator: "\n\n")
+    }
 }
 
 /// The L1 part of an action (no output, no plain text).
@@ -67,12 +78,17 @@ struct ToolRowAction: Equatable, Sendable {
     var object: String
     var objectIsAgentLabel: Bool
     var objectDetail: String?
+    /// The action's own status: a code-mode command whose chunk maps to it reads that chunk's exit
+    /// code (metadata only); every other action has the invocation's status.
+    var status: ToolStatus
+    /// `ToolChip.chips(for: status)`.
+    var chips: [String]
 }
 
 /// What an L1 row needs, built without decoding any output body.
 struct ToolRowSummary: Equatable, Sendable {
     var actions: [ToolRowAction]
-    /// Pre-formatted, from the invocation's cheap status only (`ToolChip.chips(for:)`).
+    /// Invocation-level, pre-formatted from the invocation's cheap status only (`ToolChip.chips(for:)`).
     var chips: [String]
 }
 

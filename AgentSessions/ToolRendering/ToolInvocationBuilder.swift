@@ -11,24 +11,37 @@ import Foundation
 /// - **Polls** (`write_stdin`, `wait`): the object is the command that started the session or
 ///   cell (`ToolInvocationIndex.processOwnerBySessionID`); the detail is "session N" / "cell N".
 /// - **Shell tools**: wrappers (`bash|sh|zsh -lc|-c`) and a leading `cd X &&` / `cd X;` move to the
-///   context; `workdir` / `cwd` give cwd; a heredoc on the first line is split off. Object (spec
-///   §14 Q1): the `description` input, then the agent label (call sidecar first, then outputs),
-///   then the command's first line.
+///   context; `workdir` / `cwd` give cwd; a heredoc on the first line is split off. That lifted
+///   form is display only (`command`); `exactCommand` keeps the agent's text for `plainText` and
+///   Copy Command. Object (spec §14 Q1): the `description` input, then the agent label (call
+///   sidecar first, then outputs), then the command's first line.
 /// - **Every other tool**: one action with the category's verb (a structured action's verb is
 ///   its tool name), the primary argument as object, and the input as fields.
+///
+/// Per-action status: a code-mode command whose chunk maps to it (chunk count == call count, every
+/// call `exec_command` / `write_stdin`) takes that chunk's status from the metadata-only scan
+/// (`ToolStatusProbe.codeModeFacts`); every other action has the invocation's status. `build` and
+/// `rowSummary` give the same actions, in the same order, with the same statuses.
 ///
 /// Output side (`build` only), per output block: (1) the text: content items joined as is, any
 /// other structured value through `ToolTextDecoding.decode(value:fallback:)` (final; nothing to
 /// lift); (2) `ToolEnvelopes.lift` on that text; (3) `ToolTextDecoding.decode(value: nil,
 /// fallback: body)` for shape and normalization. Code mode instead uses `CodexExecOutput` and
 /// attaches chunks per `CodexExecOutput.assign`; output that is not assigned to a command goes to
-/// one extra trailing `ToolVerb.output` action (spec §9).
+/// `ToolInvocation.scriptOutput` (spec §9).
 ///
 /// Ciphertext (a string that starts `gAAAAA` and is longer than 40 characters) never appears: it
 /// becomes "message encrypted in the log (N chars)" in objects, fields, output and plain text.
 enum ToolInvocationBuilder {
     typealias Block = SessionTranscriptBuilder.LogicalBlock
 
+    /// The full model, outputs decoded.
+    ///
+    /// Cost: this decodes every output body (JSON parse and pretty-print, line-number stripping,
+    /// envelope lifting, code-mode chunk parsing) and can take hundreds of milliseconds on
+    /// megabyte outputs. Never call it on the main thread. Callers (L2 rendering, Copy, Find) run it
+    /// off the main thread and cache the result per invocation; `rowSummary` is the cheap L1 path.
+    ///
     /// - Parameter blocks: the full session block array (`globalBlockIndex` == position).
     static func build(_ ref: ToolInvocationRef, blocks: [Block], index: ToolInvocationIndex,
                       source: SessionSource, duration: Double?) -> ToolInvocation {
@@ -38,11 +51,14 @@ enum ToolInvocationBuilder {
         let toolName = call?.toolName ?? outputs.first?.toolName
 
         var actions: [ToolAction] = []
+        var scriptOutput: DecodedText?
         var invocationDuration = duration
         if plan.isCodeMode {
             let exec = mergedExecOutput(outputs)
             invocationDuration = duration ?? exec.wallTimeSeconds
-            actions = codeModeActions(plan, exec: exec, status: ref.status, duration: invocationDuration)
+            let statuses = actionStatuses(plan, ref: ref, blocks: blocks)
+            (actions, scriptOutput) = codeModeActions(plan, exec: exec, statuses: statuses, status: ref.status,
+                                                      duration: invocationDuration)
         } else if let draft = plan.drafts.first {
             let decoded = decodeOutputs(outputs, source: source, toolName: toolName)
             let exitCode = decoded.facts.lazy.compactMap(exitCodeFact).first
@@ -55,26 +71,44 @@ enum ToolInvocationBuilder {
                               status: ref.status, exitCode: exitCode, duration: wallTime ?? duration)]
         }
         return ToolInvocation(ref: ref, displayToolName: plan.displayToolName, actions: actions,
-                              scriptSource: plan.scriptSource, durationSeconds: invocationDuration)
+                              scriptSource: plan.scriptSource, scriptOutput: scriptOutput,
+                              durationSeconds: invocationDuration)
     }
 
-    /// L1 only: reads the call's input and sidecar labels, never an output body (the chips come
-    /// from `ref.status`). A poll whose session was started by a code-mode script reads the
-    /// owner's chunk metadata to find the command (a substring scan, no decoding).
+    /// L1 only: reads the call's input and sidecar labels, never an output body. The invocation's
+    /// chips come from `ref.status`. A code-mode command's own status, and a poll whose session a
+    /// code-mode script started, read only chunk metadata (`ToolStatusProbe.codeModeFacts`).
     static func rowSummary(_ ref: ToolInvocationRef, blocks: [Block],
                            index: ToolInvocationIndex, source: SessionSource) -> ToolRowSummary {
         let plan = inputPlan(ref, blocks: blocks, index: index, source: source)
-        return ToolRowSummary(actions: plan.drafts.map {
-            ToolRowAction(category: $0.category, verbKey: $0.verbKey, object: $0.object,
-                          objectIsAgentLabel: $0.objectIsAgentLabel, objectDetail: $0.objectDetail)
+        let statuses = actionStatuses(plan, ref: ref, blocks: blocks)
+        return ToolRowSummary(actions: zip(plan.drafts, statuses).map { draft, status in
+            ToolRowAction(category: draft.category, verbKey: draft.verbKey, object: draft.object,
+                          objectIsAgentLabel: draft.objectIsAgentLabel, objectDetail: draft.objectDetail,
+                          status: status, chips: ToolChip.chips(for: status))
         }, chips: ToolChip.chips(for: ref.status))
     }
 
-    /// "1.2s" under a minute (one decimal), else "1m 5s".
-    static func durationText(_ seconds: Double) -> String {
-        guard seconds >= 60 else { return String(format: "%.1fs", max(0, seconds)) }
-        let total = Int(seconds.rounded())
-        return "\(total / 60)m \(total % 60)s"
+    /// One status per draft: a code-mode command takes its chunk's status (metadata scan) when
+    /// chunks map to commands by order and the chunk has an exit code; everything else has the
+    /// invocation's status.
+    private static func actionStatuses(_ plan: InputPlan, ref: ToolInvocationRef, blocks: [Block]) -> [ToolStatus] {
+        let fallback = Array(repeating: ref.status, count: plan.drafts.count)
+        guard plan.isCodeMode, let script = plan.script, mapsChunksByOrder(script) else { return fallback }
+        let chunks = chunkFacts(ref.outputBlockIndices, blocks: blocks)
+        guard chunks.count == script.calls.count, chunks.count == plan.drafts.count else { return fallback }
+        return chunks.map { $0.status ?? ref.status }
+    }
+
+    /// `CodexExecOutput.assign`'s rule: chunks map to calls by order only when every call is
+    /// `exec_command` or `write_stdin`.
+    private static func mapsChunksByOrder(_ script: CodexExecScript) -> Bool {
+        !script.calls.isEmpty && script.calls.allSatisfy { $0.tool == "exec_command" || $0.tool == "write_stdin" }
+    }
+
+    /// Chunk metadata of the given output blocks, in order.
+    private static func chunkFacts(_ outputs: [Int], blocks: [Block]) -> [ToolStatusProbe.ChunkFacts] {
+        outputs.filter { blocks.indices.contains($0) }.flatMap { ToolStatusProbe.codeModeFacts(in: blocks[$0].text).chunks }
     }
 
     // MARK: - Input plan
@@ -88,8 +122,8 @@ enum ToolInvocationBuilder {
         var objectDetail: String?
         var context: [ToolContextItem] = []
         var command: String?
-        /// The whole command (heredoc included) for `plainText`.
-        var fullCommand: String?
+        /// The command as the agent sent it, for `plainText` and Copy Command.
+        var exactCommand: String?
         var heredoc: DecodedText?
         var inputFields: [ToolField] = []
     }
@@ -135,7 +169,7 @@ enum ToolInvocationBuilder {
             } else {
                 var draft = Draft(category: .shell, verbKey: ToolVerb.ranScript)
                 draft.command = input ?? ""
-                draft.fullCommand = input ?? ""
+                draft.exactCommand = input ?? ""
                 draft.object = singleLine(input ?? "")
                 drafts = [draft]
             }
@@ -238,11 +272,10 @@ enum ToolInvocationBuilder {
         if ToolStatusProbe.isCodeMode(toolName: call.toolName, source: source) {
             guard let script = call.toolInput.flatMap({ CodexExecScript.parse($0) }) else { return nil }
             let commands = script.calls.map { $0.tool == "exec_command" ? shellParts($0.arguments)?.command : nil }
-            let ordered = script.calls.allSatisfy { $0.tool == "exec_command" || $0.tool == "write_stdin" }
-            if ordered {
-                let texts = owner.outputBlockIndices.filter { blocks.indices.contains($0) }.map { blocks[$0].text }
-                let found = chunkOrdinal(ofProcessID: id, in: texts)
-                if let ordinal = found.ordinal, found.total == script.calls.count, let command = commands[ordinal] {
+            if mapsChunksByOrder(script) {
+                let chunks = chunkFacts(owner.outputBlockIndices, blocks: blocks)
+                if chunks.count == script.calls.count, let ordinal = chunks.firstIndex(where: { $0.sessionID == id }),
+                   let command = commands[ordinal] {
                     return singleLine(command)
                 }
             }
@@ -264,46 +297,13 @@ enum ToolInvocationBuilder {
         return nil
     }
 
-    /// The text before a chunk's `chunk_id` key: `{"` plain, `{\"` in a JSON-encoded item.
-    private static let plainChunkStart = #"{"chunk_id"#
-    private static let encodedChunkStart = #"{\"chunk_id"#
-
-    /// Which chunk (0-based, counted over all `texts`) carries `"session_id":id` in its metadata,
-    /// and how many chunks there are. Metadata ends at the chunk's `output` key, the next chunk or
-    /// 512 characters.
-    private static func chunkOrdinal(ofProcessID id: String, in texts: [String]) -> (ordinal: Int?, total: Int) {
-        var total = 0
-        var ordinal: Int?
-        for text in texts {
-            var starts: [String.Index] = []
-            var cursor = text.startIndex
-            while let hit = text.range(of: "chunk_id", range: cursor..<text.endIndex) {
-                cursor = hit.upperBound
-                let head = text[..<hit.upperBound]
-                if head.hasSuffix(plainChunkStart) {
-                    starts.append(text.index(hit.lowerBound, offsetBy: -2))
-                } else if head.hasSuffix(encodedChunkStart) {
-                    starts.append(text.index(hit.lowerBound, offsetBy: -3))
-                }
-            }
-            for (k, start) in starts.enumerated() {
-                let next = k + 1 < starts.count ? starts[k + 1] : text.endIndex
-                var end = text.index(start, offsetBy: 512, limitedBy: next) ?? next
-                if let output = text.range(of: "output", range: start..<end) { end = output.lowerBound }
-                if ordinal == nil,
-                   ToolInvocationIndex.processIDs(in: text[start..<end], keys: ["session_id"]).contains(id) {
-                    ordinal = total
-                }
-                total += 1
-            }
-        }
-        return (ordinal, total)
-    }
-
     // MARK: Shell
 
     private struct ShellParts {
+        /// Display form: wrapper and leading `cd` lifted.
         var command: String
+        /// As the agent sent it (an argv array joined with shell quoting).
+        var exact: String
         var context: [ToolContextItem]
         /// The input was a `code` script, not a command.
         var isScript: Bool
@@ -315,11 +315,13 @@ enum ToolInvocationBuilder {
     /// `CommandLine`; a `code` script), or nil when there is none.
     private static func shellParts(_ arguments: [String: ToolPayloadValue]) -> ShellParts? {
         var command: String
+        let exact: String
         var shell: String?
         var isScript = false
         switch arguments["command"] ?? arguments["cmd"] ?? arguments["CommandLine"] {
         case .string(let raw)?:
             command = unwrapJSONString(raw)
+            exact = command
             if let lifted = liftStringWrapper(command) {
                 command = lifted.command
                 shell = lifted.shell
@@ -327,15 +329,17 @@ enum ToolInvocationBuilder {
         case .array(let items)?:
             let words = items.compactMap(\.stringValue)
             guard !words.isEmpty, words.count == items.count else { return nil }
+            exact = words.map(shellQuoted).joined(separator: " ")
             if words.count == 3, shellWrappers.contains(baseName(words[0])), words[1] == "-lc" || words[1] == "-c" {
                 command = words[2]
                 shell = "\(words[0]) \(words[1])"
             } else {
-                command = words.map(shellQuoted).joined(separator: " ")
+                command = exact
             }
         default:
             guard let code = arguments["code"]?.stringValue, !code.isEmpty else { return nil }
             command = code
+            exact = code
             isScript = true
         }
         guard !command.isEmpty else { return nil }
@@ -353,7 +357,7 @@ enum ToolInvocationBuilder {
         if let cwd { context.append(ToolContextItem(key: "cwd", value: cwd)) }
         if let shell { context.append(ToolContextItem(key: "shell", value: shell)) }
         if let timeout = arguments["timeout"].flatMap(token) { context.append(ToolContextItem(key: "timeout", value: timeout)) }
-        return ShellParts(command: command, context: context, isScript: isScript)
+        return ShellParts(command: command, exact: exact, context: context, isScript: isScript)
     }
 
     /// A shell action, or nil when the arguments hold no command.
@@ -361,7 +365,7 @@ enum ToolInvocationBuilder {
         guard let parts = shellParts(arguments) else { return nil }
         var draft = Draft(category: .shell, verbKey: parts.isScript ? ToolVerb.ranScript : ToolVerb.ran)
         draft.context = parts.context
-        draft.fullCommand = parts.command
+        draft.exactCommand = parts.exact
         if !parts.isScript, let split = splitHeredoc(parts.command) {
             draft.command = split.command
             draft.heredoc = DecodedText(text: split.body,
@@ -654,39 +658,39 @@ enum ToolInvocationBuilder {
         return merged
     }
 
-    private static func codeModeActions(_ plan: InputPlan, exec: CodexExecOutput, status: ToolStatus,
-                                        duration: Double?) -> [ToolAction] {
-        // No readable call: one "Ran script" action that owns the whole output.
+    /// The actions of a code-mode call and the script output that no command owns. `statuses` comes
+    /// from `actionStatuses` (one per draft), so the statuses match `rowSummary`.
+    private static func codeModeActions(_ plan: InputPlan, exec: CodexExecOutput, statuses: [ToolStatus],
+                                        status: ToolStatus, duration: Double?) -> ([ToolAction], DecodedText?) {
+        // No readable call: the one "Ran script" action is the script, so the whole output is its own.
         guard let script = plan.script else {
-            guard let draft = plan.drafts.first else { return [] }
-            return [finish(draft, output: unassignedOutput(exec, includeChunks: true),
-                           facts: exec.chunks.flatMap(\.facts) + exec.facts, hiddenNotes: [], status: status,
-                           exitCode: failedExitCode(status), duration: duration)]
+            guard let draft = plan.drafts.first else { return ([], nil) }
+            return ([finish(draft, output: unassignedOutput(exec, includeChunks: true),
+                            facts: exec.chunks.flatMap(\.facts) + exec.facts, hiddenNotes: [], status: status,
+                            exitCode: failedExitCode(status), duration: duration)], nil)
         }
         let assigned = CodexExecOutput.assign(exec, to: script)
         let single = plan.drafts.count == 1
         var actions: [ToolAction] = []
         for (offset, draft) in plan.drafts.enumerated() {
+            let actionStatus = offset < statuses.count ? statuses[offset] : status
             if let chunk = assigned[offset] {
                 actions.append(finish(draft, output: redactedCiphertext(chunk.output), facts: chunk.facts, hiddenNotes: [],
-                                      status: chunkStatus(chunk, fallback: status), exitCode: chunk.exitCode,
+                                      status: actionStatus, exitCode: chunk.exitCode ?? failedExitCode(actionStatus),
                                       duration: chunk.wallTimeSeconds ?? (single ? duration : nil)))
             } else {
-                actions.append(finish(draft, output: nil, facts: [], hiddenNotes: [], status: status,
-                                      exitCode: single ? failedExitCode(status) : nil,
+                actions.append(finish(draft, output: nil, facts: [], hiddenNotes: [], status: actionStatus,
+                                      exitCode: single || actionStatus != status ? failedExitCode(actionStatus) : nil,
                                       duration: single ? duration : nil))
             }
         }
-        // Output not assigned to a command shows under the script as one trailing action (spec §9).
-        if let output = unassignedOutput(exec, includeChunks: assigned.isEmpty) {
-            actions.append(finish(Draft(category: .shell, verbKey: ToolVerb.output), output: output,
-                                  facts: assigned.isEmpty ? exec.chunks.flatMap(\.facts) : [], hiddenNotes: [],
-                                  status: status, exitCode: nil, duration: nil))
+        // Output no command owns shows under the script (spec §9); its facts join the script's.
+        let scriptOutput = unassignedOutput(exec, includeChunks: assigned.isEmpty)
+        let scriptFacts = (assigned.isEmpty ? exec.chunks.flatMap(\.facts) : []) + exec.facts
+        if !scriptFacts.isEmpty, !actions.isEmpty {
+            actions[actions.count - 1].facts += scriptFacts
         }
-        if !exec.facts.isEmpty, !actions.isEmpty {
-            actions[actions.count - 1].facts += exec.facts
-        }
-        return actions
+        return (actions, scriptOutput)
     }
 
     /// The loose text, after every chunk output when `includeChunks`; nil when all are empty. A
@@ -697,14 +701,6 @@ enum ToolInvocationBuilder {
         guard let first = pieces.first else { return nil }
         if pieces.count == 1 { return redactedCiphertext(first) }
         return redactedCiphertext(ToolTextDecoding.decode(value: nil, fallback: pieces.map(\.text).joined(separator: "\n")))
-    }
-
-    /// A chunk's own status: exit 0, or exit 1 with empty output (a search with no matches), is a
-    /// success; another code is a failure; no code (still running) keeps the invocation's status.
-    private static func chunkStatus(_ chunk: CodexExecOutput.Chunk, fallback: ToolStatus) -> ToolStatus {
-        guard let code = chunk.exitCode else { return fallback }
-        if code == 0 || (code == 1 && chunk.output.text.isEmpty) { return .success }
-        return .failed(exitCode: code)
     }
 
     // MARK: - Finishing
@@ -722,22 +718,48 @@ enum ToolInvocationBuilder {
             default: break
             }
         }
-        if let duration { bracket.append(durationText(duration)) }
+        if let duration { bracket.append(TranscriptTurnTiming.formatDuration(duration)) }
 
         var lines: [String] = []
-        if let command = draft.fullCommand {
+        if let command = draft.exactCommand {
             lines.append("$ " + command)
         } else {
             lines.append([ToolVerb.text(draft.verbKey), draft.object].filter { !$0.isEmpty }.joined(separator: " "))
+            lines += draft.inputFields.map { "\($0.key): \(plainValue($0.value))" }
         }
         if !bracket.isEmpty { lines.append("[" + bracket.joined(separator: " · ") + "]") }
         if let text = output?.text, !text.isEmpty { lines.append(text) }
 
         return ToolAction(category: draft.category, verbKey: draft.verbKey, object: draft.object,
                           objectIsAgentLabel: draft.objectIsAgentLabel, objectDetail: draft.objectDetail,
-                          context: draft.context, command: draft.command, heredoc: draft.heredoc,
-                          inputFields: draft.inputFields, output: output, facts: facts, hiddenNotes: hiddenNotes,
-                          status: status, plainText: redactedCiphertext(lines.joined(separator: "\n")))
+                          context: draft.context, command: draft.command, exactCommand: draft.exactCommand,
+                          heredoc: draft.heredoc, inputFields: draft.inputFields, output: output, facts: facts,
+                          hiddenNotes: hiddenNotes, status: status,
+                          plainText: redactedCiphertext(lines.joined(separator: "\n")))
+    }
+
+    /// An input field's value in plain text: a string as is (unescaped, newlines kept), a scalar
+    /// as JSON writes it, an array or object as compact JSON (sorted keys, no slash escaping).
+    private static func plainValue(_ value: ToolPayloadValue) -> String {
+        switch value {
+        case .string(let s): return s
+        case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? String(Int(n)) : String(n)
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return "null"
+        case .array, .object: return ToolJSON.string(from: foundationValue(value), pretty: false) ?? ""
+        }
+    }
+
+    /// A Foundation object tree for `JSONSerialization`; whole numbers stay integers.
+    private static func foundationValue(_ value: ToolPayloadValue) -> Any {
+        switch value {
+        case .string(let s): return s
+        case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? NSNumber(value: Int(n)) : NSNumber(value: n)
+        case .bool(let b): return NSNumber(value: b)
+        case .null: return NSNull()
+        case .array(let items): return items.map(foundationValue)
+        case .object(let object): return object.mapValues(foundationValue)
+        }
     }
 
     private static func exitCodeFact(_ fact: AgentFact) -> Int? {

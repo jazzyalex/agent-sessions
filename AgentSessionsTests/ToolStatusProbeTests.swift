@@ -93,6 +93,27 @@ final class ToolStatusProbeTests: XCTestCase {
         XCTAssertEqual(status(call: exec, outputs: [out(ended)]), .success)
     }
 
+    /// Task 9: every chunk's metadata, in order, for per-command status and poll targets.
+    func testCodeModeFactsListEveryChunk() {
+        let header = "Script completed\nWall time 1.0 seconds\nOutput:\n"
+        let text = header
+            + #"{"chunk_id":"a","exit_code":1,"output":"{\"exit_code\":9,\"session_id\":5}"}"#
+            + #"{"chunk_id":"b","exit_code":1,"output":""}"#
+            + #""{\"chunk_id\":\"c\",\"session_id\":777,\"output\":\"ready\"}""#
+        let facts = ToolStatusProbe.codeModeFacts(in: text)
+        typealias Chunk = ToolStatusProbe.ChunkFacts
+        XCTAssertEqual(facts.chunks, [
+            Chunk(exitCode: 1, sessionID: nil, outputIsEmpty: false),
+            Chunk(exitCode: 1, sessionID: nil, outputIsEmpty: true),
+            Chunk(exitCode: nil, sessionID: "777", outputIsEmpty: false),
+        ], "body text is never read as metadata")
+        XCTAssertEqual(facts.chunks.map(\.status), [.failed(exitCode: 1), .success, nil])
+        XCTAssertEqual(facts.sessionIDs, ["777"])
+        XCTAssertEqual(facts.failureExitCode, 1)
+        XCTAssertTrue(facts.hasRunningChunk)
+        XCTAssertEqual(ToolStatusProbe.codeModeFacts(in: "plain text {not a chunk}").chunks, [])
+    }
+
     // MARK: - Grep family
 
     func testRgExitOneEmptyIsSuccess() {

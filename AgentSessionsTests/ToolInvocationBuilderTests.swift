@@ -78,13 +78,14 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(action.object, "List files")
         XCTAssertTrue(action.objectIsAgentLabel)
         XCTAssertEqual(action.command, "ls")
+        XCTAssertEqual(action.exactCommand, "ls")
         XCTAssertEqual(action.output?.text, "a\nb")
         XCTAssertEqual(action.status, .success)
         XCTAssertEqual(action.plainText, "$ ls\na\nb", "plainText keeps the command, never the label")
         XCTAssertEqual(invocation.displayToolName, "Bash")
         XCTAssertEqual(s.summary(at: 1).actions, [
             ToolRowAction(category: .shell, verbKey: "tool.verb.ran", object: "List files",
-                          objectIsAgentLabel: true, objectDetail: nil),
+                          objectIsAgentLabel: true, objectDetail: nil, status: .success, chips: []),
         ])
 
         // A ready-made label: the call's sidecar wins over an output's; `description` wins over both.
@@ -145,10 +146,14 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(wrapped.command, "make")
         XCTAssertEqual(wrapped.object, "make")
         XCTAssertEqual(wrapped.context, [ToolContextItem(key: "cwd", value: "/x"), ToolContextItem(key: "shell", value: "bash -lc")])
+        XCTAssertEqual(wrapped.exactCommand, "bash -lc 'cd /x && make'", "the exact command keeps the wrapper and cd")
+        XCTAssertEqual(wrapped.plainText, "$ bash -lc 'cd /x && make'\ndone", "plainText and Copy use the exact command")
 
         let relative = s.invocation(at: 3).actions[0]
         XCTAssertEqual(relative.command, "make test")
         XCTAssertEqual(relative.context, [ToolContextItem(key: "cwd", value: "/repo/sub")])
+        XCTAssertEqual(relative.exactCommand, "cd sub && make test")
+        XCTAssertTrue(relative.plainText.hasPrefix("$ cd sub && make test\n"))
 
         XCTAssertEqual(s.invocation(at: 5).actions[0].command, "cd /x", "a bare cd is the whole command")
         XCTAssertEqual(s.invocation(at: 7).actions[0].command, "git commit -m 'fix it'", "argv joins with shell quoting")
@@ -161,9 +166,11 @@ final class ToolInvocationBuilderTests: XCTestCase {
         ], source: .claude)
         let lifted = claude.invocation(at: 1).actions[0]
         XCTAssertEqual(lifted.command, "make test")
+        XCTAssertEqual(lifted.object, "make test")
         XCTAssertEqual(lifted.context, [ToolContextItem(key: "cwd", value: "/my dir"),
                                         ToolContextItem(key: "shell", value: "bash -lc"),
                                         ToolContextItem(key: "timeout", value: "120000")])
+        XCTAssertEqual(lifted.plainText, "$ bash -lc 'cd \"/my dir\"; make test'\nok")
     }
 
     func testHeredocSplitsBody() {
@@ -223,32 +230,44 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(invocation.actions.map { $0.output?.text }, ["boom", "fine"])
         XCTAssertEqual(invocation.actions.map(\.status), [.failed(exitCode: 1), .success])
         XCTAssertEqual(invocation.actions[0].plainText, "$ false\n[exit 1 · 0.5s]\nboom")
+        XCTAssertNil(invocation.scriptOutput)
         XCTAssertEqual(invocation.plainText, invocation.actions[0].plainText + "\n\n" + invocation.actions[1].plainText)
 
+        // L1: each command has its own chunk's status, read from chunk metadata only.
         let row = s.summary(at: 1)
         XCTAssertEqual(row.actions.map(\.object), ["false", "true"])
-        XCTAssertEqual(row.chips, ["exit 1"])
+        XCTAssertEqual(row.actions.map(\.status), [.failed(exitCode: 1), .success])
+        XCTAssertEqual(row.actions.map(\.chips), [["exit 1"], []])
+        XCTAssertEqual(row.chips, ["exit 1"], "the invocation's chips stay invocation-level")
+        XCTAssertEqual(row.actions.map(\.verbKey), invocation.actions.map(\.verbKey))
+        XCTAssertEqual(row.actions.map(\.status), invocation.actions.map(\.status), "build and rowSummary agree")
     }
 
     func testUnassignedScriptOutputShowsUnderTheScript() {
+        // Promise.all with custom printing: one chunk for three commands, so nothing maps by order.
         let script = """
-        const r = await Promise.all([tools.exec_command({cmd: "a"}), tools.exec_command({cmd: "b"})]);
-        for (let i = 0; i < 2; i++) text(`---${i}---`);
+        const r = await Promise.all([
+          tools.exec_command({cmd: "a"}), tools.exec_command({cmd: "b"}), tools.exec_command({cmd: "c"})]);
+        for (let i = 0; i < 3; i++) text(`---${i}---`);
         """
         let s = session([
             F.block(.user, text: "go"),
             F.block(.toolCall, id: "t1", toolName: "exec", toolInput: script),
-            codeModeOutput(id: "t1", [scriptHeader, "---0---\n", chunk("a", exit: 0, output: "x"), "---1---\n"]),
+            codeModeOutput(id: "t1", [scriptHeader, "---0---\n", chunk("a", exit: 0, output: "x"), "---1---\n", "---2---\n"]),
         ], source: .codex)
         let invocation = s.invocation(at: 1)
-        XCTAssertEqual(invocation.actions.map(\.command), ["a", "b", nil])
-        XCTAssertNil(invocation.actions[0].output, "children show their commands only")
-        XCTAssertNil(invocation.actions[1].output)
-        let tail = invocation.actions[2]
-        XCTAssertEqual(tail.verbKey, "tool.verb.output")
-        XCTAssertTrue(tail.output?.text.contains("x") ?? false)
-        XCTAssertTrue(tail.output?.text.contains("---0---") ?? false)
-        XCTAssertEqual(s.summary(at: 1).actions.count, 2, "the row summary reads no output, so it has no tail action")
+        XCTAssertEqual(invocation.actions.map(\.command), ["a", "b", "c"], "the three commands only, no extra action")
+        XCTAssertTrue(invocation.actions.allSatisfy { $0.output == nil }, "children show their commands only")
+        let scriptOutput = invocation.scriptOutput
+        XCTAssertNotNil(scriptOutput)
+        XCTAssertTrue(scriptOutput?.text.contains("x") ?? false)
+        XCTAssertTrue(scriptOutput?.text.contains("---0---") ?? false)
+        XCTAssertTrue(invocation.plainText.hasSuffix("\n\n" + (scriptOutput?.text ?? "∅")), "plainText ends with the script output")
+
+        let row = s.summary(at: 1)
+        XCTAssertEqual(row.actions.count, invocation.actions.count)
+        XCTAssertEqual(row.actions.map(\.object), invocation.actions.map(\.object))
+        XCTAssertEqual(row.actions.map(\.status), [.success, .success, .success], "unmapped commands take the invocation's status")
     }
 
     func testScriptParseFailureIsRanScript() {
@@ -310,10 +329,11 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(poll.object, "npm run dev")
         XCTAssertEqual(poll.objectDetail, "session 42437")
         XCTAssertFalse(poll.objectIsAgentLabel)
-        XCTAssertEqual(poll.plainText, "Polled npm run dev\n[10.0s]", "the poll's own output has a 10 s wall time and no body")
+        XCTAssertEqual(poll.plainText, "Polled npm run dev\n[10s]", "the poll's own output has a 10 s wall time and no body")
         XCTAssertEqual(s.summary(at: 3).actions, [
             ToolRowAction(category: .shell, verbKey: "tool.verb.polled", object: "npm run dev",
-                          objectIsAgentLabel: false, objectDetail: "session 42437"),
+                          objectIsAgentLabel: false, objectDetail: "session 42437",
+                          status: .pending, chips: ["no result yet"]),
         ])
         let unresolved = s.invocation(at: 5).actions[0]
         XCTAssertEqual(unresolved.object, "session 999")
@@ -399,13 +419,40 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(invocation.durationSeconds, 1.2)
         XCTAssertEqual(invocation.actions[0].status, .failed(exitCode: 2))
         XCTAssertEqual(invocation.actions[0].plainText, "$ make\n[exit 2 · 1.2s]\nboom")
-        XCTAssertEqual(s.invocation(at: 3).actions[0].plainText, "Read Foo.swift\nlet x = 1")
-        XCTAssertEqual(s.invocation(at: 3, duration: 65).actions[0].plainText, "Read Foo.swift\n[1m 5s]\nlet x = 1")
+        // Non-shell actions list their input fields; durations use TranscriptTurnTiming.formatDuration.
+        XCTAssertEqual(s.invocation(at: 3).actions[0].plainText, "Read Foo.swift\nfile_path: /a/Foo.swift\nlet x = 1")
+        XCTAssertEqual(s.invocation(at: 3, duration: 48).actions[0].plainText,
+                       "Read Foo.swift\nfile_path: /a/Foo.swift\n[48s]\nlet x = 1")
+        XCTAssertEqual(s.invocation(at: 3, duration: 65).actions[0].plainText,
+                       "Read Foo.swift\nfile_path: /a/Foo.swift\n[1m 5s]\nlet x = 1")
+    }
 
-        XCTAssertEqual(ToolInvocationBuilder.durationText(1.2), "1.2s")
-        XCTAssertEqual(ToolInvocationBuilder.durationText(59.9), "59.9s")
-        XCTAssertEqual(ToolInvocationBuilder.durationText(65), "1m 5s")
-        XCTAssertEqual(ToolInvocationBuilder.durationText(3600), "60m 0s")
+    func testGenericPlainTextListsInputs() {
+        let patch = "*** Begin Patch\n*** Update File: A.swift\n@@\n-x\n+y\n*** End Patch"
+        let s = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "mcp__github__create_pull_request",
+                    toolInput: json(["owner": "a", "draft": true, "options": ["x": 1], "body": "line 1\nline 2"])),  // 1
+            F.block(.toolOut, id: "t1", text: "ok", toolName: "mcp__github__create_pull_request"),
+            F.block(.toolCall, id: "t2", toolName: "write_stdin", toolInput: json(["session_id": 7, "chars": "y\n"])), // 3
+            F.block(.toolOut, id: "t2", text: "", toolName: "write_stdin"),
+        ], source: .claude)
+        let mcp = s.invocation(at: 1).actions[0].plainText
+        XCTAssertTrue(mcp.hasPrefix("github › create_pull_request line 1\nbody: "), "verb, object, then fields in order: \(mcp)")
+        XCTAssertTrue(mcp.contains("\nowner: a\n"), mcp)
+        XCTAssertTrue(mcp.contains("\ndraft: true\n"), mcp)
+        XCTAssertTrue(mcp.contains(#"options: {"x":1}"#), mcp)
+        XCTAssertTrue(mcp.contains("\nbody: line 1\nline 2\n"), "strings are unescaped, newlines kept")
+        XCTAssertTrue(mcp.hasSuffix("\nok"))
+        XCTAssertEqual(s.invocation(at: 3).actions[0].plainText, "Sent input session 7\nchars: y\n", "the typed input")
+
+        let codex = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "apply_patch", toolInput: patch),
+            F.block(.toolOut, id: "t1", text: "Done", toolName: "apply_patch"),
+        ], source: .codex)
+        XCTAssertEqual(codex.invocation(at: 1).actions[0].plainText, "Edited A.swift\ninput: \(patch)\nDone",
+                       "the patch is in the plain text")
     }
 
     func testOutputPipelineLiftsBeforeShapeDetection() {
@@ -420,7 +467,7 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(action.output?.text, "let a = 1\nlet b = 2")
         XCTAssertEqual(action.output?.shape, .lineNumbered(gutter: [1, 2]))
         XCTAssertEqual(action.hiddenNotes, ["Be careful."])
-        XCTAssertEqual(action.plainText, "Read b.swift\nlet a = 1\nlet b = 2", "no gutter in plain text")
+        XCTAssertEqual(action.plainText, "Read b.swift\nfile_path: /a/b.swift\nlet a = 1\nlet b = 2", "no gutter in plain text")
     }
 
     func testOrphanOutputIsOutputRow() {
@@ -525,6 +572,24 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(s.summary(at: 9).chips, ["no result recorded"])
         XCTAssertEqual(s.summary(at: 11).chips, ["no result yet"])
         XCTAssertEqual(s.invocation(at: 9).actions[0].output, nil)
+
+        // Exit 1 with no output is "no matches" only for a grep-family command (spec §6.3).
+        let empty = "Process exited with code 1\nOutput:\n"
+        let grep = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec_command", toolInput: json(["cmd": "rg -n nothing src"])),     // 1
+            F.block(.toolOut, id: "t1", text: empty, toolName: "exec_command"),
+            F.block(.toolCall, id: "t2", toolName: "exec_command", toolInput: json(["cmd": "test -f missing.txt"])),   // 3
+            F.block(.toolOut, id: "t2", text: empty, toolName: "exec_command"),
+            F.block(.toolCall, id: "t3", toolName: "exec_command",
+                    toolInput: json(["cmd": "bash -lc 'cd /x && grep -r nothing .'"])),                               // 5
+            F.block(.toolOut, id: "t3", text: empty, toolName: "exec_command"),
+        ], source: .codex)
+        XCTAssertEqual(grep.invocation(at: 1).actions[0].status, .success)
+        XCTAssertEqual(grep.summary(at: 1).chips, [])
+        XCTAssertEqual(grep.invocation(at: 3).actions[0].status, .failed(exitCode: 1))
+        XCTAssertEqual(grep.summary(at: 3).actions.first?.chips, ["exit 1"])
+        XCTAssertEqual(grep.invocation(at: 5).actions[0].status, .success, "a wrapped grep is still grep-family")
     }
 
     func testRowSummaryDoesNotDecodeOutput() {
@@ -550,10 +615,27 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(summary.actions.first?.object, "rg --json value")
         XCTAssertLessThan(perCallMs, 5, "rowSummary must not touch the output body")
 
+        // Code mode reads chunk metadata for per-command status, never the 2 MB chunk body.
+        let codeMode = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec", toolInput: "await tools.exec_command({cmd: \"rg --json value\"})"),
+            codeModeOutput(id: "t1", [scriptHeader, chunk("a", exit: 2, output: body)]),
+        ], source: .codex)
+        let codeRef = codeMode.ref(at: 1)
+        _ = ToolInvocationBuilder.rowSummary(codeRef, blocks: codeMode.blocks, index: codeMode.index, source: .codex)
+        let codeStart = DispatchTime.now().uptimeNanoseconds
+        var codeSummary = ToolRowSummary(actions: [], chips: [])
+        for _ in 0..<runs {
+            codeSummary = ToolInvocationBuilder.rowSummary(codeRef, blocks: codeMode.blocks, index: codeMode.index, source: .codex)
+        }
+        let codePerCallMs = Double(DispatchTime.now().uptimeNanoseconds - codeStart) / 1_000_000 / Double(runs)
+        XCTAssertEqual(codeSummary.actions.first?.status, .failed(exitCode: 2))
+        XCTAssertLessThan(codePerCallMs, 5, "the chunk scan reads metadata only")
+
         // Positive control: the full build does decode the body.
         let buildStart = DispatchTime.now().uptimeNanoseconds
         _ = ToolInvocationBuilder.build(ref, blocks: s.blocks, index: s.index, source: .codex, duration: nil)
         let buildMs = Double(DispatchTime.now().uptimeNanoseconds - buildStart) / 1_000_000
-        print("TASK9-PERF rowSummary=\(perCallMs)ms build=\(buildMs)ms")
+        print("TASK9-PERF rowSummary=\(perCallMs)ms codeModeRowSummary=\(codePerCallMs)ms build=\(buildMs)ms")
     }
 }
