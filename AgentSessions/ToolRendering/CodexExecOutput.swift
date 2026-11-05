@@ -62,12 +62,11 @@ struct CodexExecOutput: Equatable, Sendable {
         return result
     }
 
-    /// Chunk i belongs to call i only when the counts match, every call is `exec_command` or `write_stdin`,
-    /// and the script printed no text of its own (loose text means the chunks cannot be trusted to line up).
+    /// Chunk i belongs to call i only when the counts match and every call is `exec_command` or `write_stdin`.
+    /// Loose text (a summary the script prints) does not block the mapping.
     static func assign(_ output: CodexExecOutput, to script: CodexExecScript) -> [Int: Chunk] {
         guard !script.calls.isEmpty,
               output.chunks.count == script.calls.count,
-              output.looseText == nil,
               script.calls.allSatisfy({ $0.tool == "exec_command" || $0.tool == "write_stdin" })
         else { return [:] }
         return Dictionary(uniqueKeysWithValues: output.chunks.enumerated().map { ($0.offset, $0.element) })
@@ -142,12 +141,41 @@ struct CodexExecOutput: Equatable, Sendable {
         for (i, start) in starts.enumerated() {
             let end = i + 1 < starts.count ? starts[i + 1] : body.endIndex
             let segment = String(body[start..<end])
-            if let chunk = makeChunk(segment) {
+            let objectEnd = firstObjectEnd(in: segment)
+            let head = objectEnd.map { String(segment[segment.startIndex..<$0]) } ?? segment
+            if let chunk = makeChunk(head) {
                 chunks.append(chunk)
+                if let objectEnd, objectEnd < segment.endIndex { loose.append(String(segment[objectEnd...])) }
             } else {
                 loose.append(segment)
             }
         }
+    }
+
+    /// End index (exclusive) of the first complete JSON object, which must start at the first character.
+    /// Linear, iterative, string-aware. Nil when the object never closes.
+    private static func firstObjectEnd(in s: String) -> String.Index? {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var i = s.startIndex
+        while i < s.endIndex {
+            let c = s[i]
+            if inString {
+                if escaped { escaped = false }
+                else if c == "\\" { escaped = true }
+                else if c == "\"" { inString = false }
+            } else if c == "\"" {
+                inString = true
+            } else if c == "{" {
+                depth += 1
+            } else if c == "}" {
+                depth -= 1
+                if depth == 0 { return s.index(after: i) }
+            }
+            i = s.index(after: i)
+        }
+        return nil
     }
 
     private static func makeChunk(_ segment: String) -> Chunk? {

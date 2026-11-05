@@ -48,6 +48,7 @@ final class CodexExecOutputTests: XCTestCase {
         let inner = "Warning: truncated output (original token count: 5000)\nTotal output lines: 842\n\nline one\nline two\n"
         let out = CodexExecOutput.parse(value: items([header, chunk("a", exit: 0, output: inner)]), fallback: nil)
         XCTAssertEqual(out.chunks.count, 1)
+        guard out.chunks.count == 1 else { return }
         XCTAssertEqual(out.chunks[0].facts.map(\.kind), [.truncated(agent: "codex", originalTokens: 5000, totalLines: 842)])
         XCTAssertTrue(out.chunks[0].output.text.hasPrefix("line one"))
     }
@@ -89,6 +90,7 @@ final class CodexExecOutputTests: XCTestCase {
         let literal = "\"" + chunk("a", exit: 0, output: "hi").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         let out = CodexExecOutput.parse(value: items([header, literal]), fallback: nil)
         XCTAssertEqual(out.chunks.count, 1)
+        guard out.chunks.count == 1 else { return }
         XCTAssertEqual(out.chunks[0].output.text, "hi")
 
         let loose = CodexExecOutput.parse(value: items([header, "\"line1\\nline2\""]), fallback: nil)
@@ -105,9 +107,33 @@ final class CodexExecOutputTests: XCTestCase {
         XCTAssertEqual(CodexExecOutput.parse(value: items([header, joined]), fallback: nil).chunks.count, 2)
     }
 
+    func testAssignKeepsChunksWhenScriptPrintsSummary() throws {
+        let value = items([header, chunk("a", exit: 1, output: "one"), chunk("b", exit: 0, output: "two"), "done"])
+        let out = CodexExecOutput.parse(value: value, fallback: nil)
+        XCTAssertEqual(out.looseText?.text, "done")
+        let s = try script(#"""
+        await tools.exec_command({cmd: "a"});
+        await tools.exec_command({cmd: "b"});
+        text("done");
+        """#)
+        let map = CodexExecOutput.assign(out, to: s)
+        XCTAssertEqual(map[0]?.exitCode, 1)
+        XCTAssertEqual(map[1]?.output.text, "two")
+    }
+
+    func testChunkFollowedDirectlyByTextInFallback() {
+        let out = CodexExecOutput.parse(value: nil, fallback: #"{"chunk_id":"a","exit_code":0,"output":"x"}---1---"# + "\n")
+        XCTAssertEqual(out.chunks.count, 1)
+        guard out.chunks.count == 1 else { return }
+        XCTAssertEqual(out.chunks[0].output.text, "x")
+        XCTAssertEqual(out.chunks[0].exitCode, 0)
+        XCTAssertEqual(out.looseText?.text, "---1---")
+    }
+
     func testRunningChunkHasNoExitCode() {
         let out = CodexExecOutput.parse(value: items([header, chunk("a", exit: nil, output: "tick", session: 9)]), fallback: nil)
         XCTAssertEqual(out.chunks.count, 1)
+        guard out.chunks.count == 1 else { return }
         XCTAssertNil(out.chunks[0].exitCode)
     }
 
