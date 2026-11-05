@@ -307,6 +307,8 @@ struct SessionTranscriptBuilder {
         var firstEventIndex: Int = -1
         /// Codex tool namespace of the originating tool call (e.g. `mcp__node_repl__`).
         var toolNamespace: String? = nil
+        /// Provider call id of the originating tool call/result; outputs with different ids never merge.
+        var toolCallID: String? = nil
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
@@ -345,7 +347,8 @@ struct SessionTranscriptBuilder {
                                 isErrorOutput: false,
                                 eventID: e.id,
                                 rawJSON: e.rawJSON,
-                                toolNamespace: e.toolNamespace)
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID)
         case .tool_result:
             let outputText = e.toolOutput ?? e.text ?? ""
             let exitCode = ToolTextBlockNormalizer.exitCode(from: e.rawJSON)
@@ -360,7 +363,8 @@ struct SessionTranscriptBuilder {
                                 isErrorOutput: looksLikeError,
                                 eventID: e.id,
                                 rawJSON: e.rawJSON,
-                                toolNamespace: e.toolNamespace)
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID)
         case .error:
             if e.toolName != nil || e.toolOutput != nil {
                 let outputText = e.toolOutput ?? e.text ?? ""
@@ -373,7 +377,9 @@ struct SessionTranscriptBuilder {
                                     toolInput: nil,
                                     isErrorOutput: true,
                                     eventID: e.id,
-                                    rawJSON: e.rawJSON)
+                                    rawJSON: e.rawJSON,
+                                    toolNamespace: e.toolNamespace,
+                                    toolCallID: e.toolCallID)
             }
             // If text is empty, fall back to pretty textified raw JSON
             let txt = (e.text?.isEmpty == false) ? e.text! : PrettyJSON.prettyPrinted(e.rawJSON)
@@ -486,6 +492,8 @@ struct SessionTranscriptBuilder {
     private static func canMerge(_ a: LogicalBlock, _ b: LogicalBlock) -> Bool {
         // Only merge assistant/toolOut/meta streams
         guard a.kind == b.kind else { return false }
+        // Outputs of different tool calls never fuse, even when they share a message ID.
+        if let ai = a.toolCallID, let bi = b.toolCallID, ai != bi { return false }
         switch a.kind {
         case .assistant, .toolOut:
             if let am = a.messageID, let bm = b.messageID { return am == bm }
@@ -532,6 +540,7 @@ struct SessionTranscriptBuilder {
                     if blocks[i].toolName == nil { blocks[i].toolName = b.toolName }
                     if blocks[i].toolInput == nil { blocks[i].toolInput = b.toolInput }
                     if blocks[i].toolNamespace == nil { blocks[i].toolNamespace = b.toolNamespace }
+                    if blocks[i].toolCallID == nil { blocks[i].toolCallID = b.toolCallID }
                     blocks[i].isErrorOutput = blocks[i].isErrorOutput || b.isErrorOutput
                     // firstEventIndex stays the merge chain's FIRST event (already set).
                 } else {

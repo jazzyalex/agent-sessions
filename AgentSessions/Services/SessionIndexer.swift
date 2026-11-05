@@ -3080,6 +3080,7 @@ final class SessionIndexer: ObservableObject {
         var toolInput: String? = nil
         var toolOutput: String? = nil
         var toolNamespace: String? = nil
+        var toolCallID: String? = nil
         var model: String? = nil
         var messageID: String? = nil
         var parentID: String? = nil
@@ -3179,6 +3180,8 @@ final class SessionIndexer: ObservableObject {
             if toolName == nil, let fn = (workingObj["function"] as? [String: Any])?["name"] as? String { toolName = fn }
 
             if let ns = workingObj["namespace"] as? String, !ns.isEmpty { toolNamespace = ns }
+            // Same read serves calls and outputs, so both carry the id (calls do from this task on).
+            if let cid = workingObj["call_id"] as? String, !cid.isEmpty { toolCallID = cid }
 
             // Codex web_search_call carries its query in `action`, not in `arguments`.
             if type == "web_search_call" {
@@ -3213,7 +3216,13 @@ final class SessionIndexer: ObservableObject {
             if let stdout = workingObj["stdout"] { outputs.append(Self.stringifyJSON(stdout, pretty: true) ?? String(describing: stdout)) }
             if let stderr = workingObj["stderr"] { outputs.append(Self.stringifyJSON(stderr, pretty: true) ?? String(describing: stderr)) }
             if let result = workingObj["result"] { outputs.append(Self.stringifyJSON(result, pretty: true) ?? String(describing: result)) }
-            if let output = workingObj["output"] { outputs.append(Self.stringifyJSON(output, pretty: true) ?? String(describing: output)) }
+            if let output = workingObj["output"] {
+                if let joined = ToolJSON.joinedContentItemText(output) {
+                    outputs.append(joined)
+                } else {
+                    outputs.append(Self.stringifyJSON(output, pretty: true) ?? String(describing: output))
+                }
+            }
             if !outputs.isEmpty {
                 toolOutput = outputs.joined(separator: "\n")
             }
@@ -3233,6 +3242,7 @@ final class SessionIndexer: ObservableObject {
             toolInput: toolInput,
             toolOutput: toolOutput,
             toolNamespace: toolNamespace,
+            toolCallID: toolCallID,
             messageID: messageID,
             parentID: parentID,
             isDelta: isDelta,
