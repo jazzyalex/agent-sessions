@@ -6,9 +6,11 @@ struct FoldState: Equatable, Sendable {
     /// Logical lines added to the visible head by "Show 500 more" (error mode: added to the tail).
     var extraLinesShown: Int = 0
     var showAll = false
-    /// Logical line indexes whose "… +N chars" cut was opened.
+    /// Logical line indexes whose "… +N chars" cut was opened. An opened line renders in full but
+    /// still counts as its cut size (`longLineVisualLines`) in every budget, so opening it never
+    /// moves a fold boundary.
     var openedLongLines: Set<Int> = []
-    /// Command and heredoc panes only.
+    /// Command and heredoc panes only: every line, cut lines opened, up to the Show-all caps.
     var commandShowAll = false
 }
 
@@ -29,9 +31,12 @@ struct FoldState: Equatable, Sendable {
 /// - Order: segments are in text order. A cut line sits between `.lines` ranges, e.g.
 ///   `[.lines(0..<3), .longLineCut(line: 3, hiddenChars: 680), .lines(4..<10)]`.
 /// - Normal mode: `[.lines(all)]`, or `[head..., .fold, tail...]`. Error mode: `[.fold, tail...]` or all.
-///   `foldCommand`: `[head...]` or `[head..., .fold]`. A fold with 0 hidden lines is never emitted.
-/// - `hitShowAllCap` is true when "Show all" stopped at 20,000 lines or 2 MB; the last segment is then
-///   the `.fold` for the rest, and the pane offers Copy output and Show Raw Event.
+///   `foldCommand`: `[head...]` or `[head..., .fold]`; with `commandShowAll`, every line with no cut,
+///   up to the Show-all caps. A fold with 0 hidden lines is never emitted.
+/// - Budgets count a line longer than 4 visual lines as 4, opened or not, so `openedLongLines` only
+///   turns a `.longLineCut` into part of a `.lines` range and never moves a fold boundary.
+/// - `hitShowAllCap` is true when "Show all" (or `commandShowAll`) stopped at 20,000 lines or 2 MB;
+///   the last segment is then the `.fold` for the rest, and the pane offers Copy output and Show Raw Event.
 struct FoldedText: Equatable, Sendable {
     enum Segment: Equatable, Sendable {
         case lines(Range<Int>)
@@ -79,23 +84,10 @@ enum ToolTextBudget {
         var text = text
         let columns = max(1, columns)
         return text.withUTF8 { bytes in
-            let scan = Scan(bytes: bytes, columns: columns, opened: state.openedLongLines)
+            let scan = Scan(bytes: bytes, columns: columns, opened: state.openedLongLines, openAll: false)
             let n = scan.count
             if n == 0 { return FoldedText(segments: [], hitShowAllCap: false) }
-
-            if state.showAll {
-                var end = 0
-                var used = 0
-                while end < n {
-                    let size = scan.ends[end] - scan.starts[end] + 1
-                    if end >= showAllLineCap || (used + size > showAllByteCap && end > 0) { break }
-                    used += size
-                    end += 1
-                }
-                var segments = scan.emit(0..<end)
-                if end < n { segments.append(.fold(hiddenLines: n - end)) }
-                return FoldedText(segments: segments, hitShowAllCap: end < n)
-            }
+            if state.showAll { return scan.showAll() }
 
             if isError {
                 if scan.total <= errorTailLines { return FoldedText(segments: scan.emit(0..<n), hitShowAllCap: false) }
@@ -120,14 +112,16 @@ enum ToolTextBudget {
     }
 
     /// Command and heredoc panes: full up to 12 visual lines, else the first 12 plus a fold (no tail).
+    /// `commandShowAll` shows every line with no cut, up to the Show-all caps.
     static func foldCommand(_ text: String, columns: Int, state: FoldState) -> FoldedText {
         var text = text
         let columns = max(1, columns)
         return text.withUTF8 { bytes in
-            let scan = Scan(bytes: bytes, columns: columns, opened: state.openedLongLines)
+            let scan = Scan(bytes: bytes, columns: columns, opened: state.openedLongLines, openAll: state.commandShowAll)
             let n = scan.count
             if n == 0 { return FoldedText(segments: [], hitShowAllCap: false) }
-            if state.commandShowAll || scan.total <= commandLines {
+            if state.commandShowAll { return scan.showAll() }
+            if scan.total <= commandLines {
                 return FoldedText(segments: scan.emit(0..<n), hitShowAllCap: false)
             }
             let headEnd = scan.headEnd(budget: commandLines)
@@ -144,18 +138,21 @@ enum ToolTextBudget {
         let bytes: UnsafeBufferPointer<UInt8>
         let columns: Int
         let opened: Set<Int>
+        /// Every line is opened (`commandShowAll`), without a set over all lines.
+        let openAll: Bool
         var starts: [Int] = []
         var ends: [Int] = []
         var visual: [Int] = []
         var plain: [Bool] = []
-        /// Sum of shown visual lines (long lines count as 4 unless opened).
+        /// Budget size of the text: visual lines, each long line counted as 4 (opened or not).
         var total = 0
         var count: Int { starts.count }
 
-        init(bytes: UnsafeBufferPointer<UInt8>, columns: Int, opened: Set<Int>) {
+        init(bytes: UnsafeBufferPointer<UInt8>, columns: Int, opened: Set<Int>, openAll: Bool) {
             self.bytes = bytes
             self.columns = columns
             self.opened = opened
+            self.openAll = openAll
             guard let base = bytes.baseAddress else { return }
             let n = bytes.count
             var pos = 0
@@ -183,14 +180,33 @@ enum ToolTextBudget {
                 ends.append(end)
                 visual.append(v)
                 plain.append(isPlain)
-                total += (v > ToolTextBudget.longLineVisualLines && !opened.contains(starts.count - 1))
-                    ? ToolTextBudget.longLineVisualLines : v
+                total += min(v, ToolTextBudget.longLineVisualLines)
                 pos = end + 1
             }
         }
 
-        func isCut(_ i: Int) -> Bool { visual[i] > ToolTextBudget.longLineVisualLines && !opened.contains(i) }
-        func shown(_ i: Int) -> Int { isCut(i) ? ToolTextBudget.longLineVisualLines : visual[i] }
+        /// Rendered as a cut: long and not opened.
+        func isCut(_ i: Int) -> Bool {
+            visual[i] > ToolTextBudget.longLineVisualLines && !openAll && !opened.contains(i)
+        }
+
+        /// Budget size of line `i`: its visual lines, at most 4. Opening a line does not change it.
+        func shown(_ i: Int) -> Int { min(visual[i], ToolTextBudget.longLineVisualLines) }
+
+        /// "Show all": every line up to 20,000 lines or 2 MB, then a fold for the rest.
+        func showAll() -> FoldedText {
+            var end = 0
+            var used = 0
+            while end < count {
+                let size = ends[end] - starts[end] + 1
+                if end >= ToolTextBudget.showAllLineCap || (used + size > ToolTextBudget.showAllByteCap && end > 0) { break }
+                used += size
+                end += 1
+            }
+            var segments = emit(0..<end)
+            if end < count { segments.append(.fold(hiddenLines: count - end)) }
+            return FoldedText(segments: segments, hitShowAllCap: end < count)
+        }
 
         /// End (exclusive) of the head: whole lines from the top while they fit in `budget`; at least one.
         func headEnd(budget: Int) -> Int {

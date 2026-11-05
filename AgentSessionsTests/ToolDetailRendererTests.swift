@@ -333,6 +333,48 @@ final class ToolDetailRendererTests: XCTestCase {
             .hasSuffix("line 19999: Compiling AgentSessionsCore SessionEvent.swift"))
         XCTAssertTrue(body.foldLinks.isEmpty, "everything is shown")
         XCTAssertLessThan(elapsed, 0.1, "50 ms release budget × 2 in Debug")
+
+        // Numbered variant: a gutter cell before every line.
+        let numberedText = (0..<20_000).map { "    let value\($0) = compute(\($0))" }.joined(separator: "\n")
+        let numberedOutput = DecodedText(text: numberedText,
+                                         sourceMap: [SourceMapEntry(rendered: NSRange(location: 0, length: (numberedText as NSString).length),
+                                                                    source: NSRange(location: 0, length: (numberedText as NSString).length))],
+                                         shape: .lineNumbered(gutter: Array(1...20_000)))
+        var numberedAction = shell("cat big.swift", output: numberedText)
+        numberedAction.output = numberedOutput
+        let numbered = self.invocation([numberedAction])
+        _ = render(numbered, folds: [0: state])
+        let numberedStart = CFAbsoluteTimeGetCurrent()
+        let numberedBody = render(numbered, folds: [0: state])
+        let numberedElapsed = CFAbsoluteTimeGetCurrent() - numberedStart
+        print("ToolDetailRenderer huge numbered output (20,000 lines, \(numberedText.utf8.count) bytes, showAll): \(Int(numberedElapsed * 1000)) ms")
+        XCTAssertTrue(numberedBody.attributed.string.contains("\t20000\t    let value19999 = compute(19999)"))
+        XCTAssertEqual(numberedBody.sourceMap.count, 20_002, "the prompt, the command, and one entry per numbered line")
+        XCTAssertFalse(numberedBody.plainCopyText.contains("\t20000\t"), "copy skips the gutter")
+        XCTAssertTrue(numberedBody.plainCopyText.hasSuffix("    let value19999 = compute(19999)"))
+        XCTAssertLessThan(numberedElapsed, 0.1, "numbered panes stay inside the same budget")
+    }
+
+    func testHugeHeredocWithCommandShowAllIsCapped() {
+        let body = (1...30_000).map { "echo \($0)" }.joined(separator: "\n")
+        let command = "cat > big.sh <<'EOF'"
+        var action = shell(command, output: nil)
+        action.exactCommand = command + "\n" + body + "\nEOF"
+        action.heredoc = decoded(body)
+        action.plainText = "$ " + action.exactCommand!
+        var state = FoldState()
+        state.commandShowAll = true
+        let rendered = render(invocation([action]), folds: [0: state])
+        let text = rendered.attributed.string
+        XCTAssertTrue(text.contains("\techo 20000\n"), "Show all shows 20,000 lines")
+        XCTAssertFalse(text.contains("echo 20001"), "and stops at the cap")
+        XCTAssertTrue(text.contains("10,000 more lines past the display limit") || text.contains("10000 more lines past the display limit"),
+                      "the rest is a capped fold")
+        XCTAssertFalse(rendered.foldLinks.contains { $0.action == .showFullCommand(action: 0) },
+                       "nothing more to open in place")
+        let rows = text.components(separatedBy: "\n")
+        XCTAssertEqual(rows.last(where: { !$0.isEmpty })?.trimmingCharacters(in: .whitespaces), "EOF",
+                       "the terminator still closes the pane")
     }
 
     // MARK: - Beyond the brief
@@ -353,9 +395,8 @@ final class ToolDetailRendererTests: XCTestCase {
     }
 
     func testLongLineCutUsesBudgetPrefix() {
-        // 400 columns: over the 4-line cut (~4 × 77) at this width, yet opened it still fits the
-        // 16-line budget, so the opened line is not folded away.
-        let wide = String(repeating: "中文", count: 100)
+        // 1,600 columns (~21 visual lines): opened, it still counts as 4 in the budget and stays visible.
+        let wide = String(repeating: "中文", count: 400)
         let ascii = String(repeating: "abcdefghij", count: 200)
         let output = "short\n" + wide + "\nmiddle\n" + ascii + "\nend"
         let action = shell("cat x", output: output)

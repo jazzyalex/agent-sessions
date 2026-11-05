@@ -16,7 +16,8 @@ extension NSAttributedString.Key {
 /// What the cell does with each (Task 13): `showMore` adds `ToolTextBudget.showMoreStep` to
 /// `FoldState.extraLinesShown`; `showAll` sets `showAll`; `openLongLine` inserts `line` into
 /// `openedLongLines` (output panes only); `showFullCommand` sets `commandShowAll`, which opens the
-/// action's command, heredoc and input-field panes, cut lines included; `showScript` shows
+/// action's command, heredoc and input-field panes, cut lines included, up to the Show-all caps
+/// (20,000 lines or 2 MB); `showScript` shows
 /// `ToolInvocation.scriptSource`; `copyOutput` copies the pane's whole decoded output.
 enum ToolFoldLink: Hashable, Sendable {
     case showMore(action: Int), showAll(action: Int), openLongLine(action: Int, line: Int), showFullCommand(action: Int)
@@ -418,15 +419,13 @@ private struct Builder {
         prompt[.foregroundColor] = NSColor.tertiaryLabelColor
         let lead = [LeadRun(text: "$ ", attrs: prompt, copy: true, source: layout.prompt)]
 
-        let folded = ToolTextBudget.foldCommand(command, columns: columns, state: inputState(state, for: command))
+        let folded = ToolTextBudget.foldCommand(command, columns: columns, state: inputState(state))
         monoText(command, folded: folded, kind: .input(action: index), lead: .firstLine(lead),
                  firstStyle: first, restStyle: rest, columns: columns, mapIndex: index, mapBase: layout.command)
 
         if let heredoc = action.heredoc, !heredoc.text.isEmpty {
-            let lineCount = Self.lineCount(heredoc.text)
-            let gutter = gutterStyle(maxNumber: lineCount)
-            let folded = ToolTextBudget.foldCommand(heredoc.text, columns: gutter.columns,
-                                                    state: inputState(state, for: heredoc.text))
+            let gutter = gutterStyle(maxNumber: Self.lineCount(heredoc.text))
+            let folded = ToolTextBudget.foldCommand(heredoc.text, columns: gutter.columns, state: inputState(state))
             monoText(heredoc.text, folded: folded, kind: .input(action: index), lead: .gutter(nil),
                      firstStyle: gutter.style, restStyle: gutter.style, columns: gutter.columns,
                      mapIndex: index, mapBase: layout.heredoc)
@@ -439,13 +438,11 @@ private struct Builder {
         endPane()
     }
 
-    /// The command-pane fold state: `commandShowAll` opens everything, cut lines included; otherwise
-    /// no cut line is open (`openedLongLines` belongs to the output pane).
-    private func inputState(_ state: FoldState, for text: String) -> FoldState {
-        var result = FoldState()
-        result.commandShowAll = state.commandShowAll
-        if state.commandShowAll { result.openedLongLines = Set(0..<Self.lineCount(text)) }
-        return result
+    /// The input-pane fold state: `commandShowAll` alone. `foldCommand` opens every cut line under it
+    /// (up to the Show-all caps); `openedLongLines` belongs to the output pane, whose line indexes
+    /// would collide.
+    private func inputState(_ state: FoldState) -> FoldState {
+        FoldState(commandShowAll: state.commandShowAll)
     }
 
     /// The word a heredoc opener on the first line names (`<<'EOF'`, `<<"EOF"`, `<<EOF`, `<<-EOF`):
@@ -493,7 +490,7 @@ private struct Builder {
                         LeadRun(text: padding, attrs: textAttrs(), copy: true, source: nil)]
             let valueBase = layout.fieldValues[n]
             if case .string(let text) = field.value {
-                let folded = ToolTextBudget.foldCommand(text, columns: columns, state: inputState(state, for: text))
+                let folded = ToolTextBudget.foldCommand(text, columns: columns, state: inputState(state))
                 monoText(text, folded: folded, kind: .input(action: index), lead: .firstLine(lead),
                          firstStyle: first, restStyle: rest, columns: columns, mapIndex: index, mapBase: valueBase)
                 continue
@@ -570,8 +567,8 @@ private struct Builder {
         case gutter([Int?]?)
     }
 
-    /// Renders folded text into the open pane: one block per run of plain lines (one run per line
-    /// when each line has a lead), cut lines with their "… +N chars" control, fold rows.
+    /// Renders folded text into the open pane: one block per `.lines` segment (numbered lines too,
+    /// with their gutter cells), cut lines with their "… +N chars" control, fold rows.
     private mutating func monoText(_ text: String, folded: FoldedText, kind: PaneKind, lead: Lead,
                                    firstStyle: NSParagraphStyle, restStyle: NSParagraphStyle, columns: Int,
                                    mapIndex: Int, mapBase: Int?) {
@@ -592,11 +589,8 @@ private struct Builder {
                 case .lines(let range):
                     switch lead {
                     case .gutter(let numbers):
-                        for line in range {
-                            paneBlock(firstStyle)
-                            appendGutter(number(line, numbers))
-                            appendLines(bytes, lines, line..<(line + 1), attrs, mapIndex: mapIndex, mapBase: mapBase)
-                        }
+                        paneBlock(firstStyle)
+                        appendNumberedLines(bytes, lines, range, numbers: numbers, attrs, mapIndex: mapIndex, mapBase: mapBase)
                     case .firstLine(let runs) where range.lowerBound == 0:
                         paneBlock(firstStyle)
                         appendLead(runs, index: mapIndex)
@@ -652,6 +646,53 @@ private struct Builder {
         if let mapBase { map(rendered, index: mapIndex, source: mapBase + lines.u16Start[range.lowerBound]) }
     }
 
+    /// Numbered lines `range` as one run in the open block (all lines of a numbered pane share one
+    /// paragraph style). The text and gutter cells are built in one pass, then each cell gets the
+    /// gutter attributes through CoreFoundation with one prebuilt dictionary: per-line attributed
+    /// appends cost ~17 µs a line in Debug (342 ms for 20,000 lines), mostly dictionary bridging.
+    private mutating func appendNumberedLines(_ bytes: UnsafeBufferPointer<UInt8>, _ lines: LineTable, _ range: Range<Int>,
+                                              numbers: [Int?]?, _ attrs: Attrs, mapIndex: Int, mapBase: Int?) {
+        let start = out.length
+        var text = ""
+        var copy = ""
+        var cells: [CFRange] = []
+        cells.reserveCapacity(range.count)
+        var offset = 0
+        for line in range {
+            if line > range.lowerBound {
+                text.append("\n")
+                copy.append("\n")
+                offset += 1
+            }
+            let cell = "\t" + (number(line, numbers).map(String.init) ?? "") + "\t"
+            cells.append(CFRange(location: offset, length: cell.utf8.count))
+            text.append(cell)
+            offset += cell.utf8.count
+            let content = String(decoding: UnsafeBufferPointer(rebasing: bytes[lines.u8Start[line]..<lines.u8End[line]]),
+                                 as: UTF8.self)
+            text.append(content)
+            copy.append(content)
+            let length = lines.u16End[line] - lines.u16Start[line]
+            if let mapBase {
+                map(NSRange(location: start + offset, length: length), index: mapIndex, source: mapBase + lines.u16Start[line])
+            }
+            offset += length
+        }
+        let base = attrs.merging(blockBase) { run, _ in run }
+        var gutter = base
+        gutter[.foregroundColor] = NSColor.tertiaryLabelColor
+        gutter[.toolGutter] = true
+        let gutterAttributes = gutter as NSDictionary as CFDictionary
+        let run = NSMutableAttributedString(string: text, attributes: base)
+        let cfRun = unsafeBitCast(run, to: CFMutableAttributedString.self)
+        CFAttributedStringBeginEditing(cfRun)
+        for cell in cells { CFAttributedStringSetAttributes(cfRun, cell, gutterAttributes, true) }
+        CFAttributedStringEndEditing(cfRun)
+        out.append(run)
+        blockCopy += copy
+        blockCopyable = true
+    }
+
     private mutating func appendLead(_ runs: [LeadRun], index: Int) {
         for run in runs {
             let range = append(run.text, run.attrs, copy: run.copy)
@@ -685,9 +726,14 @@ private struct Builder {
             append(Style.factSeparator, base, copy: false)
             link(ToolDetailText.copyOutput, .copyOutput(action: key), base: base)
         case .input(let action):
-            append(ToolDetailText.moreLines(hidden), base, copy: false)
-            append(Style.factSeparator, base, copy: false)
-            link(ToolDetailText.showAll, .showFullCommand(action: action), base: base)
+            if capped {
+                // `commandShowAll` already holds; there is nothing more to open in place.
+                append(ToolDetailText.moreLinesPastLimit(hidden), base, copy: false)
+            } else {
+                append(ToolDetailText.moreLines(hidden), base, copy: false)
+                append(Style.factSeparator, base, copy: false)
+                link(ToolDetailText.showAll, .showFullCommand(action: action), base: base)
+            }
         }
     }
 
@@ -846,7 +892,7 @@ private struct Builder {
         return false
     }
 
-    /// Logical lines in `ToolTextBudget`'s sense, at most one too many (enough for an open-all set).
+    /// Logical lines in `ToolTextBudget`'s sense, at most one too many (the heredoc gutter's widest number).
     static func lineCount(_ text: String) -> Int {
         text.utf8.reduce(1) { $1 == 0x0A ? $0 + 1 : $0 }
     }
@@ -938,6 +984,7 @@ private struct LineTable {
     var u8Start: [Int] = []
     var u8End: [Int] = []
     var u16Start: [Int] = []
+    var u16End: [Int] = []
 
     init(_ bytes: UnsafeBufferPointer<UInt8>, ascii: Bool) {
         guard let base = bytes.baseAddress else { return }
@@ -962,6 +1009,7 @@ private struct LineTable {
             u8Start.append(pos)
             u8End.append(end)
             u16Start.append(u16)
+            u16End.append(u16 + length)
             u16 += length + 1
             pos = end + 1
         }

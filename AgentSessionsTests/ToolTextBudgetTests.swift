@@ -82,6 +82,52 @@ final class ToolTextBudgetTests: XCTestCase {
         XCTAssertEqual(ToolTextBudget.fold(text, columns: 80, isError: false, state: state).segments, [.lines(0..<1)])
     }
 
+    /// Fix round 1: an opened long line keeps its cut size (4) in every budget, so it renders in full
+    /// where it was and no fold boundary moves.
+    func testOpeningALongLineNeverMovesFoldBoundaries() {
+        let long = String(repeating: "a", count: 5000)  // 63 visual lines at 80 columns
+        var head = (0..<30).map { "row \($0)" }
+        head.insert(long, at: 2)
+        let text = head.joined(separator: "\n")
+        var open = FoldState()
+        open.openedLongLines = [2]
+
+        let closed = ToolTextBudget.fold(text, columns: 80, isError: false, state: FoldState())
+        XCTAssertEqual(closed.segments, [.lines(0..<2), .longLineCut(line: 2, hiddenChars: 5000 - 320), .lines(3..<9),
+                                         .fold(hiddenLines: 18), .lines(27..<31)])
+        let opened = ToolTextBudget.fold(text, columns: 80, isError: false, state: open)
+        XCTAssertEqual(opened.segments, [.lines(0..<9), .fold(hiddenLines: 18), .lines(27..<31)],
+                       "line 2 is inside the head, and head, fold and tail are unchanged")
+
+        let command = ToolTextBudget.foldCommand(text, columns: 80, state: open)
+        XCTAssertEqual(command.segments, [.lines(0..<9), .fold(hiddenLines: 22)])
+        XCTAssertEqual(ToolTextBudget.foldCommand(text, columns: 80, state: FoldState()).segments,
+                       [.lines(0..<2), .longLineCut(line: 2, hiddenChars: 5000 - 320), .lines(3..<9), .fold(hiddenLines: 22)])
+
+        var tail = (0..<30).map { "row \($0)" }
+        tail.insert(long, at: 28)
+        let errorText = tail.joined(separator: "\n")
+        var openTail = FoldState()
+        openTail.openedLongLines = [28]
+        XCTAssertEqual(ToolTextBudget.fold(errorText, columns: 80, isError: true, state: FoldState()).segments,
+                       [.fold(hiddenLines: 16), .lines(16..<28), .longLineCut(line: 28, hiddenChars: 5000 - 320), .lines(29..<31)])
+        XCTAssertEqual(ToolTextBudget.fold(errorText, columns: 80, isError: true, state: openTail).segments,
+                       [.fold(hiddenLines: 16), .lines(16..<31)], "error mode: the opened line stays in the tail")
+    }
+
+    /// Fix round 1: `commandShowAll` uses the Show-all caps and opens cut lines without a set.
+    func testCommandShowAllIsCappedAndOpensCutLines() {
+        var state = FoldState()
+        state.commandShowAll = true
+        let capped = ToolTextBudget.foldCommand(lines(30_000) { _ in "x" }, columns: 80, state: state)
+        XCTAssertTrue(capped.hitShowAllCap)
+        XCTAssertEqual(capped.segments, [.lines(0..<20_000), .fold(hiddenLines: 10_000)])
+        let long = "short\n" + String(repeating: "c", count: 2000)
+        XCTAssertEqual(ToolTextBudget.foldCommand(long, columns: 80, state: state).segments, [.lines(0..<2)])
+        XCTAssertEqual(ToolTextBudget.foldCommand(long, columns: 80, state: FoldState()).segments,
+                       [.lines(0..<1), .longLineCut(line: 1, hiddenChars: 2000 - 320)])
+    }
+
     func testLongWideLineCutKeepsWholeCharacters() {
         // 80 columns x 4 = 320 columns = 160 wide characters kept.
         let text = String(repeating: "日", count: 400)
