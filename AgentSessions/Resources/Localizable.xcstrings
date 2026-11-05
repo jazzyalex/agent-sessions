@@ -267,6 +267,160 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "消息在日志中已加密（%lld 个字符）" } }
       }
     },
+    "⋯ %lld more lines": {
+      "comment": "Transcript tool pane fold row: this many lines are hidden here. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ %lld more line" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ %lld more lines" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ 还有 %lld 行" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ 还有 %lld 行" } }
+            }
+          }
+        }
+      }
+    },
+    "⋯ %lld more lines past the display limit": {
+      "comment": "Transcript tool pane fold row after Show all stopped at its limit (20,000 lines or 2 MB). %lld is the count of lines not shown.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ %lld more line past the display limit" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ %lld more lines past the display limit" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ 另有 %lld 行超出显示上限" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ 另有 %lld 行超出显示上限" } }
+            }
+          }
+        }
+      }
+    },
+    "Show %lld more": {
+      "comment": "Transcript tool output fold link: shows the next hidden lines. %lld is the step, 500.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show %lld more" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "再显示 %lld 行" } }
+      }
+    },
+    "Show all": {
+      "comment": "Transcript tool pane fold link: shows every hidden line.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show all" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "全部显示" } }
+      }
+    },
+    "Copy output": {
+      "comment": "Transcript tool output fold link: copies the whole tool output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "复制输出" } }
+      }
+    },
+    "… +%lld chars": {
+      "comment": "Transcript tool pane: a long line or value stops here; this many characters follow. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "… +%lld char" } },
+              "other": { "stringUnit": { "state": "translated", "value": "… +%lld chars" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "… 另有 %lld 个字符" } },
+              "other": { "stringUnit": { "state": "translated", "value": "… 另有 %lld 个字符" } }
+            }
+          }
+        }
+      }
+    },
+    "Show script": {
+      "comment": "Transcript tool detail link: shows the script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "显示脚本" } }
+      }
+    },
+    "system note": {
+      "comment": "Transcript tool detail: a collapsed note the agent's app added to the tool output (for example a system reminder).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "system note" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "系统备注" } }
+      }
+    },
+    "output saved to a file": {
+      "comment": "Transcript tool footer: the agent saved the full output to a file and kept a preview.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "output saved to a file" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出已保存到文件" } }
+      }
+    },
+    "output saved to a file (%@)": {
+      "comment": "Transcript tool footer: the agent saved the full output to a file and kept a preview. %@ is the file size, for example 38.4 KB.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "output saved to a file (%@)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出已保存到文件（%@）" } }
+      }
+    },
+    "%lld tokens": {
+      "comment": "Transcript tool footer: size of the output before the agent shortened it, in model tokens. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld token" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld tokens" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld 个词元" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld 个词元" } }
+            }
+          }
+        }
+      }
+    },
+    "tool.context.cwd": {
+      "comment": "Transcript tool context line label before the working directory of a command.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cwd" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工作目录" } }
+      }
+    },
+    "tool.context.shell": {
+      "comment": "Transcript tool context line label before the shell that ran a command, for example zsh -lc.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "shell" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Shell" } }
+      }
+    },
+    "tool.context.timeout": {
+      "comment": "Transcript tool context line label before the command's time limit.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "timeout" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "超时" } }
+      }
+    },
     "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem.": {
       "comment": "Codex quota fetch recovery step for HTTP 401/403. 'codex login' is a command and stays verbatim.",
       "localizations": {
