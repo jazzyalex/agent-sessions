@@ -12,12 +12,11 @@ import XCTest
 /// - `durationSeconds` = timestamp(last block in turn) − timestamp(user
 ///   block); nil if either timestamp is nil or the delta is negative.
 /// - `toolCallCount` = number of `.toolCall` blocks in the turn.
-/// - Tool duration is computed session-wide (not turn-scoped): each
-///   `.toolOut` is matched to the NEAREST PRECEDING UNMATCHED `.toolCall`
-///   (stack/LIFO discipline — see the interleaved/nested tests below), and
-///   keyed by the toolOut's `globalBlockIndex`. nil if either timestamp is
-///   missing or the delta is negative, or if there's no unmatched toolCall
-///   to match.
+/// - Tool duration comes from `ToolInvocationIndex` pairing (Task 6): by
+///   call id, then FIFO inside the turn, then the stack fallback for an
+///   output with no open call in its own turn. Each output is keyed by its
+///   `globalBlockIndex`. nil if either timestamp is missing or the delta is
+///   negative, or if the output has no call.
 final class TranscriptTurnTimingTests: XCTestCase {
 
     // MARK: - Basic turn + tool timing
@@ -183,31 +182,56 @@ final class TranscriptTurnTimingTests: XCTestCase {
         XCTAssertEqual(result.turns[1]?.toolCallCount, 2)
     }
 
-    func testNestedToolPairsMatchLIFONearestPrecedingUnmatched() {
-        // call1@0, call2@1, out2@3, out1@10 — nested/LIFO: out2 closes the
-        // INNER call (call2, the nearer preceding unmatched one), out1 closes
-        // the outer call (call1). This is the documented, tested decision:
-        // "nearest preceding unmatched" is a stack/LIFO match, not FIFO —
-        // out1 must NOT match call1 by simple output-order pairing if that
-        // would skip over call2's still-unmatched status.
+    func testIDlessCallsInOneTurnPairFIFO() {
+        // call1@0, call2@1, out@3, out@10 with no call ids — the parallel shape
+        // (spec §6.2: parallel calls are far more common than nested ones).
+        // Without ids, outputs pair with calls in arrival order inside the turn.
         let blocks = TranscriptTestFixtures.makeTimedBlocks([
             .user(0),        // 0
             .assistant(0),   // 1
-            .toolCall(0),    // 2  call1 (outer)
-            .toolCall(1),    // 3  call2 (inner)
-            .toolOut(3),     // 4  out2
-            .toolOut(10),    // 5  out1
+            .toolCall(0),    // 2  call1
+            .toolCall(1),    // 3  call2
+            .toolOut(3),     // 4  out1
+            .toolOut(10),    // 5  out2
         ])
         let result = TranscriptTurnTiming.compute(blocks: blocks)
 
-        // out2 (idx 4) matches the NEAREST preceding unmatched toolCall, which
-        // is call2 (idx 3): 3 - 1 = 2.0. (NOT call1 — call1 is further away.)
-        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 2.0))
-        // out1 (idx 5) then matches the next-nearest preceding unmatched
-        // toolCall, call1 (idx 2), since call2 was already consumed by out2:
-        // 10 - 0 = 10.0.
-        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 10.0))
+        // out1 (idx 4) pairs with call1 (idx 2): 3 - 0 = 3.0.
+        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 3.0))
+        // out2 (idx 5) pairs with call2 (idx 3): 10 - 1 = 9.0.
+        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 9.0))
         XCTAssertEqual(result.turns[1]?.toolCallCount, 2)
+    }
+
+    func testToolDurationUsesPairing() {
+        typealias F = TranscriptTestFixtures
+        // c1 c2 o1 o2 with ids: each output pairs with its own call.
+        let inOrder = F.sequence([
+            F.block(.user, at: 0),                  // 0
+            F.block(.assistant, at: 0),             // 1
+            F.block(.toolCall, id: "t1", at: 0),    // 2
+            F.block(.toolCall, id: "t2", at: 1),    // 3
+            F.block(.toolOut, id: "t1", at: 4),     // 4
+            F.block(.toolOut, id: "t2", at: 10),    // 5
+        ])
+        let result = TranscriptTurnTiming.compute(blocks: inOrder)
+        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 4.0))
+        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 9.0))
+
+        // Ids beat arrival order: o2 lands first. The explicit-index entry point.
+        let outOfOrder = F.sequence([
+            F.block(.user, at: 0),                  // 0
+            F.block(.assistant, at: 0),             // 1
+            F.block(.toolCall, id: "t1", at: 0),    // 2
+            F.block(.toolCall, id: "t2", at: 1),    // 3
+            F.block(.toolOut, id: "t2", at: 4),     // 4  pairs with t2 (idx 3)
+            F.block(.toolOut, id: "t1", at: 10),    // 5  pairs with t1 (idx 2)
+        ])
+        let index = ToolInvocationIndex.build(blocks: outOfOrder, source: .claude)
+        let byID = TranscriptTurnTiming.compute(blocks: outOfOrder, index: index)
+        XCTAssertEqual(byID.tools[4], ToolTiming(durationSeconds: 3.0))
+        XCTAssertEqual(byID.tools[5], ToolTiming(durationSeconds: 10.0))
+        XCTAssertEqual(byID.turns[1]?.toolCallCount, 2)
     }
 
     // MARK: - No crash on fully-nil timestamps

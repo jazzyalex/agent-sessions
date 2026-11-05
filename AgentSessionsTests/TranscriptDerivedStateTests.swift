@@ -47,6 +47,45 @@ final class TranscriptDerivedStateTests: XCTestCase {
                        "error-bearing fixture must actually exercise errorBlockIndices")
     }
 
+    func testSnapshotCarriesInvocationIndexAndFailedIDs() {
+        func call(_ id: String, _ callID: String, _ cmd: String) -> SessionEvent {
+            SessionEvent(id: id, timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                         toolName: "exec_command", toolInput: #"{"cmd":"\#(cmd)"}"#, toolOutput: nil,
+                         toolNamespace: nil, toolCallID: callID,
+                         messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+        }
+        func result(_ id: String, _ callID: String, _ output: String) -> SessionEvent {
+            SessionEvent(id: id, timestamp: nil, kind: .tool_result, role: "tool", text: nil,
+                         toolName: nil, toolInput: nil, toolOutput: output,
+                         toolNamespace: nil, toolCallID: callID,
+                         messageID: "m-\(id)", parentID: nil, isDelta: false, rawJSON: "{}")
+        }
+        // 0 user · 1 call k1 · 2 result k1 (exit 2) · 3 call k2 · 4 result k2 · 5 assistant
+        let events = [
+            TranscriptTestFixtures.userEvent("u1", "build it"),
+            call("c1", "k1", "make"),
+            result("r1", "k1", "Process exited with code 2\nOutput:\nboom"),
+            call("c2", "k2", "ls"),
+            result("r2", "k2", "Process exited with code 0\nOutput:\nREADME.md"),
+            TranscriptTestFixtures.assistantDelta("a1", "Build failed.", messageID: "m-a1"),
+        ]
+        let session = Session(id: "derived-invocations", source: .codex, startTime: nil, endTime: nil,
+                              model: "test", filePath: "/tmp/derived-invocations.jsonl", fileSizeBytes: nil,
+                              eventCount: events.count, events: events)
+        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false,
+                                                              reviewCardsEnabled: true)
+        let snap = TranscriptDerivedState.computeSnapshot(session: session, settings: settings)
+
+        XCTAssertEqual(snap.invocationIndex.invocations.map(\.id), [1, 3])
+        XCTAssertEqual(snap.invocationIndex.invocations.map(\.outputBlockIndices), [[2], [4]])
+        XCTAssertEqual(snap.invocationIndex.invocations.map(\.status), [.failed(exitCode: 2), .success])
+        XCTAssertEqual(snap.failedInvocationIDs, [1])
+        // Errors stay block-based: a failed tool output is not an `.error` block.
+        XCTAssertEqual(snap.errorBlockIndices, [])
+        XCTAssertTrue(TranscriptDerivedState.Snapshot().invocationIndex.invocations.isEmpty)
+        XCTAssertTrue(TranscriptDerivedState.Snapshot().failedInvocationIDs.isEmpty)
+    }
+
     func testSnapshotKeyDedupe() {
         let session = fixtureSession()
         let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false,

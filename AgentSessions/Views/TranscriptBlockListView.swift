@@ -316,6 +316,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.installDocumentFrameObserver(on: scroll)
         let rowsChanged = context.coordinator.apply(
             allBlocks: snapshot.blocks,
+            invocationIndex: snapshot.invocationIndex,
+            failedInvocationIDs: snapshot.failedInvocationIDs,
             totalBlockCount: snapshot.totalBlockCount,
             fontSize: fontSize,
             source: session.source,
@@ -624,13 +626,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Full block stream last handed to `apply`, retained so scroll-driven
     /// widening can re-slice without waiting for the next SwiftUI update pass.
     private var allBlocksCache: [SessionTranscriptBuilder.LogicalBlock] = []
+    /// Whole-session tool pairing and status for `allBlocksCache`, from the same
+    /// snapshot (Task 6). Keyed by `globalBlockIndex`, like `allBlocksCache`.
+    private(set) var invocationIndex: ToolInvocationIndex = .empty
+    /// Invocation ids whose status is `.failed`, from the same snapshot.
+    private(set) var failedInvocationIDs: Set<Int> = []
     /// Row id currently flashing (widen/jump highlight), so a recycled cell for
     /// that row re-raises the pulse and every other cell resets to base alpha.
     private var flashingRowID: Int?
 
     // MARK: Turn/tool timing badges (Phase 3 Task 19)
 
-    /// `TranscriptTurnTiming.compute(blocks:)` results for the CURRENT full
+    /// `TranscriptTurnTiming.compute(blocks:index:)` results for the CURRENT full
     /// block stream, cached so a per-row lookup (`turnTiming(forRowID:)` /
     /// `toolTiming(forRowID:)`) is O(1) rather than re-scanning the stream on
     /// every `configure`. Recomputed on the same seam as the other per-snapshot
@@ -1190,6 +1197,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// table with the cheapest correct operation.
     @discardableResult
     func apply(allBlocks: [SessionTranscriptBuilder.LogicalBlock],
+               invocationIndex: ToolInvocationIndex = .empty,
+               failedInvocationIDs: Set<Int> = [],
                totalBlockCount: Int,
                fontSize: CGFloat,
                source: SessionSource,
@@ -1326,6 +1335,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
         allBlocksCache = allBlocks
+        self.invocationIndex = invocationIndex
+        self.failedInvocationIDs = failedInvocationIDs
 
         // Turn/tool timing (Task 19): recompute once per snapshot, on the same
         // "did the full stream change" gate the window-maintenance branch below
@@ -1336,7 +1347,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // reason to redo it when the stream is provably unchanged.
         if totalBlockCount != lastTimingComputedBlockCount {
             lastTimingComputedBlockCount = totalBlockCount
-            let timing = TranscriptTurnTiming.compute(blocks: allBlocks)
+            let timing = TranscriptTurnTiming.compute(blocks: allBlocks, index: self.invocationIndex)
             turnTimingCache = timing.turns
             toolTimingCache = timing.tools
         }

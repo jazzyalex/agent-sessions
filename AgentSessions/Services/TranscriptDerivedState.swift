@@ -40,6 +40,10 @@ final class TranscriptDerivedState {
         var toolBlockIndices: [Int] = []
         var errorBlockIndices: [Int] = []
         var preambleUserBlockIndexes: Set<Int> = []
+        /// Whole-session tool pairing and status (Task 6), built from `blocks`.
+        var invocationIndex: ToolInvocationIndex = .empty
+        /// Ids of invocations whose status is `.failed` (the Errors filter's tool half, spec §6.8).
+        var failedInvocationIDs: Set<Int> = []
         var key: Key?
     }
 
@@ -105,6 +109,16 @@ final class TranscriptDerivedState {
         snap.userBlockIndices = userIdx
         snap.toolBlockIndices = toolIdx
         snap.errorBlockIndices = errIdx
+
+        // Tool pairing + cheap status (spec §6.2 pass 1), once per snapshot, off main.
+        // Errors stay block-based in `errorBlockIndices`; failed invocations are separate.
+        let invocationIndex = ToolInvocationIndex.build(blocks: blocks, source: session.source)
+        snap.invocationIndex = invocationIndex
+        var failedInvocationIDs: Set<Int> = []
+        for invocation in invocationIndex.invocations {
+            if case .failed = invocation.status { failedInvocationIDs.insert(invocation.id) }
+        }
+        snap.failedInvocationIDs = failedInvocationIDs
 
         snap.preambleUserBlockIndexes = settings.skipAgentsPreamble
             ? SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: blocks)

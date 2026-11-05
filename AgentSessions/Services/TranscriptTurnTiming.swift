@@ -7,8 +7,8 @@ struct TurnTiming: Equatable {
     var toolCallCount: Int
 }
 
-/// Per-tool-call duration ("how long did this tool take"), keyed by the
-/// matching `.toolOut` block's `globalBlockIndex`.
+/// Per-tool-call duration ("how long did this tool take"), keyed by each
+/// output block's `globalBlockIndex` (see `TranscriptTurnTiming`).
 struct ToolTiming: Equatable {
     var durationSeconds: Double?
 }
@@ -27,67 +27,66 @@ struct ToolTiming: Equatable {
 ///   turn's user block); nil if either timestamp is nil, or if the delta is
 ///   negative (clock skew — never show a bogus negative duration).
 /// - `toolCallCount` = number of `.toolCall` blocks in the turn.
-/// - Tool duration is computed SESSION-WIDE, independent of turn boundaries:
-///   each `.toolOut` is matched to the nearest PRECEDING UNMATCHED `.toolCall`
-///   and keyed by the toolOut's `globalBlockIndex`. This is a LIFO/stack match
-///   (push on `.toolCall`, pop on `.toolOut`) — see "Nested vs. interleaved"
-///   below. nil duration if either timestamp is missing, the delta is
-///   negative, or there is no unmatched toolCall to match against.
-///
-/// Nested vs. interleaved tool pairs: "nearest preceding unmatched" is
-/// deliberately a LIFO stack match, not FIFO-by-arrival-order. For
-/// `call1, out1, call2, out2` (sequential/interleaved), out1 closes call1 and
-/// out2 closes call2 — both a stack and a queue agree here. For
-/// `call1, call2, out2, out1` (nested — call2 opens and closes entirely
-/// inside call1's span), a stack correctly matches out2 to call2 (the nearer,
-/// still-open call) and out1 to call1, mirroring how nested tool
-/// calls/subagent spans actually behave. A queue would incorrectly match out1
-/// to call1 by arrival position while ignoring nesting, but here it also
-/// happens to agree because call1 IS the next FIFO entry — the two
-/// disciplines only diverge when an inner call's output arrives before an
-/// unrelated, still-open outer call started even earlier and stays open
-/// longer, which a plain stack handles correctly. We use a stack throughout.
+/// - Tool duration comes from the call ↔ output pairing in
+///   `ToolInvocationIndex` (spec §6.2): by call id, then FIFO inside the turn,
+///   then a stack fallback for an output with no open call in its own turn.
+///   Pairing is session-wide. Each output of an invocation with a call gets
+///   `timestamp(output) − timestamp(call)`, keyed by the output's
+///   `globalBlockIndex`. nil duration if either timestamp is missing or the
+///   delta is negative. An output with no call (orphan) gets no entry.
+///   Id-less parallel calls (`call1, call2, out, out`) pair in arrival order:
+///   parallel calls are far more common than nested ones, and nested calls
+///   from agents that record ids pair by id.
 enum TranscriptTurnTiming {
 
+    /// Builds the pairing itself (source `.codex`). Callers that hold a
+    /// snapshot's `ToolInvocationIndex` use `compute(blocks:index:)`.
     static func compute(
         blocks: [SessionTranscriptBuilder.LogicalBlock]
+    ) -> (turns: [Int: TurnTiming], tools: [Int: ToolTiming]) {
+        compute(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: .codex))
+    }
+
+    /// - Parameters:
+    ///   - blocks: the full session stream (`globalBlockIndex` == position).
+    ///   - index: the pairing built from the same `blocks`.
+    static func compute(
+        blocks: [SessionTranscriptBuilder.LogicalBlock],
+        index: ToolInvocationIndex
     ) -> (turns: [Int: TurnTiming], tools: [Int: ToolTiming]) {
         var turns: [Int: TurnTiming] = [:]
         var tools: [Int: ToolTiming] = [:]
 
-        // MARK: Tool matching — session-wide, stack-based nearest-preceding-unmatched.
-        var openToolCalls: [SessionTranscriptBuilder.LogicalBlock] = []
-        for block in blocks {
-            switch block.kind {
-            case .toolCall:
-                openToolCalls.append(block)
-            case .toolOut:
-                guard let call = openToolCalls.popLast() else {
-                    // Orphaned toolOut — no unmatched toolCall precedes it.
-                    continue
-                }
-                tools[block.globalBlockIndex] = ToolTiming(
-                    durationSeconds: duration(from: call.timestamp, to: block.timestamp))
-            default:
-                break
+        // MARK: Tool durations — from the session-wide pairing.
+        func timestamp(_ globalBlockIndex: Int) -> Date? {
+            guard blocks.indices.contains(globalBlockIndex),
+                  blocks[globalBlockIndex].globalBlockIndex == globalBlockIndex else { return nil }
+            return blocks[globalBlockIndex].timestamp
+        }
+        for invocation in index.invocations {
+            guard let callIndex = invocation.callBlockIndex else { continue }
+            let callTimestamp = timestamp(callIndex)
+            for outputIndex in invocation.outputBlockIndices {
+                tools[outputIndex] = ToolTiming(
+                    durationSeconds: duration(from: callTimestamp, to: timestamp(outputIndex)))
             }
         }
 
         // MARK: Turn segmentation — user block + everything up to the next user block.
-        var index = 0
-        while index < blocks.count {
-            guard blocks[index].kind == .user else {
+        var position = 0
+        while position < blocks.count {
+            guard blocks[position].kind == .user else {
                 // Blocks before the first `.user` block belong to no turn.
-                index += 1
+                position += 1
                 continue
             }
 
-            let userBlock = blocks[index]
-            var turnEnd = index + 1
+            let userBlock = blocks[position]
+            var turnEnd = position + 1
             while turnEnd < blocks.count, blocks[turnEnd].kind != .user {
                 turnEnd += 1
             }
-            let turnBlocks = blocks[index..<turnEnd]
+            let turnBlocks = blocks[position..<turnEnd]
 
             let anchorIndex = turnBlocks.first(where: { $0.kind == .assistant })?.globalBlockIndex
                 ?? userBlock.globalBlockIndex
@@ -99,7 +98,7 @@ enum TranscriptTurnTiming {
 
             turns[anchorIndex] = TurnTiming(durationSeconds: durationSeconds, toolCallCount: toolCallCount)
 
-            index = turnEnd
+            position = turnEnd
         }
 
         return (turns, tools)

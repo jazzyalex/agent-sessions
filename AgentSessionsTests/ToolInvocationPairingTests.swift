@@ -1,0 +1,257 @@
+import XCTest
+@testable import AgentSessions
+
+/// Task 6: `ToolInvocationIndex.build` pairs calls with outputs (by id, then FIFO in
+/// the turn, then the stack fallback) and gives each invocation its cheap status.
+final class ToolInvocationPairingTests: XCTestCase {
+    private typealias F = TranscriptTestFixtures
+
+    override func setUp() {
+        super.setUp()
+        SessionTranscriptBuilder._testResetCoalesceCache()
+    }
+
+    private func invocation(_ index: ToolInvocationIndex, containing block: Int) -> ToolInvocationRef? {
+        guard let id = index.invocationIDByBlock[block] else { return nil }
+        return index.invocations.first { $0.id == id }
+    }
+
+    // MARK: - Pairing order
+
+    func testParallelCallsPairByID() {
+        // 0 user · 1 c1 · 2 c2 · 3 c3 · 4 o1 · 5 o2 · 6 o3
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1"), F.block(.toolCall, id: "t2"), F.block(.toolCall, id: "t3"),
+            F.block(.toolOut, id: "t1", text: "a"), F.block(.toolOut, id: "t2", text: "b"),
+            F.block(.toolOut, id: "t3", text: "c"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.invocations.map(\.id), [1, 2, 3])
+        XCTAssertEqual(index.invocations.map(\.callBlockIndex), [1, 2, 3])
+        XCTAssertEqual(index.invocations.map(\.outputBlockIndices), [[4], [5], [6]])
+        XCTAssertEqual(index.invocations.map(\.status), [.success, .success, .success])
+        XCTAssertEqual(index.invocationIDByBlock, [1: 1, 2: 2, 3: 3, 4: 1, 5: 2, 6: 3])
+
+        // Ids beat arrival order: outputs arrive t3, t1, t2.
+        let shuffled = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1"), F.block(.toolCall, id: "t2"), F.block(.toolCall, id: "t3"),
+            F.block(.toolOut, id: "t3", text: "c"), F.block(.toolOut, id: "t1", text: "a"),
+            F.block(.toolOut, id: "t2", text: "b"),
+        ])
+        let byID = ToolInvocationIndex.build(blocks: shuffled, source: .codex)
+        XCTAssertEqual(byID.invocations.map(\.outputBlockIndices), [[5], [6], [4]])
+    }
+
+    func testParallelCallsWithoutIDsPairFIFOInTurn() {
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall), F.block(.toolCall), F.block(.toolCall),
+            F.block(.toolOut, text: "a"), F.block(.toolOut, text: "b"), F.block(.toolOut, text: "c"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.invocations.map(\.id), [1, 2, 3])
+        XCTAssertEqual(index.invocations.map(\.outputBlockIndices), [[4], [5], [6]])
+    }
+
+    func testOutputWithoutCallInItsTurnFallsBackToStack() {
+        // turn 1: 0 user · 1 c1 — turn 2: 2 user · 3 c2 · 4 o2 · 5 o1 (no ids)
+        let blocks = F.sequence([
+            F.block(.user, text: "one"),
+            F.block(.toolCall),
+            F.block(.user, text: "two"),
+            F.block(.toolCall),
+            F.block(.toolOut, text: "o2"),
+            F.block(.toolOut, text: "o1"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(invocation(index, containing: 4)?.callBlockIndex, 3, "o2 pairs FIFO with c2 in its own turn")
+        XCTAssertEqual(invocation(index, containing: 5)?.callBlockIndex, 1, "o1 falls back to the stack: c1")
+        XCTAssertEqual(index.invocations.map(\.outputBlockIndices), [[5], [4]])
+    }
+
+    func testIDPairingIsSessionWide() {
+        // The call is in turn 1, its output (same id) in turn 2.
+        let blocks = F.sequence([
+            F.block(.user, text: "one"),
+            F.block(.toolCall, id: "t1"),
+            F.block(.user, text: "two"),
+            F.block(.toolOut, id: "t1", text: "late"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+
+        XCTAssertEqual(index.invocations.count, 1)
+        XCTAssertEqual(index.invocations.first?.outputBlockIndices, [3])
+    }
+
+    func testRuntimeErrorBlockPairsAsFailedOutput() {
+        // 0 user · 1 c1 (t1) · 2 .error carrying t1 (a Claude runtime error)
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "Bash"),
+            F.block(.error, id: "t1", text: "Error: permission denied", isError: true,
+                    disposition: .runtimeError),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+
+        XCTAssertEqual(index.invocations.count, 1)
+        XCTAssertEqual(index.invocations.first?.callBlockIndex, 1)
+        XCTAssertEqual(index.invocations.first?.outputBlockIndices, [2])
+        XCTAssertEqual(index.invocations.first?.status, .failed(exitCode: nil))
+        XCTAssertEqual(index.invocationIDByBlock[2], 1)
+    }
+
+    func testErrorBlockWithoutMatchingCallStaysOutOfIndex() {
+        // An `.error` block joins only the call its id names; with no such call it stays a plain error.
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.error, id: "nope", text: "boom", isError: true),
+            F.block(.error, text: "plain error", isError: true),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+
+        XCTAssertTrue(index.invocations.isEmpty)
+        XCTAssertTrue(index.invocationIDByBlock.isEmpty)
+    }
+
+    func testOrphanOutputBecomesOwnInvocation() {
+        // 0 user · 1 assistant · 2 o1 (id, no call) · 3 o2 (no id, no call)
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.assistant, text: "working"),
+            F.block(.toolOut, id: "t9", text: "orphan"),
+            F.block(.toolOut, text: "orphan 2"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.invocations.map(\.id), [2, 3])
+        XCTAssertEqual(index.invocations.map(\.callBlockIndex), [nil, nil])
+        XCTAssertEqual(index.invocations.map(\.outputBlockIndices), [[2], [3]])
+        XCTAssertEqual(index.invocations.map(\.status), [.success, .success])
+        XCTAssertEqual(index.invocationIDByBlock, [2: 2, 3: 3])
+    }
+
+    // MARK: - Calls without outputs
+
+    func testCallWithoutOutputAtSessionEndIsPending() {
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1"),
+            F.block(.assistant, text: "still working"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.invocations.count, 1)
+        XCTAssertEqual(index.invocations.first?.status, .pending)
+        XCTAssertEqual(index.invocations.first?.outputBlockIndices, [])
+    }
+
+    func testCallWithoutOutputBeforeALaterTurnIsNoResult() {
+        let blocks = F.sequence([
+            F.block(.user, text: "one"),
+            F.block(.toolCall, id: "t1"),
+            F.block(.user, text: "two"),
+            F.block(.assistant, text: "ok"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.invocations.first?.status, .noResult)
+    }
+
+    func testInterruptedByTurnAbortedNotice() {
+        // Real coalesce: the `<turn_aborted>` user message is split into its own `.meta`
+        // notice, which sits in the call's turn.
+        func session(aborted: Bool) -> Session {
+            var events: [SessionEvent] = [
+                TranscriptTestFixtures.userEvent("u1", "run the build"),
+                SessionEvent(id: "c1", timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                             toolName: "exec_command", toolInput: #"{"cmd":"make"}"#, toolOutput: nil,
+                             toolNamespace: nil, toolCallID: "call_1",
+                             messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}"),
+            ]
+            if aborted {
+                events.append(TranscriptTestFixtures.userEvent(
+                    "u2", "<turn_aborted>\n<turn_id>t-1</turn_id>\n<reason>interrupted</reason>\n</turn_aborted>"))
+            }
+            events.append(TranscriptTestFixtures.userEvent("u3", "try again"))
+            events.append(TranscriptTestFixtures.assistantDelta("a1", "ok", messageID: "m-a1"))
+            return Session(id: "pairing-abort-\(aborted)-\(UUID().uuidString)", source: .codex,
+                           startTime: nil, endTime: nil, model: "test", filePath: "/tmp/abort.jsonl",
+                           fileSizeBytes: nil, eventCount: events.count, events: events)
+        }
+
+        let abortedBlocks = SessionTranscriptBuilder.coalescedBlocks(for: session(aborted: true), includeMeta: false)
+        XCTAssertTrue(abortedBlocks.contains { $0.kind == .meta && $0.text.contains("Tag: turn_aborted") },
+                      "sanity: the builder splits the notice into a meta block")
+        let aborted = ToolInvocationIndex.build(blocks: abortedBlocks, source: .codex)
+        XCTAssertEqual(aborted.invocations.first?.status, .interrupted)
+
+        // Control: the same call with no notice is noResult (a later turn exists).
+        let plainBlocks = SessionTranscriptBuilder.coalescedBlocks(for: session(aborted: false), includeMeta: false)
+        let plain = ToolInvocationIndex.build(blocks: plainBlocks, source: .codex)
+        XCTAssertEqual(plain.invocations.first?.status, .noResult)
+    }
+
+    func testInterruptedByUserInterruptMarker() {
+        // Claude writes "[Request interrupted by user for tool use]" as a user message.
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "Bash"),
+            F.block(.user, text: "[Request interrupted by user for tool use]"),
+            F.block(.user, text: "do something else"),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+
+        XCTAssertEqual(index.invocations.first?.status, .interrupted)
+    }
+
+    func testCursorCallStatusIsUnknown() {
+        let blocks = F.sequence([
+            F.block(.user, text: "one"),
+            F.block(.toolCall),
+            F.block(.user, text: "two"),
+            F.block(.toolCall),
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .cursor)
+
+        XCTAssertEqual(index.invocations.map(\.status), [.unknown, .unknown])
+    }
+
+    // MARK: - Process owners
+
+    func testProcessOwnerBySessionID() {
+        let running = "Chunk ID: ab12\nWall time: 1.0 seconds\nProcess running with session ID 42437\n"
+            + "Original token count: 0\nOutput:\n"
+        // A mention deep in an output body is not a header: it must not claim an owner.
+        let body = String(repeating: "x", count: 600) + "\nProcess running with session ID 99\n"
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec_command"),                 // 1
+            F.block(.toolOut, id: "t1", text: running),                             // 2
+            F.block(.toolCall, id: "t2", toolName: "exec"),                         // 3
+            F.block(.toolOut, id: "t2", text: "Script running with cell ID 7\nWall time 11.0 seconds\nOutput:\n"), // 4
+            F.block(.toolCall, id: "t3", toolName: "exec_command"),                 // 5
+            F.block(.toolOut, id: "t3", text: running),                             // 6
+            F.block(.toolCall, id: "t4", toolName: "exec_command"),                 // 7
+            F.block(.toolOut, id: "t4", text: body),                                // 8
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+
+        XCTAssertEqual(index.processOwnerBySessionID["42437"], 5, "a later owner of the same id wins")
+        XCTAssertEqual(index.processOwnerBySessionID["7"], 3)
+        XCTAssertNil(index.processOwnerBySessionID["99"])
+        XCTAssertEqual(index.processOwnerBySessionID.count, 2)
+    }
+
+    func testEmptyIndex() {
+        let index = ToolInvocationIndex.build(blocks: [], source: .codex)
+        XCTAssertTrue(index.invocations.isEmpty)
+        XCTAssertTrue(ToolInvocationIndex.empty.invocations.isEmpty)
+        XCTAssertTrue(ToolInvocationIndex.empty.invocationIDByBlock.isEmpty)
+        XCTAssertTrue(ToolInvocationIndex.empty.processOwnerBySessionID.isEmpty)
+    }
+}
