@@ -337,6 +337,86 @@ final class ToolInvocationPairingTests: XCTestCase {
         XCTAssertEqual(index.invocations.first?.status, .pending)
     }
 
+    /// Task 9 ruling: a code-mode `exec` script whose only tool calls are `write_stdin` is a poll.
+    /// Its chunk `session_id` must not take the process over from the script that started it.
+    func testCodeModePollScriptIsNotAnOwner() {
+        let running = "Script completed\nWall time 10.0 seconds\nOutput:\n"
+            + #"{"chunk_id":"df07ab","wall_time_seconds":10.0,"session_id":90623,"output":"ready"}"#
+        let blocks = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec",
+                    toolInput: "await tools.exec_command({cmd: \"npm run dev\"})"),                     // 1
+            F.block(.toolOut, id: "t1", text: running),                                               // 2
+            F.block(.toolCall, id: "t2", toolName: "exec",
+                    toolInput: "await tools.write_stdin({session_id: 90623, chars: \"\"})"),          // 3
+            F.block(.toolOut, id: "t2", text: running),                                               // 4
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+        XCTAssertEqual(index.processOwnerBySessionID["90623"], 1, "a write_stdin-only script is a poll, not an owner")
+
+        // A script that starts a command and also writes to it is not a pure poll: it still owns.
+        let mixed = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec",
+                    toolInput: "await tools.exec_command({cmd: \"npm run dev\"})"),                     // 1
+            F.block(.toolOut, id: "t1", text: running),                                               // 2
+            F.block(.toolCall, id: "t2", toolName: "exec",
+                    toolInput: "await tools.exec_command({cmd: \"cat\"}); await tools.write_stdin({session_id: 1, chars: \"x\"})"), // 3
+            F.block(.toolOut, id: "t2", text: running),                                               // 4
+        ])
+        XCTAssertEqual(ToolInvocationIndex.build(blocks: mixed, source: .codex).processOwnerBySessionID["90623"], 3)
+    }
+
+    /// Task 9 ruling: a running owner (pending from its "Process running" header or a chunk
+    /// `session_id` without `exit_code`) becomes `.success` once a later poll references its id.
+    func testRunningOwnerSucceedsAfterLaterPoll() {
+        let running = "Chunk ID: ab12\nWall time: 10.0 seconds\nProcess running with session ID 42437\n"
+            + "Original token count: 0\nOutput:\n"
+        let exited = "Chunk ID: cd34\nWall time: 3.0 seconds\nProcess exited with code 0\nOriginal token count: 0\nOutput:\nbye\n"
+        let blocks = F.sequence([
+            F.block(.user, text: "start the dev server"),
+            F.block(.toolCall, id: "t1", toolName: "exec_command", toolInput: #"{"cmd":"npm run dev"}"#),          // 1
+            F.block(.toolOut, id: "t1", text: running),                                                         // 2
+            F.block(.toolCall, id: "t2", toolName: "exec_command", toolInput: #"{"cmd":"make watch"}"#),           // 3
+            F.block(.toolOut, id: "t2", text: running.replacingOccurrences(of: "42437", with: "555")),           // 4
+            F.block(.toolCall, id: "t3", toolName: "write_stdin", toolInput: #"{"session_id":42437,"chars":""}"#), // 5
+            F.block(.toolOut, id: "t3", text: running),                                                         // 6
+            F.block(.toolCall, id: "t4", toolName: "write_stdin", toolInput: #"{"session_id":42437,"chars":""}"#), // 7
+            F.block(.toolOut, id: "t4", text: exited),                                                          // 8
+        ])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+        XCTAssertEqual(invocation(index, containing: 1)?.status, .success, "a later poll of 42437 finishes its owner")
+        XCTAssertEqual(invocation(index, containing: 5)?.status, .success, "a poll that saw it running is read again later")
+        XCTAssertEqual(invocation(index, containing: 7)?.status, .success)
+        XCTAssertEqual(invocation(index, containing: 3)?.status, .pending, "no poll references 555")
+        XCTAssertEqual(index.processOwnerBySessionID["42437"], 1)
+
+        // Code mode: a JS poll (`session_id: N`) of a chunk-registered owner.
+        let chunk = "Script completed\nWall time 10.0 seconds\nOutput:\n"
+            + #"{"chunk_id":"df07ab","wall_time_seconds":10.0,"session_id":90623,"output":"ready"}"#
+        let codeMode = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec",
+                    toolInput: "await tools.exec_command({cmd: \"npm run dev\"})"),                      // 1
+            F.block(.toolOut, id: "t1", text: chunk),                                                  // 2
+            F.block(.toolCall, id: "t2", toolName: "exec",
+                    toolInput: "await tools.write_stdin({session_id: 90623, chars: \"\"})"),           // 3
+            F.block(.toolOut, id: "t2", text: "Script completed\nWall time 1.0 seconds\nOutput:\n"),   // 4
+        ])
+        let codeIndex = ToolInvocationIndex.build(blocks: codeMode, source: .codex)
+        XCTAssertEqual(invocation(codeIndex, containing: 1)?.status, .success)
+
+        // A poll that comes before the owner's output does not count.
+        let early = F.sequence([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "write_stdin", toolInput: #"{"session_id":42437,"chars":""}"#), // 1
+            F.block(.toolOut, id: "t1", text: exited),                                                          // 2
+            F.block(.toolCall, id: "t2", toolName: "exec_command", toolInput: #"{"cmd":"npm run dev"}"#),          // 3
+            F.block(.toolOut, id: "t2", text: running),                                                         // 4
+        ])
+        XCTAssertEqual(invocation(ToolInvocationIndex.build(blocks: early, source: .codex), containing: 3)?.status, .pending)
+    }
+
     func testEmptyIndex() {
         let index = ToolInvocationIndex.build(blocks: [], source: .codex)
         XCTAssertTrue(index.invocations.isEmpty)

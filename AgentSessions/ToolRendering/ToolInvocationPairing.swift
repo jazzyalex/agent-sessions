@@ -38,8 +38,14 @@ struct ToolInvocationIndex: Sendable {
     /// Process or cell id → the invocation that started it. Read from an output's header
     /// ("Process running with session ID N" / "Script running with cell ID N" in the first
     /// `ToolStatusProbe.headerScanLimit` bytes) and from Codex code-mode chunk metadata
-    /// (`"session_id":N`). Keyed by N as written. Polls (`write_stdin`, `wait`) never own.
+    /// (`"session_id":N`). Keyed by N as written. Polls never own: `write_stdin`, `wait`, and a
+    /// code-mode `exec` script that calls `tools.write_stdin(` but not `tools.exec_command(`.
     /// A later owner of the same N overwrites an earlier one (Codex reuses ids).
+    ///
+    /// A call that is still running (`pending` from a running header or a chunk `session_id`
+    /// without `exit_code`) becomes `success` once a later poll call names its id in its input
+    /// (`session_id` / `cell_id`, JSON or JavaScript): the process went on and was read again, so
+    /// "no result yet" would be false. This covers the owner and earlier polls of the same id.
     var processOwnerBySessionID: [String: Int]
 
     static let empty = ToolInvocationIndex(invocations: [], invocationIDByBlock: [:], processOwnerBySessionID: [:])
@@ -53,13 +59,15 @@ struct ToolInvocationIndex: Sendable {
             var callPosition: Int?
             var outputPositions: [Int] = []
             var turn: Int
-            /// The call is a poll (`write_stdin`, `wait`): it never owns a process.
+            /// The call is a poll (`isPollCall`): it never owns a process.
             var isPoll = false
             /// The call is Codex code mode: `codeModeFacts` holds one entry per output.
             var isCodeMode = false
             var codeModeFacts: [ToolStatusProbe.CodeModeFacts] = []
             /// The next slot (call or orphan) with the same `toolCallID`.
             var nextWithSameID: Int?
+            /// A later poll named a process this slot's output showed running.
+            var polledLater = false
         }
         /// Slots that share one `toolCallID`, linked through `nextWithSameID`. `head` moves past
         /// slots that already have an output.
@@ -85,6 +93,8 @@ struct ToolInvocationIndex: Sendable {
         var invocationIDByBlock: [Int: Int] = [:]
         invocationIDByBlock.reserveCapacity(blocks.count / 2)
         var processOwners: [String: Int] = [:]
+        // Process id → slots whose output showed it running and that no later poll has named yet.
+        var runningSlotsByProcessID: [String: [Int]] = [:]
 
         func enqueue(_ slot: Int, callID: String) {
             if var queue = queueByCallID[callID] {
@@ -146,10 +156,16 @@ struct ToolInvocationIndex: Sendable {
             case .toolCall:
                 let slot = slots.count
                 let toolName = blocks[position].toolName
-                slots.append(Slot(id: globalIndex, callPosition: position, turn: turn,
-                                  isPoll: ToolStatusProbe.isPoll(toolName: toolName),
+                let isPoll = isPollCall(toolName: toolName, toolInput: blocks[position].toolInput, source: source)
+                slots.append(Slot(id: globalIndex, callPosition: position, turn: turn, isPoll: isPoll,
                                   isCodeMode: ToolStatusProbe.isCodeMode(toolName: toolName, source: source)))
                 invocationIDByBlock[globalIndex] = globalIndex
+                if isPoll, !runningSlotsByProcessID.isEmpty, let input = blocks[position].toolInput {
+                    for processID in processIDs(in: Substring(input), keys: pollIDKeys) {
+                        guard let running = runningSlotsByProcessID.removeValue(forKey: processID) else { continue }
+                        for earlier in running { slots[earlier].polledLater = true }
+                    }
+                }
                 if let callID = blocks[position].toolCallID {
                     enqueue(slot, callID: callID)
                     turnIDCalls.append(slot)
@@ -176,14 +192,18 @@ struct ToolInvocationIndex: Sendable {
                 let invocationID = slots[slot].id
                 invocationIDByBlock[globalIndex] = invocationID
                 let ownsProcesses = !slots[slot].isPoll
-                if ownsProcesses, let processID = ToolStatusProbe.runningProcessID(in: blocks[position].text) {
-                    processOwners[processID] = invocationID
+                if let processID = ToolStatusProbe.runningProcessID(in: blocks[position].text) {
+                    if ownsProcesses { processOwners[processID] = invocationID }
+                    runningSlotsByProcessID[processID, default: []].append(slot)
                 }
                 if slots[slot].isCodeMode {
                     let facts = ToolStatusProbe.codeModeFacts(in: blocks[position].text)
                     slots[slot].codeModeFacts.append(facts)
                     if ownsProcesses {
                         for sessionID in facts.sessionIDs { processOwners[sessionID] = invocationID }
+                    }
+                    if facts.hasRunningChunk {
+                        for sessionID in facts.sessionIDs { runningSlotsByProcessID[sessionID, default: []].append(slot) }
                     }
                 }
             case .assistant:
@@ -201,12 +221,13 @@ struct ToolInvocationIndex: Sendable {
             if let callPosition = slot.callPosition, let notice = noticeByTurn[slot.turn] {
                 abortedAfter = notice > callPosition
             }
-            let status = ToolStatusProbe.status(call: call,
+            var status = ToolStatusProbe.status(call: call,
                                                 outputs: outputs,
                                                 source: source,
                                                 laterBlocksExist: slot.turn < lastTurn,
                                                 turnAbortedAfter: abortedAfter,
                                                 precomputedCodeModeFacts: slot.isCodeMode ? slot.codeModeFacts : nil)
+            if status == .pending, slot.polledLater { status = .success }
             invocations.append(ToolInvocationRef(id: slot.id,
                                                  callBlockIndex: call?.globalBlockIndex,
                                                  outputBlockIndices: outputs.map(\.globalBlockIndex),
@@ -220,6 +241,63 @@ struct ToolInvocationIndex: Sendable {
         return ToolInvocationIndex(invocations: invocations,
                                    invocationIDByBlock: invocationIDByBlock,
                                    processOwnerBySessionID: processOwners)
+    }
+
+    // MARK: Polls
+
+    /// Input keys a poll names its process with: `write_stdin` `session_id`, `wait` `cell_id`.
+    static let pollIDKeys = ["session_id", "cell_id"]
+
+    /// A call that reads a running process instead of starting one: `write_stdin`, `wait`, and a
+    /// Codex code-mode script whose only tool call is `write_stdin` (a substring check on the input).
+    static func isPollCall(toolName: String?, toolInput: String?, source: SessionSource) -> Bool {
+        if ToolStatusProbe.isPoll(toolName: toolName) { return true }
+        guard ToolStatusProbe.isCodeMode(toolName: toolName, source: source), let input = toolInput else { return false }
+        return input.contains("tools.write_stdin(") && !input.contains("tools.exec_command(")
+    }
+
+    /// The values of `keys` in `text`, in order: JSON `"session_id":42437` / `"session_id": "7"`,
+    /// an escaped `\"session_id\":7`, or JavaScript `session_id: 42437`. A value is a token of
+    /// letters, digits, `-` and `_`, the same alphabet the owner ids are read with. A key that is
+    /// the tail of a longer name (`parent_session_id`) does not count.
+    static func processIDs(in text: Substring, keys: [String]) -> [String] {
+        let bytes = Array(text.utf8)
+        let n = bytes.count
+        func isWordByte(_ b: UInt8) -> Bool {
+            (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || b == 0x5F
+        }
+        func isTokenByte(_ b: UInt8) -> Bool { isWordByte(b) || b == 0x2D }
+        func skipQuote(_ j: inout Int) {
+            if j < n, bytes[j] == 0x5C { j += 1 }                       // backslash of an escaped quote
+            if j < n, bytes[j] == 0x22 || bytes[j] == 0x27 { j += 1 }   // " or '
+        }
+        func skipSpaces(_ j: inout Int) { while j < n, bytes[j] == 0x20 || bytes[j] == 0x09 { j += 1 } }
+
+        var ids: [String] = []
+        for key in keys {
+            let k = Array(key.utf8)
+            guard !k.isEmpty, n >= k.count else { continue }
+            var i = 0
+            while i + k.count <= n {
+                guard bytes[i] == k[0], bytes[i..<(i + k.count)].elementsEqual(k),
+                      i == 0 || !isWordByte(bytes[i - 1]) else {
+                    i += 1
+                    continue
+                }
+                var j = i + k.count
+                skipQuote(&j)
+                skipSpaces(&j)
+                guard j < n, bytes[j] == 0x3A else { i += 1; continue }   // ":"
+                j += 1
+                skipSpaces(&j)
+                skipQuote(&j)
+                let start = j
+                while j < n, isTokenByte(bytes[j]) { j += 1 }
+                if j > start { ids.append(String(decoding: bytes[start..<j], as: UTF8.self)) }
+                i = max(j, i + 1)
+            }
+        }
+        return ids
     }
 
     /// A Codex turn_aborted notice: the `.meta` block `SessionTranscriptBuilder` splits out of a

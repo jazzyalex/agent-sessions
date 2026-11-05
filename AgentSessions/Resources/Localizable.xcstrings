@@ -43,6 +43,230 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "二进制数据（%lld KB）" } }
       }
     },
+    "tool.verb.ran": {
+      "comment": "Transcript tool row verb before a shell command or its description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ran" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行" } }
+      }
+    },
+    "tool.verb.polled": {
+      "comment": "Transcript tool row verb: the agent checked a running process for new output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Polled" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "轮询" } }
+      }
+    },
+    "tool.verb.sentInput": {
+      "comment": "Transcript tool row verb: the agent typed input into a running process.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sent input" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "发送输入" } }
+      }
+    },
+    "tool.verb.ranScript": {
+      "comment": "Transcript tool row verb before a script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ran script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行脚本" } }
+      }
+    },
+    "tool.verb.read": {
+      "comment": "Transcript tool row verb (past tense) before a file name the agent read.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Read" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "读取" } }
+      }
+    },
+    "tool.verb.created": {
+      "comment": "Transcript tool row verb before a file path the agent wrote.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Created" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "创建" } }
+      }
+    },
+    "tool.verb.edited": {
+      "comment": "Transcript tool row verb before a file name the agent edited.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Edited" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "编辑" } }
+      }
+    },
+    "tool.verb.searched": {
+      "comment": "Transcript tool row verb before a search pattern.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Searched" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "搜索" } }
+      }
+    },
+    "tool.verb.listed": {
+      "comment": "Transcript tool row verb before a directory the agent listed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Listed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "列出" } }
+      }
+    },
+    "tool.verb.fetched": {
+      "comment": "Transcript tool row verb before a URL the agent fetched.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Fetched" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "获取" } }
+      }
+    },
+    "tool.verb.searchedWeb": {
+      "comment": "Transcript tool row verb before a web search query.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Searched the web" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "搜索网页" } }
+      }
+    },
+    "tool.verb.updatedPlan": {
+      "comment": "Transcript tool row verb: the agent changed its task plan.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Updated plan" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "更新计划" } }
+      }
+    },
+    "tool.verb.subagent": {
+      "comment": "Transcript tool row label for a call that starts or messages another agent.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Subagent" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "子智能体" } }
+      }
+    },
+    "tool.verb.asked": {
+      "comment": "Transcript tool row verb before a question the agent asked the user.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Asked" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "提问" } }
+      }
+    },
+    "tool.verb.screenshot": {
+      "comment": "Transcript tool row label for an image or screenshot tool call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Screenshot" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "截图" } }
+      }
+    },
+    "tool.verb.output": {
+      "comment": "Transcript tool row label for tool output whose call is not shown.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出" } }
+      }
+    },
+    "exit %lld": {
+      "comment": "Transcript tool row chip: the command's exit code. %lld is the code.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "exit %lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "退出码 %lld" } }
+      }
+    },
+    "error": {
+      "comment": "Transcript tool row chip: the tool call failed without an exit code.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "error" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "错误" } }
+      }
+    },
+    "%lld lines": {
+      "comment": "Transcript tool row chip: number of output lines. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld line" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld lines" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld 行" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld 行" } }
+            }
+          }
+        }
+      }
+    },
+    "no output": {
+      "comment": "Transcript tool row chip: the tool call finished with empty output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无输出" } }
+      }
+    },
+    "no matches": {
+      "comment": "Transcript tool row chip: a search command found nothing.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no matches" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无匹配" } }
+      }
+    },
+    "cut by %@": {
+      "comment": "Transcript tool row chip: the agent shortened this output before saving it. %@ is the agent name, for example Codex.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cut by %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已被 %@ 截断" } }
+      }
+    },
+    "rejected by you": {
+      "comment": "Transcript tool row chip: the user declined this tool call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "rejected by you" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已被你拒绝" } }
+      }
+    },
+    "interrupted": {
+      "comment": "Transcript tool row chip: the tool call stopped because the turn was interrupted.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "interrupted" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已中断" } }
+      }
+    },
+    "no result recorded": {
+      "comment": "Transcript tool row chip: the session continued but stored no result for this call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result recorded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "未记录结果" } }
+      }
+    },
+    "no result yet": {
+      "comment": "Transcript tool row chip: the call is the latest one and has no result so far.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result yet" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "尚无结果" } }
+      }
+    },
+    "session %@": {
+      "comment": "Transcript tool row detail of a process poll. %@ is the process session ID, a number.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "session %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "会话 %@" } }
+      }
+    },
+    "cell %@": {
+      "comment": "Transcript tool row detail of a wait call. %@ is the ID of the running script cell.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cell %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "单元 %@" } }
+      }
+    },
+    "exec script · command %lld of %lld": {
+      "comment": "Transcript tool context line: this command is one of several in an exec script. The first number is its position, the second the total. 'exec' is a tool name and stays verbatim.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "exec script · command %1$lld of %2$lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "exec 脚本 · 第 %1$lld 条命令，共 %2$lld 条" } }
+      }
+    },
+    "message encrypted in the log (%lld chars)": {
+      "comment": "Transcript placeholder for an agent message stored encrypted in the session log. %lld is its length in characters.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "message encrypted in the log (%lld chars)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "消息在日志中已加密（%lld 个字符）" } }
+      }
+    },
     "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem.": {
       "comment": "Codex quota fetch recovery step for HTTP 401/403. 'codex login' is a command and stays verbatim.",
       "localizations": {
