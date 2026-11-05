@@ -78,6 +78,25 @@ enum TranscriptToolSummary {
         return cmd
     }
 
+    /// Number of tool calls in a merged run: `.toolCall` blocks, minimum 1
+    /// (an orphan-output run still reads as one call).
+    static func callCount(in blocks: [SessionTranscriptBuilder.LogicalBlock]) -> Int {
+        max(1, blocks.reduce(0) { $0 + ($1.kind == .toolCall ? 1 : 0) })
+    }
+
+    /// Tool name for display, with the Codex namespace as a "server › tool" prefix.
+    /// `mcp__node_repl__` + `js` -> `node_repl › js`. Nil/empty namespace keeps `name`.
+    static func displayToolName(name: String?, namespace: String?) -> String? {
+        guard let name else { return nil }
+        guard var server = namespace, !server.isEmpty else { return name }
+        if server.hasPrefix("mcp__") { server.removeFirst("mcp__".count) }
+        if server.hasSuffix("__") { server.removeLast(2) }
+        server = server.replacingOccurrences(of: "::", with: " › ")
+                       .replacingOccurrences(of: "__", with: " › ")
+        guard !server.isEmpty else { return name }
+        return "\(server) › \(name)"
+    }
+
     /// Fold consecutive `.toolCall`/`.toolOut` rows (run length >= 2) into a
     /// single `.toolGroup` row keyed by the first block's `globalBlockIndex`.
     /// A lone tool row (run length 1) is left as `.message` — it still renders

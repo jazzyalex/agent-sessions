@@ -3786,8 +3786,8 @@ final class BlockCardCellView: NSTableCellView {
         headerHeightConstraint?.constant = CardMetrics.headerHeight
 
         let toolBlocks = row.toolBlocks
-        let groupCount = toolBlocks.count
-        let isGroup = groupCount >= 2
+        let isGroup = toolBlocks.count >= 2
+        let groupCount = TranscriptToolSummary.callCount(in: toolBlocks)
         // A merged group's blocks may mix tool names — "N tool calls" stands
         // alone without a (potentially misleading) single toolName badge.
         let headerSummary = isGroup
@@ -3797,7 +3797,7 @@ final class BlockCardCellView: NSTableCellView {
         let toolMode = BlockCardHeader.ToolMode(
             isExpanded: isExpanded,
             summary: headerSummary,
-            toolName: isGroup ? nil : block.toolName,
+            toolName: isGroup ? nil : TranscriptToolSummary.displayToolName(name: block.toolName, namespace: block.toolNamespace),
             findMatchCount: findMatchCount,
             durationText: toolDurationText,
             onToggle: onToggleExpansion)

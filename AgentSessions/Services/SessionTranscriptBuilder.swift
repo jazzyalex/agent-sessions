@@ -305,6 +305,8 @@ struct SessionTranscriptBuilder {
         /// Index of this block's FIRST originating event within `session.events`
         /// (first event of a merge chain). -1 until assigned by `coalesce`.
         var firstEventIndex: Int = -1
+        /// Codex tool namespace of the originating tool call (e.g. `mcp__node_repl__`).
+        var toolNamespace: String? = nil
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
@@ -342,7 +344,8 @@ struct SessionTranscriptBuilder {
                                 toolInput: e.toolInput,
                                 isErrorOutput: false,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace)
         case .tool_result:
             let outputText = e.toolOutput ?? e.text ?? ""
             let exitCode = ToolTextBlockNormalizer.exitCode(from: e.rawJSON)
@@ -527,6 +530,7 @@ struct SessionTranscriptBuilder {
                     blocks[i].rawJSON = b.rawJSON
                     if blocks[i].toolName == nil { blocks[i].toolName = b.toolName }
                     if blocks[i].toolInput == nil { blocks[i].toolInput = b.toolInput }
+                    if blocks[i].toolNamespace == nil { blocks[i].toolNamespace = b.toolNamespace }
                     blocks[i].isErrorOutput = blocks[i].isErrorOutput || b.isErrorOutput
                     // firstEventIndex stays the merge chain's FIRST event (already set).
                 } else {

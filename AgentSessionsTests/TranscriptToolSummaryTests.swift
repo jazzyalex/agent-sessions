@@ -36,6 +36,32 @@ final class TranscriptToolSummaryTests: XCTestCase {
             TranscriptToolSummary.summary(toolName: "", toolInput: "\n  raw command text\nsecond line"),
             "raw command text")
     }
+    // MARK: - Group count, namespace and web search label
+
+    private func countBlock(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind, _ id: String) -> SessionTranscriptBuilder.LogicalBlock {
+        SessionTranscriptBuilder.LogicalBlock(kind: kind, text: id, timestamp: nil,
+            messageID: nil, toolName: "shell", isDelta: false, toolInput: nil,
+            isErrorOutput: false, eventID: id, rawJSON: "")
+    }
+
+    func testGroupHeaderCountsCallsNotBlocks() {
+        let blocks = [countBlock(.toolCall, "a"), countBlock(.toolOut, "a"), countBlock(.toolCall, "b"), countBlock(.toolOut, "b")]
+        XCTAssertEqual(TranscriptToolSummary.callCount(in: blocks), 2)
+    }
+
+    func testOrphanOutputGroupCountsOne() {
+        XCTAssertEqual(TranscriptToolSummary.callCount(in: [countBlock(.toolOut, "x"), countBlock(.toolOut, "y")]), 1)
+    }
+
+    func testNamespaceDisplay() {
+        XCTAssertEqual(TranscriptToolSummary.displayToolName(name: "js", namespace: "mcp__node_repl__"), "node_repl › js")
+        XCTAssertEqual(TranscriptToolSummary.displayToolName(name: "send_message", namespace: "collaboration"), "collaboration › send_message")
+        XCTAssertEqual(TranscriptToolSummary.displayToolName(name: "x", namespace: "a::b"), "a › b › x")
+        XCTAssertEqual(TranscriptToolSummary.displayToolName(name: "js", namespace: nil), "js")
+        XCTAssertEqual(TranscriptToolSummary.displayToolName(name: "js", namespace: ""), "js")
+        XCTAssertNil(TranscriptToolSummary.displayToolName(name: nil, namespace: "ns"))
+    }
+
     func testMergeConsecutiveToolRuns() {
         func tool(_ i: Int) -> BlockRowModel {
             var b = SessionTranscriptBuilder.LogicalBlock(kind: .toolCall, text: "t\(i)", timestamp: nil,

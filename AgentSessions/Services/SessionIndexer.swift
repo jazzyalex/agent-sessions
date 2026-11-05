@@ -3079,6 +3079,7 @@ final class SessionIndexer: ObservableObject {
         var toolName: String? = nil
         var toolInput: String? = nil
         var toolOutput: String? = nil
+        var toolNamespace: String? = nil
         var model: String? = nil
         var messageID: String? = nil
         var parentID: String? = nil
@@ -3177,7 +3178,30 @@ final class SessionIndexer: ObservableObject {
             if toolName == nil, let name = workingObj["name"] as? String { toolName = name }
             if toolName == nil, let fn = (workingObj["function"] as? [String: Any])?["name"] as? String { toolName = fn }
 
-            if let input = workingObj["input"] as? String { toolInput = input }
+            if let ns = workingObj["namespace"] as? String, !ns.isEmpty { toolNamespace = ns }
+
+            // Codex web_search_call carries its query in `action`, not in `arguments`.
+            if type == "web_search_call" {
+                toolName = "web_search"
+                if let action = workingObj["action"] as? [String: Any] {
+                    var input: [String: Any]?
+                    if let q = action["query"] as? String, !q.isEmpty {
+                        input = ["query": q]
+                    } else if let qs = action["queries"] as? [Any], !qs.isEmpty {
+                        input = ["queries": qs]
+                    } else if let kind = action["type"] as? String, kind == "open_page" || kind == "find_in_page",
+                              let url = action["url"] as? String, !url.isEmpty {
+                        var obj: [String: Any] = ["url": url]
+                        if kind == "find_in_page", let pattern = action["pattern"] as? String, !pattern.isEmpty {
+                            obj["pattern"] = pattern
+                        }
+                        input = obj
+                    }
+                    if let input, let s = ToolJSON.string(from: input, pretty: false) { toolInput = s }
+                }
+            }
+
+            if toolInput == nil, let input = workingObj["input"] as? String { toolInput = input }
             if toolInput == nil, let args = workingObj["arguments"] as? String { toolInput = args }
             // Arguments may be non-string; minify to single-line JSON
             if toolInput == nil, let argsObj = workingObj["arguments"] {
@@ -3208,6 +3232,7 @@ final class SessionIndexer: ObservableObject {
             toolName: toolName,
             toolInput: toolInput,
             toolOutput: toolOutput,
+            toolNamespace: toolNamespace,
             messageID: messageID,
             parentID: parentID,
             isDelta: isDelta,

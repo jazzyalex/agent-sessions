@@ -18,6 +18,8 @@ public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     public let toolName: String?
     public let toolInput: String?
     public let toolOutput: String?
+    /// Codex tool namespace (e.g. `mcp__node_repl__`); nil for other agents.
+    public var toolNamespace: String? = nil
     // Delta/stream grouping
     public let messageID: String?
     public let parentID: String?
