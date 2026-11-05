@@ -359,7 +359,8 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: looksLikeError,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace)
         case .error:
             if e.toolName != nil || e.toolOutput != nil {
                 let outputText = e.toolOutput ?? e.text ?? ""

@@ -62,6 +62,66 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertNil(TranscriptToolSummary.displayToolName(name: nil, namespace: "ns"))
     }
 
+    // MARK: - Card header decision
+
+    private func hdrBlock(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind, _ id: String, name: String? = "shell",
+                          input: String? = nil, ns: String? = nil) -> SessionTranscriptBuilder.LogicalBlock {
+        var b = SessionTranscriptBuilder.LogicalBlock(kind: kind, text: id, timestamp: nil,
+            messageID: nil, toolName: name, isDelta: false, toolInput: input,
+            isErrorOutput: false, eventID: id, rawJSON: "")
+        b.toolNamespace = ns
+        return b
+    }
+
+    func testCallPlusOutputIsSingleHeader() {
+        let h = TranscriptToolSummary.cardHeader(for: [
+            hdrBlock(.toolCall, "a", input: #"{"command":"ls -la"}"#), hdrBlock(.toolOut, "a")])
+        XCTAssertFalse(h.isGroup)
+        XCTAssertEqual(h.toolName, "shell")
+        XCTAssertEqual(h.summary, "ls -la")
+    }
+
+    func testNamespacedCallPlusOutputShowsServerAndTool() {
+        let h = TranscriptToolSummary.cardHeader(for: [
+            hdrBlock(.toolCall, "a", name: "js", input: #"{"code":"1"}"#, ns: "mcp__node_repl__"),
+            hdrBlock(.toolOut, "a", name: "js")])
+        XCTAssertFalse(h.isGroup)
+        XCTAssertEqual(h.toolName, "node_repl › js")
+    }
+
+    func testTwoCallsWithOutputsAreGroupTitledByCallCount() {
+        let h = TranscriptToolSummary.cardHeader(for: [
+            hdrBlock(.toolCall, "a"), hdrBlock(.toolOut, "a"), hdrBlock(.toolCall, "b"), hdrBlock(.toolOut, "b")])
+        XCTAssertTrue(h.isGroup)
+        XCTAssertNil(h.toolName)
+        XCTAssertEqual(h.summary, "2 tool calls")
+    }
+
+    func testOrphanOutputsAreSingleHeaderNotOneToolCalls() {
+        let h = TranscriptToolSummary.cardHeader(for: [
+            hdrBlock(.toolOut, "x", ns: "mcp__node_repl__"), hdrBlock(.toolOut, "y")])
+        XCTAssertFalse(h.isGroup)
+        XCTAssertEqual(h.toolName, "node_repl › shell")
+        XCTAssertNotEqual(h.summary, "1 tool calls")
+    }
+
+    func testCoalesceKeepsFirstToolNamespaceOnMerge() {
+        SessionTranscriptBuilder._testResetCoalesceCache()
+        func out(_ id: String, ns: String) -> SessionEvent {
+            var e = SessionEvent(id: id, timestamp: nil, kind: .tool_result, role: "tool", text: nil,
+                                 toolName: "js", toolInput: nil, toolOutput: id,
+                                 messageID: "m1", parentID: nil, isDelta: true, rawJSON: "{}")
+            e.toolNamespace = ns
+            return e
+        }
+        let session = Session(id: "ns-merge-\(UUID().uuidString)", source: .codex, startTime: nil, endTime: nil,
+                              model: "test", filePath: "/tmp/x.jsonl", fileSizeBytes: nil,
+                              eventCount: 2, events: [out("o1", ns: "first"), out("o2", ns: "second")])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.first?.toolNamespace, "first")
+    }
+
     func testMergeConsecutiveToolRuns() {
         func tool(_ i: Int) -> BlockRowModel {
             var b = SessionTranscriptBuilder.LogicalBlock(kind: .toolCall, text: "t\(i)", timestamp: nil,

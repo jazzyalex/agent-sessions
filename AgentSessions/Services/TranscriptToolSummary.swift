@@ -84,6 +84,26 @@ enum TranscriptToolSummary {
         max(1, blocks.reduce(0) { $0 + ($1.kind == .toolCall ? 1 : 0) })
     }
 
+    /// Header text for a collapsed tool card. Two or more calls form a group titled
+    /// "N tool calls" (no tool name: the calls may differ). Otherwise the card is a
+    /// single-call header built from the call block, or from the first output block
+    /// when the run has no call.
+    static func cardHeader(for blocks: [SessionTranscriptBuilder.LogicalBlock])
+        -> (isGroup: Bool, toolName: String?, summary: String) {
+        let count = callCount(in: blocks)
+        if count >= 2 {
+            let title = String(localized: "\(count) tool calls",
+                               comment: "Header of a collapsed transcript card that groups several tool calls. The number is the call count.")
+            return (true, nil, title)
+        }
+        guard let lead = blocks.first(where: { $0.kind == .toolCall }) ?? blocks.first else {
+            return (false, nil, summary(toolName: nil, toolInput: nil))
+        }
+        return (false,
+                displayToolName(name: lead.toolName, namespace: lead.toolNamespace),
+                summary(toolName: lead.toolName, toolInput: lead.toolInput))
+    }
+
     /// Tool name for display, with the Codex namespace as a "server › tool" prefix.
     /// `mcp__node_repl__` + `js` -> `node_repl › js`. Nil/empty namespace keeps `name`.
     static func displayToolName(name: String?, namespace: String?) -> String? {

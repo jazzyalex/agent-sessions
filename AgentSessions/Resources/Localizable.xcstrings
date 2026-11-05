@@ -2989,6 +2989,47 @@
         }
       }
     },
+    "%lld tool calls": {
+      "comment": "Header of a collapsed transcript card that groups several tool calls. The number is the call count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tool call"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tool calls"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个工具调用"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个工具调用"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld you · %lld agent · %lld tools": {
       "comment": "Session info turn composition: blocks from the user, the agent, and tool calls.",
       "localizations": {
