@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **A new tool view in the Session transcript, for all 17 agents.** Each tool call is one row with a verb and an icon, and the command or path comes first. Calls that run together form a group with one row per call. Open a row to read the decoded output. Long output folds, with "Show more" and "Show all". Exit codes and errors show on the row. Copy, Copy Command, Copy Output and Show Raw Event are in the row menu, and you can right-click a row header or its open body.
+- **Find matches what you see.** A match inside a folded output opens the fold, and Esc closes it again. The ▲▼ buttons and the Errors filter step through single calls. VoiceOver reads each row, and Increase Contrast is supported.
+
 ### Bug Fixes
 
 - **Tool calls in the transcript are easier to read.** Paths and URLs no longer show escaped slashes (`\/`). A call is labelled by its command or path, for example `exec pwd`. A group of tool calls now counts the calls it holds. MCP calls keep their server name, and web searches show their query.

@@ -1,3 +1,24 @@
+## 2026-11-05 · transcript-tool-rendering · P0+P1 tool view built; owner QA and one perf finding open
+status: in-progress
+
+**State:** Branch `feature/transcript-tool-rendering` (worktree `.claude/worktrees/transcript-tool-rendering`), all 18 tasks done and reviewed. Nothing is pushed or merged. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree.
+
+**Verified:**
+- Full suite: 4228 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
+- Corpus check (Task 17): 1,119 sessions, 30,763 invocations, 0 violations.
+- L2 open on a 2.4 MB output: main thread 0.7-1.5 ms in `toggleInvocation` (limit 50 ms); body lands ~585 ms later, off main.
+- Snapshot perf (coalescedBlocks + computeSnapshot, Debug, 5 runs, medians, `main` 555fbfdd vs HEAD): Claude 45 MB 528 -> 544 ms (1.03, passes). Codex 78 MB 666 -> 1294 ms (1.94, FAILS the 1.05 gate).
+
+**Decided / don't redo:**
+- Spec: `docs/superpowers/specs/2026-11-04-transcript-tool-rendering-design.md`; plan: `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-p0-p1.md`.
+- Perf cause (coarse split): coalesce phase 484 -> 1058 ms on the Codex session. `TranscriptToolSummary.callLabelArgument` (called from `renderToolCallLabel`) costs ~730 ms over 2449 calls / 3.1 MB of inputs; Codex `exec` goes through `CodexExecScript.parse`. Not optimised in Task 18. Cache the label or parse lazily.
+- P2 deferred: Claude rejected rows, process-poll collapse, per-action jump stops, JSON value unescaping in output panes, item_completed sidecar, persisted-output Open link, markdown/image rendering.
+
+**Next:**
+1. Fix the `callLabelArgument` cost, then re-measure Codex 78 MB (target <= 1.05x).
+2. Owner QA with the build above: P0 screenshot session (Codex rollout 2026-11-04T11-32-12, "6 tool calls", readable commands, no `\/`); Claude session with parallel Bash calls (one row per call); one OpenCode, Hermes and Cursor session; light and dark; narrow and wide; Find for a quoted string inside an output (opens the fold, Esc closes); Errors filter and ▲▼; right-click on a row header and on its open body (Copy / Copy Command / Show Raw Event); live tail of a running session.
+3. Whole-branch review via Repo MCP, then the merge decision.
+
 ## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
 status: in-progress
 
