@@ -7,18 +7,17 @@ status: in-progress
 - Full suite: 4228 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
 - Corpus check (Task 17): 1,119 sessions, 30,763 invocations, 0 violations.
 - L2 open on a 2.4 MB output: main thread 0.7-1.5 ms in `toggleInvocation` (limit 50 ms); body lands ~585 ms later, off main.
-- Snapshot perf (coalescedBlocks + computeSnapshot, Debug, 5 runs, medians, `main` 555fbfdd vs HEAD): Claude 45 MB 528 -> 555 ms (1.05, at the gate). Codex 78 MB 666 -> 759 ms (1.14); it was 1294 ms (1.94) before the label fixes. The 1.05 gate still FAILS on Codex by 93 ms: coalesce 484 -> 524 ms (+40), the rest of the snapshot (pairing, jump ids, anchors) 182 -> 235 ms (+53).
+- Snapshot perf (coalescedBlocks + computeSnapshot, 5 runs, medians, `main` 555fbfdd vs HEAD). The gate is judged on Release (`-configuration Release ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`, because the test target needs the DEBUG hooks): Codex 78 MB 614 -> 616 ms (1.00), Claude 45 MB 509 -> 529 ms (1.04). PASS. Debug, for information: Codex 666 -> 759 ms (1.14; it was 1294 ms before the label fixes), Claude 528 -> 555 ms (1.05). Debug Codex gap: coalesce +40 ms, `ToolInvocationIndex.build` +48 ms spread over many small parts (isPollCall 15, status of outputs 14, codeModeFacts 6, runningProcessID 5, status of calls 2); no single hot spot, so nothing was changed.
 
 **Decided / don't redo:**
 - Spec: `docs/superpowers/specs/2026-11-04-transcript-tool-rendering-design.md`; plan: `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-p0-p1.md`.
 - Perf fixes done: inputs above 8 KB are scanned on a 16 KB prefix, and Codex `exec` labels use a UTF-8 fast path (`ExecFirstCommandScan`) that falls back to `CodexExecScript.parse` when undecided. The fast path cut the 608 ms exec label cost to a few ms.
-- Remaining Codex 78 MB gap (+93 ms): about +40 ms in coalesce (extra block fields, per-call label, `exitCode`) and +53 ms in the snapshot after coalesce (`ToolInvocationIndex.build`, `jumpIDs`). Next: profile those two phases.
+- `exitCode(from: rawJSON)` over all blocks costs ~225 ms in Debug on Codex 78 MB, and it was already on `main`; it is the largest remaining coalesce cost if a later release wants more speed.
 - P2 deferred: Claude rejected rows, process-poll collapse, per-action jump stops, JSON value unescaping in output panes, item_completed sidecar, persisted-output Open link, markdown/image rendering.
 
 **Next:**
-1. Cut the remaining +93 ms on Codex 78 MB (see Decided), then re-measure (target <= 1.05x).
-2. Owner QA with the build above: P0 screenshot session (Codex rollout 2026-11-04T11-32-12, "6 tool calls", readable commands, no `\/`); Claude session with parallel Bash calls (one row per call); one OpenCode, Hermes and Cursor session; light and dark; narrow and wide; Find for a quoted string inside an output (opens the fold, Esc closes); Errors filter and ▲▼; right-click on a row header and on its open body (Copy / Copy Command / Show Raw Event); live tail of a running session.
-3. Whole-branch review via Repo MCP, then the merge decision.
+1. Owner QA with the build above: P0 screenshot session (Codex rollout 2026-11-04T11-32-12, "6 tool calls", readable commands, no `\/`); Claude session with parallel Bash calls (one row per call); one OpenCode, Hermes and Cursor session; light and dark; narrow and wide; Find for a quoted string inside an output (opens the fold, Esc closes); Errors filter and ▲▼; right-click on a row header and on its open body (Copy / Copy Command / Show Raw Event); live tail of a running session.
+2. Whole-branch review via Repo MCP, then the merge decision.
 
 ## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
 status: in-progress
