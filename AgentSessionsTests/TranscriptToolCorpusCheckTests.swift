@@ -22,8 +22,10 @@ import Darwin
 ///    repeated id; or one invocation joins two call ids.
 /// 5. A pane folded with the default `FoldState` shows more visual lines than its budget.
 /// 6. `gAAAAA` ciphertext in `plainText` (also checked: the rendered body and the L1 object).
+/// It also fails per source (`coverageFailures`): a source with sessions on disk that had none
+/// checked, or that lost more than 5% of its sample to timeouts and the time budget.
 /// Report only, per tool family: structured (fallback renderer) and unnamed actions, orphan
-/// outputs, and JSON panes whose string values show escapes.
+/// outputs, and JSON panes whose string values show escapes. Parse failures are report-only too.
 ///
 /// Output: `scripts/probe_scan_output/tool_corpus/report.json` (git-ignored). It holds counts per
 /// source and per tool family, and per violation only its source, file path or session id, block
@@ -98,6 +100,8 @@ final class TranscriptToolCorpusCheckTests: XCTestCase {
         var sources: [String: SourceCounts] = [:]
         var not_covered: [String: String] = [:]
         var no_local_sessions: [String] = []
+        /// `coverageFailures`: per-source gate messages (source names and counts only).
+        var coverage_failures: [String] = []
         var totals: [String: Int] = [:]
         var violation_totals: [String: Int] = [:]
         var waived: [String: String] = [:]
@@ -189,6 +193,7 @@ final class TranscriptToolCorpusCheckTests: XCTestCase {
         report.complete = true
         report.elapsed_seconds = Date().timeIntervalSince(start)
         report.no_local_sessions = report.sources.filter { $0.value.discovered == 0 }.map(\.key).sorted()
+        report.coverage_failures = Self.coverageFailures(report.sources)
         try save()
 
         // Counts only: an assertion message never carries session content.
@@ -196,6 +201,30 @@ final class TranscriptToolCorpusCheckTests: XCTestCase {
         XCTAssertTrue(failing.isEmpty, "tool corpus violations: \(failing.sorted { $0.key < $1.key })")
         XCTAssertGreaterThan(report.totals["invocations"] ?? 0, 0)
         XCTAssertTrue(report.not_covered.isEmpty, "sources without a discovery seam: \(report.not_covered.keys.sorted())")
+        XCTAssertTrue(report.coverage_failures.isEmpty, "per-source coverage: \(report.coverage_failures)")
+    }
+
+    /// Most of a source's sample that may time out or stay unreached before the check fails.
+    static let maxLostFraction = 0.05
+
+    /// Per-source gate, so one source whose discovery or parser breaks cannot hide behind the others.
+    /// For every source with sessions on disk: at least one session is checked, and timeouts plus
+    /// sessions the time budget did not reach stay within 5% of its sample
+    /// (`min(discovered, maxSessionsPerSource)`). `parse_failed` stays report-only: old-format files
+    /// are legitimate. One message per failure, with the source name and counts only.
+    static func coverageFailures(_ sources: [String: SourceCounts]) -> [String] {
+        var failures: [String] = []
+        for (name, counts) in sources.sorted(by: { $0.key < $1.key }) where counts.discovered > 0 {
+            let sample = min(counts.discovered, maxSessionsPerSource)
+            if counts.sessions_checked == 0 {
+                failures.append("\(name): 0 of \(sample) sessions checked")
+            }
+            let lost = counts.timeouts + counts.not_reached
+            if Double(lost) > Double(sample) * maxLostFraction {
+                failures.append("\(name): \(lost) of \(sample) sessions timed out or not reached")
+            }
+        }
+        return failures
     }
 
     // MARK: - Discovery
@@ -1013,6 +1042,36 @@ final class TranscriptToolCorpusCheckTests: XCTestCase {
                                    F.block(.toolOut, id: "a", text: "x"), F.block(.toolCall, id: "a", toolInput: "{}"),
                                    F.block(.toolOut, id: "a", text: "y")])
         XCTAssertEqual(Self.pairingFindings(repeated, index: ToolInvocationIndex.build(blocks: repeated, source: .claude)).count, 0)
+    }
+
+    /// The per-source gate flags a source with sessions on disk but none checked, and one that lost
+    /// more than 5% of its sample to timeouts and the time budget; it passes healthy sources, sources
+    /// with nothing on disk, and parse failures (report-only).
+    func testCoverageGateFlagsZeroCheckedAndLostSourcesOnly() {
+        func counts(discovered: Int, checked: Int, parseFailed: Int = 0, timeouts: Int = 0,
+                    notReached: Int = 0) -> SourceCounts {
+            var c = SourceCounts()
+            c.discovered = discovered
+            c.sessions_checked = checked
+            c.parse_failed = parseFailed
+            c.timeouts = timeouts
+            c.not_reached = notReached
+            return c
+        }
+        let sources: [String: SourceCounts] = [
+            "zero": counts(discovered: 12, checked: 0, parseFailed: 12),
+            "lost": counts(discovered: 300, checked: 195, timeouts: 6, notReached: 5),     // 11 of 200
+            "edge": counts(discovered: 300, checked: 195, timeouts: 5, notReached: 5),     // 10 of 200: allowed
+            "small": counts(discovered: 20, checked: 19, timeouts: 2),                      // 2 of 20
+            "parse": counts(discovered: 9, checked: 1, parseFailed: 8),
+            "empty": counts(discovered: 0, checked: 0),
+        ]
+        XCTAssertEqual(Self.coverageFailures(sources), [
+            "lost: 11 of 200 sessions timed out or not reached",
+            "small: 2 of 20 sessions timed out or not reached",
+            "zero: 0 of 12 sessions checked",
+        ])
+        XCTAssertEqual(Self.coverageFailures(["edge": sources["edge"]!, "parse": sources["parse"]!]), [])
     }
 
     func testFoldedBudgetMeasureCountsCutLinesAsFour() {
