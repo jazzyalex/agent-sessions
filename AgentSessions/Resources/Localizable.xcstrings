@@ -3415,6 +3415,20 @@
         }
       }
     },
+    "%lld failed": {
+      "comment": "Transcript tool group header pill: how many of the group's tool calls failed. %lld is the count.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lld 个失败" } }
+      }
+    },
+    "tool.group.digestEntry": {
+      "comment": "Transcript tool group header: a verb and how many of the group's actions used it, for example Ran 3. The first value is the verb, the second the count.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$@ %2$lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%1$@ %2$lld 次" } }
+      }
+    },
     "%lld you · %lld agent · %lld tools": {
       "comment": "Session info turn composition: blocks from the user, the agent, and tool calls.",
       "localizations": {
@@ -20686,47 +20700,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "当最新的 5 小时用量样本预测额度会在重置前用尽时，在额度监视器中显示类似 ▸2h 的紧凑标记。"
-          }
-        }
-      }
-    },
-    "Show all %lld lines": {
-      "comment": "User-visible copy from TranscriptBlockListView. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Show all %lld line"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Show all %lld lines"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "显示全部%lld行"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "显示全部%lld行"
-                }
-              }
-            }
           }
         }
       }

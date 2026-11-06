@@ -292,11 +292,40 @@ final class TranscriptToolRowsTests: XCTestCase {
                                                      [.errors, .assistant], [.tools]]
         for roles in roleSets {
             for window in [0...4, 2...4, 0...1] {
-                let expected = BlockTableController.rowsWithTelemetry(from: s.blocks[window], markers: markers,
-                                                                      totalBlockCount: 5, activeRoles: roles)
+                let expected = referenceRows(s.blocks[window], markers: markers, totalBlockCount: 5, roles: roles)
                 XCTAssertEqual(s.rows(window, roles: roles, markers: markers), expected, "\(roles) \(window)")
+                // The Session view's rows are `emit` (Task 13), so the controller's entry point agrees too.
+                XCTAssertEqual(BlockTableController.rowsWithTelemetry(from: s.blocks[window], markers: markers,
+                                                                      totalBlockCount: 5, activeRoles: roles,
+                                                                      index: s.index, failedInvocationIDs: s.failed),
+                               expected, "\(roles) \(window)")
             }
         }
+    }
+
+    /// The pre-Task-13 message-row emission (`rowsWithTelemetry` before it called `emit`): one row
+    /// per block that the role filter shows, a marker row (id `-i - 1`) above block `i`, and the
+    /// trailing marker after the stream's last block. Kept here as the reference for non-tool rows.
+    private func referenceRows(_ blocks: ArraySlice<Block>, markers: [Int: [String]], totalBlockCount: Int,
+                               roles: Set<TranscriptRoleFilter>) -> [BlockRowModel] {
+        var rows: [BlockRowModel] = []
+        func appendMarker(at index: Int) {
+            guard let lines = markers[index], !lines.isEmpty else { return }
+            let block = Block(kind: .meta, text: lines.joined(separator: "\n"), timestamp: nil,
+                              messageID: nil, toolName: nil, isDelta: false, toolInput: nil,
+                              isErrorOutput: false, eventID: "telemetry-change-\(index)", rawJSON: "",
+                              globalBlockIndex: -index - 1)
+            rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
+        }
+        for block in blocks {
+            appendMarker(at: block.globalBlockIndex)
+            let role = TranscriptRoleFilter.governing(block.kind)
+            if roles.isEmpty || role.map({ roles.contains($0) }) ?? true {
+                rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
+            }
+        }
+        if blocks.last?.globalBlockIndex == totalBlockCount - 1 { appendMarker(at: totalBlockCount) }
+        return rows
     }
 
     func testTelemetryMarkerSplitsRun() {

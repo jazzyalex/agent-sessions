@@ -28,68 +28,74 @@ enum TranscriptRoleFilter: String, CaseIterable, Hashable {
 
 // MARK: - Row model
 
-/// One row per displayed card. `TranscriptToolSummary.mergeToolRuns` (Task 6)
-/// folds consecutive `.toolCall`/`.toolOut` message rows (run length >= 2)
-/// into a single `.toolGroup` row; a lone tool block stays `.message` but is
-/// still rendered as a collapsed tool card (see `isToolCard`).
-///
-/// `TranscriptToolRows.emit` (tool rendering Task 12) emits `.toolGroupHeader`
-/// and `.toolInvocation` rows instead. The live table switches to them in Task 13,
-/// which adds their cells; until then nothing in production emits them, and the
-/// accessors below treat them as empty rows.
+/// One row per displayed card. `TranscriptToolRows.emit` (tool rendering
+/// Task 12) turns the tool blocks of a window into `.toolGroupHeader` rows (a
+/// run of two or more invocations) and one `.toolInvocation` row per
+/// invocation; every other block is a `.message` row. Tool rows have their own
+/// cells (`TranscriptToolCells.swift`).
 struct BlockRowModel: Identifiable, Equatable {
     enum Content: Equatable {
-        /// user / assistant / error / meta / tool (as ordinary card until T6)
+        /// user / assistant / error / meta (and the telemetry marker rows)
         case message(SessionTranscriptBuilder.LogicalBlock)
-        /// merged consecutive tool blocks — produced by Task 6, never by T5.
-        case toolGroup([SessionTranscriptBuilder.LogicalBlock])
         /// The L0 header of a run of two or more tool invocations.
         case toolGroupHeader(ToolGroupHeaderModel)
         /// One tool invocation (call plus outputs), solo or inside a group.
         case toolInvocation(ToolInvocationRowModel)
     }
 
-    /// `globalBlockIndex` of the first block — stable across window widening.
+    /// A message row's `globalBlockIndex` — stable across window widening.
     /// An invocation row's id is its invocation id; a group header's is
-    /// `TranscriptToolRows.groupHeaderRowID(forGroup:)`.
+    /// `TranscriptToolRows.groupHeaderRowID(forGroup:)` (far negative), so row
+    /// ids are unique but NOT ordered: never binary-search rows by id.
     var id: Int
     var content: Content
 
-    /// The block used to drive chrome/height for the row. For a message that is
-    /// the block itself; for a (future) tool group it is the first block.
-    var primaryBlock: SessionTranscriptBuilder.LogicalBlock {
+    /// The first block the row shows: a message's own block; an invocation's
+    /// id (its call, or its first output with no call); a group header's group
+    /// id (its first invocation's first block).
+    var anchorBlockIndex: Int {
         switch content {
-        case .message(let b): return b
-        case .toolGroup(let blocks): return blocks.first ?? Self.emptyBlock
-        case .toolGroupHeader, .toolInvocation: return Self.emptyBlock
+        case .message(let b): return b.globalBlockIndex
+        case .toolGroupHeader(let header): return header.groupID
+        case .toolInvocation(let invocation): return invocation.invocationID
         }
     }
 
-    /// Text rendered in the body. T6 will concatenate grouped tool text.
+    /// The block used to drive chrome/height for a message row. Tool rows do
+    /// not hold blocks: they get a placeholder whose `globalBlockIndex` is
+    /// `anchorBlockIndex` (enough for viewport-top lookups). Their chrome,
+    /// timestamp and height come from their own models (`ToolGroupHeaderModel`
+    /// carries the group's first timestamp) and cells.
+    var primaryBlock: SessionTranscriptBuilder.LogicalBlock {
+        switch content {
+        case .message(let b): return b
+        case .toolGroupHeader, .toolInvocation:
+            var placeholder = Self.emptyBlock
+            placeholder.globalBlockIndex = anchorBlockIndex
+            return placeholder
+        }
+    }
+
+    /// Text rendered in a message body. Tool rows render their own L1/L2 text
+    /// (`ToolInvocationCellView`), so they have none here.
     var bodyText: String {
         switch content {
         case .message(let b): return b.text
-        case .toolGroup(let blocks): return blocks.map(\.text).joined(separator: "\n\n")
         case .toolGroupHeader, .toolInvocation: return ""
         }
     }
 
-    /// True for any row rendered as a tool card: a merged `.toolGroup`, or a
-    /// lone `.message` row whose block kind is `.toolCall`/`.toolOut`.
-    var isToolCard: Bool {
-        switch content {
-        case .toolGroup: return true
-        case .message(let b): return b.kind.isTool
-        case .toolGroupHeader, .toolInvocation: return false
-        }
-    }
+    /// True for any row rendered as a tool card: a group header or an
+    /// invocation row. Every tool block lands in one of those (`emit`), so a
+    /// `.message` row is never a tool card.
+    var isToolCard: Bool { isToolRow }
 
     /// True for a `.toolGroupHeader` or `.toolInvocation` row. `classifyChange`
     /// reloads such rows in place when only their content changed.
     var isToolRow: Bool {
         switch content {
         case .toolGroupHeader, .toolInvocation: return true
-        case .message, .toolGroup: return false
+        case .message: return false
         }
     }
 
@@ -101,22 +107,11 @@ struct BlockRowModel: Identifiable, Equatable {
     }
 
     /// True for a user/assistant prose message — the ONLY rows that get markdown
-    /// rendering (Task 12). Tool cards, tool groups, errors, and meta rows keep
-    /// their existing plain-string bodies untouched.
+    /// rendering (Task 12). Tool rows, errors, and meta rows keep their own
+    /// bodies.
     var isMarkdownMessage: Bool {
         if case .message(let b) = content { return b.kind == .user || b.kind == .assistant }
         return false
-    }
-
-    /// The individual blocks backing this row (1 for `.message`, N for
-    /// `.toolGroup`) — used to render per-call summary lines when a group is
-    /// expanded.
-    var toolBlocks: [SessionTranscriptBuilder.LogicalBlock] {
-        switch content {
-        case .message(let b): return [b]
-        case .toolGroup(let blocks): return blocks
-        case .toolGroupHeader, .toolInvocation: return []
-        }
     }
 
     private static let emptyBlock = SessionTranscriptBuilder.LogicalBlock(
@@ -126,7 +121,7 @@ struct BlockRowModel: Identifiable, Equatable {
 
 // MARK: - Layout constants (single source of truth, shared by cell + measurement)
 
-private enum CardMetrics {
+enum CardMetrics {
     static let accentBarWidth: CGFloat = 3
     static let cornerRadius: CGFloat = 6
     /// Leading gap between the accent bar and text content.
@@ -142,19 +137,13 @@ private enum CardMetrics {
     static let minCardHeight: CGFloat = headerHeight + 12
     /// Background tint alpha for the role-tinted card fill (HIG-quiet).
     static let cardTintAlpha: CGFloat = 0.06
-    /// Collapsed tool-card height: header row only (~28pt design target).
-    /// Exactly headerHeight + bodyBottomInset so the measured height equals
-    /// the Auto Layout solution for the collapsed shape (header 22 + zero-gap
-    /// zero-height body + zero-height showAll + 8pt bottom inset) — anything
-    /// smaller forces a negative body height out of the constraint chain.
-    static let toolCardCollapsedHeight: CGFloat = headerHeight + bodyBottomInset
     /// Thin separator row height for `.meta` blocks (no card chrome).
     static let metaSeparatorHeight: CGFloat = 14
-    /// Expanded tool body is truncated to this many lines before a
-    /// "Show all N lines" affordance takes over.
-    static let toolBodyTruncationLineLimit = 20
-    /// Height of the "Show all N lines" SwiftUI affordance row.
-    static let showAllRowHeight: CGFloat = 20
+    /// Vertical gap between two cards. The table's intercell spacing is 0 and
+    /// every row reserves half of this above and below its card instead, so
+    /// the rows of one tool group can join into one card (no gap, continuous
+    /// accent bar — spec §6.7). `tableView(_:heightOfRow:)` adds the halves.
+    static let rowGap: CGFloat = 10
 
     /// Horizontal space consumed by chrome; body text width = tableWidth - this.
     static var horizontalChrome: CGFloat { accentBarWidth + contentLeadingInset + contentTrailingInset }
@@ -274,32 +263,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
     func makeCoordinator() -> BlockTableController { BlockTableController() }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let table = BlockTableView()
-        table.selectionOwner = context.coordinator
-        table.headerView = nil
-        table.style = .plain
-        table.backgroundColor = .clear
-        table.selectionHighlightStyle = .none
-        table.allowsColumnResizing = false
-        table.allowsColumnReordering = false
-        table.allowsColumnSelection = false
-        table.gridStyleMask = []
-        table.intercellSpacing = NSSize(width: 0, height: 10)
-        table.usesAutomaticRowHeights = false
-        table.rowSizeStyle = .custom
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-
-        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("card"))
-        col.resizingMask = .autoresizingMask
-        col.isEditable = false
-        table.addTableColumn(col)
-
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = false
-        scroll.drawsBackground = false
-        scroll.autohidesScrollers = true
+        let (scroll, table) = BlockTableController.makeScrollView(selectionOwner: context.coordinator)
 
         // Remount replay guard (Task 8): the token @State
         // (richFirstPromptJumpToken &co) lives on UnifiedTranscriptView and
@@ -550,28 +514,64 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// state below. Nil until the first `apply`.
     private var sessionID: String?
 
-    /// Row ids (== first block's `globalBlockIndex`) whose tool card is
-    /// expanded. Collapsed is the default for every `.toolCall`/`.toolOut`/
-    /// `.toolGroup` row. Reset whenever `sessionID` changes.
-    private(set) var expandedToolRowIDs: Set<Int> = []
-    /// Row ids that opted into "Show all N lines" past the >20-line
-    /// truncation. Reset whenever `sessionID` changes.
-    private(set) var showAllRowIDs: Set<Int> = []
-    /// Row ids `scrollToCurrentFindMatch` auto-expanded to reveal a NAVIGATED
-    /// match (Task 16) — replaces the interim Phase-1 pill-only behavior for a
-    /// collapsed tool card. Cleared (re-collapsing the untouched survivors) on
-    /// an empty-query clear (`applyFind`) and unconditionally on a session
-    /// switch. A row is dropped from this set the moment the user manually
-    /// toggles it (`toggleToolExpansion`), so their explicit choice survives a
-    /// subsequent Esc.
-    private var autoExpandedByFind: Set<Int> = []
-    /// Subset bookkeeping: row ids where the SAME auto-expand also had to set
-    /// `showAllRowIDs` (the match sat past the 20-line truncation fold).
-    /// Tracked separately from `autoExpandedByFind` so the Esc-recollapse never
-    /// strips a `showAllRowIDs` membership the user set manually BEFORE find
-    /// touched that row (collapsing doesn't clear show-all, so a stale prior
-    /// manual show-all can coexist with a since-collapsed row).
-    private var autoShowedAllByFind: Set<Int> = []
+    // MARK: Tool rows (tool rendering Task 13)
+    //
+    // Open state is keyed by group id (L1 shown) and invocation id (L2 shown),
+    // never by row index. All of it resets on a session switch.
+
+    /// Group ids whose invocation rows show (L1). A group re-keyed by a window
+    /// prepend carries its state through `ToolGroupHeaderModel.invocationIDs`.
+    private(set) var openGroups: Set<Int> = []
+    /// Invocation ids whose L2 detail shows.
+    private(set) var openInvocations: Set<Int> = []
+    /// Group ids `seedAndCarryToolOpenState` has seen, to tell a new group from
+    /// a known one (and a re-keyed one from a solo row that became a group).
+    private var knownGroupIDs: Set<Int> = []
+    /// Failed invocations already opened by default (spec §6.1). Seeding runs
+    /// once per invocation id, so a row the user closed is never reopened, even
+    /// when its group is re-keyed.
+    private var seededInvocationIDs: Set<Int> = []
+    /// Invocation ids of every group the user toggled. A failed call arriving
+    /// in such a group opens at L2 but does not reopen the group.
+    private var userToggledGroupMembers: Set<Int> = []
+    /// Per invocation, per action index: the L2 fold state (Show more / Show
+    /// all / opened long lines / full command). The script output pane uses
+    /// `actions.count`, the "Show script" pane `actions.count + 1`.
+    private(set) var foldStates: [Int: [Int: FoldState]] = [:]
+    /// Invocations whose "Show script" pane is shown.
+    private var scriptShownInvocations: Set<Int> = []
+    /// Groups / invocations `scrollToCurrentFindMatch` opened to reveal a
+    /// NAVIGATED match. Closed again on an empty-query clear (`applyFind`) and
+    /// dropped on a session switch. A manual toggle removes the ids it touches,
+    /// so the user's explicit choice survives a later Esc.
+    private var autoOpenedGroupsByFind: Set<Int> = []
+    private var autoOpenedInvocationsByFind: Set<Int> = []
+
+    /// L1 summaries, keyed by invocation id; an entry is valid while its
+    /// content stamp and status match (`ToolInvocationBuilder.rowSummary` is
+    /// cheap but scans code-mode chunks, ~1.4 ms on 2 MB).
+    private var rowSummaryCache: [Int: (stamp: Int, status: ToolStatus, summary: ToolRowSummary)] = [:]
+    /// `ToolInvocationBuilder.build` results (expensive, built off the main
+    /// thread), keyed by "id|stamp|status".
+    private let toolInvocationCache = NSCacheMemo<ToolInvocation>(countLimit: 64)
+    /// Rendered and measured L2 bodies, keyed by "id|stamp|status|font|width";
+    /// an entry is valid while its fold state and script flag match.
+    private let toolPresentationCache = NSCacheMemo<ToolPresentation>(countLimit: 128)
+    /// The last presentation shown per open invocation. Shown (with its height)
+    /// while a newer one (new width, font, folds or content) renders, so a
+    /// resize or a fold click never blanks the body.
+    private var latestToolPresentation: [Int: ToolPresentation] = [:]
+    /// In-flight render per invocation (its request key), and the newest
+    /// request that arrived meanwhile. One render per invocation at a time.
+    private var toolPresentationInFlight: [Int: ToolPresentationRequest] = [:]
+    private var toolPresentationQueued: [Int: ToolPresentationRequest] = [:]
+    /// Bumped on a session switch so a render of the previous session is dropped.
+    private var toolPresentationGeneration = 0
+
+    /// True while an L2 render is running or queued (test seam).
+    var hasPendingToolPresentations: Bool {
+        !toolPresentationInFlight.isEmpty || !toolPresentationQueued.isEmpty
+    }
 
     /// Full coalesced stream length last seen (drives window re-pinning).
     private var totalBlockCount: Int = 0
@@ -685,8 +685,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     func turnTiming(forRowID rowID: Int) -> TurnTiming? { turnTimingCache[rowID] }
 
     /// Per-tool duration lookup, keyed by the `.toolOut` block's
-    /// `globalBlockIndex` (NOT the row id — see `toolDurationText(for:)`,
-    /// which resolves the right key for a row).
+    /// `globalBlockIndex` (NOT the row id — see `invocationDuration(_:)`,
+    /// which resolves the right key for an invocation).
     func toolTiming(forRowID rowID: Int) -> ToolTiming? { toolTimingCache[rowID] }
 
     /// The turn chip text for a row, or `""` (render nothing) when the row
@@ -701,30 +701,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                                  toolCallCount: timing.toolCallCount)
     }
 
-    /// Per-tool duration suffix for a tool row, formatted and ready to append
-    /// to the collapsed header — or nil to render nothing. Decision (Task 19,
-    /// documented per the brief's "decide + document" instruction): Task 6's
-    /// `mergeToolRuns` folds ANY run of >=2 consecutive tool-kind blocks into a
-    /// `.toolGroup` — which means the ORDINARY single-tool-invocation shape
-    /// (one `.toolCall` immediately followed by its own `.toolOut`) is ALREADY
-    /// a 2-block "group", not a lone `.message` row (a genuinely lone tool row
-    /// only occurs for an unpaired/still-streaming `.toolCall`). Reading the
-    /// brief's "omit on merged groups" literally against raw block count would
-    /// suppress the duration for nearly every real tool call. So: show the
-    /// duration when `toolBlocks` is EXACTLY `[.toolCall, .toolOut]` (one
-    /// logical invocation, regardless of whether Task 6 merged it) — that's
-    /// the "trivial"/solo case the brief calls out as an exception. For any
-    /// group with more than 2 blocks (multiple DISTINCT tool calls merged —
-    /// the "N tool calls" header case), omit: summing unrelated durations
-    /// would fabricate a misleading number, and there's no single call the
-    /// number could honestly describe.
-    private func toolDurationText(for row: BlockRowModel) -> String? {
-        guard row.isToolCard else { return nil }
-        let blocks = row.toolBlocks
-        guard blocks.count == 2, blocks[0].kind == .toolCall, blocks[1].kind == .toolOut else { return nil }
-        guard let timing = toolTimingCache[blocks[1].globalBlockIndex],
-              let duration = timing.durationSeconds else { return nil }
-        return TranscriptTurnTiming.formatDuration(duration)
+    /// An invocation's duration: call → its last output (`TranscriptTurnTiming`,
+    /// keyed by output block). Nil without a call, an output or timestamps.
+    private func invocationDuration(_ ref: ToolInvocationRef) -> Double? {
+        guard let last = ref.outputBlockIndices.last else { return nil }
+        return toolTimingCache[last]?.durationSeconds
     }
 
     // MARK: Cross-block selection (Task 9)
@@ -849,14 +830,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         lastSeenUnifiedFindToken = unifiedFindToken
     }
 
-    // `toolState` folds collapsed/expanded/showAll into the cache key so a
-    // toggle can never read back a stale height computed under the other
-    // state (the classic recycling-height defect this row type invites).
+    // Message rows only: tool rows compute their height from cached
+    // summaries and presentations on every call (cheap), so an open/closed or
+    // fold change can never read back a stale height.
     private struct HeightKey: Hashable {
         var rowID: Int
         var widthBucket: Int
         var fontBucket: Int
-        var toolState: ToolRowHeightState
         /// Inline-image count contributing to this row's reserved image-row
         /// height (0 for non-image / non-user rows). Part of the key so a row
         /// that gains/loses images re-measures rather than serving a stale
@@ -865,15 +845,41 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         var imageCount: Int = 0
     }
 
-    private enum ToolRowHeightState: Hashable {
-        /// Not a tool card — state doesn't affect height.
-        case notApplicable
-        case collapsed
-        case expandedTruncated
-        case expandedShowAll
-    }
-
     // MARK: Attach / teardown
+
+    /// The Session view's scroll view and table, configured for card rows. `makeNSView` and the
+    /// table-hosting tests build it here, so both run the same table setup.
+    static func makeScrollView(selectionOwner: BlockTableController) -> (scroll: NSScrollView, table: BlockTableView) {
+        let table = BlockTableView()
+        table.selectionOwner = selectionOwner
+        table.headerView = nil
+        table.style = .plain
+        table.backgroundColor = .clear
+        table.selectionHighlightStyle = .none
+        table.allowsColumnResizing = false
+        table.allowsColumnReordering = false
+        table.allowsColumnSelection = false
+        table.gridStyleMask = []
+        // No intercell spacing: each row reserves `CardMetrics.rowGap / 2` above
+        // and below its card, except where tool rows join into one card.
+        table.intercellSpacing = NSSize(width: 0, height: 0)
+        table.usesAutomaticRowHeights = false
+        table.rowSizeStyle = .custom
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("card"))
+        col.resizingMask = .autoresizingMask
+        col.isEditable = false
+        table.addTableColumn(col)
+
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.drawsBackground = false
+        scroll.autohidesScrollers = true
+        return (scroll, table)
+    }
 
     func attach(table: NSTableView, scroll: NSScrollView) {
         self.table = table
@@ -1116,10 +1122,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     /// Splice a downward-extended row set into the table with the viewport
-    /// pinned. Handles the Task 6 boundary subtlety: the old top row (a lone
-    /// tool card) may merge into a `.toolGroup` after the prepend, changing its
-    /// id — so we diff by id and, when the boundary changed, reload that row too
-    /// and drop its now-defunct expansion state.
+    /// pinned. Handles the boundary subtlety: the old top row (a solo tool row,
+    /// or a group cut by the window edge) may join a larger group after the
+    /// prepend, which re-keys it — so we diff by id, reload when the boundary
+    /// changed, and re-point the scroll anchor. Open state already moved to
+    /// the new group id in `rowsWithTelemetry` (membership carry).
     private func applyPrepend(newRows: [BlockRowModel]) {
         guard let table else { rows = newRows; return }
 
@@ -1130,30 +1137,17 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         clearCrossBlockSelection()
 
         let diff = Self.prependDiff(old: rows, new: newRows)
-        // Migrate/drop expansion state for a boundary row whose id changed: the
-        // old lone-tool row id no longer exists as a row, so its expansion is
-        // meaningless. Dropping is acceptable (documented) — a merged group
-        // defaults to collapsed.
-        for droppedID in diff.droppedRowIDs {
-            expandedToolRowIDs.remove(droppedID)
-            showAllRowIDs.remove(droppedID)
-            // Keep the find-auto-expand tracking sets in parity with the
-            // expansion sets they shadow (inert today given id uniqueness, but
-            // avoids a stale id lingering until the next Esc/session switch).
-            autoExpandedByFind.remove(droppedID)
-            autoShowedAllByFind.remove(droppedID)
-        }
 
         var anchor = captureScrollAnchor()
-        // If the anchor row's id was dropped by a boundary merge (the first
-        // visible row WAS the old lone-tool top edge that folded into a group),
-        // re-point the anchor to the row in `newRows` that now contains that
-        // block index — otherwise restore no-ops and the viewport jumps.
-        if let a = anchor, diff.droppedRowIDs.contains(a.rowID),
-           let absorbing = newRows.first(where: { row in
-               row.toolBlocks.contains { $0.globalBlockIndex == a.rowID }
-           }) {
-            anchor = ScrollAnchor(rowID: absorbing.id, offsetIntoRow: a.offsetIntoRow)
+        // The anchor row may be gone: a re-keyed header (new group id) or a
+        // solo row that joined a group whose rows are closed. Re-point it to
+        // the row that now shows its content — otherwise restore no-ops and
+        // the viewport jumps. (`prependDiff` reports a dropped id only when
+        // its anchor row survives, so search by the anchor id directly.)
+        if let a = anchor, !newRows.contains(where: { $0.id == a.rowID }),
+           let oldRow = rows.first(where: { $0.id == a.rowID }),
+           let target = Self.rowShowingContent(of: oldRow, in: newRows) {
+            anchor = ScrollAnchor(rowID: target.id, offsetIntoRow: a.offsetIntoRow)
         }
         rows = newRows
         // Find map invariant (Task 10 review): same rebuild-at-every-rows-swap
@@ -1184,35 +1178,43 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private var telemetryMarkers: [Int: [String]] = [:]
 
+    /// The rows of a window under the controller's state: `emit` over the
+    /// window, then default open state for groups and failed invocations seen
+    /// for the first time and open state carried to re-keyed groups
+    /// (`seedAndCarryToolOpenState`); a second `emit` when that changed state.
     private func rowsWithTelemetry(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
-        Self.rowsWithTelemetry(from: blocks, markers: telemetryMarkers,
-                               totalBlockCount: allBlocksCache.count, activeRoles: activeRoleFilters)
+        let rows = emitRows(from: blocks)
+        guard seedAndCarryToolOpenState(for: rows) else { return rows }
+        return emitRows(from: blocks)
     }
 
-    /// Display-only rows use negative IDs, leaving every transcript block ID and
-    /// source text untouched. Insert before tool grouping so changes split runs.
+    private func emitRows(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
+        Self.rowsWithTelemetry(from: blocks, markers: telemetryMarkers,
+                               totalBlockCount: allBlocksCache.count, activeRoles: activeRoleFilters,
+                               index: invocationIndex, failedInvocationIDs: failedInvocationIDs,
+                               openGroups: openGroups, openInvocations: openInvocations,
+                               rowSummary: { [unowned self] ref in self.rowSummary(for: ref) })
+    }
+
+    /// Rows for a window (`TranscriptToolRows.emit`). Display-only rows (the
+    /// telemetry markers) use negative ids, leaving every transcript block id
+    /// and source text untouched; a marker ends a tool run. Tool blocks become
+    /// group headers and invocation rows; with the default `.empty` index each
+    /// tool block is its own invocation.
     static func rowsWithTelemetry(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>,
                                   markers: [Int: [String]], totalBlockCount: Int,
-                                  activeRoles: Set<TranscriptRoleFilter>) -> [BlockRowModel] {
-        var rows: [BlockRowModel] = []
-        func appendMarker(at index: Int) {
-            guard let lines = markers[index], !lines.isEmpty else { return }
-            let block = SessionTranscriptBuilder.LogicalBlock(
-                kind: .meta, text: lines.joined(separator: "\n"), timestamp: nil,
-                messageID: nil, toolName: nil, isDelta: false, toolInput: nil,
-                isErrorOutput: false, eventID: "telemetry-change-\(index)", rawJSON: "",
-                globalBlockIndex: -index - 1)
-            rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
-        }
-        for block in blocks {
-            appendMarker(at: block.globalBlockIndex)
-            let role = TranscriptRoleFilter.governing(block.kind)
-            if activeRoles.isEmpty || role == nil || activeRoles.contains(role!) {
-                rows.append(BlockRowModel(id: block.globalBlockIndex, content: .message(block)))
-            }
-        }
-        if blocks.last?.globalBlockIndex == totalBlockCount - 1 { appendMarker(at: totalBlockCount) }
-        return TranscriptToolSummary.mergeToolRuns(rows)
+                                  activeRoles: Set<TranscriptRoleFilter>,
+                                  index: ToolInvocationIndex = .empty,
+                                  failedInvocationIDs: Set<Int> = [],
+                                  openGroups: Set<Int> = [],
+                                  openInvocations: Set<Int> = [],
+                                  rowSummary: (ToolInvocationRef) -> ToolRowSummary = { _ in
+                                      ToolRowSummary(actions: [], chips: [])
+                                  }) -> [BlockRowModel] {
+        TranscriptToolRows.emit(blocks: blocks, index: index, rowSummary: rowSummary,
+                                openGroups: openGroups, openInvocations: openInvocations,
+                                activeRoles: activeRoles, failedInvocationIDs: failedInvocationIDs,
+                                markers: markers, totalBlockCount: totalBlockCount)
     }
 
     // MARK: Apply
@@ -1256,10 +1258,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         if sessionID != self.sessionID {
             self.sessionID = sessionID
             proximityReportGeneration &+= 1
-            expandedToolRowIDs.removeAll()
-            showAllRowIDs.removeAll()
-            autoExpandedByFind.removeAll()
-            autoShowedAllByFind.removeAll()
+            resetToolRowState()
             heightCache.removeAll(keepingCapacity: true)
             renderedBodyCache.removeAll()
             loadedBlockRange = nil
@@ -1361,6 +1360,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         allBlocksCache = allBlocks
         self.invocationIndex = invocationIndex
         self.failedInvocationIDs = failedInvocationIDs
+        if fontChanged {
+            // L2 bodies render at the transcript font size − 0.5 pt: drop the
+            // shown fallbacks so an open row re-renders (its key misses anyway).
+            latestToolPresentation.removeAll()
+        }
 
         // Turn/tool timing (Task 19): recompute once per snapshot, on the same
         // "did the full stream change" gate the window-maintenance branch below
@@ -1523,9 +1527,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return blocks[lower...upper]
     }
 
-    /// 1 block = 1 message row. Callers (namely `apply`) pipe this through
-    /// `TranscriptToolSummary.mergeToolRuns` to fold consecutive tool blocks
-    /// into `.toolGroup` rows before diffing/rendering.
+    /// 1 block = 1 message row, without tool grouping (`apply` emits rows
+    /// through `TranscriptToolRows.emit` instead).
     static func rowModels(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
         blocks.map { BlockRowModel(id: $0.globalBlockIndex, content: .message($0)) }
     }
@@ -1563,8 +1566,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// `new` have `old`'s ids, every row among them whose content changed is a
     /// tool row (`isToolRow`, header or invocation), and at least one changed.
     /// `reloadRows` are those rows' indexes; `count` is the appended rows (may be
-    /// 0). Legacy `.toolGroup` rows are not tool rows. Every other change keeps
-    /// the result it had before (identical / appendOnly / wholesale).
+    /// 0). Every other change keeps the result it had before (identical /
+    /// appendOnly / wholesale).
     static func classifyChange(old: [BlockRowModel], new: [BlockRowModel]) -> ChangeKind {
         if old == new { return .identical }
         guard new.count >= old.count else { return .wholesale }
@@ -1589,11 +1592,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Result of diffing a downward-window-extension against the current rows.
     /// The new rows are the old rows with a block of OLDER rows prepended — but
-    /// the OLD first row's id can CHANGE if it was a lone tool card that now
-    /// merges into a `.toolGroup` with the newly-prepended tool blocks
-    /// (Task 6). So the new rows are NOT guaranteed to contain the old rows as a
-    /// strict suffix by id; the boundary row must be treated as part of the
-    /// prepend delta and reloaded.
+    /// the OLD first row's id can CHANGE if it was a solo tool row (or a group
+    /// cut by the window edge) that now joins a group with the newly-prepended
+    /// tool blocks, which re-keys it. So the new rows are NOT guaranteed to
+    /// contain the old rows as a strict suffix by id; the boundary row must be
+    /// treated as part of the prepend delta and reloaded.
     struct PrependDiff: Equatable {
         /// Number of brand-new rows spliced in at index 0 (ids absent from old).
         /// Only meaningful when `canSplice` is true.
@@ -1741,7 +1744,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             if let value = link as? URL { return value.absoluteString }
             return nil
         }()
-        guard let payload, let decoded = TranscriptLinkifier.decodePayload(payload) else {
+        guard let payload else { return false }
+        // A tool L2 control (`toolfold:` — Show more / Show all / "… +N chars" /
+        // full command / Show script / Copy output). The body's ordinal names
+        // its invocation row.
+        if let foldLink = ToolFoldLink(payload: payload) {
+            guard let ordinal = (textView as? SelectableBlockTextView)?.blockOrdinal,
+                  rows.indices.contains(ordinal),
+                  case .toolInvocation(let model) = rows[ordinal].content else { return false }
+            handleToolFoldLink(foldLink, invocationID: model.invocationID)
+            return true
+        }
+        guard let decoded = TranscriptLinkifier.decodePayload(payload) else {
             return false
         }
         IDEOpener.open(path: decoded.path,
@@ -1754,23 +1768,58 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     // MARK: NSTableViewDelegate
 
+    /// Picks the cell by row content: a group header, an invocation, or a
+    /// message card. Each kind has its own reuse identifier.
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard rows.indices.contains(row) else { return nil }
-        let cell: BlockCardCellView
-        if let reused = tableView.makeView(withIdentifier: BlockCardCellView.reuseID, owner: self) as? BlockCardCellView {
-            cell = reused
-        } else {
-            cell = BlockCardCellView()
-            cell.identifier = BlockCardCellView.reuseID
+        let cell: NSView
+        switch rows[row].content {
+        case .toolGroupHeader:
+            cell = Self.reusedCell(in: tableView, owner: self, id: ToolGroupHeaderCellView.reuseID) {
+                ToolGroupHeaderCellView()
+            }
+        case .toolInvocation:
+            cell = Self.reusedCell(in: tableView, owner: self, id: ToolInvocationCellView.reuseID) {
+                ToolInvocationCellView()
+            }
+        case .message:
+            cell = Self.reusedCell(in: tableView, owner: self, id: BlockCardCellView.reuseID) {
+                BlockCardCellView()
+            }
         }
-        configure(cell: cell, forRowModel: rows[row], ordinal: row)
+        configureRowCell(cell, forRowModel: rows[row], ordinal: row)
         return cell
     }
 
-    /// Single call site for `BlockCardCellView.configure`, so every path
-    /// (initial render, visible-row reconfigure, single-row toggle) passes
-    /// the exact same expansion/show-all/callback wiring. `ordinal` is the row's
-    /// index into `rows` — the coordinate space the selection coordinator uses.
+    private static func reusedCell<Cell: NSView>(in tableView: NSTableView, owner: Any?,
+                                                 id: NSUserInterfaceItemIdentifier,
+                                                 make: () -> Cell) -> Cell {
+        if let reused = tableView.makeView(withIdentifier: id, owner: owner) as? Cell { return reused }
+        let cell = make()
+        cell.identifier = id
+        return cell
+    }
+
+    /// Configures any row cell for its row model. Every path (initial render,
+    /// visible-row reconfigure, toggles, presentation landing) goes through
+    /// here, so all of them wire the same state and callbacks.
+    private func configureRowCell(_ view: NSView, forRowModel rowModel: BlockRowModel, ordinal: Int) {
+        switch rowModel.content {
+        case .toolGroupHeader(let header):
+            guard let cell = view as? ToolGroupHeaderCellView else { return }
+            configureGroupHeader(cell, header: header, rowModel: rowModel, ordinal: ordinal)
+        case .toolInvocation(let invocation):
+            guard let cell = view as? ToolInvocationCellView else { return }
+            configureInvocation(cell, model: invocation, rowModel: rowModel, ordinal: ordinal)
+        case .message:
+            guard let cell = view as? BlockCardCellView else { return }
+            configure(cell: cell, forRowModel: rowModel, ordinal: ordinal)
+        }
+    }
+
+    /// Single call site for `BlockCardCellView.configure` (message rows).
+    /// `ordinal` is the row's index into `rows` — the coordinate space the
+    /// selection coordinator uses.
     private func configure(cell: BlockCardCellView, forRowModel rowModel: BlockRowModel, ordinal: Int) {
         // Review cards (Task C2): a detected review row substitutes the cleaned
         // summary for the raw block text (plain, never markdown) and recolors
@@ -1784,26 +1833,19 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         cell.configure(row: rowModel,
                        fontSize: fontSize,
                        source: source,
-                       isExpanded: expandedToolRowIDs.contains(rowModel.id),
-                       showAll: showAllRowIDs.contains(rowModel.id),
-                       lineLimit: CardMetrics.toolBodyTruncationLineLimit,
-                       findMatchCount: findMatchCount(forRowID: rowModel.id),
                        renderedBody: renderedBody(for: rowModel),
                        turnChipText: turnChipText(forRowID: rowModel.id),
-                       toolDurationText: toolDurationText(for: rowModel),
                        inlineImages: inlineImages(for: rowModel),
                        sessionID: sessionID ?? "",
                        imageContentWidth: currentBodyWidth(),
                        overrideBodyText: reviewText,
-                       accentOverride: accentOverride,
-                       onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
-                       onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
+                       accentOverride: accentOverride)
 
         // Linkify (Task C3): applied AFTER `cell.configure` has set the body
         // string/attributed-string on `bodyText.textStorage`, directly against
         // the RENDERED text (`cell.bodyText.string` — for a markdown row that's
         // `renderedBody.attributed.string`, never the markdown source; for a
-        // plain/tool/review row it's exactly `bodyText.string`). Matches are in
+        // plain/review row it's exactly `bodyText.string`). Matches are in
         // rendered-space, so no source-map translation is needed or correct
         // here. Meta rows and hidden/empty bodies have nothing to linkify.
         if !rowModel.isMeta, !cell.bodyText.isHidden, let storage = cell.bodyText.textStorage, storage.length > 0 {
@@ -1861,9 +1903,27 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         cell.applyFindHighlights(all: ranges, current: currentRange)
     }
 
+    /// The card's measured height plus the half gaps it reserves above and
+    /// below (`CardMetrics.rowGap`; none where tool rows join into one card).
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard rows.indices.contains(row) else { return CardMetrics.minCardHeight }
-        return measuredHeight(for: rows[row], width: currentBodyWidth())
+        guard rows.indices.contains(row) else { return CardMetrics.minCardHeight + CardMetrics.rowGap }
+        let rowModel = rows[row]
+        let gaps = Self.rowGaps(for: rowModel)
+        return measuredHeight(for: rowModel, width: currentBodyWidth()) + gaps.top + gaps.bottom
+    }
+
+    /// Space a row reserves above and below its card. Tool rows join their
+    /// neighbours inside a group (`ToolCardEdges`); every other row keeps half
+    /// the card gap on each side.
+    static func rowGaps(for row: BlockRowModel) -> (top: CGFloat, bottom: CGFloat) {
+        let half = CardMetrics.rowGap / 2
+        let edges: ToolCardEdges
+        switch row.content {
+        case .message: return (half, half)
+        case .toolGroupHeader(let header): edges = .header(header)
+        case .toolInvocation(let invocation): edges = .invocation(invocation)
+        }
+        return (edges.joinedTop ? 0 : half, edges.joinedBottom ? 0 : half)
     }
 
     // Prevent selection chrome entirely (belt-and-suspenders with .none style).
@@ -1891,26 +1951,6 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// measurement yet) always invalidates so the first layout pass seeds it.
     static func shouldInvalidateForWidth(oldBucket: Int?, newBucket: Int) -> Bool {
         oldBucket != newBucket
-    }
-
-    /// The exact text `BlockCardCellView` renders in the body for this row —
-    /// height measurement MUST match this, not the plain `row.bodyText`,
-    /// because a `.toolGroup`'s expanded body is the bullet+summary-annotated
-    /// text from `BlockCardCellView.expandedToolBodyText`, not the raw
-    /// `\n\n`-joined block text.
-    private func renderedBodyText(for row: BlockRowModel) -> String {
-        row.isToolCard ? BlockCardCellView.expandedToolBodyText(blocks: row.toolBlocks) : row.bodyText
-    }
-
-    private func toolRowHeightState(for row: BlockRowModel) -> ToolRowHeightState {
-        guard row.isToolCard else { return .notApplicable }
-        guard expandedToolRowIDs.contains(row.id) else { return .collapsed }
-        let text = renderedBodyText(for: row)
-        let lineCount = text.isEmpty ? 0 : text.components(separatedBy: "\n").count
-        if lineCount > CardMetrics.toolBodyTruncationLineLimit && !showAllRowIDs.contains(row.id) {
-            return .expandedTruncated
-        }
-        return .expandedShowAll
     }
 
     /// Inline images to render below this row's body, or `[]`. Non-empty only
@@ -1941,6 +1981,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return ceil(rect.height) + 2 * LayoutTokens.sm
     }
 
+    /// The card's height (without the row gaps). Tool rows: a header is
+    /// `ToolRowMetrics.headerCardHeight`; an invocation is 24 pt per action
+    /// line plus, when open and rendered, its L2 body height.
     private func measuredHeight(for row: BlockRowModel, width: CGFloat) -> CGFloat {
         if row.isMeta {
             if row.primaryBlock.eventID.hasPrefix("telemetry-change-") {
@@ -1948,13 +1991,19 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             }
             return CardMetrics.metaSeparatorHeight
         }
+        switch row.content {
+        case .toolGroupHeader:
+            return ToolRowMetrics.headerCardHeight
+        case .toolInvocation(let model):
+            return invocationCardHeight(model)
+        case .message:
+            break
+        }
 
-        let toolState = toolRowHeightState(for: row)
         let imageCount = inlineImages(for: row).count
         let key = HeightKey(rowID: row.id,
                             widthBucket: widthBucket(width),
                             fontBucket: fontBucket(fontSize),
-                            toolState: toolState,
                             imageCount: imageCount)
         if let cached = heightCache[key] { return cached }
 
@@ -1973,29 +2022,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             return h
         }
 
-        let h: CGFloat
-        switch toolState {
-        case .notApplicable:
-            // Review cards (Task C2): a detected review row is a markdown
-            // message whose `renderedBody(for:)` is intentionally nil (its
-            // summary is derived, plain-text-only — see that function's doc),
-            // so it falls through to this plain-text measurement path. Measure
-            // the SAME summary string `configure` displays, not the raw
-            // block.text, or the reserved height would mismatch the rendered
-            // plain string (clip / extra whitespace).
-            let text = reviewSummary(for: row) ?? row.bodyText
-            h = Self.computeHeight(text: text, width: width, fontSize: fontSize)
-        case .collapsed:
-            h = CardMetrics.toolCardCollapsedHeight
-        case .expandedTruncated:
-            let text = renderedBodyText(for: row)
-            let truncated = Self.truncatedBody(text, lineLimit: CardMetrics.toolBodyTruncationLineLimit)
-            h = Self.computeHeight(text: truncated, width: width, fontSize: fontSize)
-                + CardMetrics.showAllRowHeight
-        case .expandedShowAll:
-            let text = renderedBodyText(for: row)
-            h = Self.computeHeight(text: text, width: width, fontSize: fontSize)
-        }
+        // Review cards (Task C2): a detected review row is a markdown message
+        // whose `renderedBody(for:)` is intentionally nil (its summary is
+        // derived, plain-text-only — see that function's doc), so it falls
+        // through to this plain-text measurement path. Measure the SAME
+        // summary string `configure` displays, not the raw block.text, or the
+        // reserved height would mismatch the rendered plain string (clip /
+        // extra whitespace).
+        let text = reviewSummary(for: row) ?? row.bodyText
+        let h = Self.computeHeight(text: text, width: width, fontSize: fontSize)
         let total = h + imageHeight
         heightCache[key] = total
         return total
@@ -2018,14 +2053,6 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             acc ^= h.finalize() // XOR: order-independent over dictionary iteration
         }
         return acc
-    }
-
-    /// First `lineLimit` lines of `text`, joined back with newlines. Pure,
-    /// used both for height measurement and for what the cell actually shows.
-    static func truncatedBody(_ text: String, lineLimit: Int) -> String {
-        let lines = text.components(separatedBy: "\n")
-        guard lines.count > lineLimit else { return text }
-        return lines.prefix(lineLimit).joined(separator: "\n")
     }
 
     /// Pure height computation: header band + measured monospaced body + insets.
@@ -2152,12 +2179,22 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// `SelectableBlockTextView.clearFindHighlights` only ever touches
     /// `.backgroundColor`, so a find-clear can never strip a link. A no-op when
     /// linkify is gated off or the row has no resolvable matches.
-    private func applyLinkAttributes(rowID: Int, text: String, to storage: NSTextStorage) {
+    /// `skippingExistingLinks`: leave alone any match that overlaps a `.link`
+    /// the text already carries (a tool body's `toolfold:` controls).
+    private func applyLinkAttributes(rowID: Int, text: String, to storage: NSTextStorage,
+                                     skippingExistingLinks: Bool = false) {
         let links = linkAttributes(for: rowID, text: text)
         guard !links.isEmpty else { return }
         let fullLen = storage.length
         for link in links {
             guard NSMaxRange(link.range) <= fullLen else { continue }
+            if skippingExistingLinks {
+                var overlapsControl = false
+                storage.enumerateAttribute(.link, in: link.range) { value, _, stop in
+                    if value != nil { overlapsControl = true; stop.pointee = true }
+                }
+                if overlapsControl { continue }
+            }
             storage.addAttributes([
                 .link: link.payload,
                 .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -2199,15 +2236,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// object into `bodyText.textStorage` (attribute parity; the Phase-1 ShowAll
     /// bug class where a differently-attributed measure string clipped the body).
     static func measuredHeight(of attributed: NSAttributedString, width: CGFloat) -> CGFloat {
-        guard attributed.length > 0 else { return 0 }
-        let storage = NSTextStorage(attributedString: attributed)
-        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        let manager = NSLayoutManager()
-        manager.addTextContainer(container)
-        storage.addLayoutManager(manager)
-        manager.ensureLayout(for: container)
-        return ceil(manager.usedRect(for: container).height)
+        ToolPresentationRenderer.measuredHeight(of: attributed, width: width)
     }
 
     /// Card height for a markdown row: header band + measured markdown body +
@@ -2265,90 +2294,511 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     private func reconfigureVisibleRows() {
-        guard let table else { return }
-        let visible = table.rows(in: table.visibleRect)
-        guard visible.length > 0 else { return }
-        for row in visible.lowerBound..<visible.upperBound where rows.indices.contains(row) {
-            if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? BlockCardCellView {
-                configure(cell: cell, forRowModel: rows[row], ordinal: row)
+        forEachVisibleCell { cell, ordinal in
+            self.configureRowCell(cell, forRowModel: self.rows[ordinal], ordinal: ordinal)
+        }
+    }
+
+    // MARK: - Tool rows (tool rendering Task 13)
+
+    /// Tool cards keep the 4.2 tool accent (spec §6.6).
+    private static var toolAccent: NSColor { TranscriptColorSystem.semanticAccent(.toolCall) }
+
+    /// Drops every piece of tool-row state (session switch).
+    private func resetToolRowState() {
+        openGroups.removeAll()
+        openInvocations.removeAll()
+        knownGroupIDs.removeAll()
+        seededInvocationIDs.removeAll()
+        userToggledGroupMembers.removeAll()
+        foldStates.removeAll()
+        scriptShownInvocations.removeAll()
+        autoOpenedGroupsByFind.removeAll()
+        autoOpenedInvocationsByFind.removeAll()
+        rowSummaryCache.removeAll()
+        toolInvocationCache.removeAll()
+        toolPresentationCache.removeAll()
+        latestToolPresentation.removeAll()
+        toolPresentationInFlight.removeAll()
+        toolPresentationQueued.removeAll()
+        toolPresentationGeneration &+= 1
+    }
+
+    /// The invocation `id`, or — as `TranscriptToolRows.emit` treats it — a
+    /// lone invocation of tool block `id` when the index does not know it.
+    private func toolInvocationRef(id: Int) -> ToolInvocationRef? {
+        if let ref = TranscriptToolRows.invocationRef(id: id, in: invocationIndex) { return ref }
+        guard allBlocksCache.indices.contains(id), allBlocksCache[id].kind.isTool else { return nil }
+        let isCall = allBlocksCache[id].kind == .toolCall
+        return ToolInvocationRef(id: id, callBlockIndex: isCall ? id : nil,
+                                 outputBlockIndices: isCall ? [] : [id], status: .unknown)
+    }
+
+    /// The invocation that shows block `index`: its pairing, or the block
+    /// itself for a tool block the index does not know. Nil for other blocks.
+    private func toolInvocationID(forBlock index: Int) -> Int? {
+        if let id = invocationIndex.invocationIDByBlock[index] { return id }
+        guard allBlocksCache.indices.contains(index), allBlocksCache[index].kind.isTool else { return nil }
+        return index
+    }
+
+    private static func memberBlocks(of ref: ToolInvocationRef) -> [Int] {
+        (ref.callBlockIndex.map { [$0] } ?? []) + ref.outputBlockIndices
+    }
+
+    /// `TranscriptToolRows.contentStamp` over the member blocks in the FULL
+    /// stream: it changes when an output arrives or grows.
+    private func contentStamp(of ref: ToolInvocationRef) -> Int {
+        let members = Self.memberBlocks(of: ref)
+        var length = 0
+        for member in members where allBlocksCache.indices.contains(member) {
+            length += allBlocksCache[member].text.utf16.count
+        }
+        return TranscriptToolRows.contentStamp(memberCount: members.count, utf16Length: length)
+    }
+
+    /// Cached L1 summary (`ToolInvocationBuilder.rowSummary`), keyed by
+    /// invocation id and valid while its content stamp and status match.
+    private func rowSummary(for ref: ToolInvocationRef) -> ToolRowSummary {
+        let stamp = contentStamp(of: ref)
+        if let cached = rowSummaryCache[ref.id], cached.stamp == stamp, cached.status == ref.status {
+            return cached.summary
+        }
+        let summary = ToolInvocationBuilder.rowSummary(ref, blocks: allBlocksCache, index: invocationIndex,
+                                                       source: source)
+        rowSummaryCache[ref.id] = (stamp, ref.status, summary)
+        return summary
+    }
+
+    private func toolGroupHeader(groupID: Int) -> ToolGroupHeaderModel? {
+        for row in rows {
+            if case .toolGroupHeader(let header) = row.content, header.groupID == groupID { return header }
+        }
+        return nil
+    }
+
+    private func toolGroupHeader(containing invocationID: Int) -> ToolGroupHeaderModel? {
+        for row in rows {
+            if case .toolGroupHeader(let header) = row.content, header.invocationIDs.contains(invocationID) {
+                return header
+            }
+        }
+        return nil
+    }
+
+    private func invocationRowIndex(_ invocationID: Int) -> Int? {
+        rows.firstIndex { row in
+            if case .toolInvocation(let model) = row.content { return model.invocationID == invocationID }
+            return false
+        }
+    }
+
+    // MARK: Default and carried open state (spec §6.1)
+
+    /// Default open state for the tool rows of a fresh `emit`, and open state
+    /// carried to re-keyed groups. Returns true when it changed `openGroups` or
+    /// `openInvocations`, so the caller emits again.
+    ///
+    /// - A group id seen for the first time takes the open state of an older
+    ///   group id among its invocations (a window prepend re-keyed it); with
+    ///   none (a solo row became a group) it opens when one of its invocations
+    ///   is open, so the row the user opened stays in view.
+    /// - A failed invocation not seeded yet opens at L2, and its group opens
+    ///   unless the user toggled that group (`TranscriptToolRows.seedOpenState`).
+    ///   Seeding runs once per invocation id: a row the user closed stays
+    ///   closed, also after its group is re-keyed.
+    private func seedAndCarryToolOpenState(for rows: [BlockRowModel]) -> Bool {
+        var changed = false
+        for row in rows {
+            switch row.content {
+            case .toolGroupHeader(let header):
+                if knownGroupIDs.insert(header.groupID).inserted, carryOpenState(to: header) {
+                    changed = true
+                }
+                let fresh = header.invocationIDs.filter {
+                    failedInvocationIDs.contains($0) && !seededInvocationIDs.contains($0)
+                }
+                guard !fresh.isEmpty else { continue }
+                var freshGroup = header
+                freshGroup.invocationIDs = fresh
+                let seed = TranscriptToolRows.seedOpenState(newGroups: [freshGroup], index: invocationIndex,
+                                                            failedInvocationIDs: failedInvocationIDs)
+                seededInvocationIDs.formUnion(fresh)
+                openInvocations.formUnion(seed.invocations)
+                if !header.invocationIDs.contains(where: userToggledGroupMembers.contains) {
+                    openGroups.formUnion(seed.groups)
+                }
+                changed = true
+            case .toolInvocation(let model) where model.groupID == nil:
+                guard failedInvocationIDs.contains(model.invocationID),
+                      seededInvocationIDs.insert(model.invocationID).inserted else { continue }
+                openInvocations.insert(model.invocationID)
+                changed = true
+            default:
+                continue
+            }
+        }
+        return changed
+    }
+
+    /// First sight of `header.groupID` (see `seedAndCarryToolOpenState`).
+    /// Returns true when the group opened.
+    private func carryOpenState(to header: ToolGroupHeaderModel) -> Bool {
+        // A group id is its first invocation's id, so an older key of this
+        // group is one of its (non-first) invocation ids.
+        let olderKeys = header.invocationIDs.filter { $0 != header.groupID && knownGroupIDs.contains($0) }
+        let open: Bool
+        if olderKeys.isEmpty {
+            open = header.invocationIDs.contains(where: openInvocations.contains)
+        } else {
+            open = olderKeys.contains(where: openGroups.contains)
+            for key in olderKeys {
+                openGroups.remove(key)
+                if autoOpenedGroupsByFind.remove(key) != nil { autoOpenedGroupsByFind.insert(header.groupID) }
+            }
+        }
+        return open && openGroups.insert(header.groupID).inserted
+    }
+
+    // MARK: Toggles
+
+    /// Opens or closes a group's invocation rows (L1). `allRows` (Option-click)
+    /// also opens or closes every invocation in it (Finder behavior).
+    func toggleGroup(groupID: Int, allRows: Bool) {
+        guard let header = toolGroupHeader(groupID: groupID) else { return }
+        let open = !openGroups.contains(groupID)
+        if open { openGroups.insert(groupID) } else { openGroups.remove(groupID) }
+        userToggledGroupMembers.formUnion(header.invocationIDs)
+        // A manual toggle wins over find's auto-open: Esc leaves it as set.
+        autoOpenedGroupsByFind.remove(groupID)
+        if allRows {
+            for id in header.invocationIDs {
+                if open { openInvocations.insert(id) } else { openInvocations.remove(id) }
+                autoOpenedInvocationsByFind.remove(id)
+            }
+        }
+        applyToolRowsChange()
+    }
+
+    /// Opens or closes an invocation's L2 detail. `allInGroup` (Option-click)
+    /// gives every invocation of its group the new state.
+    func toggleInvocation(invocationID: Int, allInGroup: Bool) {
+        let open = !openInvocations.contains(invocationID)
+        var ids = [invocationID]
+        if allInGroup, let header = toolGroupHeader(containing: invocationID) { ids = header.invocationIDs }
+        for id in ids {
+            if open { openInvocations.insert(id) } else { openInvocations.remove(id) }
+            autoOpenedInvocationsByFind.remove(id)
+        }
+        applyToolRowsChange()
+    }
+
+    /// Re-emits the loaded window after an open-state change and applies the
+    /// difference as row removals, insertions and in-place reloads (no
+    /// animation), keeping the first visible row still. Clears a live
+    /// cross-block selection: rows change text and ordinals.
+    private func applyToolRowsChange() {
+        let newRows = rowsWithTelemetry(from: Self.slice(allBlocksCache, to: loadedBlockRange))
+        // A closed row needs no fallback body; reopening reads the presentation cache.
+        latestToolPresentation = latestToolPresentation.filter { openInvocations.contains($0.key) }
+        guard let table else { rows = newRows; return }
+        clearCrossBlockSelection()
+        guard newRows != rows else { return }
+
+        var anchor = captureScrollAnchor()
+        if let a = anchor, !newRows.contains(where: { $0.id == a.rowID }),
+           let oldRow = rows.first(where: { $0.id == a.rowID }),
+           let target = Self.rowShowingContent(of: oldRow, in: newRows) {
+            // The first visible row closed away (a group closed over it): keep
+            // its group header in place instead.
+            anchor = ScrollAnchor(rowID: target.id, offsetIntoRow: 0)
+        }
+        let script = Self.rowEditScript(old: rows, new: newRows)
+        rows = newRows
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            guard let script else {
+                table.reloadData()
+                return
+            }
+            table.beginUpdates()
+            if !script.removed.isEmpty { table.removeRows(at: script.removed, withAnimation: []) }
+            if !script.inserted.isEmpty { table.insertRows(at: script.inserted, withAnimation: []) }
+            table.endUpdates()
+            if !script.reloaded.isEmpty {
+                table.reloadData(forRowIndexes: script.reloaded, columnIndexes: IndexSet(integer: 0))
+                table.noteHeightOfRows(withIndexesChanged: script.reloaded)
+            }
+        }
+        rebuildFindMatchesByRowIDIfActive()
+        restoreScrollAnchor(anchor)
+    }
+
+    struct RowEditScript: Equatable {
+        /// Indexes in the old rows.
+        var removed: IndexSet
+        /// Indexes in the new rows.
+        var inserted: IndexSet
+        /// Indexes in the new rows of surviving rows whose content changed.
+        var reloaded: IndexSet
+    }
+
+    /// `old` → `new` as removals, insertions and in-place reloads, matched by
+    /// row id. Nil when ids repeat or the surviving rows changed order (the
+    /// caller reloads everything).
+    static func rowEditScript(old: [BlockRowModel], new: [BlockRowModel]) -> RowEditScript? {
+        let oldIDs = Set(old.map(\.id))
+        let newIDs = Set(new.map(\.id))
+        guard oldIDs.count == old.count, newIDs.count == new.count else { return nil }
+        let oldSurvivors = old.filter { newIDs.contains($0.id) }
+        let newSurvivorIndexes = new.indices.filter { oldIDs.contains(new[$0].id) }
+        guard oldSurvivors.map(\.id) == newSurvivorIndexes.map({ new[$0].id }) else { return nil }
+        var reloaded = IndexSet()
+        for (oldRow, newIndex) in zip(oldSurvivors, newSurvivorIndexes) where oldRow != new[newIndex] {
+            reloaded.insert(newIndex)
+        }
+        return RowEditScript(removed: IndexSet(old.indices.filter { !newIDs.contains(old[$0].id) }),
+                             inserted: IndexSet(new.indices.filter { !oldIDs.contains(new[$0].id) }),
+                             reloaded: reloaded)
+    }
+
+    /// The row of `rows` that now shows what tool row `old` showed when `old`'s
+    /// id is gone: the header of the group its invocation closed into, or the
+    /// re-keyed header that holds its invocations. Nil for a message row.
+    static func rowShowingContent(of old: BlockRowModel, in rows: [BlockRowModel]) -> BlockRowModel? {
+        let members: Set<Int>
+        switch old.content {
+        case .message: return nil
+        case .toolGroupHeader(let header): members = Set(header.invocationIDs)
+        case .toolInvocation(let model): members = [model.invocationID]
+        }
+        return rows.first { row in
+            switch row.content {
+            case .toolGroupHeader(let header): return header.invocationIDs.contains(where: members.contains)
+            case .toolInvocation(let model): return members.contains(model.invocationID)
+            case .message: return false
             }
         }
     }
 
-    // MARK: Tool-card expansion toggles
+    // MARK: Cells
 
-    /// Toggle a tool card's collapsed/expanded state. Called from the header
-    /// click target (the whole collapsed header row, not just the chevron
-    /// glyph). Notes the single row's height change inside a 0.15s animation
-    /// group, capturing/restoring the scroll anchor when the toggled row sits
-    /// above the current viewport (so content below doesn't visually jump).
-    func toggleToolExpansion(rowID: Int) {
-        guard let rowIndex = rows.firstIndex(where: { $0.id == rowID }) else { return }
-        // Collapse/expand changes this row's rendered text and its
-        // included/excluded status — clear any live cross-block selection so an
-        // ordinal can't reference now-different text (locked clear-on-change rule).
-        clearCrossBlockSelection()
-        if expandedToolRowIDs.contains(rowID) {
-            expandedToolRowIDs.remove(rowID)
-        } else {
-            expandedToolRowIDs.insert(rowID)
-        }
-        // Manual toggle overrides find's auto-expand bookkeeping (Task 16): a
-        // row the user explicitly interacted with (expand OR re-collapse) is no
-        // longer "only auto-expanded" — it must survive a subsequent Esc as the
-        // user just now left it, not silently snap back to collapsed. Drop the
-        // show-all half of the bookkeeping too: a manual re-collapse/expand is
-        // a broader override than the narrower toggleShowAll case below.
-        autoExpandedByFind.remove(rowID)
-        autoShowedAllByFind.remove(rowID)
-        noteHeightChanged(forRowAt: rowIndex)
+    private func configureGroupHeader(_ cell: ToolGroupHeaderCellView, header: ToolGroupHeaderModel,
+                                      rowModel: BlockRowModel, ordinal: Int) {
+        let groupID = header.groupID
+        cell.configure(header: header, accent: Self.toolAccent,
+                       findMatchCount: header.isOpen ? 0 : findMatchCount(forRowID: rowModel.id),
+                       onToggle: { [weak self] allRows in self?.toggleGroup(groupID: groupID, allRows: allRows) })
+        finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
     }
 
-    /// Toggle "Show all N lines" for a tool card whose expanded body exceeds
-    /// the 20-line truncation limit. Same animation/anchor discipline as
-    /// `toggleToolExpansion`.
-    func toggleShowAll(rowID: Int) {
-        guard let rowIndex = rows.firstIndex(where: { $0.id == rowID }) else { return }
-        // Show-all changes the rendered (truncated↔full) body text — clear any
-        // live cross-block selection to keep ordinals honest.
-        clearCrossBlockSelection()
-        if showAllRowIDs.contains(rowID) {
-            showAllRowIDs.remove(rowID)
-        } else {
-            showAllRowIDs.insert(rowID)
+    private func configureInvocation(_ cell: ToolInvocationCellView, model: ToolInvocationRowModel,
+                                     rowModel: BlockRowModel, ordinal: Int) {
+        let invocationID = model.invocationID
+        let presentation = model.isOpen ? toolPresentation(for: model) : nil
+        cell.configure(model: model, lines: toolActionLines(for: model), accent: Self.toolAccent,
+                       findMatchCount: findMatchCount(forRowID: rowModel.id),
+                       body: presentation?.attributed, bodyHeight: presentation?.bodyHeight ?? 0,
+                       onToggle: { [weak self] allInGroup in
+                           self?.toggleInvocation(invocationID: invocationID, allInGroup: allInGroup)
+                       })
+        // File-path links in the L2 text (Task C3 parity), around the fold
+        // controls the renderer already linked. Skipped for very large bodies
+        // (Show all): the scan would run on the main thread.
+        if let storage = cell.bodyText.textStorage, !cell.bodyText.isHidden,
+           storage.length > 0, storage.length <= Self.toolBodyLinkifyLimit {
+            applyLinkAttributes(rowID: rowModel.id, text: cell.bodyText.string, to: storage,
+                                skippingExistingLinks: true)
         }
-        // Manual show-all toggle overrides find's bookkeeping for this row
-        // (Task 16) — the user just explicitly set its show-all state, so an
-        // Esc must not silently override it back.
-        autoShowedAllByFind.remove(rowID)
-        noteHeightChanged(forRowAt: rowIndex)
+        finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
     }
 
-    /// Shared height-change + scroll-anchor discipline for a single-row toggle.
-    private func noteHeightChanged(forRowAt rowIndex: Int) {
-        guard let table else { return }
+    /// Rendered L2 text longer than this (UTF-16) is not scanned for file links.
+    private static let toolBodyLinkifyLimit = 200_000
 
-        // Only capture/restore the anchor when the toggled row is ABOVE the
-        // current viewport — the row expanding/collapsing there would
-        // otherwise shove the visible content down/up by the height delta.
-        // A toggle at or below the viewport doesn't need this: nothing above
-        // the fold moves.
+    /// Flash alpha and selection wiring, as `configure(cell:…)` does for
+    /// message cards. Tool rows take no part in cross-block selection yet
+    /// (their text is excluded), and find highlights inside L2 come later:
+    /// the header and row pills carry the match count.
+    private func finishToolCellConfigure(_ cell: ToolCardCellView, rowModel: BlockRowModel, ordinal: Int) {
+        cell.setFlashAlpha(isFlashing(rowID: rowModel.id) ? Self.flashRaisedAlpha : CardMetrics.cardTintAlpha)
+        cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
+        if crossBlockDragActive { cell.applySelectionRange(NSRange(location: 0, length: 0)) }
+    }
+
+    /// One L1 line per action; the chevron and the duration sit on the first.
+    private func toolActionLines(for model: ToolInvocationRowModel) -> [ToolActionLine] {
+        guard let ref = toolInvocationRef(id: model.invocationID) else { return [] }
+        let duration = invocationDuration(ref).map(TranscriptTurnTiming.formatDuration)
+        return rowSummary(for: ref).actions.enumerated().map { offset, action in
+            ToolActionLine(action: action, isFirst: offset == 0, durationText: offset == 0 ? duration : nil)
+        }
+    }
+
+    private func invocationCardHeight(_ model: ToolInvocationRowModel) -> CGFloat {
+        let lineCount = toolInvocationRef(id: model.invocationID).map { rowSummary(for: $0).actions.count } ?? 1
+        let bodyHeight = model.isOpen ? toolPresentation(for: model)?.bodyHeight : nil
+        return ToolRowMetrics.invocationCardHeight(lineCount: lineCount, edges: .invocation(model),
+                                                   bodyHeight: bodyHeight)
+    }
+
+    // MARK: Fold links
+
+    /// A `toolfold:` control in an invocation's L2 body (Task 11 grammar).
+    /// Fold changes re-render off the main thread from the cached
+    /// `ToolInvocation`; the row keeps its current body until the new one lands.
+    func handleToolFoldLink(_ link: ToolFoldLink, invocationID: Int) {
+        var folds = foldStates[invocationID] ?? [:]
+        switch link {
+        case .showMore(let action):
+            folds[action, default: FoldState()].extraLinesShown += ToolTextBudget.showMoreStep
+        case .showAll(let action):
+            folds[action, default: FoldState()].showAll = true
+        case .openLongLine(let action, let line):
+            folds[action, default: FoldState()].openedLongLines.insert(line)
+        case .showFullCommand(let action):
+            folds[action, default: FoldState()].commandShowAll = true
+        case .showScript:
+            if scriptShownInvocations.remove(invocationID) == nil { scriptShownInvocations.insert(invocationID) }
+        case .copyOutput(let action):
+            copyToolOutput(action: action, invocationID: invocationID)
+            return
+        }
+        foldStates[invocationID] = folds
+        // The body's text changes: a selection over it would be stale.
+        clearCrossBlockSelection()
+        guard let rowIndex = invocationRowIndex(invocationID),
+              case .toolInvocation(let model) = rows[rowIndex].content, model.isOpen else { return }
+        _ = toolPresentation(for: model)
+    }
+
+    /// "Copy output": the pane's whole decoded output (an action's output, the
+    /// script output at `actions.count`, the script at `actions.count + 1`).
+    private func copyToolOutput(action: Int, invocationID: Int) {
+        guard let request = toolPresentationRequest(for: invocationID) else { return }
+        let copy: (ToolInvocation) -> Void = { invocation in
+            let text: String?
+            if action < invocation.actions.count {
+                text = invocation.actions[action].output?.text
+            } else if action == invocation.actions.count {
+                text = invocation.scriptOutput?.text
+            } else {
+                text = invocation.scriptSource
+            }
+            guard let text, !text.isEmpty else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+        if let cached = toolInvocationCache.object(forKey: request.invocationKey as NSString) {
+            copy(cached)
+            return
+        }
+        let blocks = allBlocksCache
+        let index = invocationIndex
+        let source = source
+        let cache = toolInvocationCache
+        Task.detached(priority: .userInitiated) {
+            let invocation = ToolInvocationBuilder.build(request.ref, blocks: blocks, index: index, source: source,
+                                                         duration: request.duration)
+            await MainActor.run {
+                cache.setObject(invocation, forKey: request.invocationKey as NSString)
+                copy(invocation)
+            }
+        }
+    }
+
+    // MARK: Off-main L2 presentation
+
+    /// The L2 presentation to show for an open invocation row, or nil before
+    /// its first render. On a cache miss this starts (or queues) an off-main
+    /// build + render + measure and returns the last presentation shown for
+    /// the row, so the row keeps its body (or shows L1 only) until then.
+    private func toolPresentation(for model: ToolInvocationRowModel) -> ToolPresentation? {
+        let id = model.invocationID
+        // No usable width yet (before the first layout): nothing to render at.
+        guard currentBodyWidth() > ToolRowMetrics.minimumRenderWidth,
+              let request = toolPresentationRequest(for: id) else { return latestToolPresentation[id] }
+        if let cached = toolPresentationCache.object(forKey: request.key as NSString), request.isSatisfied(by: cached) {
+            latestToolPresentation[id] = cached
+            return cached
+        }
+        startToolPresentation(request)
+        return latestToolPresentation[id]
+    }
+
+    private func toolPresentationRequest(for invocationID: Int) -> ToolPresentationRequest? {
+        guard let ref = toolInvocationRef(id: invocationID) else { return nil }
+        let invocationKey = "\(ref.id)|\(contentStamp(of: ref))|\(ref.status)"
+        let width = max(1, currentBodyWidth() - ToolRowMetrics.bodyLeadingIndent)
+        return ToolPresentationRequest(
+            ref: ref, invocationKey: invocationKey,
+            key: "\(invocationKey)|\(fontBucket(fontSize))|\(widthBucket(width))",
+            folds: foldStates[invocationID] ?? [:], scriptShown: scriptShownInvocations.contains(invocationID),
+            fontSize: fontSize, width: width, duration: invocationDuration(ref))
+    }
+
+    /// Runs one request off the main thread: `ToolInvocationBuilder.build`
+    /// (skipped when cached), `ToolPresentationRenderer.render` and the TextKit 1
+    /// body measurement. One render per invocation at a time; a newer request
+    /// waits and replaces any older waiting one.
+    private func startToolPresentation(_ request: ToolPresentationRequest) {
+        let id = request.ref.id
+        if let running = toolPresentationInFlight[id] {
+            toolPresentationQueued[id] = running.matches(request) ? nil : request
+            return
+        }
+        toolPresentationInFlight[id] = request
+        let generation = toolPresentationGeneration
+        let cachedInvocation = toolInvocationCache.object(forKey: request.invocationKey as NSString)
+        let blocks = allBlocksCache
+        let index = invocationIndex
+        let source = source
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let invocation = cachedInvocation
+                ?? ToolInvocationBuilder.build(request.ref, blocks: blocks, index: index, source: source,
+                                               duration: request.duration)
+            let presentation = ToolPresentationRenderer.render(invocation, folds: request.folds,
+                                                               scriptShown: request.scriptShown,
+                                                               fontSize: request.fontSize, width: request.width)
+            await MainActor.run { [weak self] in
+                self?.finishToolPresentation(request, invocation: invocation, presentation: presentation,
+                                             generation: generation)
+            }
+        }
+    }
+
+    private func finishToolPresentation(_ request: ToolPresentationRequest, invocation: ToolInvocation,
+                                        presentation: ToolPresentation, generation: Int) {
+        // A session switch since the start: the result belongs to another session.
+        guard generation == toolPresentationGeneration else { return }
+        let id = request.ref.id
+        toolInvocationCache.setObject(invocation, forKey: request.invocationKey as NSString)
+        toolPresentationCache.setObject(presentation, forKey: request.key as NSString)
+        toolPresentationInFlight[id] = nil
+        if let next = toolPresentationQueued.removeValue(forKey: id) { startToolPresentation(next) }
+
+        // Show it only when it is what the open row wants now.
+        guard let current = toolPresentationRequest(for: id), current.matches(request),
+              let rowIndex = invocationRowIndex(id),
+              case .toolInvocation(let model) = rows[rowIndex].content, model.isOpen else { return }
+        latestToolPresentation[id] = presentation
+        reloadToolRows(IndexSet(integer: rowIndex))
+    }
+
+    /// Reloads tool rows in place and re-notes their heights, keeping the
+    /// viewport still when a reloaded row sits above it.
+    private func reloadToolRows(_ indexes: IndexSet) {
+        guard let table, !indexes.isEmpty else { return }
         let visible = table.rows(in: table.visibleRect)
-        let toggledRowAboveViewport = visible.length > 0 && rowIndex < visible.lowerBound
-        let anchor = toggledRowAboveViewport ? captureScrollAnchor() : nil
-
-        if let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: false) as? BlockCardCellView {
-            configure(cell: cell, forRowModel: rows[rowIndex], ordinal: rowIndex)
-        }
-
+        let aboveViewport = visible.length > 0 && (indexes.first ?? Int.max) < visible.lowerBound
+        let anchor = aboveViewport ? captureScrollAnchor() : nil
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
-            table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: rowIndex))
+            ctx.duration = 0
+            table.reloadData(forRowIndexes: indexes, columnIndexes: IndexSet(integer: 0))
+            table.noteHeightOfRows(withIndexesChanged: indexes)
         }
-
-        if let anchor {
-            restoreScrollAnchor(anchor)
-        }
+        restoreScrollAnchor(anchor)
     }
 
     // MARK: Scroll anchoring
@@ -2911,17 +3361,30 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     /// Map each match to the row id that renders it, so per-cell paint/pill is an
-    /// O(1) dictionary lookup rather than a rescan of the flat list. A match's
-    /// block may sit inside a merged group whose id is the group's first block.
+    /// O(1) dictionary lookup rather than a rescan of the flat list. A tool
+    /// block's match maps to its invocation row, or to its group header when
+    /// the group is closed.
     private func rebuildFindMatchesByRowID() {
         var byRow: [Int: [TranscriptDerivedState.BlockMatch]] = [:]
         guard !findMatches.isEmpty else { findMatchesByRowID = [:]; return }
         // block index -> row id (only for currently-loaded rows; off-window
         // matches simply don't map to a row, which is correct — they're counted
-        // in the total but have no cell to paint).
+        // in the total but have no cell to paint). A header comes before its
+        // invocation rows, so an open group's rows take their own blocks over.
         var blockToRowID: [Int: Int] = [:]
         for row in rows {
-            for b in row.toolBlocks { blockToRowID[b.globalBlockIndex] = row.id }
+            switch row.content {
+            case .message(let block):
+                blockToRowID[block.globalBlockIndex] = row.id
+            case .toolGroupHeader(let header):
+                for id in header.invocationIDs {
+                    guard let ref = toolInvocationRef(id: id) else { continue }
+                    for member in Self.memberBlocks(of: ref) { blockToRowID[member] = row.id }
+                }
+            case .toolInvocation(let model):
+                guard let ref = toolInvocationRef(id: model.invocationID) else { continue }
+                for member in Self.memberBlocks(of: ref) { blockToRowID[member] = row.id }
+            }
         }
         for m in findMatches {
             guard let rowID = blockToRowID[m.globalBlockIndex] else { continue }
@@ -2936,7 +3399,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard let table, let scroll = scroll, !rows.isEmpty else { return nil }
         let visible = table.rows(in: scroll.contentView.bounds)
         guard visible.length > 0, rows.indices.contains(visible.lowerBound) else { return nil }
-        return rows[visible.lowerBound].primaryBlock.globalBlockIndex
+        return rows[visible.lowerBound].anchorBlockIndex
     }
 
     /// Scroll to the row backing the current match's block, widening the window
@@ -2959,123 +3422,85 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         scrollToBlock(target) // widens (no-op here) if off-window, then scrolls + flashes
     }
 
-    /// Auto-expand (Task 16) the collapsed tool row/group that owns `match`,
-    /// so the row it lands on renders in-body highlights rather than a header
-    /// pill. No-ops for a non-tool row, an already-expanded row, or a match
-    /// whose row still isn't loaded (a widen just failed/no-op'd for an
-    /// out-of-bounds target — `scrollToBlock` below will also no-op). No
-    /// animation: a find jump lands instantly, `flashRow` gives confirmation.
+    /// Open (Task 16, spec §6.8) the closed group and the closed invocation
+    /// that own a tool `match`, so the jump lands on the invocation row with
+    /// its L2 detail. No-ops for a non-tool block or one that is already open.
+    /// Opening a fold to the match (and painting the match inside L2) is the
+    /// decoded-text Find's job (Task 15); until then the row's pill counts it.
+    /// No animation: a find jump lands instantly, `flashRow` gives confirmation.
     private func autoExpandCollapsedMatch(_ match: TranscriptDerivedState.BlockMatch) {
-        guard let rowIndex = rowIndex(forBlock: match.globalBlockIndex) else { return }
-        let row = rows[rowIndex]
-        guard row.isToolCard, !expandedToolRowIDs.contains(row.id) else { return }
-
-        clearCrossBlockSelection() // same locked rule as a manual toggle
-        expandedToolRowIDs.insert(row.id)
-        autoExpandedByFind.insert(row.id)
-
-        // Past the truncation fold ⇒ "Show all" is ALSO needed to reveal the
-        // match. Only remember this as FIND's doing when showAll wasn't
-        // already set (a stale prior manual show-all must not be stripped by
-        // find's own Esc-recollapse).
-        let fullBody = renderedBodyText(for: row)
-        let ownerIdx = row.toolBlocks.firstIndex { $0.globalBlockIndex == match.globalBlockIndex } ?? 0
-        let matchOffset = BlockCardCellView.expandedToolBodyOffset(blocks: row.toolBlocks, ownerIndex: ownerIdx)
-            + NSMaxRange(match.rangeInBlockText)
-        if TranscriptFindNavigator.matchExceedsTruncationFold(
-            fullBodyText: fullBody, matchEndOffset: matchOffset, lineLimit: CardMetrics.toolBodyTruncationLineLimit),
-           !showAllRowIDs.contains(row.id) {
-            showAllRowIDs.insert(row.id)
-            autoShowedAllByFind.insert(row.id)
+        guard let invocationID = toolInvocationID(forBlock: match.globalBlockIndex) else { return }
+        var changed = false
+        if let header = toolGroupHeader(containing: invocationID), !openGroups.contains(header.groupID) {
+            openGroups.insert(header.groupID)
+            autoOpenedGroupsByFind.insert(header.groupID)
+            changed = true
         }
-
-        // Zero-duration height re-note, pre-scroll, so the row's EXPANDED
-        // height is already settled when scrollToBlock's layoutSubtreeIfNeeded
-        // / scrollRowToVisible run right after (memo Q6) — a 0.15s-animated
-        // noteHeightChanged here would still be mid-flight at that point.
-        if let cell = table?.view(atColumn: 0, row: rowIndex, makeIfNecessary: false) as? BlockCardCellView {
-            configure(cell: cell, forRowModel: rows[rowIndex], ordinal: rowIndex)
+        if !openInvocations.contains(invocationID) {
+            openInvocations.insert(invocationID)
+            autoOpenedInvocationsByFind.insert(invocationID)
+            changed = true
         }
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0
-            table?.noteHeightOfRows(withIndexesChanged: IndexSet(integer: rowIndex))
-        }
-        // The row now renders in-body highlights instead of a pill — rebuild
-        // the row-id map so paint/pill lookups reflect the new expanded shape
-        // (same invariant `widen`/`applyPrepend` uphold at every rows change).
-        rebuildFindMatchesByRowIDIfActive()
+        // Same locked clear-on-change rule as a manual toggle; the row-id map
+        // is rebuilt inside (a closed group's header gives way to its rows).
+        if changed { applyToolRowsChange() }
     }
 
-    /// Task 16 Esc/clear companion to `autoExpandCollapsedMatch`: re-collapse
-    /// every row find auto-expanded that the reader never manually touched
-    /// (a manual `toggleToolExpansion`/`toggleShowAll` already dropped that
-    /// row from these two sets, so it's simply absent here and stays open).
-    /// Called from `applyFind`'s empty-query clear branch; always clears both
-    /// tracking sets afterward regardless of whether any row survived to be
-    /// collapsed, so a stale id can never leak into the next find session.
+    /// Task 16 Esc/clear companion to `autoExpandCollapsedMatch`: close every
+    /// group and invocation find opened that the reader never toggled (a
+    /// manual toggle already dropped them from these sets, so they stay
+    /// open). Called from `applyFind`'s empty-query clear branch; always
+    /// empties both sets, so a stale id can never leak into the next find.
     private func recollapseAutoExpandedFindRows() {
-        guard !autoExpandedByFind.isEmpty || !autoShowedAllByFind.isEmpty else { return }
-        // Re-collapsing changes a row's rendered text and included/excluded
-        // status exactly like a manual toggle — clear any live cross-block
-        // selection so an ordinal can't reference now-different text (same
-        // locked clear-on-change rule `toggleToolExpansion` follows).
-        clearCrossBlockSelection()
-        for rowID in autoExpandedByFind {
-            expandedToolRowIDs.remove(rowID)
-        }
-        for rowID in autoShowedAllByFind {
-            showAllRowIDs.remove(rowID)
-        }
-        autoExpandedByFind.removeAll()
-        autoShowedAllByFind.removeAll()
-        noteAllHeightsChanged()
+        guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty else { return }
+        openGroups.subtract(autoOpenedGroupsByFind)
+        openInvocations.subtract(autoOpenedInvocationsByFind)
+        autoOpenedGroupsByFind.removeAll()
+        autoOpenedInvocationsByFind.removeAll()
+        applyToolRowsChange()
     }
 
     /// Re-paint find highlights (and pills, via reconfigure) on every visible
     /// row from the current match list + current ordinal. Cheap: one pass over
     /// visible cells. Called after any find state change.
     private func repaintAllVisibleFind() {
-        guard let table else { return }
-        let visible = table.rows(in: table.visibleRect)
-        guard visible.length > 0 else { return }
         // The current match is derived inside applyRenderableFindHighlights
         // (via findCurrentOrdinal), so no per-call current argument is needed.
-        for rowIdx in visible.lowerBound..<visible.upperBound where rows.indices.contains(rowIdx) {
-            guard let cell = table.view(atColumn: 0, row: rowIdx, makeIfNecessary: false) as? BlockCardCellView else { continue }
-            paintFind(on: cell, rowModel: rows[rowIdx])
+        forEachVisibleCell { cell, ordinal in
+            self.paintFind(on: cell, rowModel: self.rows[ordinal], ordinal: ordinal)
         }
     }
 
     /// Paint a single visible cell's find state: in-body highlights for
-    /// renderable rows, or (collapsed tool card) a header pill via a full
-    /// reconfigure carrying the fresh count. Non-renderable-but-loaded matches
-    /// (collapsed / truncated-hidden / merged-group body) contribute to the pill
-    /// count, never a highlight. Called only from `repaintAllVisibleFind` (never
-    /// from `configure`, so the reconfigure branch can't recurse).
-    private func paintFind(on cell: BlockCardCellView, rowModel: BlockRowModel) {
-        guard !findQuery.isEmpty else { cell.clearFindHighlights(); return }
-        let shape = findRowShape(for: rowModel)
-        if case .nonRenderable = shape {
-            // Collapsed tool card / group ⇒ reconfigure so the header pill count
-            // is current. Meta / other non-renderable ⇒ just ensure no stale
-            // highlight. `configure` strips highlights and re-feeds the pill.
-            if rowModel.isToolCard, !expandedToolRowIDs.contains(rowModel.id),
-               let idx = rows.firstIndex(where: { $0.id == rowModel.id }) {
-                configure(cell: cell, forRowModel: rowModel, ordinal: idx)
-            } else {
-                cell.clearFindHighlights()
-            }
+    /// renderable rows, or (tool rows) the pill via a full reconfigure
+    /// carrying the fresh count. Non-renderable-but-loaded matches contribute
+    /// to the pill count, never a highlight. Called only from
+    /// `repaintAllVisibleFind` (never from `configure`, so the reconfigure
+    /// branch can't recurse).
+    private func paintFind(on cell: TranscriptRowCell, rowModel: BlockRowModel, ordinal: Int) {
+        if rowModel.isToolRow {
+            // Tool rows show their count on a pill (header or L1 line); a
+            // reconfigure feeds the current count (none once find clears).
+            configureRowCell(cell, forRowModel: rowModel, ordinal: ordinal)
             return
         }
-        applyRenderableFindHighlights(on: cell, rowModel: rowModel)
+        guard !findQuery.isEmpty, let card = cell as? BlockCardCellView else {
+            cell.clearFindHighlights()
+            return
+        }
+        if case .nonRenderable = findRowShape(for: rowModel) {
+            card.clearFindHighlights()
+            return
+        }
+        applyRenderableFindHighlights(on: card, rowModel: rowModel)
     }
 
     /// Classify the row's rendered shape for find-highlight mapping. Message
-    /// rows and a single expanded (untruncated) tool card map block.text
-    /// directly; a truncated single tool card maps only within the visible
-    /// prefix; collapsed cards, merged groups, and meta rows are non-renderable.
+    /// rows map block.text directly (markdown rows through their source map);
+    /// tool rows (until decoded-text Find maps L2 through
+    /// `RenderedToolBody.sourceMap`, Task 15) and meta rows are non-renderable.
     private func findRowShape(for row: BlockRowModel) -> TranscriptFindNavigator.RowShape {
-        if row.isMeta { return .nonRenderable }
+        if row.isMeta || row.isToolRow { return .nonRenderable }
         // Review cards (Task C2): the displayed summary is DERIVED text (≠
         // block.text) with no source map back to the raw JSON/tag payload — a
         // match range in block.text (found by the whole-session scan, which
@@ -3095,36 +3520,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         if row.isMarkdownMessage {
             return renderedBody(for: row).map { .markdownMessage($0) } ?? .message
         }
-        if !row.isToolCard { return .message }
-        // Tool card / group.
-        guard expandedToolRowIDs.contains(row.id) else { return .nonRenderable }
-        // A merged group's expanded body is bullet-annotated (≠ block.text), so
-        // per-block ranges don't map — non-renderable (pill via group count).
-        guard row.toolBlocks.count == 1 else { return .nonRenderable }
-        // Single expanded tool card: body string == block.text (untruncated) or
-        // its first-N-lines prefix (truncated, showAll off).
-        let full = row.bodyText // == block.text for a lone block
-        let lines = full.components(separatedBy: "\n")
-        if lines.count > CardMetrics.toolBodyTruncationLineLimit && !showAllRowIDs.contains(row.id) {
-            let visible = lines.prefix(CardMetrics.toolBodyTruncationLineLimit).joined(separator: "\n")
-            return .expandedSingleToolTruncated(visibleUTF16Len: (visible as NSString).length)
-        }
-        return .expandedSingleToolFull
+        return .message
     }
 
     /// The find-match count for a row (matches inside its backing block(s)) —
-    /// consumed by `configure` to feed the collapsed-card header pill.
+    /// consumed by the tool cells' pills.
     func findMatchCount(forRowID rowID: Int) -> Int {
         findMatchesByRowID[rowID]?.count ?? 0
     }
 
-    /// Row index whose row model backs (contains) `globalBlockIndex`. A
-    /// `.toolGroup` row's id is its FIRST block's index, so a target that falls
-    /// inside a merged group won't match by id — scan the row's backing blocks.
-    private func rowIndex(forBlock globalBlockIndex: Int) -> Int? {
-        if let exact = rows.firstIndex(where: { $0.id == globalBlockIndex }) { return exact }
+    /// Row index that shows `globalBlockIndex`. A tool block (call, output, or
+    /// paired `.error` block) resolves through
+    /// `invocationIndex.invocationIDByBlock` to its invocation row; when that
+    /// row is hidden inside a closed group, to the group header. Any other
+    /// block resolves to its own message row. Linear scans by id: row ids are
+    /// unique but not ordered (header ids are far negative).
+    func rowIndex(forBlock globalBlockIndex: Int) -> Int? {
+        guard let invocationID = toolInvocationID(forBlock: globalBlockIndex) else {
+            return rows.firstIndex { row in
+                if case .message = row.content { return row.id == globalBlockIndex }
+                return false
+            }
+        }
+        if let row = invocationRowIndex(invocationID) { return row }
         return rows.firstIndex { row in
-            row.toolBlocks.contains { $0.globalBlockIndex == globalBlockIndex }
+            if case .toolGroupHeader(let header) = row.content { return header.invocationIDs.contains(invocationID) }
+            return false
         }
     }
 
@@ -3135,7 +3556,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func flashRow(id rowID: Int) {
         flashingRowID = rowID
         guard let table, let rowIndex = rows.firstIndex(where: { $0.id == rowID }),
-              let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? BlockCardCellView else {
+              let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? TranscriptRowCell else {
             // Cell not realized yet; the marked id will pulse on next configure.
             return
         }
@@ -3161,21 +3582,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     // MARK: - Cross-block selection (Task 9)
 
     /// Rendered body text for a row — the SAME string the cell shows and the
-    /// height math measures. Expanded tool groups use the bullet/summary body;
-    /// a TRUNCATED expanded body copies only the visible (truncated) text
-    /// ("copy what you see"); collapsed tool cards / meta rows are excluded
-    /// upstream so their text never enters the copy.
+    /// height math measures. Meta rows and tool rows are excluded upstream so
+    /// their text never enters a cross-block copy (tool rows join selection
+    /// with their visible text in Task 14).
     private func renderedSelectableText(for row: BlockRowModel) -> String {
-        if row.isMeta { return "" }
-        if row.isToolCard {
-            guard expandedToolRowIDs.contains(row.id) else { return "" } // collapsed ⇒ excluded
-            let full = renderedBodyText(for: row)
-            let lines = full.components(separatedBy: "\n")
-            if lines.count > CardMetrics.toolBodyTruncationLineLimit && !showAllRowIDs.contains(row.id) {
-                return lines.prefix(CardMetrics.toolBodyTruncationLineLimit).joined(separator: "\n")
-            }
-            return full
-        }
+        if row.isMeta || row.isToolRow { return "" }
         // Review cards (Task C2): the cell displays the cleaned summary (plain
         // text), not the raw block text or a markdown render — copy/selection
         // must match exactly, or cross-block selection ranges (computed from
@@ -3194,17 +3605,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return row.bodyText
     }
 
-    /// True for a row that contributes nothing to selection: a meta separator,
-    /// or a tool card that's currently collapsed. Shared by `excludedOrdinals()`
-    /// (builds the full set) and `hasCopyableSelection()` (inlines this same
-    /// test over just the selection span, without building the set — see that
-    /// function's perf note).
+    /// True for a row that contributes nothing to selection: a meta separator
+    /// or a tool row (group header or invocation; Task 14 lets them copy their
+    /// visible text). Shared by `excludedOrdinals()` (builds the full set) and
+    /// `hasCopyableSelection()` (inlines this same test over just the selection
+    /// span, without building the set — see that function's perf note).
     private func isExcludedFromSelection(_ row: BlockRowModel) -> Bool {
-        if row.isMeta { return true }
-        return row.isToolCard && !expandedToolRowIDs.contains(row.id)
+        row.isMeta || row.isToolRow
     }
 
-    /// Ordinals that contribute nothing: collapsed tool cards and meta rows.
+    /// Ordinals that contribute nothing: tool rows and meta rows.
     private func excludedOrdinals() -> Set<Int> {
         var set = Set<Int>()
         for (i, row) in rows.enumerated() {
@@ -3297,7 +3707,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// that will be re-resolved as the row scrolls into view.
     private func characterOffset(inRow row: Int, tablePoint p: NSPoint) -> Int {
         guard let table,
-              let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? BlockCardCellView else {
+              let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TranscriptRowCell else {
             return 0
         }
         let body = cell.bodyText
@@ -3318,12 +3728,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     // MARK: Painting
 
-    private func forEachVisibleCell(_ body: (BlockCardCellView, Int) -> Void) {
+    /// Every realized visible row cell (message card, group header or
+    /// invocation row) with its ordinal.
+    private func forEachVisibleCell(_ body: (TranscriptRowCell, Int) -> Void) {
         guard let table else { return }
         let visible = table.rows(in: table.visibleRect)
         guard visible.length > 0 else { return }
         for row in visible.lowerBound..<visible.upperBound where rows.indices.contains(row) {
-            if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? BlockCardCellView {
+            if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TranscriptRowCell {
                 body(cell, row)
             }
         }
@@ -3535,33 +3947,43 @@ final class DynamicFillView: NSView {
     }
 }
 
+// MARK: - Row cells
+
+/// What the controller needs from every row cell (message card, tool group
+/// header, tool invocation row): the selectable body, cross-block selection
+/// wiring, find-highlight reset and the jump flash.
+protocol TranscriptRowCell: NSView {
+    /// The selectable body text view (hidden when the row shows no body).
+    var bodyText: SelectableBlockTextView { get }
+    func wireSelection(controller: BlockTableController?, ordinal: Int, coordinatorActive: Bool)
+    func applySelectionRange(_ range: NSRange)
+    func clearFindHighlights()
+    func setFlashAlpha(_ alpha: CGFloat)
+    func animateFlashAlpha(to target: CGFloat)
+}
+
 // MARK: - Card cell
 
-/// A card row: a 3pt accent bar, a SwiftUI header hosted in an NSHostingView,
-/// and a selectable NSTextView body. Reused across rows — `configure` fully
-/// resets all mutable state.
-///
-/// Tool cards (`.toolCall`/`.toolOut`/`.toolGroup`) render the SAME chrome but
-/// swap the header for a clickable chevron+summary row and default to
-/// collapsed (body hidden). `.meta` rows collapse to a thin separator with no
-/// card chrome at all.
-final class BlockCardCellView: NSTableCellView {
+/// A message card row: a 3pt accent bar, a SwiftUI header hosted in an
+/// NSHostingView, and a selectable NSTextView body. Reused across rows —
+/// `configure` fully resets all mutable state. `.meta` rows collapse to a thin
+/// separator with no card chrome at all. Tool rows have their own cells
+/// (`TranscriptToolCells.swift`).
+final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
     static let reuseID = NSUserInterfaceItemIdentifier("BlockCardCellView")
 
     private let cardBackground = DynamicFillView()
     private let accentBar = DynamicFillView()
     let bodyText = SelectableBlockTextView()
     private var headerHost: NSHostingView<BlockCardHeader>?
-    private var showAllHost: NSHostingView<ShowAllRow>?
     private let metaSeparator = DynamicFillView()
     private let telemetryLabel = NSTextField(wrappingLabelWithString: "")
-    /// Inline-image grid (Task C1), a sibling BELOW `showAllHost`. Native AppKit
+    /// Inline-image grid (Task C1), a sibling BELOW the body. Native AppKit
     /// (no hosting view) so it recycles cleanly and cancels its own decodes.
     private let imageGrid = InlineImageThumbnailGridView()
 
     private var bodyTopConstraint: NSLayoutConstraint?
     private var headerHeightConstraint: NSLayoutConstraint?
-    private var showAllHeightConstraint: NSLayoutConstraint?
     private var imageGridHeightConstraint: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
@@ -3611,20 +4033,13 @@ final class BlockCardCellView: NSTableCellView {
         bodyText.isHorizontallyResizable = false
         cardBackground.addSubview(bodyText)
 
-        let host = NSHostingView(rootView: BlockCardHeader(kind: .meta, timestamp: nil, accent: .secondary,
-                                                            toolMode: nil))
+        let host = NSHostingView(rootView: BlockCardHeader(kind: .meta, timestamp: nil, accent: .secondary))
         host.translatesAutoresizingMaskIntoConstraints = false
         cardBackground.addSubview(host)
         headerHost = host
 
-        let showAll = NSHostingView(rootView: ShowAllRow(lineCount: 0, action: {}))
-        showAll.translatesAutoresizingMaskIntoConstraints = false
-        showAll.isHidden = true
-        cardBackground.addSubview(showAll)
-        showAllHost = showAll
-
-        // Inline-image grid: below the show-all row, above the card's bottom
-        // inset. Hidden with zero height by default (every non-image row).
+        // Inline-image grid: below the body, above the card's bottom inset.
+        // Hidden with zero height by default (every non-image row).
         imageGrid.isHidden = true
         cardBackground.addSubview(imageGrid)
 
@@ -3636,9 +4051,10 @@ final class BlockCardCellView: NSTableCellView {
         metaSeparator.isHidden = true
         addSubview(metaSeparator)
 
-        // Card fills the cell; accent bar pinned leading full-height; header at
-        // top; body below header with trailing/bottom insets; show-all row
-        // below body.
+        // Card fills the cell less half the card gap above and below (the
+        // table has no intercell spacing); accent bar pinned leading
+        // full-height; header at top; body below header with trailing/bottom
+        // insets; image grid below body.
         let headerHeight = host.heightAnchor.constraint(equalToConstant: CardMetrics.headerHeight)
         headerHeightConstraint = headerHeight
 
@@ -3646,17 +4062,14 @@ final class BlockCardCellView: NSTableCellView {
                                                     constant: CardMetrics.headerToBodyGap)
         bodyTopConstraint = bodyTop
 
-        let showAllHeight = showAll.heightAnchor.constraint(equalToConstant: CardMetrics.showAllRowHeight)
-        showAllHeightConstraint = showAllHeight
-
         let imageGridHeight = imageGrid.heightAnchor.constraint(equalToConstant: 0)
         imageGridHeightConstraint = imageGridHeight
 
         NSLayoutConstraint.activate([
             cardBackground.leadingAnchor.constraint(equalTo: leadingAnchor),
             cardBackground.trailingAnchor.constraint(equalTo: trailingAnchor),
-            cardBackground.topAnchor.constraint(equalTo: topAnchor),
-            cardBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
+            cardBackground.topAnchor.constraint(equalTo: topAnchor, constant: CardMetrics.rowGap / 2),
+            cardBackground.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -CardMetrics.rowGap / 2),
 
             accentBar.leadingAnchor.constraint(equalTo: cardBackground.leadingAnchor),
             accentBar.topAnchor.constraint(equalTo: cardBackground.topAnchor),
@@ -3676,24 +4089,16 @@ final class BlockCardCellView: NSTableCellView {
                                                constant: -CardMetrics.contentTrailingInset),
             bodyTop,
 
-            showAll.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor,
-                                             constant: CardMetrics.contentLeadingInset),
-            showAll.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor,
-                                              constant: -CardMetrics.contentTrailingInset),
-            showAll.topAnchor.constraint(equalTo: bodyText.bottomAnchor),
-            showAllHeight,
-            showAll.bottomAnchor.constraint(lessThanOrEqualTo: cardBackground.bottomAnchor,
-                                            constant: -CardMetrics.bodyBottomInset),
-
-            // Image grid sits directly below the (usually zero-height) show-all
-            // row and matches the body's content width. Its height is driven by
-            // configure(); the <= bottom constraint keeps it inside the card's
-            // reserved height (measuredHeight adds the same grid height).
+            // Image grid sits directly below the body and matches its content
+            // width. Its height is driven by configure() (0 for every non-image
+            // row); the <= bottom constraint keeps it — and the body above it —
+            // inside the card's reserved height (measuredHeight adds the same
+            // grid height).
             imageGrid.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor,
                                                constant: CardMetrics.contentLeadingInset),
             imageGrid.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor,
                                                 constant: -CardMetrics.contentTrailingInset),
-            imageGrid.topAnchor.constraint(equalTo: showAll.bottomAnchor),
+            imageGrid.topAnchor.constraint(equalTo: bodyText.bottomAnchor),
             imageGridHeight,
             imageGrid.bottomAnchor.constraint(lessThanOrEqualTo: cardBackground.bottomAnchor,
                                               constant: -CardMetrics.bodyBottomInset),
@@ -3711,20 +4116,13 @@ final class BlockCardCellView: NSTableCellView {
     func configure(row: BlockRowModel,
                    fontSize: CGFloat,
                    source: SessionSource,
-                   isExpanded: Bool,
-                   showAll: Bool,
-                   lineLimit: Int,
-                   findMatchCount: Int = 0,
                    renderedBody: RenderedBody? = nil,
                    turnChipText: String = "",
-                   toolDurationText: String? = nil,
                    inlineImages: [InlineSessionImage] = [],
                    sessionID: String = "",
                    imageContentWidth: CGFloat = 0,
                    overrideBodyText: String? = nil,
-                   accentOverride: NSColor? = nil,
-                   onToggleExpansion: @escaping () -> Void,
-                   onToggleShowAll: @escaping () -> Void) {
+                   accentOverride: NSColor? = nil) {
         // Recycle hygiene (Task 10): drop any find highlight the previous
         // occupant left before this row's body string is (re)assigned below. The
         // controller re-applies the correct highlights right after configure for
@@ -3762,24 +4160,9 @@ final class BlockCardCellView: NSTableCellView {
         accentBar.fillColor = accent
         cardBackground.fillColor = accent
 
-        if row.isToolCard {
-            configureToolCard(row: row, block: block, accent: accent, fontSize: fontSize,
-                              isExpanded: isExpanded, showAll: showAll, lineLimit: lineLimit,
-                              findMatchCount: findMatchCount, toolDurationText: toolDurationText,
-                              onToggleExpansion: onToggleExpansion, onToggleShowAll: onToggleShowAll)
-            return
-        }
-
         // Ordinary message card (user/assistant/error) — Task 5 chrome, plus
         // Task 12 markdown for user/assistant bodies.
         headerHeightConstraint?.constant = CardMetrics.headerHeight
-        // isHidden does NOT relax constraints in AppKit: the showAll chain
-        // (showAll.top == bodyText.bottom, height, bottom <= card.bottom-inset)
-        // stays active, so the height constant MUST be zeroed whenever the row
-        // is hidden or every non-truncated card demands bodyText.bottom + 20pt
-        // that measuredHeight doesn't provide (clipping/log spam).
-        showAllHeightConstraint?.constant = 0
-        showAllHost?.isHidden = true
 
         bodyText.textContainer?.widthTracksTextView = true
         bodyText.isHidden = false
@@ -3813,7 +4196,7 @@ final class BlockCardCellView: NSTableCellView {
         bodyText.isHidden = isEmpty
 
         let header = BlockCardHeader(kind: block.kind, timestamp: block.timestamp,
-                                     accent: Color(nsColor: accent), toolMode: nil,
+                                     accent: Color(nsColor: accent),
                                      turnChipText: turnChipText)
         headerHost?.rootView = header
 
@@ -3852,101 +4235,6 @@ final class BlockCardCellView: NSTableCellView {
         imageGridHeightConstraint?.constant = 0
     }
 
-    private func configureToolCard(row: BlockRowModel,
-                                    block: SessionTranscriptBuilder.LogicalBlock,
-                                    accent: NSColor,
-                                    fontSize: CGFloat,
-                                    isExpanded: Bool,
-                                    showAll: Bool,
-                                    lineLimit: Int,
-                                    findMatchCount: Int,
-                                    toolDurationText: String?,
-                                    onToggleExpansion: @escaping () -> Void,
-                                    onToggleShowAll: @escaping () -> Void) {
-        headerHeightConstraint?.constant = CardMetrics.headerHeight
-
-        let toolBlocks = row.toolBlocks
-        let cardHeader = TranscriptToolSummary.cardHeader(for: toolBlocks.isEmpty ? [block] : toolBlocks)
-
-        let toolMode = BlockCardHeader.ToolMode(
-            isExpanded: isExpanded,
-            summary: cardHeader.summary,
-            toolName: cardHeader.toolName,
-            findMatchCount: findMatchCount,
-            durationText: toolDurationText,
-            onToggle: onToggleExpansion)
-        let header = BlockCardHeader(kind: block.kind, timestamp: block.timestamp,
-                                     accent: Color(nsColor: accent), toolMode: toolMode)
-        headerHost?.rootView = header
-
-        bodyText.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        bodyText.textColor = .labelColor
-        bodyText.textContainer?.widthTracksTextView = true
-
-        guard isExpanded else {
-            // Collapsed: header row only, body + show-all hidden. Clear the
-            // body string too — a live expanded→collapsed toggle reconfigures
-            // this same cell without a prepareForReuse pass.
-            bodyText.string = ""
-            bodyText.isHidden = true
-            bodyTopConstraint?.constant = 0
-            showAllHeightConstraint?.constant = 0
-            showAllHost?.isHidden = true
-            return
-        }
-
-        let fullText = Self.expandedToolBodyText(blocks: toolBlocks)
-        let lines = fullText.components(separatedBy: "\n")
-        let isTruncated = lines.count > lineLimit && !showAll
-
-        bodyText.string = isTruncated ? lines.prefix(lineLimit).joined(separator: "\n") : fullText
-        let isEmpty = fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        bodyText.isHidden = isEmpty
-        bodyTopConstraint?.constant = isEmpty ? 0 : CardMetrics.headerToBodyGap
-
-        if isTruncated {
-            showAllHeightConstraint?.constant = CardMetrics.showAllRowHeight
-            showAllHost?.rootView = ShowAllRow(lineCount: lines.count, action: onToggleShowAll)
-            showAllHost?.isHidden = false
-        } else {
-            showAllHeightConstraint?.constant = 0
-            showAllHost?.isHidden = true
-        }
-    }
-
-    /// Per-call summary sub-header + body, stacked, for an expanded group (one
-    /// expansion level — no per-call collapse).
-    static func expandedToolBodyText(blocks: [SessionTranscriptBuilder.LogicalBlock]) -> String {
-        guard blocks.count >= 2 else { return blocks.first?.text ?? "" }
-        return blocks.map { block -> String in
-            let summary = TranscriptToolSummary.summary(toolName: block.toolName, toolInput: block.toolInput)
-            return "\u{2022} \(summary)\n\(block.text)"
-        }.joined(separator: "\n\n")
-    }
-
-    /// UTF-16 offset, WITHIN `expandedToolBodyText(blocks:)`'s output, where
-    /// `blocks[ownerIndex]`'s own `.text` begins — i.e. every earlier block's
-    /// full annotated contribution + joiner, plus this block's own
-    /// bullet+summary annotation prefix. Lets a caller re-base a
-    /// `BlockMatch.rangeInBlockText` (scoped to that one block's raw text) into
-    /// the group's concatenated coordinate space (Task 16 fold check). Returns 0
-    /// for a lone block (`expandedToolBodyText` returns `block.text` verbatim,
-    /// no annotation, so the block's text already starts at offset 0).
-    static func expandedToolBodyOffset(blocks: [SessionTranscriptBuilder.LogicalBlock], ownerIndex: Int) -> Int {
-        guard blocks.count >= 2, blocks.indices.contains(ownerIndex) else { return 0 }
-        func annotationPrefix(_ block: SessionTranscriptBuilder.LogicalBlock) -> String {
-            let summary = TranscriptToolSummary.summary(toolName: block.toolName, toolInput: block.toolInput)
-            return "\u{2022} \(summary)\n"
-        }
-        var offset = 0
-        for block in blocks[..<ownerIndex] {
-            let annotatedLen = (annotationPrefix(block) as NSString).length + (block.text as NSString).length
-            offset += annotatedLen + 2 // "\n\n" joiner
-        }
-        offset += (annotationPrefix(blocks[ownerIndex]) as NSString).length
-        return offset
-    }
-
     private func configureMetaSeparator() {
         cardBackground.isHidden = true
         metaSeparator.isHidden = false
@@ -3957,8 +4245,6 @@ final class BlockCardCellView: NSTableCellView {
         // 22pt header + 8pt bottom inset would not fit in 14pt otherwise.
         headerHeightConstraint?.constant = 0
         bodyTopConstraint?.constant = 0
-        showAllHeightConstraint?.constant = 0
-        showAllHost?.isHidden = true
     }
 
     // MARK: Cross-block selection wiring (Task 9)
@@ -4378,33 +4664,12 @@ final class SelectableBlockTextView: NSTextView {
 
 // MARK: - SwiftUI header
 
+/// The role label + timestamp header of a message card. Tool rows use
+/// `ToolGroupHeaderView` / `ToolActionRowHeader` (`TranscriptToolCells.swift`).
 struct BlockCardHeader: View {
-    /// Tool-card header mode: chevron + toolName + one-line summary (or
-    /// "N tool calls" for a merged group). The whole row is the click target,
-    /// not just the chevron glyph.
-    struct ToolMode {
-        var isExpanded: Bool
-        var summary: String
-        var toolName: String?
-        /// Task 10: count of find matches inside this collapsed tool row's
-        /// block(s). >0 renders a match-count pill on the header (the match text
-        /// itself is unreachable while collapsed — auto-expand is Phase 2). 0
-        /// hides the pill. Ignored while expanded (matches highlight in-body).
-        var findMatchCount: Int = 0
-        /// Task 19: pre-formatted `"4.8s"`-style duration for a SOLO tool
-        /// invocation (one `.toolCall` + its own `.toolOut` — see
-        /// `BlockTableController.toolDurationText(for:)` for the merged-group
-        /// decision). Nil renders nothing; the controller never passes an empty
-        /// string. Shown/hidden identically whether the card is expanded or
-        /// collapsed (it's header chrome, not body content).
-        var durationText: String? = nil
-        var onToggle: () -> Void
-    }
-
     let kind: SessionTranscriptBuilder.LogicalBlock.Kind
     let timestamp: Date?
     let accent: Color
-    let toolMode: ToolMode?
     /// Task 19: pre-formatted turn-duration chip (`"4.8s · 1 call"` /
     /// `"4.8s"`), rendered trailing on the SAME line as the role label +
     /// timestamp — never a new line, so it can never change the header's
@@ -4416,14 +4681,6 @@ struct BlockCardHeader: View {
     var turnChipText: String = ""
 
     var body: some View {
-        if let toolMode {
-            toolHeader(toolMode)
-        } else {
-            plainHeader
-        }
-    }
-
-    private var plainHeader: some View {
         HStack(spacing: 6) {
             Text(roleLabel)
                 .font(.system(size: 11, weight: .semibold))
@@ -4448,61 +4705,6 @@ struct BlockCardHeader: View {
         .padding(.top, 6)
     }
 
-    private func toolHeader(_ mode: ToolMode) -> some View {
-        Button(action: mode.onToggle) {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(mode.isExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.15), value: mode.isExpanded)
-                if let toolName = mode.toolName, !toolName.isEmpty {
-                    Text(toolName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(accent)
-                }
-                Text(mode.summary)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                // Task 19: solo-invocation duration, subordinate to the
-                // name/summary (smaller, tertiary). Same line as everything
-                // else in this HStack — the fixed-height header band means
-                // this can't affect row height either way (see
-                // `turnChipText`'s doc on `BlockCardHeader`).
-                if let durationText = mode.durationText {
-                    Text("· \(durationText)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                if let timestamp {
-                    Text(timestamp, format: .dateTime.hour().minute().second())
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-                if !mode.isExpanded, mode.findMatchCount > 0 {
-                    Text("\(mode.findMatchCount)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color(nsColor: .systemYellow).opacity(0.9))
-                        )
-                        .help("\(mode.findMatchCount) find matches in this collapsed card")
-                        .accessibilityLabel("\(mode.findMatchCount) find matches, collapsed")
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 6)
-    }
-
     private var roleLabel: String {
         switch kind {
         case .user: return "You"
@@ -4512,24 +4714,5 @@ struct BlockCardHeader: View {
         case .error: return "Error"
         case .meta: return "Meta"
         }
-    }
-}
-
-// MARK: - Show-all affordance
-
-/// "Show all N lines" SwiftUI row shown below a truncated (>20-line)
-/// expanded tool-card body.
-struct ShowAllRow: View {
-    let lineCount: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text("Show all \(lineCount) lines")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tint)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }

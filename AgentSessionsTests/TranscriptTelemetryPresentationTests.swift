@@ -124,13 +124,28 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
     @MainActor
     func testMarkerSplitsToolGroupAndPreservesBodyIDsAndText() {
         let blocks = [block(0, record: 1, kind: .toolCall), block(1, record: 3, kind: .toolOut)]
+        // Unpaired (no index): two one-block invocations; the marker ends the run, so no group.
         let rows = BlockTableController.rowsWithTelemetry(from: blocks[...], markers: [1: ["Model changed"]],
                                                           totalBlockCount: 2, activeRoles: [])
         XCTAssertEqual(rows.map(\.id), [0, -2, 1])
-        XCTAssertEqual(rows[0].primaryBlock, blocks[0])
-        XCTAssertEqual(rows[2].primaryBlock, blocks[1])
+        XCTAssertEqual(rows.map(\.anchorBlockIndex), [0, -2, 1])
+        for row in [rows[0], rows[2]] {
+            guard case .toolInvocation(let invocation) = row.content else { return XCTFail("expected an invocation row") }
+            XCTAssertEqual(invocation.position, .solo)
+            XCTAssertNil(invocation.groupID)
+        }
         XCTAssertTrue(rows[1].isMeta)
         XCTAssertFalse(rows[1].isToolCard)
+        XCTAssertEqual(rows[1].bodyText, "Model changed")
+
+        // Paired: the call and its output are one invocation row; the marker above the output
+        // stays, and every block id is untouched.
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+        let paired = BlockTableController.rowsWithTelemetry(from: blocks[...], markers: [1: ["Model changed"]],
+                                                            totalBlockCount: 2, activeRoles: [], index: index)
+        XCTAssertEqual(paired.map(\.id), [0, -2])
+        XCTAssertEqual(blocks.map(\.globalBlockIndex), [0, 1])
+        XCTAssertEqual(blocks.map(\.text), ["Original message 0", "Original message 1"])
     }
 
     @MainActor

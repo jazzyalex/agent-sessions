@@ -117,41 +117,6 @@ enum TranscriptToolSummary {
         return "\(server) › \(name)"
     }
 
-    /// Fold consecutive `.toolCall`/`.toolOut` rows (run length >= 2) into a
-    /// single `.toolGroup` row keyed by the first block's `globalBlockIndex`.
-    /// A lone tool row (run length 1) is left as `.message` — it still renders
-    /// as a collapsed tool card, just without group chrome.
-    static func mergeToolRuns(_ rows: [BlockRowModel]) -> [BlockRowModel] {
-        var result: [BlockRowModel] = []
-        result.reserveCapacity(rows.count)
-
-        var i = 0
-        while i < rows.count {
-            let row = rows[i]
-            guard case .message(let block) = row.content, block.kind.isTool else {
-                result.append(row)
-                i += 1
-                continue
-            }
-
-            var runBlocks: [SessionTranscriptBuilder.LogicalBlock] = [block]
-            var j = i + 1
-            while j < rows.count, case .message(let nextBlock) = rows[j].content, nextBlock.kind.isTool {
-                runBlocks.append(nextBlock)
-                j += 1
-            }
-
-            if runBlocks.count >= 2 {
-                result.append(BlockRowModel(id: row.id, content: .toolGroup(runBlocks)))
-            } else {
-                result.append(row)
-            }
-            i = j
-        }
-
-        return result
-    }
-
     // MARK: - JSON helpers
 
     private static func parseJSON(_ input: String) -> [String: Any]? {

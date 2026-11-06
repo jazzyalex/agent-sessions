@@ -54,9 +54,20 @@ final class TranscriptBlockWindowingTests: XCTestCase {
         BlockRowModel(id: index, content: .message(block(index, kind: kind)))
     }
 
+    /// A closed group header over one-block invocations `indices` (as `TranscriptToolRows.emit`
+    /// gives it).
     private func groupRow(_ indices: [Int]) -> BlockRowModel {
-        let blocks = indices.map { block($0, kind: .toolCall) }
-        return BlockRowModel(id: indices.first ?? 0, content: .toolGroup(blocks))
+        let groupID = indices.first ?? 0
+        return BlockRowModel(id: TranscriptToolRows.groupHeaderRowID(forGroup: groupID),
+                             content: .toolGroupHeader(ToolGroupHeaderModel(
+                                groupID: groupID, callCount: indices.count, verbDigest: [], failedCount: 0,
+                                durationSeconds: nil, timestamp: nil, isOpen: false, invocationIDs: indices)))
+    }
+
+    /// A solo invocation row for tool block `index`.
+    private func invocationRow(_ index: Int) -> BlockRowModel {
+        BlockRowModel(id: index, content: .toolInvocation(ToolInvocationRowModel(
+            invocationID: index, groupID: nil, position: .solo, isOpen: false, contentStamp: 0)))
     }
 
     // MARK: prependDiff — clean prepend (no boundary re-key)
@@ -77,12 +88,12 @@ final class TranscriptBlockWindowingTests: XCTestCase {
     // MARK: prependDiff — boundary row re-keyed by a tool-run merge across the edge
 
     func testPrependBoundaryToolMergeDropsOldLoneRow() {
-        // Old window top was a LONE tool card at block 5 (run length 1 at the
-        // old edge), followed by user 6, user 7.
-        let old = [messageRow(5, kind: .toolCall), messageRow(6), messageRow(7)]
-        // After extending down, block 4 is ALSO a tool call → blocks 4,5 now
-        // merge into a single .toolGroup keyed by 4. The old lone row id 5 is
-        // gone; the boundary row is the group at index 1 (after inserted 2,3).
+        // Old window top was a SOLO invocation row at block 5 (run length 1 at
+        // the old edge), followed by user 6, user 7.
+        let old = [invocationRow(5), messageRow(6), messageRow(7)]
+        // After extending down, block 4 is ALSO a tool call → invocations 4,5
+        // now form one group keyed by 4 (closed: one header row). The old solo
+        // row id 5 is gone; the boundary row is the header after inserted 2,3.
         let new = [messageRow(2), messageRow(3),
                    groupRow([4, 5]),
                    messageRow(6), messageRow(7)]
@@ -229,9 +240,12 @@ final class TranscriptBlockWindowingTests: XCTestCase {
             old: toolRows([F.block(.user, text: "go"), call("t1"), out("t1")]),
             new: toolRows([F.block(.user, text: "go"), call("t1"), out("t1"), call("t2")])), .wholesale)
 
-        // Legacy `.toolGroup` rows are not tool rows: a changed one stays wholesale.
+        // A header that gained a call reloads in place; a header that was re-keyed does not.
         XCTAssertEqual(BlockTableController.classifyChange(old: [groupRow([1, 2])],
-                                                           new: [groupRow([1, 2, 3]), messageRow(4)]), .wholesale)
+                                                           new: [groupRow([1, 2, 3]), messageRow(4)]),
+                       .appendWithReload(count: 1, reloadRows: IndexSet(integer: 0)))
+        XCTAssertEqual(BlockTableController.classifyChange(old: [groupRow([2, 3])],
+                                                           new: [groupRow([1, 2, 3])]), .wholesale)
     }
 
     func testPrependAcrossGroupBoundaryFallsBackSafely() {
