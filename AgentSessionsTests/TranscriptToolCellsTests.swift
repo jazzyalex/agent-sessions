@@ -75,6 +75,14 @@ final class TranscriptToolCellsTests: XCTestCase {
 
         var rowIDs: [Int] { controller.rows.map(\.id) }
 
+        /// The viewport shows the end of the last row.
+        var isAtBottom: Bool {
+            layout()
+            guard table.numberOfRows > 0 else { return true }
+            let end = table.rect(ofRow: table.numberOfRows - 1).maxY
+            return scroll.contentView.bounds.maxY >= end - 1
+        }
+
         func rowIndex(id: Int) -> Int? { controller.rows.firstIndex { $0.id == id } }
 
         func invocation(id: Int) -> ToolInvocationRowModel? {
@@ -204,6 +212,83 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(h.waitForPresentations())
         let allHeight = h.table.rect(ofRow: row).height
         XCTAssertGreaterThan(allHeight, openHeight + 1000, "Show all renders every line")
+    }
+
+    /// The cell's "Show all" fold control for action 0.
+    private func showAllLink(in cell: ToolInvocationCellView) -> (url: URL, location: Int)? {
+        guard let storage = cell.bodyText.textStorage else { return nil }
+        var found: (url: URL, location: Int)?
+        storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let url = value as? URL, ToolFoldLink(url: url) == .showAll(action: 0) { found = (url, range.location) }
+        }
+        return found
+    }
+
+    // MARK: - Fix round 1
+
+    func testFailedTailInvocationKeepsFollowingTail() {
+        // Enough messages to scroll, then a failed call whose L2 opens by default (seeded) and
+        // lands off the main thread after the view pinned to the bottom.
+        var blocks: [Block] = []
+        for i in 0..<20 {
+            blocks.append(user("question \(i)\nsecond line\nthird line"))
+            blocks.append(assistant("answer \(i)\nmore\nmore"))
+        }
+        let failing = (1...120).map { "error line \($0)" }.joined(separator: "\n")
+        blocks += [bash("t1", "make"), output("t1", failing, failed: true)]
+        let h = Harness(blocks)
+        XCTAssertEqual(h.invocation(id: 40)?.isOpen, true)
+        XCTAssertTrue(h.waitForPresentations())
+        XCTAssertGreaterThan(h.table.rect(ofRow: h.table.numberOfRows - 1).height, 200, "the L2 body landed")
+        XCTAssertTrue(h.isAtBottom, "a landing L2 body keeps the tail in view")
+
+        // A live append of another failing call keeps following.
+        h.replace(blocks + [assistant("retrying"), bash("t2", "make again"), output("t2", failing, failed: true)])
+        XCTAssertEqual(h.invocation(id: 43)?.isOpen, true)
+        XCTAssertTrue(h.waitForPresentations())
+        XCTAssertGreaterThan(h.table.rect(ofRow: h.table.numberOfRows - 1).height, 200)
+        XCTAssertTrue(h.isAtBottom, "live tail still follows after the second landing")
+    }
+
+    func testCellOrdinalsFollowRowsAfterGroupToggle() throws {
+        let lines = (1...200).map { "line \($0)" }.joined(separator: "\n")
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant · 6 S call · 7 S output
+        let h = Harness([user(), bash("t1", "make"), output("t1", lines), bash("t2", "make test"), output("t2", lines),
+                         assistant(), bash("t3", "seq 1 200"), output("t3", lines)])
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5, 6])
+        h.controller.toggleInvocation(invocationID: 6, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+        XCTAssertEqual(try XCTUnwrap(h.view(id: 6, as: ToolInvocationCellView.self)).bodyText.blockOrdinal, 3)
+
+        // Opening the group inserts two rows above S; S's cell moves without a reconfigure.
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5, 6])
+        let cell = try XCTUnwrap(h.view(id: 6, as: ToolInvocationCellView.self))
+        XCTAssertEqual(cell.bodyText.blockOrdinal, 5, "the moved cell names its new row")
+
+        // S's Show all acts on S, never on the group member now at S's old index.
+        let link = try XCTUnwrap(showAllLink(in: cell))
+        XCTAssertTrue(h.controller.textView(cell.bodyText, clickedOnLink: link.url, at: link.location))
+        XCTAssertEqual(h.controller.foldStates[6]?[0]?.showAll, true)
+        XCTAssertNil(h.controller.foldStates[1])
+        XCTAssertNil(h.controller.foldStates[3])
+    }
+
+    func testFindRepaintUpdatesToolPillWithoutResettingBody() throws {
+        let lines = (1...200).map { "line \($0)" }.joined(separator: "\n")
+        let h = Harness([user(), bash("t1", "seq 1 200"), output("t1", lines)])
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        cell.bodyText.setSelectedRange(NSRange(location: 0, length: 4))
+
+        let match = TranscriptDerivedState.BlockMatch(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 0, length: 4),
+                                                      ordinal: 0)
+        h.controller.applyFind(source: .local, query: "line", matches: [match], token: 1, direction: 1,
+                               reset: true, shouldJump: false)
+        XCTAssertEqual(cell.findMatchCount, 1, "the pill shows the match")
+        XCTAssertEqual(cell.bodyText.selectedRange(), NSRange(location: 0, length: 4),
+                       "a find repaint leaves the L2 body and its selection alone")
     }
 
     // MARK: - Card chrome

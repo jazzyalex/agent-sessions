@@ -176,10 +176,14 @@ final class MemoBox<Value> {
 final class NSCacheMemo<Value>: @unchecked Sendable {
     private let cache = NSCache<NSString, MemoBox<Value>>()
 
-    /// - Parameter countLimit: optional entry cap; `nil` leaves NSCache unbounded
-    ///   (it still evicts under memory pressure).
-    init(countLimit: Int? = nil) {
+    /// - Parameters:
+    ///   - countLimit: optional entry cap; `nil` leaves NSCache unbounded
+    ///     (it still evicts under memory pressure).
+    ///   - totalCostLimit: optional cap on the summed costs passed to
+    ///     `setObject(_:forKey:cost:)` (NSCache evicts past it).
+    init(countLimit: Int? = nil, totalCostLimit: Int? = nil) {
         if let countLimit { cache.countLimit = countLimit }
+        if let totalCostLimit { cache.totalCostLimit = totalCostLimit }
     }
 
     /// Cached value for `key`, or `nil` if the key is absent. Note: for an
@@ -197,6 +201,11 @@ final class NSCacheMemo<Value>: @unchecked Sendable {
 
     func setObject(_ value: Value, forKey key: NSString) {
         cache.setObject(MemoBox(value), forKey: key)
+    }
+
+    /// Stores `value` with a cost that counts against `totalCostLimit`.
+    func setObject(_ value: Value, forKey key: NSString, cost: Int) {
+        cache.setObject(MemoBox(value), forKey: key, cost: max(0, cost))
     }
 
     func removeAll() {

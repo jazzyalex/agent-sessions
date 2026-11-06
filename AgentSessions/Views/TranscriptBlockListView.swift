@@ -552,11 +552,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// cheap but scans code-mode chunks, ~1.4 ms on 2 MB).
     private var rowSummaryCache: [Int: (stamp: Int, status: ToolStatus, summary: ToolRowSummary)] = [:]
     /// `ToolInvocationBuilder.build` results (expensive, built off the main
-    /// thread), keyed by "id|stamp|status".
-    private let toolInvocationCache = NSCacheMemo<ToolInvocation>(countLimit: 64)
+    /// thread), keyed by "id|stamp|status". Cost: the model's text in UTF-16
+    /// units (`ToolPresentationRenderer.cost(of:)`), so a few Show-all sized
+    /// outputs cannot pin hundreds of MB.
+    private let toolInvocationCache = NSCacheMemo<ToolInvocation>(
+        countLimit: 64, totalCostLimit: BlockTableController.toolCacheCostLimit)
     /// Rendered and measured L2 bodies, keyed by "id|stamp|status|font|width";
-    /// an entry is valid while its fold state and script flag match.
-    private let toolPresentationCache = NSCacheMemo<ToolPresentation>(countLimit: 128)
+    /// an entry is valid while its fold state and script flag match. Cost: the
+    /// rendered body's UTF-16 length.
+    private let toolPresentationCache = NSCacheMemo<ToolPresentation>(
+        countLimit: 128, totalCostLimit: BlockTableController.toolCacheCostLimit)
+    /// Per cache: 8 M UTF-16 units (a Show-all body is at most ~2 M).
+    static let toolCacheCostLimit = 8_000_000
     /// The last presentation shown per open invocation. Shown (with its height)
     /// while a newer one (new width, font, folds or content) renders, so a
     /// resize or a fold click never blanks the body.
@@ -567,6 +574,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private var toolPresentationQueued: [Int: ToolPresentationRequest] = [:]
     /// Bumped on a session switch so a render of the previous session is dropped.
     private var toolPresentationGeneration = 0
+    /// Bumped when the linkify inputs (gate, cwd, repo root) change.
+    private var toolBodyLinkGeneration = 0
 
     /// True while an L2 render is running or queued (test seam).
     var hasPendingToolPresentations: Bool {
@@ -1164,6 +1173,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 if diff.insertedCount > 0 {
                     table.insertRows(at: IndexSet(integersIn: 0..<diff.insertedCount),
                                      withAnimation: [])
+                    // Every existing cell moved down without a reconfigure.
+                    restampCellOrdinals()
                 }
                 if diff.reloadBoundaryRow, rows.indices.contains(diff.insertedCount) {
                     table.reloadData(forRowIndexes: IndexSet(integer: diff.insertedCount),
@@ -1353,6 +1364,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         self.ideBinaryOverridePath = ideBinaryOverridePath
         if linkInputsChanged {
             rowLinkCache.removeAll()
+            // Tool L2 bodies keep their storage across reconfigures; a new
+            // generation makes each one reset and linkify again.
+            toolBodyLinkGeneration &+= 1
         }
 
         // Retain the full stream so scroll-driven widening can re-slice it
@@ -1746,12 +1760,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         }()
         guard let payload else { return false }
         // A tool L2 control (`toolfold:` — Show more / Show all / "… +N chars" /
-        // full command / Show script / Copy output). The body's ordinal names
-        // its invocation row.
+        // full command / Show script / Copy output). The table names the row the
+        // text view sits in (never a stored ordinal, which rows inserted or
+        // removed above it can leave stale).
         if let foldLink = ToolFoldLink(payload: payload) {
-            guard let ordinal = (textView as? SelectableBlockTextView)?.blockOrdinal,
-                  rows.indices.contains(ordinal),
-                  case .toolInvocation(let model) = rows[ordinal].content else { return false }
+            guard let row = table?.row(for: textView), rows.indices.contains(row),
+                  case .toolInvocation(let model) = rows[row].content else { return false }
             handleToolFoldLink(foldLink, invocationID: model.invocationID)
             return true
         }
@@ -2525,6 +2539,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             if !script.removed.isEmpty { table.removeRows(at: script.removed, withAnimation: []) }
             if !script.inserted.isEmpty { table.insertRows(at: script.inserted, withAnimation: []) }
             table.endUpdates()
+            // Cells below the change moved without a reconfigure.
+            restampCellOrdinals()
             if !script.reloaded.isEmpty {
                 table.reloadData(forRowIndexes: script.reloaded, columnIndexes: IndexSet(integer: 0))
                 table.noteHeightOfRows(withIndexesChanged: script.reloaded)
@@ -2587,7 +2603,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                       rowModel: BlockRowModel, ordinal: Int) {
         let groupID = header.groupID
         cell.configure(header: header, accent: Self.toolAccent,
-                       findMatchCount: header.isOpen ? 0 : findMatchCount(forRowID: rowModel.id),
+                       findMatchCount: toolFindMatchCount(for: rowModel),
                        onToggle: { [weak self] allRows in self?.toggleGroup(groupID: groupID, allRows: allRows) })
         finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
     }
@@ -2596,21 +2612,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                      rowModel: BlockRowModel, ordinal: Int) {
         let invocationID = model.invocationID
         let presentation = model.isOpen ? toolPresentation(for: model) : nil
-        cell.configure(model: model, lines: toolActionLines(for: model), accent: Self.toolAccent,
-                       findMatchCount: findMatchCount(forRowID: rowModel.id),
-                       body: presentation?.attributed, bodyHeight: presentation?.bodyHeight ?? 0,
-                       onToggle: { [weak self] allInGroup in
-                           self?.toggleInvocation(invocationID: invocationID, allInGroup: allInGroup)
-                       })
+        let bodyReset = cell.configure(
+            model: model, lines: toolActionLines(for: model), accent: Self.toolAccent,
+            findMatchCount: toolFindMatchCount(for: rowModel),
+            body: presentation?.attributed, bodyHeight: presentation?.bodyHeight ?? 0,
+            bodyGeneration: toolBodyLinkGeneration,
+            onToggle: { [weak self] allInGroup in
+                self?.toggleInvocation(invocationID: invocationID, allInGroup: allInGroup)
+            })
         // File-path links in the L2 text (Task C3 parity), around the fold
-        // controls the renderer already linked. Skipped for very large bodies
-        // (Show all): the scan would run on the main thread.
-        if let storage = cell.bodyText.textStorage, !cell.bodyText.isHidden,
+        // controls the renderer already linked — only when the body text was
+        // set anew (a reconfigure with the same body keeps its links). Skipped
+        // for very large bodies (Show all): the scan would run on the main thread.
+        if bodyReset, let storage = cell.bodyText.textStorage,
            storage.length > 0, storage.length <= Self.toolBodyLinkifyLimit {
             applyLinkAttributes(rowID: rowModel.id, text: cell.bodyText.string, to: storage,
                                 skippingExistingLinks: true)
         }
         finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
+    }
+
+    /// The count a tool row's pill shows: a closed group header counts its
+    /// invocations' matches; an invocation row its own (L2 highlights come
+    /// with decoded-text Find).
+    private func toolFindMatchCount(for rowModel: BlockRowModel) -> Int {
+        if case .toolGroupHeader(let header) = rowModel.content, header.isOpen { return 0 }
+        return findMatchCount(forRowID: rowModel.id)
     }
 
     /// Rendered L2 text longer than this (UTF-16) is not scanned for file links.
@@ -2701,8 +2728,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         Task.detached(priority: .userInitiated) {
             let invocation = ToolInvocationBuilder.build(request.ref, blocks: blocks, index: index, source: source,
                                                          duration: request.duration)
+            let cost = ToolPresentationRenderer.cost(of: invocation)
             await MainActor.run {
-                cache.setObject(invocation, forKey: request.invocationKey as NSString)
+                cache.setObject(invocation, forKey: request.invocationKey as NSString, cost: cost)
                 copy(invocation)
             }
         }
@@ -2758,23 +2786,25 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             let invocation = cachedInvocation
                 ?? ToolInvocationBuilder.build(request.ref, blocks: blocks, index: index, source: source,
                                                duration: request.duration)
+            let invocationCost = ToolPresentationRenderer.cost(of: invocation)
             let presentation = ToolPresentationRenderer.render(invocation, folds: request.folds,
                                                                scriptShown: request.scriptShown,
                                                                fontSize: request.fontSize, width: request.width)
             await MainActor.run { [weak self] in
-                self?.finishToolPresentation(request, invocation: invocation, presentation: presentation,
-                                             generation: generation)
+                self?.finishToolPresentation(request, invocation: invocation, invocationCost: invocationCost,
+                                             presentation: presentation, generation: generation)
             }
         }
     }
 
     private func finishToolPresentation(_ request: ToolPresentationRequest, invocation: ToolInvocation,
-                                        presentation: ToolPresentation, generation: Int) {
+                                        invocationCost: Int, presentation: ToolPresentation, generation: Int) {
         // A session switch since the start: the result belongs to another session.
         guard generation == toolPresentationGeneration else { return }
         let id = request.ref.id
-        toolInvocationCache.setObject(invocation, forKey: request.invocationKey as NSString)
-        toolPresentationCache.setObject(presentation, forKey: request.key as NSString)
+        toolInvocationCache.setObject(invocation, forKey: request.invocationKey as NSString, cost: invocationCost)
+        toolPresentationCache.setObject(presentation, forKey: request.key as NSString,
+                                        cost: presentation.attributed.length)
         toolPresentationInFlight[id] = nil
         if let next = toolPresentationQueued.removeValue(forKey: id) { startToolPresentation(next) }
 
@@ -2786,19 +2816,51 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         reloadToolRows(IndexSet(integer: rowIndex))
     }
 
-    /// Reloads tool rows in place and re-notes their heights, keeping the
-    /// viewport still when a reloaded row sits above it.
+    /// Re-stamps every realized row cell with its current row index. Rows that
+    /// were inserted or removed above a cell move it without a reconfigure, so
+    /// the ordinal its body stored (selection routing, drag tests) would name
+    /// another row.
+    private func restampCellOrdinals() {
+        table?.enumerateAvailableRowViews { rowView, row in
+            (rowView.view(atColumn: 0) as? TranscriptRowCell)?.updateOrdinal(row)
+        }
+    }
+
+    /// Reloads tool rows in place and re-notes their heights (an L2 body that
+    /// landed off the main thread). A reader following the tail stays pinned
+    /// to the bottom — the grown row would otherwise push the end out of view
+    /// and the document-frame observer would turn follow-tail off. Otherwise
+    /// the viewport stays still when a reloaded row sits above it.
     private func reloadToolRows(_ indexes: IndexSet) {
         guard let table, !indexes.isEmpty else { return }
+        let sticky = isNearBottom || isScrolledToBottom()
         let visible = table.rows(in: table.visibleRect)
         let aboveViewport = visible.length > 0 && (indexes.first ?? Int.max) < visible.lowerBound
-        let anchor = aboveViewport ? captureScrollAnchor() : nil
+        let anchor = !sticky && aboveViewport ? captureScrollAnchor() : nil
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0
             table.reloadData(forRowIndexes: indexes, columnIndexes: IndexSet(integer: 0))
             table.noteHeightOfRows(withIndexesChanged: indexes)
         }
-        restoreScrollAnchor(anchor)
+        if sticky {
+            pinToDocumentEnd()
+            scrollToBottom()
+        } else {
+            restoreScrollAnchor(anchor)
+        }
+    }
+
+    /// Scrolls to the document's end now, so the bottom stays in view after a
+    /// row grew (a tall last row would leave `scrollRowToVisible` at its top),
+    /// and keeps follow-tail on.
+    private func pinToDocumentEnd() {
+        guard let table, let scroll, table.numberOfRows > 0 else { return }
+        table.layoutSubtreeIfNeeded()
+        let end = table.rect(ofRow: table.numberOfRows - 1).maxY
+        let target = max(0, end - scroll.contentView.bounds.height)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: target))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        isNearBottom = true
     }
 
     // MARK: Scroll anchoring
@@ -3479,9 +3541,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// branch can't recurse).
     private func paintFind(on cell: TranscriptRowCell, rowModel: BlockRowModel, ordinal: Int) {
         if rowModel.isToolRow {
-            // Tool rows show their count on a pill (header or L1 line); a
-            // reconfigure feeds the current count (none once find clears).
-            configureRowCell(cell, forRowModel: rowModel, ordinal: ordinal)
+            // Tool rows show their count on a pill (header or L1 line). Update
+            // the pill only: a reconfigure would reset the L2 body (dropping
+            // the reader's selection in it) on every find keystroke.
+            let count = toolFindMatchCount(for: rowModel)
+            (cell as? ToolGroupHeaderCellView)?.updateFindMatchCount(count)
+            (cell as? ToolInvocationCellView)?.updateFindMatchCount(count)
             return
         }
         guard !findQuery.isEmpty, let card = cell as? BlockCardCellView else {
@@ -3960,6 +4025,15 @@ protocol TranscriptRowCell: NSView {
     func clearFindHighlights()
     func setFlashAlpha(_ alpha: CGFloat)
     func animateFlashAlpha(to target: CGFloat)
+}
+
+extension TranscriptRowCell {
+    /// Re-stamps the body's row ordinal without reconfiguring the cell (rows
+    /// were inserted or removed above it, so its stored ordinal names another
+    /// row). Leaves any native selection alone.
+    func updateOrdinal(_ ordinal: Int) {
+        bodyText.blockOrdinal = ordinal
+    }
 }
 
 // MARK: - Card cell

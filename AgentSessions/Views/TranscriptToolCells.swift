@@ -241,12 +241,14 @@ struct ToolGroupHeaderView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if header.failedCount > 0 {
+                    // Dynamic colors only: systemRed text on a systemRed tint reads in light,
+                    // dark and Increase Contrast (each resolves per appearance).
                     Text(verbatim: ToolGroupText.failed(header.failedCount))
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color(nsColor: .systemRed))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
-                        .background(Capsule(style: .continuous).fill(Color(nsColor: .systemRed)))
+                        .background(Capsule(style: .continuous).fill(Color(nsColor: .systemRed).opacity(0.16)))
                         .fixedSize()
                 }
                 Spacer(minLength: 0)
@@ -447,9 +449,30 @@ final class ToolGroupHeaderCellView: ToolCardCellView {
         ])
     }
 
+    private var header = ToolGroupHeaderModel(groupID: 0, callCount: 0, verbDigest: [], failedCount: 0,
+                                              durationSeconds: nil, timestamp: nil, isOpen: false)
+    private var accent: NSColor = .secondaryLabelColor
+    private var onToggle: (_ allRows: Bool) -> Void = { _ in }
+    private(set) var findMatchCount = 0
+
     func configure(header: ToolGroupHeaderModel, accent: NSColor, findMatchCount: Int,
                    onToggle: @escaping (_ allRows: Bool) -> Void) {
+        self.header = header
+        self.accent = accent
+        self.onToggle = onToggle
+        self.findMatchCount = findMatchCount
         applyChrome(.header(header), accent: accent)
+        renderHeader()
+    }
+
+    /// Find repaint: updates the pill only (no reconfigure).
+    func updateFindMatchCount(_ count: Int) {
+        guard count != findMatchCount else { return }
+        findMatchCount = count
+        renderHeader()
+    }
+
+    private func renderHeader() {
         host.rootView = ToolGroupHeaderView(header: header, accent: Color(nsColor: accent),
                                             findMatchCount: findMatchCount, onToggle: onToggle)
     }
@@ -465,9 +488,15 @@ final class ToolInvocationCellView: ToolCardCellView {
     private var linesTop: NSLayoutConstraint?
     private var linesHeight: NSLayoutConstraint?
     private var bodyHeight: NSLayoutConstraint?
-    /// The presentation string the body shows (identity): a reconfigure with the same one keeps
-    /// the text storage, its layout and the reader's selection.
+    /// The presentation string the body shows (identity) and the link-input generation it was
+    /// linkified under: a reconfigure with the same pair keeps the text storage, its layout, its
+    /// links and the reader's selection.
     private var shownBody: NSAttributedString?
+    private var shownBodyGeneration = 0
+    private var lines: [ToolActionLine] = []
+    private var isOpen = false
+    private var onToggle: (_ allInGroup: Bool) -> Void = { _ in }
+    private(set) var findMatchCount = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -528,29 +557,53 @@ final class ToolInvocationCellView: ToolCardCellView {
     /// - Parameters:
     ///   - body: the rendered L2 body when the row is open and a render landed; nil shows L1 only.
     ///   - bodyHeight: its measured height (TextKit 1, at this cell's body width).
+    ///   - bodyGeneration: the controller's link-input generation; a new one resets the body
+    ///     (dropping file links resolved under the old inputs).
+    /// - Returns: true when the body text was set anew (the caller linkifies it then, and only then).
+    @discardableResult
     func configure(model: ToolInvocationRowModel, lines: [ToolActionLine], accent: NSColor,
-                   findMatchCount: Int, body: NSAttributedString?, bodyHeight: CGFloat,
-                   onToggle: @escaping (_ allInGroup: Bool) -> Void) {
+                   findMatchCount: Int, body: NSAttributedString?, bodyHeight: CGFloat, bodyGeneration: Int,
+                   onToggle: @escaping (_ allInGroup: Bool) -> Void) -> Bool {
         let edges = ToolCardEdges.invocation(model)
         applyChrome(edges, accent: accent)
         linesTop?.constant = Self.firstLineTop(edges)
         linesHeight?.constant = CGFloat(max(1, lines.count)) * ToolRowMetrics.lineHeight
-        linesHost.rootView = ToolActionLines(lines: lines, isOpen: model.isOpen, findMatchCount: findMatchCount,
-                                             onToggle: onToggle)
+        self.lines = lines
+        self.isOpen = model.isOpen
+        self.onToggle = onToggle
+        self.findMatchCount = findMatchCount
+        renderLines()
 
         if model.isOpen, let body, bodyHeight > 0 {
-            if body !== shownBody {
+            var reset = false
+            if body !== shownBody || bodyGeneration != shownBodyGeneration {
                 bodyText.textStorage?.setAttributedString(body)
                 shownBody = body
+                shownBodyGeneration = bodyGeneration
+                reset = true
             }
             self.bodyHeight?.constant = bodyHeight
             bodyText.isHidden = false
-        } else {
-            if shownBody != nil { bodyText.textStorage?.setAttributedString(NSAttributedString()) }
-            shownBody = nil
-            self.bodyHeight?.constant = 0
-            bodyText.isHidden = true
+            return reset
         }
+        if shownBody != nil { bodyText.textStorage?.setAttributedString(NSAttributedString()) }
+        shownBody = nil
+        self.bodyHeight?.constant = 0
+        bodyText.isHidden = true
+        return false
+    }
+
+    /// Find repaint: updates the L1 pill only (no reconfigure: the L2 body, its links and any
+    /// native selection in it stay).
+    func updateFindMatchCount(_ count: Int) {
+        guard count != findMatchCount else { return }
+        findMatchCount = count
+        renderLines()
+    }
+
+    private func renderLines() {
+        linesHost.rootView = ToolActionLines(lines: lines, isOpen: isOpen, findMatchCount: findMatchCount,
+                                             onToggle: onToggle)
     }
 
     override func prepareForReuse() {
@@ -611,6 +664,18 @@ enum ToolPresentationRenderer {
         }
         return ToolPresentation(folds: folds, scriptShown: scriptShown, attributed: attributed,
                                 bodyHeight: measuredHeight(of: attributed, width: width))
+    }
+
+    /// Cache cost of a built invocation: its text in UTF-16 units (outputs, plain forms, script
+    /// output and source), which dominates its memory.
+    static func cost(of invocation: ToolInvocation) -> Int {
+        var units = 0
+        for action in invocation.actions {
+            units += action.plainText.utf16.count + (action.output?.text.utf16.count ?? 0)
+        }
+        units += invocation.scriptOutput?.text.utf16.count ?? 0
+        units += invocation.scriptSource?.utf16.count ?? 0
+        return units
     }
 
     /// Height of `attributed` laid out at `width` with TextKit 1 and no line-fragment padding —
