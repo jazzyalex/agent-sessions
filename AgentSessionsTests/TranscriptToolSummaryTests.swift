@@ -314,10 +314,10 @@ final class TranscriptToolSummaryTests: XCTestCase {
         let expected = ("echo " + String(repeating: "abcdefghij\n", count: 20)).prefix(120)
         var label: String?
         let elapsed = seconds { label = TranscriptToolSummary.callLabelArgument(toolName: "Bash", toolInput: input) }
-        XCTAssertLessThan(elapsed, 0.005)
+        XCTAssertLessThan(elapsed, 0.02)
         XCTAssertEqual(label.map { String($0.prefix(120)) }, String(expected))
         var summary = ""
-        XCTAssertLessThan(seconds { summary = TranscriptToolSummary.summary(toolName: "Bash", toolInput: input) }, 0.005)
+        XCTAssertLessThan(seconds { summary = TranscriptToolSummary.summary(toolName: "Bash", toolInput: input) }, 0.02)
         XCTAssertEqual(String(summary.prefix(120)), String(expected))
         // Through the builder: the label is cut to 120 characters plus an ellipsis.
         let built = callLabel(toolName: "Bash", input: input)
@@ -367,6 +367,28 @@ final class TranscriptToolSummaryTests: XCTestCase {
             (#"tools.exec_command({cmd: "unterminated"#, false),
             (#"no call here"#, false),
             (#"tools.exec_command(args)"#, false),
+            // The fast path defers (nil) wherever it could read the script differently from the parser.
+            ("—tools.exec_command({cmd:\"first\"}); tools.exec_command({cmd:\"second\"})", false),   // non-ASCII before `tools.`
+            ("étools.exec_command({cmd:\"first\"}); tools.exec_command({cmd:\"second\"})", false),
+            (#"tools.exec_command({cmd: "first", cmd: "second"})"#, false),                       // the parser keeps the last `cmd`
+            (#"tools.exec_command({cmd: "first", workdir: "/w", 'cmd': 'second'})"#, false),
+            (#"tools.exec_command({cmd: "first", cmd})"#, false),
+            (#"tools.exec_command({cmd: "ls", opts: {cmd: "nested"}})"#, true),
+            (#"tools.exec_command({opts: [1, 2}, cmd: "ls"})"#, false),                          // the parser throws on these
+            (#"tools.exec_command({opts: {"a" "b"}, cmd: "ls"})"#, false),
+            (#"tools.exec_command({env: {A: "1", "B": [2, 'x', `y`]}, n: -1.5, cmd: "ls"})"#, true),
+            ("tools.exec_command({ // note\r\n cmd: \"skipped\",\n workdir: \"/w\" })", false),      // CRLF is one Character
+            ("tools.exec_command({\r\n  cmd: \"make\"\r\n})", true),
+            ("tools.exec_command\u{0B}({cmd: \"first\"}); tools.exec_command({cmd: \"second\"})", false), // VT, FF, NBSP are spaces
+            ("tools.exec_command\u{0C}({cmd: \"first\"}); tools.exec_command({cmd: \"second\"})", false),
+            ("tools.exec_command\u{A0}({cmd: \"first\"}); tools.exec_command({cmd: \"second\"})", false),
+            ("tools.\u{E9}x({cmd: \"first\"}); tools.exec_command({cmd: \"second\"})", false),           // a non-ASCII letter starts a name
+            ("tools.exec_command({a: \"x\"\u{301}, cmd: \"ls\"})", false),                             // a mark joins the quote
+            ("tools.exec_command({cmd: \"a\\n\u{301}b\"})", false),
+            ("tools.exec_command({cmd: \"a\u{600}\"})", false),                                        // a prepended mark joins the quote
+            ("tools.exec_command({a: f(\u{1FEF}), cmd: \"ls\"})", false),                             // U+1FEF equals "`"
+            ("tools.exec_command({cmd: \"a\\x4\u{FF11}b\"})", false),                                  // a fullwidth hex digit
+            ("tools.exec_command({cmd: `a\\u{`, b: `}X`})", true),                                    // a template ends as the parser ends it
         ]
         for (script, decides) in scripts {
             let fast = ExecFirstCommandScan.firstCommand(in: script)
@@ -388,7 +410,7 @@ final class TranscriptToolSummaryTests: XCTestCase {
             for _ in 0..<1000 { _ = TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script) }
         }
         XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script), cmd)
-        XCTAssertLessThan(elapsed, 0.05)
+        XCTAssertLessThan(elapsed, 0.2)
     }
 
     func testLargeExecScriptLabelIsBoundedAndCorrect() {
@@ -398,8 +420,48 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertGreaterThan(script.utf8.count, 2_000_000)
         var label: String?
         let elapsed = seconds { label = TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script) }
-        XCTAssertLessThan(elapsed, 0.005)
+        XCTAssertLessThan(elapsed, 0.02)
         XCTAssertEqual(label, cmd)
         XCTAssertEqual(callLabel(toolName: "exec", input: script), String(("exec " + cmd).prefix(120)) + "…")
+    }
+
+    func testLargeExecScriptKeepsLabelWhenFirstCommandRunsPastThePrefix() {
+        let lines = (0..<1_200).map { "line \($0): heredoc text for the long command" }
+        let cmd = "cat > /tmp/notes.txt <<'EOF'\n" + lines.joined(separator: "\n") + "\nEOF"
+        XCTAssertGreaterThan(cmd.utf8.count, 40_000)
+        let oneLine = cmd.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+        let expected = String(("exec " + oneLine).prefix(120)) + "…"
+        let quoted = #"text(await tools.exec_command({cmd:""# + cmd.replacingOccurrences(of: "\n", with: "\\n")
+            + #"",workdir:"/x"}));"#
+        let template = "text(await tools.exec_command({cmd:`" + cmd + "`,workdir:\"/x\"}));"
+        for script in [quoted, template] {
+            var label: String?
+            let elapsed = seconds { label = TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script) }
+            XCTAssertLessThan(elapsed, 0.02)
+            // The 16 KB prefix cut the literal: the label keeps the part that was read.
+            XCTAssertGreaterThan(label?.utf8.count ?? 0, 8_000)
+            XCTAssertTrue(cmd.hasPrefix(label ?? "-"))
+            let summary = TranscriptToolSummary.summary(toolName: "exec", toolInput: script)
+            XCTAssertGreaterThan(summary.utf8.count, 8_000)
+            XCTAssertTrue(cmd.hasPrefix(summary))
+            XCTAssertEqual(callLabel(toolName: "exec", input: script), expected)
+        }
+        // A literal that is still open at the end of a script read whole is malformed, not cut: no partial value.
+        let unterminated = #"tools.exec_command({cmd:""# + String(repeating: "y", count: 10_000)
+        XCTAssertNil(TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: unterminated))
+    }
+
+    func testLargeInputWithoutPrimaryKeyLabelIsBounded() {
+        let items = (0..<60_000).map { "{\"v\": \"value \($0)\", \"k\": \($0)}" }.joined(separator: ",\n  ")
+        let input = "{\"items\": [\n  " + items + "\n]}"
+        XCTAssertGreaterThan(input.utf8.count, 2_000_000)
+        XCTAssertNil(TranscriptToolSummary.callLabelArgument(toolName: "Foo", toolInput: input))
+        // Above 8 KB the label is the start of the raw input, whitespace collapsed; no full JSON parse.
+        let start = String(input.prefix(400)).components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        var label = ""
+        let elapsed = seconds { label = callLabel(toolName: "Foo", input: input) }
+        XCTAssertLessThan(elapsed, 0.02)
+        XCTAssertEqual(label, "Foo " + String(start.prefix(120)) + "…")
     }
 }

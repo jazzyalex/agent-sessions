@@ -62,8 +62,8 @@ enum TranscriptToolSummary {
         guard let input = toolInput, !input.isEmpty else { return nil }
         if isLarge(input) {
             let prefix = boundedPrefix(input)
-            if toolName == "exec", let cmd = execScriptCommand(prefix) { return cmd }
-            let fields = LargeInputScanner.scan(prefix)
+            if toolName == "exec", let cmd = execScriptCommand(prefix.text, cutByPrefix: prefix.cut) { return cmd }
+            let fields = LargeInputScanner.scan(prefix.text)
             if let command = fields.command { return command }
             for key in ["file_path", "filePath", "target_file", "pattern", "query", "url", "path", "description"] {
                 if let value = fields.strings[key], !value.isEmpty { return value }
@@ -85,8 +85,10 @@ enum TranscriptToolSummary {
     }
 
     /// First non-empty `cmd` of a Codex `exec` script, or nil when the script does not parse.
-    private static func execScriptCommand(_ script: String) -> String? {
-        if let fast = ExecFirstCommandScan.firstCommand(in: script) { return fast }
+    /// `cutByPrefix`: the script is the bounded prefix of a longer input, so a `cmd` literal that is
+    /// still open at its end keeps the part that was read.
+    private static func execScriptCommand(_ script: String, cutByPrefix: Bool = false) -> String? {
+        if let fast = ExecFirstCommandScan.firstCommand(in: script, cutByPrefix: cutByPrefix) { return fast }
         guard let parsed = CodexExecScript.parse(script, maxCalls: 1) else { return nil }
         guard let cmd = parsed.calls.first?.arguments["cmd"]?.stringValue, !cmd.isEmpty else { return nil }
         return cmd
@@ -140,14 +142,17 @@ enum TranscriptToolSummary {
 
     private static func isLarge(_ input: String) -> Bool { input.utf8.count > largeInputBytes }
 
-    private static func boundedPrefix(_ input: String) -> String {
-        String(decoding: input.utf8.prefix(scanPrefixBytes), as: UTF8.self)
+    /// The first `scanPrefixBytes` of a large input. `cut` is true when the input goes on past them.
+    private static func boundedPrefix(_ input: String) -> (text: String, cut: Bool) {
+        let utf8 = input.utf8
+        return (String(decoding: utf8.prefix(scanPrefixBytes), as: UTF8.self), utf8.count > scanPrefixBytes)
     }
 
     /// `summary` for a large input: same priority order, fed by a bounded scan of the top-level fields.
     private static func largeInputSummary(toolName: String?, input: String) -> String {
-        let prefix = boundedPrefix(input)
-        if toolName == "exec", let cmd = execScriptCommand(prefix) { return cmd }
+        let bounded = boundedPrefix(input)
+        let prefix = bounded.text
+        if toolName == "exec", let cmd = execScriptCommand(prefix, cutByPrefix: bounded.cut) { return cmd }
         let fields = LargeInputScanner.scan(prefix)
         if let command = fields.command { return command }
         let strings = fields.strings
@@ -370,231 +375,428 @@ enum TranscriptToolSummary {
 }
 
 /// UTF-8 fast path for the `cmd` of the first call in a Codex `exec` script, used only by labels and
-/// summaries. It reads the bytes of the first `tools.<name>(`, its `{` object and the first
-/// top-level `cmd` key, and decodes that one string literal. It returns nil whenever it cannot decide
-/// (no call, computed key, expression value, `${}` in a template, unbalanced input, non-ASCII where
-/// syntax is expected); the caller then falls back to `CodexExecScript.parse(_:maxCalls: 1)`.
+/// summaries. It reads the bytes of the first `tools.<name>(` and its `{…}` object: the `cmd` key at the
+/// top of that object, and the rest of the object, to check that no second `cmd` follows (the parser
+/// keeps the last one). It must never disagree with `CodexExecScript.parse(_:maxCalls: 1)`. Whenever it
+/// could read the script differently it returns nil, and the caller runs the full parser. That covers: no
+/// call; a spread, computed key or shorthand `cmd`; a `cmd` that is not one plain literal; `${}` in a
+/// template; input the parser rejects; a second `cmd`; and spots where the parser's Characters differ from
+/// these bytes (see `findCall`, `skipTrivia`, `appendEscape` and `hasCharacterHazard`).
 enum ExecFirstCommandScan {
-    static func firstCommand(in script: String) -> String? {
-        if let result = script.utf8.withContiguousStorageIfAvailable({ scan($0) }) { return result }
-        return Array(script.utf8).withUnsafeBufferPointer { scan($0) }
+    /// `cutByPrefix`: `script` is the bounded prefix of a longer input. A `cmd` literal or call object that
+    /// is still open at the end of the prefix then keeps what was read (a label is cut at 120 characters).
+    static func firstCommand(in script: String, cutByPrefix: Bool = false) -> String? {
+        if let result = script.utf8.withContiguousStorageIfAvailable({ run($0, cutByPrefix: cutByPrefix) }) {
+            return result
+        }
+        return Array(script.utf8).withUnsafeBufferPointer { run($0, cutByPrefix: cutByPrefix) }
     }
 
-    private static func isIdent(_ c: UInt8) -> Bool {
-        c == 0x5F || c == 0x24 || (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A)
+    private static func run(_ b: UnsafeBufferPointer<UInt8>, cutByPrefix: Bool) -> String? {
+        var reader = Reader(b: b)
+        guard reader.findCall(), let bytes = reader.readCommand(cutByPrefix: cutByPrefix),
+              !reader.hasCharacterHazard(through: reader.i) else { return nil }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
-    private static func isSpace(_ c: UInt8) -> Bool { c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D }
+    private struct Reader {
+        let b: UnsafeBufferPointer<UInt8>
+        var i = 0
+        /// Set where the parser may read the script differently. The scan then gives up.
+        var odd = false
+        /// Nesting limit for skipped values. The parser's limit is 64; deeper input goes to the parser.
+        static let maxDepth = 16
+        static let cmdKey: [UInt8] = Array("cmd".utf8)
 
-    private static func scan(_ b: UnsafeBufferPointer<UInt8>) -> String? {
-        let n = b.count
-        let needle: [UInt8] = Array("tools.".utf8)
-        var search = 0
-        while search + needle.count < n {
-            // Find "tools."
-            var hit = -1
-            var k = search
-            while k + needle.count <= n {
-                if b[k] == needle[0], b[k + 1] == needle[1], b[k + 2] == needle[2], b[k + 3] == needle[3],
-                   b[k + 4] == needle[4], b[k + 5] == needle[5] { hit = k; break }
+        init(b: UnsafeBufferPointer<UInt8>) { self.b = b }
+
+        private var n: Int { b.count }
+
+        static func isIdent(_ c: UInt8) -> Bool {
+            c == 0x5F || c == 0x24 || (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A)
+        }
+
+        static func isSpace(_ c: UInt8) -> Bool { c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D }
+
+        // MARK: Call
+
+        /// Moves `i` past the `(` of the first `tools.<name>(` that the parser takes. False when there is
+        /// none, or when a byte around a candidate could read differently as a Character: a non-ASCII byte
+        /// just before `tools.` (the parser skips only letters and digits there), a non-ASCII byte at the
+        /// start or end of the name (the parser takes letters), or VT, FF or a non-ASCII byte before `(`
+        /// (the parser skips them as whitespace).
+        mutating func findCall() -> Bool {
+            var search = 0
+            while let hit = find(from: search) {
+                let afterHit = hit + 6
+                search = afterHit
+                if hit > 0 {
+                    let prev = b[hit - 1]
+                    if prev >= 0x80 { return false }
+                    if Reader.isIdent(prev) || prev == 0x2E { continue }
+                }
+                var p = afterHit
+                while p < n, Reader.isIdent(b[p]) { p += 1 }
+                if p < n, b[p] >= 0x80 { return false }
+                guard p > afterHit else { continue }
+                while p < n, Reader.isSpace(b[p]) { p += 1 }
+                guard p < n else { return false }
+                let c = b[p]
+                if c >= 0x80 || c == 0x0B || c == 0x0C { return false }
+                guard c == 0x28 else { continue }
+                i = p + 1
+                return true
+            }
+            return false
+        }
+
+        /// Index of the first `tools.` at or after `from`.
+        private func find(from: Int) -> Int? {
+            var k = from
+            while k + 6 <= n {
+                if b[k] == 0x74, b[k + 1] == 0x6F, b[k + 2] == 0x6F, b[k + 3] == 0x6C, b[k + 4] == 0x73,
+                   b[k + 5] == 0x2E { return k }
                 k += 1
             }
-            if hit < 0 { return nil }
-            let afterHit = hit + needle.count
-            if hit > 0 {
-                let prev = b[hit - 1]
-                if isIdent(prev) || prev == 0x2E || prev >= 0x80 { search = afterHit; continue }
-            }
-            var p = afterHit
-            while p < n, isIdent(b[p]) { p += 1 }
-            guard p > afterHit else { search = afterHit; continue }
-            if p < n, b[p] >= 0x80 { return nil }
-            while p < n, isSpace(b[p]) { p += 1 }
-            guard p < n else { return nil }
-            guard b[p] == 0x28 else { search = afterHit; continue }
-            var i = p + 1
-            return readCommand(b, &i)
+            return nil
         }
-        return nil
-    }
 
-    /// Skips whitespace and comments. False when a byte the parser would treat differently shows up.
-    private static func skipTrivia(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> Bool {
-        let n = b.count
-        while i < n {
-            let c = b[i]
-            if isSpace(c) { i += 1 }
-            else if c >= 0x80 { return false }
-            else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2F {
-                while i < n, b[i] != 0x0A { i += 1 }
-            } else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2A {
-                i += 2
-                var closed = false
-                while i + 1 < n {
-                    if b[i] == 0x2A, b[i + 1] == 0x2F { i += 2; closed = true; break }
+        /// `i` is just after the call's `(`. Returns the decoded `cmd` of the call's `{…}` object.
+        mutating func readCommand(cutByPrefix: Bool) -> [UInt8]? {
+            guard skipTrivia(), i < n, b[i] == 0x7B else { return nil }
+            i += 1
+            var command: [UInt8]?
+            while true {
+                guard skipTrivia(), i < n else { break }
+                let c = b[i]
+                if c == 0x7D { return command }
+                if c == 0x2C { i += 1; continue }
+                let key: [UInt8]
+                if c == 0x22 || c == 0x27 {
+                    let quoted = readQuoted()
+                    guard quoted.closed else { break }
+                    key = quoted.bytes
+                } else if Reader.isIdent(c) {
+                    let from = i
+                    while i < n, Reader.isIdent(b[i]) { i += 1 }
+                    if i < n, b[i] >= 0x80 { return nil }
+                    key = Array(b[from..<i])
+                } else {
+                    return nil   // spread, computed key, non-ASCII
+                }
+                let isCmd = key == Reader.cmdKey
+                if isCmd, command != nil { return nil }   // the parser keeps the last `cmd`
+                guard skipTrivia(), i < n else { break }
+                if b[i] == 0x3A {
+                    i += 1
+                    guard skipTrivia(), i < n else { break }
+                    if isCmd {
+                        let literal: (bytes: [UInt8], closed: Bool)?
+                        switch b[i] {
+                        case 0x22, 0x27: literal = readQuoted()
+                        case 0x60: literal = readTemplate()
+                        default: literal = nil   // an expression
+                        }
+                        guard let literal, !odd else { return nil }
+                        if !literal.closed {
+                            // The literal is open at the end of the script: keep it only when a prefix cut it.
+                            return cutByPrefix && !literal.bytes.isEmpty ? literal.bytes : nil
+                        }
+                        guard !literal.bytes.isEmpty else { return nil }
+                        command = literal.bytes
+                    } else if !skipValue(depth: 0) {
+                        break
+                    }
+                } else if isCmd {
+                    return nil   // shorthand `{cmd}`
+                }
+                // The value must end here (a literal followed by `+ x` is an expression).
+                guard skipTrivia(), i < n else { break }
+                if b[i] == 0x2C { i += 1 } else if b[i] != 0x7D { return nil }
+            }
+            // Stopped early: odd or malformed input, or the end of the script. At the end of a cut prefix the
+            // `cmd` read so far stands (the parser also keeps the pairs read before an open object ends).
+            return !odd && i >= n && cutByPrefix ? command : nil
+        }
+
+        // MARK: Trivia
+
+        /// Skips whitespace and comments. False, with `odd` set, where the parser may read differently: a
+        /// non-ASCII byte (it may be a space or a letter to the parser), VT or FF (spaces to the parser), or
+        /// a `//` comment that ends in CRLF (one Character to the parser, so its comment runs on). A `/*`
+        /// that is never closed moves `i` to the end.
+        mutating func skipTrivia() -> Bool {
+            while i < n {
+                let c = b[i]
+                if Reader.isSpace(c) {
+                    i += 1
+                } else if c >= 0x80 || c == 0x0B || c == 0x0C {
+                    odd = true
+                    return false
+                } else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2F {
+                    while i < n, b[i] != 0x0A { i += 1 }
+                    if i < n, b[i - 1] == 0x0D { odd = true; return false }
+                } else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2A {
+                    i += 2
+                    while i + 1 < n, !(b[i] == 0x2A && b[i + 1] == 0x2F) { i += 1 }
+                    i = i + 1 < n ? i + 2 : n
+                } else {
+                    return true
+                }
+            }
+            return true
+        }
+
+        // MARK: Values (mirror the parser's readValue, readObject, readArray and skipExpression)
+
+        /// Skips the value at `i` as the parser's `readValue` reads it. False where the parser throws or
+        /// may throw (the caller then gives up), or at the end of the script.
+        mutating func skipValue(depth: Int) -> Bool {
+            guard skipTrivia(), i < n else { return false }
+            switch b[i] {
+            case 0x22, 0x27:
+                guard readQuoted().closed else { return false }
+                return skipAfterLiteral()
+            case 0x60:
+                guard let template = readTemplate(), template.closed else { return false }
+                return skipAfterLiteral()
+            case 0x7B, 0x5B:
+                guard depth < Reader.maxDepth else { return false }
+                return b[i] == 0x7B ? skipObject(depth: depth + 1) : skipArray(depth: depth + 1)
+            default:
+                return skipExpression()
+            }
+        }
+
+        /// After a literal the value may go on as an expression (`"a" + b`), as in `literalOrExpression`.
+        private mutating func skipAfterLiteral() -> Bool {
+            guard skipTrivia() else { return false }
+            guard i < n else { return true }
+            switch b[i] {
+            case 0x2C, 0x7D, 0x5D, 0x29: return true
+            default: return skipExpression()
+            }
+        }
+
+        private mutating func skipObject(depth: Int) -> Bool {
+            i += 1
+            while true {
+                guard skipTrivia(), i < n else { return false }
+                let c = b[i]
+                if c == 0x7D { i += 1; return true }
+                if c == 0x2C { i += 1; continue }
+                if c == 0x2E {   // spread
+                    guard skipExpression() else { return false }
+                    continue
+                }
+                if c == 0x5B {   // computed key: the parser skips it as an expression
+                    guard skipExpression() else { return false }
+                } else if c == 0x22 || c == 0x27 {
+                    guard readQuoted().closed else { return false }
+                } else if Reader.isIdent(c) {
+                    while i < n, Reader.isIdent(b[i]) { i += 1 }
+                    if i < n, b[i] >= 0x80 { return false }
+                } else {
+                    return false
+                }
+                guard skipTrivia(), i < n else { return false }
+                if b[i] == 0x3A {
+                    i += 1
+                    guard skipValue(depth: depth), skipTrivia(), i < n else { return false }
+                }
+                if b[i] == 0x2C { i += 1 } else if b[i] != 0x7D { return false }
+            }
+        }
+
+        private mutating func skipArray(depth: Int) -> Bool {
+            i += 1
+            while true {
+                guard skipTrivia(), i < n else { return false }
+                if b[i] == 0x5D { i += 1; return true }
+                if b[i] == 0x2C { i += 1; continue }
+                guard skipValue(depth: depth), skipTrivia(), i < n else { return false }
+                if b[i] == 0x2C { i += 1 } else if b[i] != 0x5D { return false }
+            }
+        }
+
+        /// The parser's `skipExpression(stopAtComma: true)`: stops before a top-level `,` or an unmatched
+        /// closer. False at the end of the script (the parser's caller fails there) or on a literal it
+        /// cannot read.
+        private mutating func skipExpression() -> Bool {
+            var depth = 0
+            while i < n {
+                switch b[i] {
+                case 0x22, 0x27:
+                    guard readQuoted().closed else { return false }
+                case 0x60:
+                    guard let template = readTemplate(), template.closed else { return false }
+                case 0x28, 0x5B, 0x7B:
+                    depth += 1; i += 1
+                case 0x29, 0x5D, 0x7D:
+                    if depth == 0 { return true }
+                    depth -= 1; i += 1
+                case 0x2C:
+                    if depth == 0 { return true }
+                    i += 1
+                default:
                     i += 1
                 }
-                if !closed { return false }
-            } else { return true }
-        }
-        return true
-    }
-
-    /// `i` is just after the call's `(`.
-    private static func readCommand(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> String? {
-        let n = b.count
-        guard skipTrivia(b, &i), i < n, b[i] == 0x7B else { return nil }
-        i += 1
-        while true {
-            guard skipTrivia(b, &i), i < n else { return nil }
-            let c = b[i]
-            if c == 0x7D { return nil }   // no cmd in the object
-            if c == 0x2C { i += 1; continue }
-            let key: [UInt8]
-            if c == 0x22 || c == 0x27 {
-                guard let k = readQuoted(b, &i) else { return nil }
-                key = k
-            } else if isIdent(c) {
-                let from = i
-                while i < n, isIdent(b[i]) { i += 1 }
-                if i < n, b[i] >= 0x80 { return nil }
-                key = Array(b[from..<i])
-            } else {
-                return nil
             }
-            guard skipTrivia(b, &i), i < n else { return nil }
-            let isCmd = key == Array("cmd".utf8)
-            if b[i] == 0x3A {
+            return false
+        }
+
+        // MARK: Literals
+
+        /// Reads and decodes the quoted literal at `b[i]`. `closed` is false when the script ends inside it
+        /// (`i` is then at the end) or when an escape is odd (`odd` is set).
+        mutating func readQuoted() -> (bytes: [UInt8], closed: Bool) {
+            let quote = b[i]
+            i += 1
+            var out: [UInt8] = []
+            while i < n {
+                let c = b[i]
                 i += 1
-                guard skipTrivia(b, &i), i < n else { return nil }
-                if isCmd {
-                    let bytes: [UInt8]?
-                    if b[i] == 0x22 || b[i] == 0x27 { bytes = readQuoted(b, &i) }
-                    else if b[i] == 0x60 { bytes = readTemplate(b, &i) }
-                    else { bytes = nil }
-                    guard let bytes, !bytes.isEmpty else { return nil }
-                    // The literal must end the value.
-                    guard skipTrivia(b, &i), i < n, b[i] == 0x2C || b[i] == 0x7D else { return nil }
-                    return String(decoding: bytes, as: UTF8.self)
+                if c == quote { return (out, true) }
+                if c == 0x5C {
+                    guard i < n else { break }
+                    guard Reader.appendEscape(b, &i, end: n, to: &out) else { odd = true; return (out, false) }
+                } else {
+                    out.append(c)
                 }
-                guard skipExpression(b, &i) else { return nil }
-            } else if isCmd {
-                return nil   // shorthand `{cmd}`
             }
-            guard skipTrivia(b, &i), i < n else { return nil }
-            if b[i] == 0x2C { i += 1 } else if b[i] != 0x7D { return nil }
+            i = n
+            return (out, false)
         }
-    }
 
-    /// Skips a value up to a top-level `,` or an unmatched closer, as the parser's `skipExpression`.
-    private static func skipExpression(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> Bool {
-        let n = b.count
-        var depth = 0
-        while i < n {
-            let c = b[i]
-            switch c {
-            case 0x22, 0x27:
-                guard readQuoted(b, &i) != nil else { return false }
-            case 0x60:
-                guard readTemplate(b, &i) != nil else { return false }
-            case 0x28, 0x5B, 0x7B:
-                depth += 1; i += 1
-            case 0x29, 0x5D, 0x7D:
-                if depth == 0 { return true }
-                depth -= 1; i += 1
-            case 0x2C:
-                if depth == 0 { return true }
-                i += 1
+        /// Reads the template literal at `b[i]`. Its end is found as the parser's `skipTemplate` finds it
+        /// (a backslash skips the next byte); then the body is decoded as `decodeTemplate` does. Nil for
+        /// `${}` (the parser keeps such a value as source text) or an odd escape (`odd` is set).
+        mutating func readTemplate() -> (bytes: [UInt8], closed: Bool)? {
+            i += 1
+            let start = i
+            while i < n {
+                let c = b[i]
+                if c == 0x60 {
+                    i += 1
+                    return decodeTemplate(start, i - 1).map { ($0, true) }
+                }
+                if c == 0x24, i + 1 < n, b[i + 1] == 0x7B { return nil }
+                i += c == 0x5C ? 2 : 1
+            }
+            i = n
+            return decodeTemplate(start, n).map { ($0, false) }
+        }
+
+        private mutating func decodeTemplate(_ from: Int, _ end: Int) -> [UInt8]? {
+            var out: [UInt8] = []
+            var k = from
+            while k < end {
+                let c = b[k]
+                k += 1
+                if c == 0x5C, k < end {
+                    guard Reader.appendEscape(b, &k, end: end, to: &out) else { odd = true; return nil }
+                } else {
+                    out.append(c)
+                }
+            }
+            return out
+        }
+
+        /// Decodes the escape whose letter is at `b[k]` (after a backslash), as the parser's `appendEscape`.
+        /// False when a `\x` or `\u` escape has a non-ASCII byte where the parser reads hex digits: it reads
+        /// them as Characters and also takes fullwidth digits.
+        static func appendEscape(_ b: UnsafeBufferPointer<UInt8>, _ k: inout Int, end: Int,
+                                 to out: inout [UInt8]) -> Bool {
+            let e = b[k]
+            k += 1
+            switch e {
+            case UInt8(ascii: "n"): out.append(0x0A)
+            case UInt8(ascii: "t"): out.append(0x09)
+            case UInt8(ascii: "r"): out.append(0x0D)
+            case UInt8(ascii: "b"): out.append(0x08)
+            case UInt8(ascii: "f"): out.append(0x0C)
+            case UInt8(ascii: "v"): out.append(0x0B)
+            case UInt8(ascii: "0"): out.append(0x00)
+            case 0x0A: break
+            case 0x0D:
+                if k < end, b[k] == 0x0A { k += 1 } else { out.append(0x0D) }
+            case UInt8(ascii: "x"):
+                guard isASCII(b, from: k, count: 2, end: end) else { return false }
+                if let v = hex(b, &k, 2, end: end) { append(v, to: &out) }
+            case UInt8(ascii: "u"):
+                if k < end, b[k] == 0x7B {
+                    k += 1
+                    let from = k
+                    while k < end, b[k] != 0x7D { k += 1 }
+                    let text = String(decoding: b[from..<k], as: UTF8.self)
+                    if k < end { k += 1 }
+                    if let v = UInt32(text, radix: 16) { append(v, to: &out) }
+                } else {
+                    guard isASCII(b, from: k, count: 4, end: end) else { return false }
+                    if let v = hex(b, &k, 4, end: end) { append(v, to: &out) }
+                }
             default:
-                i += 1
+                out.append(e)
             }
+            return true
         }
-        return false
-    }
 
-    /// Reads a quoted literal at `b[i]`; moves `i` past the closing quote. Nil when unterminated.
-    private static func readQuoted(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> [UInt8]? {
-        let quote = b[i]
-        i += 1
-        var out: [UInt8] = []
-        while i < b.count {
-            let c = b[i]
-            if c == quote { i += 1; return out }
-            i += 1
-            if c == 0x5C {
-                guard i < b.count else { return nil }
-                appendEscape(b, &i, to: &out)
-            } else {
-                out.append(c)
+        private static func isASCII(_ b: UnsafeBufferPointer<UInt8>, from k: Int, count: Int, end: Int) -> Bool {
+            var p = k
+            while p < Swift.min(k + count, end) {
+                if b[p] >= 0x80 { return false }
+                p += 1
             }
+            return true
         }
-        return nil
-    }
 
-    /// Reads a template literal without `${}` at `b[i] == '`'`. Nil for an interpolation or no end.
-    private static func readTemplate(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> [UInt8]? {
-        i += 1
-        var out: [UInt8] = []
-        while i < b.count {
-            let c = b[i]
-            if c == 0x60 { i += 1; return out }
-            if c == 0x24, i + 1 < b.count, b[i + 1] == 0x7B { return nil }
-            i += 1
-            if c == 0x5C {
-                guard i < b.count else { return nil }
-                appendEscape(b, &i, to: &out)
-            } else {
-                out.append(c)
+        private static func hex(_ b: UnsafeBufferPointer<UInt8>, _ k: inout Int, _ count: Int, end: Int) -> UInt32? {
+            guard k + count <= end else { return nil }
+            var v: UInt32 = 0
+            for p in k..<(k + count) {
+                guard let d = Character(UnicodeScalar(b[p])).hexDigitValue else { return nil }
+                v = v * 16 + UInt32(d)
             }
+            k += count
+            return v
         }
-        return nil
-    }
 
-    /// `i` is on the byte after a backslash.
-    private static func appendEscape(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int, to out: inout [UInt8]) {
-        let e = b[i]
-        i += 1
-        switch e {
-        case UInt8(ascii: "n"): out.append(0x0A)
-        case UInt8(ascii: "t"): out.append(0x09)
-        case UInt8(ascii: "r"): out.append(0x0D)
-        case UInt8(ascii: "b"): out.append(0x08)
-        case UInt8(ascii: "f"): out.append(0x0C)
-        case UInt8(ascii: "v"): out.append(0x0B)
-        case UInt8(ascii: "0"): out.append(0x00)
-        case 0x0A: break
-        case 0x0D:
-            if i < b.count, b[i] == 0x0A { i += 1 } else { out.append(0x0D) }
-        case UInt8(ascii: "x"):
-            if let v = hex(b, &i, 2) { append(v, to: &out) }
-        case UInt8(ascii: "u"):
-            if i < b.count, b[i] == 0x7B {
-                i += 1
-                let from = i
-                while i < b.count, b[i] != 0x7D { i += 1 }
-                let text = String(decoding: b[from..<i], as: UTF8.self)
-                if i < b.count { i += 1 }
-                if let v = UInt32(text, radix: 16) { append(v, to: &out) }
-            } else if let v = hex(b, &i, 4) {
-                append(v, to: &out)
+        private static func append(_ value: UInt32, to out: inout [UInt8]) {
+            if let scalar = Unicode.Scalar(value) { out.append(contentsOf: Array(String(Character(scalar)).utf8)) }
+        }
+
+        // MARK: Characters
+
+        /// True when `b[0...end]` (and the byte after it) holds a spot where the parser's Characters and
+        /// these bytes differ: a scalar that merges with a neighbouring ASCII byte into one Character (a
+        /// combining mark or joiner after it, a prepended mark before it), or U+1FEF, which Swift compares
+        /// equal to "`". Only scalars from U+0300 up can merge.
+        func hasCharacterHazard(through end: Int) -> Bool {
+            guard let base = b.baseAddress else { return false }
+            let raw = UnsafeRawPointer(base)
+            let limit = Swift.min(end + 2, n)
+            var k = 0
+            while k < limit {
+                // ASCII runs, eight bytes at a time.
+                while k + 8 <= limit, raw.loadUnaligned(fromByteOffset: k, as: UInt64.self) & 0x8080_8080_8080_8080 == 0 {
+                    k += 8
+                }
+                guard k < limit else { break }
+                let c = b[k]
+                guard c >= 0x80 else { k += 1; continue }
+                let to = Swift.min(k + (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2), n)
+                if c == 0xE1, to - k == 3, b[k + 1] == 0xBF, b[k + 2] == 0xAF { return true }   // U+1FEF
+                if c >= 0xCC {
+                    if k > 0, b[k - 1] < 0x80, Reader.isOneCharacter([0x41] + b[k..<to]) { return true }
+                    if to < n, b[to] < 0x80, Reader.isOneCharacter(Array(b[k..<to]) + [0x41]) { return true }
+                }
+                k = to
             }
-        default:
-            out.append(e)
+            return false
         }
-    }
 
-    private static func hex(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int, _ count: Int) -> UInt32? {
-        guard i + count <= b.count else { return nil }
-        var v: UInt32 = 0
-        for k in i..<(i + count) {
-            guard let d = Character(UnicodeScalar(b[k])).hexDigitValue else { return nil }
-            v = v * 16 + UInt32(d)
+        private static func isOneCharacter(_ bytes: [UInt8]) -> Bool {
+            String(decoding: bytes, as: UTF8.self).count == 1
         }
-        i += count
-        return v
-    }
-
-    private static func append(_ value: UInt32, to out: inout [UInt8]) {
-        if let scalar = Unicode.Scalar(value) { out.append(contentsOf: Array(String(Character(scalar)).utf8)) }
     }
 }

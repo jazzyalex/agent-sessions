@@ -789,11 +789,17 @@ struct SessionTranscriptBuilder {
             return truncateTo(label + " " + oneLine, max: 120)
         }
         if let a = args, !a.isEmpty {
-            let compact = compactJSONOneLine(a)
+            // A large input is never parsed whole for a label: show its start on one line.
+            let compact = a.utf8.count > TranscriptToolSummary.largeInputBytes ? collapsedStart(of: a) : compactJSONOneLine(a)
             let truncated = truncateTo(compact, max: 120)
             label += " " + truncated
         }
         return label
+    }
+
+    /// The first 2,048 characters of `s` with whitespace runs collapsed to one space.
+    private static func collapsedStart(of s: String) -> String {
+        String(s.prefix(2_048)).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private static func compactJSONOneLine(_ s: String) -> String {
