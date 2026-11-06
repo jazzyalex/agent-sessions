@@ -1893,7 +1893,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // row) paint its portion so a scrolled-into-view cell shows selection.
         cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
         if crossBlockDragActive {
-            cell.applySelectionRange(cellSelectionRange(ordinal: ordinal))
+            applyCellSelection(to: cell, ordinal: ordinal)
         }
 
         // Find highlights (Task 10). Paint directly here for RENDERABLE rows only
@@ -2672,13 +2672,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private static let toolBodyLinkifyLimit = 200_000
 
     /// Flash alpha and selection wiring, as `configure(cell:…)` does for
-    /// message cards. Tool rows take no part in cross-block selection yet
-    /// (their text is excluded), and find highlights inside L2 come later:
-    /// the header and row pills carry the match count.
+    /// message cards. A live cross-block selection paints the body's range and
+    /// the row tint (`applyCellSelection`). Find highlights inside L2 come
+    /// later: the header and row pills carry the match count.
     private func finishToolCellConfigure(_ cell: ToolCardCellView, rowModel: BlockRowModel, ordinal: Int) {
         cell.setFlashAlpha(isFlashing(rowID: rowModel.id) ? Self.flashRaisedAlpha : CardMetrics.cardTintAlpha)
         cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
-        if crossBlockDragActive { cell.applySelectionRange(cellSelectionRange(ordinal: ordinal)) }
+        if crossBlockDragActive { applyCellSelection(to: cell, ordinal: ordinal) }
     }
 
     /// One L1 line per action; the chevron and the duration sit on the first.
@@ -3968,6 +3968,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         var leadLength: Int { (lead as NSString).length }
         var bodyStart: Int { body == nil ? leadLength : leadLength + 2 }
+        /// UTF-16 length of `text`, without building it.
+        var length: Int { bodyStart + (body?.length ?? 0) }
         var text: String { body.map { lead + "\n\n" + $0.string } ?? lead }
     }
 
@@ -4011,29 +4013,48 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         if range.upperBound > start {
             let bodyRange = NSRange(location: start - selectable.bodyStart, length: range.upperBound - start)
             let coversAll = bodyRange.location == 0 && bodyRange.length >= body.length
-            let text = coversAll && selectable.plainCopyText != nil
-                ? selectable.plainCopyText!
-                : ToolDetailRenderer.copyText(of: body, in: bodyRange)
+            let text: String
+            if coversAll, let plain = selectable.plainCopyText {
+                text = plain
+            } else {
+                text = ToolDetailRenderer.copyText(of: body, in: bodyRange)
+            }
             if !text.isEmpty { parts.append(text) }
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
-    /// The range to paint in a cell's body text view for the coordinator range of its row.
-    private func cellSelectionRange(ordinal: Int) -> NSRange {
+    /// UTF-16 length of a row's selectable text (tool rows: from lengths only).
+    private func cellSelectionLength(of row: BlockRowModel) -> Int {
+        if row.isToolRow { return toolRowSelectable(for: row)?.length ?? 0 }
+        return (renderedSelectableText(for: row) as NSString).length
+    }
+
+    /// What to paint in a cell for its row's coordinator range: the range in its body text view,
+    /// and for a tool row whether the selection covers its lead (header title or L1 lines), which
+    /// shows as a row tint. Uses lengths only, so a drag event never builds a body-sized string.
+    private func cellSelectionPaint(ordinal: Int) -> (body: NSRange, leadCovered: Bool) {
+        let none = NSRange(location: 0, length: 0)
         let row = rows[ordinal]
-        let text = renderedSelectableText(for: row) as NSString
-        guard let range = selection.selectionRange(blockOrdinal: ordinal, textLength: text.length) else {
-            return NSRange(location: 0, length: 0)
+        guard row.isToolRow else {
+            let length = (renderedSelectableText(for: row) as NSString).length
+            return (selection.selectionRange(blockOrdinal: ordinal, textLength: length) ?? none, false)
         }
-        guard row.isToolRow else { return range }
-        guard let selectable = toolRowSelectable(for: row), let body = selectable.body else {
-            return NSRange(location: 0, length: 0)
-        }
+        guard let selectable = toolRowSelectable(for: row),
+              let range = selection.selectionRange(blockOrdinal: ordinal, textLength: selectable.length),
+              range.length > 0 else { return (none, false) }
+        let leadCovered = range.location < selectable.leadLength
+        guard let body = selectable.body else { return (none, leadCovered) }
         let start = max(range.location, selectable.bodyStart)
-        guard range.upperBound > start else { return NSRange(location: 0, length: 0) }
+        guard range.upperBound > start else { return (none, leadCovered) }
         let shifted = NSRange(location: start - selectable.bodyStart, length: range.upperBound - start)
-        return NSIntersectionRange(shifted, NSRange(location: 0, length: body.length))
+        return (NSIntersectionRange(shifted, NSRange(location: 0, length: body.length)), leadCovered)
+    }
+
+    private func applyCellSelection(to cell: TranscriptRowCell, ordinal: Int) {
+        let paint = cellSelectionPaint(ordinal: ordinal)
+        cell.applySelectionRange(paint.body)
+        (cell as? ToolCardCellView)?.setSelectionTint(paint.leadCovered)
     }
 
     /// Ordinals that contribute nothing: meta rows.
@@ -4190,10 +4211,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             if reset {
                 cell.bodyText.forceActiveSelectionAppearance(false)
                 cell.applySelectionRange(NSRange(location: 0, length: 0))
+                (cell as? ToolCardCellView)?.setSelectionTint(false)
                 return
             }
             cell.bodyText.forceActiveSelectionAppearance(true)
-            cell.applySelectionRange(self.cellSelectionRange(ordinal: ordinal))
+            self.applyCellSelection(to: cell, ordinal: ordinal)
         }
     }
 
@@ -4309,7 +4331,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard !rows.isEmpty else { return }
         refreshExcludedOrdinals()
         let lastOrdinal = rows.count - 1
-        let lastLen = (renderedSelectableText(for: rows[lastOrdinal]) as NSString).length
+        let lastLen = cellSelectionLength(of: rows[lastOrdinal])
         selection.begin(at: .init(blockOrdinal: 0, utf16Offset: 0))
         selection.extend(to: .init(blockOrdinal: lastOrdinal, utf16Offset: lastLen))
         crossBlockDragActive = true

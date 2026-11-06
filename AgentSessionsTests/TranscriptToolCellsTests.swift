@@ -46,6 +46,12 @@ final class TranscriptToolCellsTests: XCTestCase {
             apply()
         }
 
+        /// Role filters handed to every `apply`.
+        var activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+
+        /// Applies the same stream again (after a filter change).
+        func reapply() { apply() }
+
         private func apply() {
             let index = ToolInvocationIndex.build(blocks: blocks, source: source)
             var failed = Set<Int>()
@@ -53,7 +59,8 @@ final class TranscriptToolCellsTests: XCTestCase {
                 if case .failed = invocation.status { failed.insert(invocation.id) }
             }
             controller.apply(allBlocks: blocks, invocationIndex: index, failedInvocationIDs: failed,
-                             totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID)
+                             totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID,
+                             activeRoleFilters: activeRoleFilters)
             layout()
         }
 
@@ -799,5 +806,89 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(h.controller.assembleSelectedText(), "go\n\nRan make\n\ndone",
                        "no body yet: the L1 lines only, and nothing is built on the main thread")
         XCTAssertTrue(h.waitForPresentations())
+    }
+
+    func testCrossBlockSelectionTintsCoveredToolRows() throws {
+        let h = Harness(twoCallGroup)
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
+        let header = try XCTUnwrap(h.view(id: hid(1), as: ToolGroupHeaderCellView.self))
+        let first = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let second = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
+        XCTAssertFalse(header.isSelectionTintVisible)
+
+        // message, closed header, closed invocation, closed invocation, message
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (4, 4))
+        XCTAssertTrue(header.isSelectionTintVisible, "a copied header looks selected")
+        XCTAssertTrue(first.isSelectionTintVisible)
+        XCTAssertTrue(second.isSelectionTintVisible)
+
+        // The focus ends inside the first invocation row: the second is not covered.
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (2, selectionLength(h, row: 1)))
+        XCTAssertTrue(header.isSelectionTintVisible)
+        XCTAssertTrue(first.isSelectionTintVisible)
+        XCTAssertFalse(second.isSelectionTintVisible)
+
+        h.controller.clearCrossBlockSelection()
+        XCTAssertFalse(header.isSelectionTintVisible)
+        XCTAssertFalse(first.isSelectionTintVisible)
+        XCTAssertFalse(second.isSelectionTintVisible)
+    }
+
+    func testShowScriptOpenWholeBodyCopyIncludesScriptPane() throws {
+        let h = Harness(codexTwoCommands, source: .codex)
+        XCTAssertTrue(h.waitForPresentations(), "the failed invocation opens at L2")
+        h.controller.handleToolFoldLink(.showScript, invocationID: 1)
+        XCTAssertTrue(h.waitForPresentations())
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertTrue(cell.bodyText.string.contains("tools.exec_command"), "the script pane is visible (precondition)")
+
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (2, 4))
+        let copied = h.controller.assembleSelectedText()
+        XCTAssertTrue(copied.hasPrefix("go\n\n"), copied)
+        XCTAssertTrue(copied.hasSuffix("\n\ndone"), copied)
+        XCTAssertTrue(copied.contains("boom"), "the action output is copied")
+        XCTAssertTrue(copied.contains("const a = await tools.exec_command({cmd: \"false\"});"),
+                      "the visible script pane is copied, since it is visible text")
+        XCTAssertFalse(copied.contains("Hide script"), "the link is a control, not text")
+        XCTAssertFalse(copied.contains("\t"), "no gutter")
+
+        // A partial copy that covers the same body reads the same pieces.
+        let lead = h.controller.toolLeadLength(atRow: 1)
+        h.controller.setCrossBlockSelection(anchor: (1, lead), focus: (2, 0))
+        let bodyOnly = h.controller.assembleSelectedText()
+        XCTAssertFalse(bodyOnly.contains("Hide script"))
+        XCTAssertTrue(bodyOnly.contains("boom"))
+        XCTAssertTrue(bodyOnly.contains("const b = await tools.exec_command"))
+    }
+
+    func testRoleFilterHidingToolRowsKeepsTheirTextOutOfACopy() {
+        let h = Harness(twoCallGroup)
+        h.activeRoleFilters = [.user, .assistant]
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 5], "the tool rows are hidden")
+
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (1, 4))
+        let copied = h.controller.assembleSelectedText()
+        XCTAssertEqual(copied, "go\n\ndone")
+        XCTAssertFalse(copied.contains("tool calls"))
+        XCTAssertFalse(copied.contains("make"))
+    }
+
+    func testUpwardDragEndingOnAnOpenRowsLineCopiesLeadAndBody() throws {
+        let numbered = "     1→let a = 1\n     2→let b = 2\n     3→let c = 3"
+        let h = Harness([user(), read("t1", "/repo/Sources/App.swift"), output("t1", numbered), assistant()])
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+
+        // The anchor is in the assistant message; the focus lands on the L1 line (offset 0).
+        h.controller.setCrossBlockSelection(anchor: (2, 4), focus: (1, 0))
+        XCTAssertEqual(h.controller.assembleSelectedText(),
+                       "Read App.swift\n\nfile_path  /repo/Sources/App.swift\nlet a = 1\nlet b = 2\nlet c = 3\n\ndone")
+
+        // The row also shows the tint, and the body paints its whole range.
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        h.controller.setCrossBlockSelection(anchor: (2, 4), focus: (1, 0))
+        XCTAssertTrue(cell.isSelectionTintVisible)
     }
 }

@@ -532,6 +532,25 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
     let bodyText = SelectableBlockTextView(usingTextLayoutManager: false)
     private var cardTop: NSLayoutConstraint?
     private var cardBottom: NSLayoutConstraint?
+    private let selectionTint = DynamicFillView()
+
+    /// Alpha of the cross-block selection tint.
+    static let selectionTintAlpha: CGFloat = 0.28
+
+    /// A cross-block selection covers the row's lines (a header, a closed row, or the L1 lines of
+    /// an open row): the card shows a selection tint, since SwiftUI lines cannot highlight text.
+    /// Dynamic colors only; the unemphasized color applies while the window is not key.
+    func setSelectionTint(_ on: Bool) {
+        if on {
+            let key = window?.isKeyWindow ?? true
+            selectionTint.fillColor = key ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor
+            selectionTint.fillAlpha = Self.selectionTintAlpha
+        }
+        selectionTint.isHidden = !on
+    }
+
+    /// Whether the selection tint is showing (tests read it).
+    var isSelectionTintVisible: Bool { !selectionTint.isHidden }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -551,6 +570,17 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
         cardBackground.fillAlpha = CardMetrics.cardTintAlpha
         cardBackground.translatesAutoresizingMaskIntoConstraints = false
         addSubview(cardBackground)
+
+        // Cross-block selection tint: behind the lines and the body, over the card fill.
+        selectionTint.translatesAutoresizingMaskIntoConstraints = false
+        selectionTint.isHidden = true
+        cardBackground.addSubview(selectionTint)
+        NSLayoutConstraint.activate([
+            selectionTint.leadingAnchor.constraint(equalTo: cardBackground.leadingAnchor),
+            selectionTint.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor),
+            selectionTint.topAnchor.constraint(equalTo: cardBackground.topAnchor),
+            selectionTint.bottomAnchor.constraint(equalTo: cardBackground.bottomAnchor),
+        ])
 
         accentBarView.translatesAutoresizingMaskIntoConstraints = false
         cardBackground.addSubview(accentBarView)
@@ -628,7 +658,10 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
         bodyText.selectionController = controller
         bodyText.blockOrdinal = ordinal
         bodyText.forceActiveSelectionAppearance(coordinatorActive)
-        if !coordinatorActive { bodyText.setSelectedRange(NSRange(location: 0, length: 0)) }
+        if !coordinatorActive {
+            bodyText.setSelectedRange(NSRange(location: 0, length: 0))
+            setSelectionTint(false)
+        }
         // The controller handles the body's `toolfold:` and file links.
         bodyText.delegate = controller
     }
@@ -654,6 +687,7 @@ class ToolCardCellView: NSTableCellView, TranscriptRowCell {
         bodyText.setSelectedRange(NSRange(location: 0, length: 0))
         bodyText.blockOrdinal = -1
         bodyText.forceActiveSelectionAppearance(false)
+        setSelectionTint(false)
         cardBackground.fillAlpha = restingTintAlpha
         cardBackground.layer?.removeAnimation(forKey: "flash")
     }
@@ -1055,8 +1089,8 @@ struct ToolPresentation {
     var scriptShown: Bool
     var attributed: NSAttributedString
     var bodyHeight: CGFloat
-    /// `RenderedToolBody.plainCopyText` for a whole-body copy. Nil when the "Show script" pane is
-    /// open (it is not in that text); a copy then reads the shown text.
+    /// `RenderedToolBody.plainCopyText` for a whole-body copy, with the open "Show script" pane's
+    /// copy text after a blank line.
     var plainCopyText: String?
 }
 
@@ -1102,10 +1136,13 @@ enum ToolPresentationRenderer {
         var attributed = rendered.attributed
         var plainCopyText: String? = rendered.plainCopyText
         if scriptShown, let script = invocation.scriptSource, !script.isEmpty {
-            plainCopyText = nil
-            attributed = appendingScriptPane(to: attributed, invocation: invocation, script: script, folds: folds,
-                                             fontSize: fontSize, width: width, appearance: appearance,
-                                             increaseContrast: increaseContrast)
+            let pane = appendingScriptPane(to: attributed, invocation: invocation, script: script, folds: folds,
+                                           fontSize: fontSize, width: width, appearance: appearance,
+                                           increaseContrast: increaseContrast)
+            attributed = pane.attributed
+            // The open script pane is visible text, so a whole-body copy holds it too (after a
+            // blank line, like another action).
+            plainCopyText = [rendered.plainCopyText, pane.plainCopyText].filter { !$0.isEmpty }.joined(separator: "\n\n")
         }
         return ToolPresentation(folds: folds, scriptShown: scriptShown, attributed: attributed,
                                 bodyHeight: measuredHeight(of: attributed, width: width),
@@ -1143,7 +1180,8 @@ enum ToolPresentationRenderer {
     /// `scriptFoldKey`, so its folds live beside the invocation's own.
     private static func appendingScriptPane(to body: NSAttributedString, invocation: ToolInvocation, script: String,
                                             folds: [Int: FoldState], fontSize: CGFloat, width: CGFloat,
-                                            appearance: NSAppearance, increaseContrast: Bool) -> NSAttributedString {
+                                            appearance: NSAppearance,
+                                            increaseContrast: Bool) -> (attributed: NSAttributedString, plainCopyText: String) {
         let key = scriptFoldKey(invocation)
         let action = ToolAction(category: .shell, verbKey: ToolVerb.ranScript, object: "", objectIsAgentLabel: false,
                                 objectDetail: nil, context: [], command: nil, exactCommand: nil, heredoc: nil,
@@ -1151,9 +1189,10 @@ enum ToolPresentationRenderer {
                                 facts: [], hiddenNotes: [], status: .unknown, plainText: script)
         let pane = ToolInvocation(ref: invocation.ref, displayToolName: invocation.displayToolName, actions: [action],
                                   scriptSource: nil, scriptOutput: nil, durationSeconds: nil)
-        let rendered = NSMutableAttributedString(attributedString: ToolDetailRenderer.render(
+        let paneBody = ToolDetailRenderer.render(
             pane, fontSize: fontSize, width: width, folds: [0: folds[key] ?? FoldState()],
-            appearance: appearance, increaseContrast: increaseContrast).attributed)
+            appearance: appearance, increaseContrast: increaseContrast)
+        let rendered = NSMutableAttributedString(attributedString: paneBody.attributed)
         rendered.enumerateAttribute(.link, in: NSRange(location: 0, length: rendered.length)) { value, range, _ in
             guard let url = value as? URL, let link = ToolFoldLink(url: url) else { return }
             rendered.addAttribute(.link, value: readdressed(link, to: key).url, range: range)
@@ -1161,7 +1200,7 @@ enum ToolPresentationRenderer {
         let combined = NSMutableAttributedString(attributedString: body)
         combined.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
         combined.append(rendered)
-        return combined
+        return (combined, paneBody.plainCopyText)
     }
 
     private static func readdressed(_ link: ToolFoldLink, to key: Int) -> ToolFoldLink {
