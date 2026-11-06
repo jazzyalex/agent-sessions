@@ -102,6 +102,42 @@ final class TranscriptFindNavigatorTests: XCTestCase {
         XCTAssertNil(TranscriptFindNavigator.reconciledOrdinal(previous: prev, previousOrdinal: 0, newMatches: []))
     }
 
+    // MARK: reconciledOrdinal across the decode pass (Task 15)
+
+    func testReconcileTreatsMatchSpaceAsPartOfIdentity() {
+        // Same block and range, but one indexes raw block text and the other decoded tool text.
+        let prev = Match(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 0, length: 4), ordinal: 1, space: .raw)
+        let newMatches = [match(block: 0, loc: 0, len: 4, ordinal: 0),
+                          Match(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 0, length: 4), ordinal: 1,
+                                space: .decoded),
+                          match(block: 7, loc: 0, len: 4, ordinal: 2)]
+        // Not the same match: no owner given, so the old ordinal is clamped (0 → 0), not matched by identity (1).
+        XCTAssertEqual(TranscriptFindNavigator.reconciledOrdinal(previous: prev, previousOrdinal: 0, newMatches: newMatches), 0)
+        let samePrev = Match(globalBlockIndex: 7, rangeInBlockText: NSRange(location: 0, length: 4), ordinal: 0, space: .raw)
+        XCTAssertEqual(TranscriptFindNavigator.reconciledOrdinal(previous: samePrev, previousOrdinal: 0, newMatches: newMatches), 2,
+                       "an identical match keeps its identity")
+    }
+
+    func testReconcileStaysOnTheSameInvocationWhenItsMatchesTurnDecoded() {
+        // A raw match in output block 4 of invocation 3. After the decode pass the invocation's
+        // matches sit at its id block 3 in decoded space.
+        let prev = Match(globalBlockIndex: 4, rangeInBlockText: NSRange(location: 10, length: 4), ordinal: 3, space: .raw)
+        let newMatches = [match(block: 0, loc: 0, len: 4, ordinal: 0),
+                          Match(globalBlockIndex: 3, rangeInBlockText: NSRange(location: 20, length: 4), ordinal: 1,
+                                space: .decoded),
+                          Match(globalBlockIndex: 3, rangeInBlockText: NSRange(location: 40, length: 4), ordinal: 2,
+                                space: .decoded),
+                          match(block: 9, loc: 0, len: 4, ordinal: 3)]
+        let owner: (Int) -> Int = { $0 == 4 ? 3 : $0 }
+        XCTAssertEqual(TranscriptFindNavigator.reconciledOrdinal(previous: prev, previousOrdinal: 3,
+                                                                 newMatches: newMatches, owner: owner), 1,
+                       "the first match of the same invocation, not the clamped ordinal")
+        // Past every owner: clamp as before.
+        let late = Match(globalBlockIndex: 12, rangeInBlockText: NSRange(location: 0, length: 4), ordinal: 9, space: .raw)
+        XCTAssertEqual(TranscriptFindNavigator.reconciledOrdinal(previous: late, previousOrdinal: 9,
+                                                                 newMatches: newMatches, owner: owner), 3)
+    }
+
     // MARK: renderableRange
 
     func testRenderableMessageMapsDirectly() {

@@ -52,19 +52,33 @@ enum TranscriptFindNavigator {
 
     /// After a live-append (or any snapshot recompute) the match list may change.
     /// Keep the current selection stable by finding the SAME match (identical
-    /// `globalBlockIndex` + `rangeInBlockText`) in the new list; if it survived,
-    /// return its new ordinal. Otherwise clamp the old ordinal into the new list
-    /// bounds (or nil when the new list is empty).
+    /// `globalBlockIndex` + `rangeInBlockText` + `space`) in the new list; if it
+    /// survived, return its new ordinal.
+    ///
+    /// Otherwise, when `owner` is given (block → the row that shows it; Task 15: a
+    /// tool block → its invocation id), take the first new match whose owner is at
+    /// or after the previous match's owner: when the decode pass ends, a raw match
+    /// in a tool output becomes decoded matches at the invocation's id block, and
+    /// the current match stays on that invocation. Else clamp the old ordinal into
+    /// the new list bounds (or nil when the new list is empty).
     static func reconciledOrdinal(previous: Match?,
                                   previousOrdinal: Int,
-                                  newMatches: [Match]) -> Int? {
+                                  newMatches: [Match],
+                                  owner: ((Int) -> Int)? = nil) -> Int? {
         guard !newMatches.isEmpty else { return nil }
         if let previous,
            let survivor = newMatches.first(where: {
                $0.globalBlockIndex == previous.globalBlockIndex &&
-               $0.rangeInBlockText == previous.rangeInBlockText
+               $0.rangeInBlockText == previous.rangeInBlockText &&
+               $0.space == previous.space
            }) {
             return survivor.ordinal
+        }
+        if let previous, let owner {
+            let target = owner(previous.globalBlockIndex)
+            if let next = newMatches.first(where: { owner($0.globalBlockIndex) >= target }) {
+                return next.ordinal
+            }
         }
         return min(max(0, previousOrdinal), newMatches.count - 1)
     }

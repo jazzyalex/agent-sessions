@@ -318,7 +318,7 @@ private struct Builder {
     // MARK: Action
 
     private mutating func renderAction(_ action: ToolAction, index: Int) {
-        let facts = footerFacts(action)
+        let facts = FooterFacts.make(action, invocation: invocation)
         let terminator = action.heredoc == nil ? nil : action.command.flatMap(Self.heredocTerminator)
         let layout = PlainLayout(action, bracket: facts.bracket, terminator: terminator)
         var parts = 0
@@ -376,67 +376,6 @@ private struct Builder {
                 append(" " + item.value, base)
             }
         }
-    }
-
-    private struct FooterChip {
-        enum Kind { case status, duration, other }
-        var text: String
-        var color: NSColor
-        var bold: Bool
-        var kind: Kind
-    }
-
-    /// Footer chips in the order exit, duration, truncation, persisted, notes, and the bracket the
-    /// builder wrote into `plainText` from the same status and duration (`[exit 2 · 48s]`).
-    private func footerFacts(_ action: ToolAction) -> (chips: [FooterChip], bracket: String?) {
-        var chips: [FooterChip] = []
-        var exitCode: Int?
-        var wallTime: Double?
-        for fact in action.facts {
-            switch fact.kind {
-            case .exitCode(let code): if exitCode == nil { exitCode = code }
-            case .wallTime(let seconds): if wallTime == nil { wallTime = seconds }
-            default: break
-            }
-        }
-        if exitCode == nil, case .failed(let code?) = action.status { exitCode = code }
-        if let exitCode {
-            chips.append(FooterChip(text: ToolChip.exit(exitCode), color: exitCode == 0 ? .tertiaryLabelColor : .systemRed,
-                                    bold: exitCode != 0, kind: .status))
-        } else {
-            switch action.status {
-            case .failed(nil): chips.append(FooterChip(text: ToolChip.error, color: .systemRed, bold: true, kind: .status))
-            case .rejected: chips.append(FooterChip(text: ToolChip.rejected, color: .tertiaryLabelColor, bold: false, kind: .status))
-            case .interrupted: chips.append(FooterChip(text: ToolChip.interrupted, color: .tertiaryLabelColor, bold: false, kind: .status))
-            default: break
-            }
-        }
-        if let seconds = wallTime ?? (invocation.actions.count == 1 ? invocation.durationSeconds : nil) {
-            chips.append(FooterChip(text: TranscriptTurnTiming.formatDuration(seconds), color: .tertiaryLabelColor,
-                                    bold: false, kind: .duration))
-        }
-        let bracket = chips.isEmpty ? nil : chips.map(\.text).joined(separator: Style.factSeparator)
-        for fact in action.facts {
-            if case .truncated(let agent, let tokens, let lines) = fact.kind {
-                var text = ToolChip.cutBy(agent)
-                if let lines { text += Style.factSeparator + ToolChip.lines(lines) }
-                else if let tokens { text += Style.factSeparator + ToolDetailText.tokens(tokens) }
-                chips.append(FooterChip(text: text, color: .systemOrange, bold: false, kind: .other))
-            }
-        }
-        for fact in action.facts {
-            if case .persisted(_, let bytes) = fact.kind {
-                let size = bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
-                chips.append(FooterChip(text: ToolDetailText.savedToFile(size: size), color: .tertiaryLabelColor,
-                                        bold: false, kind: .other))
-            }
-        }
-        for fact in action.facts {
-            if case .note(let note) = fact.kind {
-                chips.append(FooterChip(text: note, color: .tertiaryLabelColor, bold: false, kind: .other))
-            }
-        }
-        return (chips, bracket)
     }
 
     /// `bracketBase` is where the bracket line's "[" sits in `plainText`, when it matches.
@@ -949,6 +888,81 @@ private struct Builder {
     /// Logical lines in `ToolTextBudget`'s sense, at most one too many (the heredoc gutter's widest number).
     static func lineCount(_ text: String) -> Int {
         text.utf8.reduce(1) { $1 == 0x0A ? $0 + 1 : $0 }
+    }
+}
+
+// MARK: - Footer facts
+
+/// One footer chip of an action (status, duration, truncation, saved output, note).
+private struct FooterChip {
+    enum Kind { case status, duration, other }
+    var text: String
+    var color: NSColor
+    var bold: Bool
+    var kind: Kind
+}
+
+private enum FooterFacts {
+    /// Footer chips in the order exit, duration, truncation, persisted, notes, and the bracket the
+    /// builder wrote into `plainText` from the same status and duration (`[exit 2 · 48s]`).
+    static func make(_ action: ToolAction, invocation: ToolInvocation) -> (chips: [FooterChip], bracket: String?) {
+        var chips: [FooterChip] = []
+        var exitCode: Int?
+        var wallTime: Double?
+        for fact in action.facts {
+            switch fact.kind {
+            case .exitCode(let code): if exitCode == nil { exitCode = code }
+            case .wallTime(let seconds): if wallTime == nil { wallTime = seconds }
+            default: break
+            }
+        }
+        if exitCode == nil, case .failed(let code?) = action.status { exitCode = code }
+        if let exitCode {
+            chips.append(FooterChip(text: ToolChip.exit(exitCode), color: exitCode == 0 ? .tertiaryLabelColor : .systemRed,
+                                    bold: exitCode != 0, kind: .status))
+        } else {
+            switch action.status {
+            case .failed(nil): chips.append(FooterChip(text: ToolChip.error, color: .systemRed, bold: true, kind: .status))
+            case .rejected: chips.append(FooterChip(text: ToolChip.rejected, color: .tertiaryLabelColor, bold: false, kind: .status))
+            case .interrupted: chips.append(FooterChip(text: ToolChip.interrupted, color: .tertiaryLabelColor, bold: false, kind: .status))
+            default: break
+            }
+        }
+        if let seconds = wallTime ?? (invocation.actions.count == 1 ? invocation.durationSeconds : nil) {
+            chips.append(FooterChip(text: TranscriptTurnTiming.formatDuration(seconds), color: .tertiaryLabelColor,
+                                    bold: false, kind: .duration))
+        }
+        let bracket = chips.isEmpty ? nil : chips.map(\.text).joined(separator: Style.factSeparator)
+        for fact in action.facts {
+            if case .truncated(let agent, let tokens, let lines) = fact.kind {
+                var text = ToolChip.cutBy(agent)
+                if let lines { text += Style.factSeparator + ToolChip.lines(lines) }
+                else if let tokens { text += Style.factSeparator + ToolDetailText.tokens(tokens) }
+                chips.append(FooterChip(text: text, color: .systemOrange, bold: false, kind: .other))
+            }
+        }
+        for fact in action.facts {
+            if case .persisted(_, let bytes) = fact.kind {
+                let size = bytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+                chips.append(FooterChip(text: ToolDetailText.savedToFile(size: size), color: .tertiaryLabelColor,
+                                        bold: false, kind: .other))
+            }
+        }
+        for fact in action.facts {
+            if case .note(let note) = fact.kind {
+                chips.append(FooterChip(text: note, color: .tertiaryLabelColor, bold: false, kind: .other))
+            }
+        }
+        return (chips, bracket)
+    }
+}
+
+extension ToolDetailRenderer {
+    /// The words of `action`'s footer chips, in footer order, as the L2 body shows them. Find
+    /// searches the ones `plainText` does not hold (spec §6.8: a lifted envelope matches as the
+    /// fact's words).
+    static func footerChipTexts(of action: ToolAction, in invocation: ToolInvocation) -> [String] {
+        FooterFacts.make(action, invocation: invocation).chips.map(\.text)
     }
 }
 

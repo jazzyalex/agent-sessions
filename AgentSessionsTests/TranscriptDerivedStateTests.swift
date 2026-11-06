@@ -185,4 +185,95 @@ final class TranscriptDerivedStateTests: XCTestCase {
         XCTAssertEqual(matchesInB.count, sessionB.events.count / 5,
                        "one 'Question' match per 5-event cycle in the smaller session")
     }
+
+    // MARK: - Find on decoded tool text (Task 15)
+
+    /// 0 user · 1 exec_command call · 2 its output (a JSON string literal with escapes) · 3 assistant.
+    private func codexToolSession(id: String) -> Session {
+        let events = [
+            TranscriptTestFixtures.userEvent("u1", "go"),
+            SessionEvent(id: "c1", timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                         toolName: "exec_command", toolInput: #"{"cmd":"printf hi"}"#, toolOutput: nil,
+                         toolNamespace: nil, toolCallID: "k1",
+                         messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}"),
+            SessionEvent(id: "r1", timestamp: nil, kind: .tool_result, role: "tool", text: nil,
+                         toolName: nil, toolInput: nil, toolOutput: #""say \"x\"\nline2 done""#,
+                         toolNamespace: nil, toolCallID: "k1",
+                         messageID: "m-r1", parentID: nil, isDelta: false, rawJSON: "{}"),
+            TranscriptTestFixtures.assistantDelta("a1", "ok", messageID: "m-a1"),
+        ]
+        return Session(id: id, source: .codex, startTime: nil, endTime: nil,
+                       model: "test", filePath: "/tmp/\(id).jsonl", fileSizeBytes: nil,
+                       eventCount: events.count, events: events)
+    }
+
+    @MainActor
+    private func spin(_ seconds: TimeInterval = 5, until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !done(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+    }
+
+    private let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+
+    @MainActor
+    func testFindRerunsOnceWhenDecodePassCompletes() {
+        let gate = DecodeGate()
+        defer { gate.open() }
+        let state = TranscriptDerivedState(toolSearchStore: ToolSearchTextStore(build: gate.build))
+        state.update(session: codexToolSession(id: "decode-rerun"), settings: settings)
+        spin { !state.isComputing }
+        spin(0.2) { false }   // the pass starts after the snapshot landed, then waits at the gate
+        XCTAssertTrue(state.isDecodingToolText, "the pass is still running")
+
+        // A query before the pass ends searches the raw text where nothing is decoded yet.
+        let before = state.findMatches(query: "done")
+        XCTAssertEqual(before.map(\.space), [.raw])
+        XCTAssertEqual(before.first?.globalBlockIndex, 2)
+        XCTAssertEqual(state.findComputeCount, 1)
+        _ = state.findMatches(query: "done")
+        XCTAssertEqual(state.findComputeCount, 1, "cached while the pass runs")
+        XCTAssertEqual(state.toolTextGeneration, 0)
+
+        gate.open()
+        spin { !state.isDecodingToolText }
+        XCTAssertFalse(state.isDecodingToolText)
+        XCTAssertEqual(state.toolTextGeneration, 1, "the pass end is announced once")
+        let after = state.findMatches(query: "done")
+        XCTAssertEqual(after.map(\.space), [.decoded])
+        XCTAssertEqual(after.first?.globalBlockIndex, 1, "reported at the invocation's row block")
+        XCTAssertEqual(state.findComputeCount, 2, "exactly one recompute after the pass")
+        _ = state.findMatches(query: "done")
+        XCTAssertEqual(state.findComputeCount, 2)
+    }
+
+    @MainActor
+    func testOpeningSessionDoesNotWaitForDecodePass() {
+        let gate = DecodeGate()
+        defer { gate.open() }
+        let store = ToolSearchTextStore(build: gate.build)
+        let state = TranscriptDerivedState(toolSearchStore: store)
+        state.update(session: codexToolSession(id: "decode-open"), settings: settings)
+        spin { !state.isComputing }
+
+        // The snapshot is complete and shown while every tool decode is still held back.
+        XCTAssertFalse(state.isComputing)
+        XCTAssertEqual(state.snapshot.totalBlockCount, 4)
+        XCTAssertEqual(state.snapshot.invocationIndex.invocations.map(\.id), [1])
+        spin(0.2) { false }
+        XCTAssertTrue(state.isDecodingToolText)
+        XCTAssertFalse(store.isComplete)
+        XCTAssertNil(store.text(forBlock: 1))
+
+        gate.open()
+        spin { !state.isDecodingToolText }
+        XCTAssertTrue(store.isComplete)
+        XCTAssertNotNil(store.text(forBlock: 1))
+
+        // A session switch cancels the pass and drops the decoded text.
+        state.update(session: TranscriptTestFixtures.makeSyntheticSession(eventCount: 10, id: "decode-other"),
+                     settings: settings)
+        XCTAssertNil(store.text(forBlock: 1))
+    }
 }

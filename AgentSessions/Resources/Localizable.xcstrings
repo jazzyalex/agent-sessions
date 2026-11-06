@@ -19310,6 +19310,23 @@
         }
       }
     },
+    "Searching tool output…": {
+      "comment": "Session view find bar status: tool outputs are still being prepared for search, so the match count can still change.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching tool output…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在搜索工具输出…"
+          }
+        }
+      }
+    },
     "Searching…": {
       "comment": "Footer status while session search is running.",
       "localizations": {

@@ -103,6 +103,18 @@ final class TranscriptToolCellsTests: XCTestCase {
             guard let row = rowIndex(id: id) else { return nil }
             return table.view(atColumn: 0, row: row, makeIfNecessary: true) as? T
         }
+
+        /// Whole-session matches for `query` after the decode pass (Task 15), as the derived
+        /// state computes them.
+        func decodedMatches(_ query: String) -> [TranscriptDerivedState.BlockMatch] {
+            let store = ToolSearchTextStore()
+            var done = false
+            store.start(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: source), source: source,
+                        sessionID: sessionID, viewportBlock: blocks.count - 1) { done = true }
+            let deadline = Date().addingTimeInterval(10)
+            while !done, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+            return TranscriptDerivedState.computeFindMatches(blocks: blocks, query: query, toolText: store.text(forBlock:))
+        }
     }
 
     private func json(_ object: [String: Any]) -> String {
@@ -296,6 +308,74 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(cell.findMatchCount, 1, "the pill shows the match")
         XCTAssertEqual(cell.bodyText.selectedRange(), NSRange(location: 0, length: 4),
                        "a find repaint leaves the L2 body and its selection alone")
+    }
+
+    // MARK: - Find on decoded text (Task 15)
+
+    func testMatchInFoldOpensAndEscRestores() throws {
+        var lines = (1...200).map { "line \($0)" }
+        lines[149] = "needle here"
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant: a closed group of invocations 1 and 3.
+        let h = Harness([user(), bash("t1", "make"), output("t1"), bash("t2", "seq 1 200"),
+                         output("t2", lines.joined(separator: "\n")), assistant()])
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
+        let matches = h.decodedMatches("needle")
+        XCTAssertEqual(matches.map(\.space), [.decoded])
+        XCTAssertEqual(matches.first?.globalBlockIndex, 3)
+
+        h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1,
+                               reset: true, shouldJump: true)
+        XCTAssertTrue(h.waitForPresentations())
+
+        // The group, the invocation and the fold that hid line 150 opened.
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
+        XCTAssertTrue(h.controller.openInvocations.contains(3))
+        XCTAssertEqual(h.controller.foldStates[3]?[0]?.showAll, true)
+
+        // The match is highlighted inside L2 as the current match, and scrolled into view.
+        let cell = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
+        let needle = (cell.bodyText.string as NSString).range(of: "needle")
+        XCTAssertNotEqual(needle.location, NSNotFound, "the opened body shows the line")
+        XCTAssertTrue(cell.bodyFindHighlights.contains { $0.range == needle && $0.isCurrent },
+                      "\(cell.bodyFindHighlights)")
+        XCTAssertNotNil(cell.bodyText.textStorage?.attribute(.backgroundColor, at: needle.location, effectiveRange: nil))
+        let rect = try XCTUnwrap(cell.bodyRect(forCharacterRange: needle, in: h.table))
+        XCTAssertTrue(h.scroll.contentView.bounds.contains(rect),
+                      "match \(rect) inside the viewport \(h.scroll.contentView.bounds)")
+
+        // Esc: everything Find opened closes again.
+        h.controller.applyFind(source: .local, query: "", matches: [], token: 2, direction: 1, reset: true,
+                               shouldJump: false)
+        XCTAssertTrue(h.waitForPresentations())
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
+        XCTAssertFalse(h.controller.openGroups.contains(1))
+        XCTAssertFalse(h.controller.openInvocations.contains(3))
+        XCTAssertNil(h.controller.foldStates[3], "the fold is back to its state before Find")
+    }
+
+    func testUnifiedJumpWithNoLocalMatchFlashesRow() {
+        let header = "Chunk ID: a1\nWall time: 0.1 seconds\nProcess exited with code 0\nOriginal token count: 3\nOutput:\nclean\n"
+        // 0 user · 1 call · 2 output · 3 assistant: one solo invocation row.
+        let h = Harness([user(), F.block(.toolCall, id: "t1", toolName: "exec_command", toolInput: json(["cmd": "git status"])),
+                         F.block(.toolOut, id: "t1", text: header, toolName: "exec_command"), assistant()],
+                        source: .codex)
+        XCTAssertEqual(h.rowIDs, [0, 1, 3])
+        // The search index matched the raw header; the decoded text has no such word.
+        XCTAssertFalse(TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "chunk").isEmpty)
+        let matches = h.decodedMatches("chunk")
+        XCTAssertTrue(matches.isEmpty)
+
+        let counts = h.controller.applyFind(source: .unified, query: "chunk", matches: matches, token: 1, direction: 1,
+                                            reset: true, shouldJump: true)
+        XCTAssertEqual(counts.total, 0)
+        XCTAssertTrue(h.controller.openInvocations.contains(1), "the invocation opens to L2")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1), "its row flashes")
+        XCTAssertTrue(h.waitForPresentations())
+
+        // Clearing the search closes what the jump opened.
+        h.controller.applyFind(source: .unified, query: "", matches: [], token: 2, direction: 1, reset: true,
+                               shouldJump: false)
+        XCTAssertFalse(h.controller.openInvocations.contains(1))
     }
 
     // MARK: - Card chrome

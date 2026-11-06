@@ -900,6 +900,7 @@ final class ToolInvocationCellView: ToolCardCellView {
                 bodyText.textStorage?.setAttributedString(body)
                 shownBody = body
                 shownBodyGeneration = bodyGeneration
+                bodyFindHighlights = []
                 reset = true
             }
             self.bodyHeight?.constant = bodyHeight
@@ -908,9 +909,44 @@ final class ToolInvocationCellView: ToolCardCellView {
         }
         if shownBody != nil { bodyText.textStorage?.setAttributedString(NSAttributedString()) }
         shownBody = nil
+        bodyFindHighlights = []
         self.bodyHeight?.constant = 0
         bodyText.isHidden = true
         return false
+    }
+
+    /// The Find highlights painted in the body (Task 15), in body ranges. Empty when the body
+    /// carries none, so a repaint of a body without matches costs nothing.
+    private(set) var bodyFindHighlights: [(range: NSRange, isCurrent: Bool)] = []
+
+    /// Whether the body shows `body` (the presentation string, by identity).
+    func showsBody(_ body: NSAttributedString) -> Bool { shownBody === body && !bodyText.isHidden }
+
+    /// Paints Find highlights in the L2 body, with the message rows' colors and mechanism
+    /// (`SelectableBlockTextView.applyFindHighlights`).
+    func applyBodyFindHighlights(_ highlights: [(range: NSRange, isCurrent: Bool)]) {
+        guard !(highlights.isEmpty && bodyFindHighlights.isEmpty) else { return }
+        bodyText.applyFindHighlights(highlights)
+        bodyFindHighlights = highlights
+    }
+
+    override func clearFindHighlights() {
+        super.clearFindHighlights()
+        bodyFindHighlights = []
+    }
+
+    /// The rect of `range` of the body text, in `view`'s coordinates. Nil when the body is hidden
+    /// or the range is outside it.
+    func bodyRect(forCharacterRange range: NSRange, in view: NSView) -> NSRect? {
+        guard !bodyText.isHidden, let manager = bodyText.layoutManager, let container = bodyText.textContainer,
+              range.length > 0, NSMaxRange(range) <= bodyText.textStorage?.length ?? 0 else { return nil }
+        layoutSubtreeIfNeeded()
+        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+        let origin = bodyText.textContainerOrigin
+        rect.origin.x += origin.x
+        rect.origin.y += origin.y
+        return bodyText.convert(rect, to: view)
     }
 
     /// Find repaint: updates the L1 pill only (no reconfigure: the L2 body, its links and any
@@ -969,6 +1005,7 @@ final class ToolInvocationCellView: ToolCardCellView {
     override func prepareForReuse() {
         super.prepareForReuse()
         shownBody = nil
+        bodyFindHighlights = []
     }
 }
 
@@ -1092,12 +1129,17 @@ struct ToolPresentation {
     /// `RenderedToolBody.plainCopyText` for a whole-body copy, with the open "Show script" pane's
     /// copy text after a blank line.
     var plainCopyText: String?
+    /// Decoded Find matches → ranges of `attributed` (Task 15). The "Show script" pane maps nothing.
+    var findMap: ToolFindMap = .empty
+    /// The body's fold controls, in rendered order (Find opens the one that hides a match).
+    var foldLinks: [ToolFoldLink] = []
 }
 
 /// Everything one L2 render needs, captured on the main thread.
 struct ToolPresentationRequest {
     var ref: ToolInvocationRef
-    /// "id|contentStamp|status": the `ToolInvocationBuilder.build` result's cache key.
+    /// "session|id|contentStamp|status" (`ToolSearchTextStore.invocationKey`): the
+    /// `ToolInvocationBuilder.build` result's cache key.
     var invocationKey: String
     /// `invocationKey` plus the font and width buckets: the presentation's cache key.
     var key: String
@@ -1146,7 +1188,10 @@ enum ToolPresentationRenderer {
         }
         return ToolPresentation(folds: folds, scriptShown: scriptShown, attributed: attributed,
                                 bodyHeight: measuredHeight(of: attributed, width: width),
-                                plainCopyText: plainCopyText)
+                                plainCopyText: plainCopyText,
+                                findMap: ToolFindMap(segments: ToolSearchText.segments(of: invocation),
+                                                     sourceMap: rendered.sourceMap),
+                                foldLinks: rendered.foldLinks.map(\.action))
     }
 
     /// Cache cost of a built invocation: its text in UTF-16 units (outputs, plain forms, script

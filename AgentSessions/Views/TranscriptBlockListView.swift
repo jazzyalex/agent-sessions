@@ -319,7 +319,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             repoRootPath: repoRootPath,
             ideTarget: ideTarget,
             ideBinaryOverridePath: ideBinaryOverridePath,
-            activeRoleFilters: activeRoleFilters)
+            activeRoleFilters: activeRoleFilters,
+            sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache)
 
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.onTopProximityChange = onTopProximityChange
@@ -546,17 +547,27 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// so the user's explicit choice survives a later Esc.
     private var autoOpenedGroupsByFind: Set<Int> = []
     private var autoOpenedInvocationsByFind: Set<Int> = []
+    /// Folds Find opened to show a navigated match (Task 15): invocation → fold key → the state
+    /// before (nil: none). Restored with the rows on Esc; a manual fold click on that pane drops
+    /// its entry, so the reader's own choice stays.
+    private var autoChangedFoldsByFind: [Int: [Int: FoldState?]] = [:]
+    /// The navigated decoded match that still waits for its invocation's L2 body (a render, or a
+    /// fold Find opened) before it can be highlighted and scrolled into view.
+    private var pendingFindReveal: (invocationID: Int, match: TranscriptDerivedState.BlockMatch)?
 
     /// L1 summaries, keyed by invocation id; an entry is valid while its
     /// content stamp and status match (`ToolInvocationBuilder.rowSummary` is
     /// cheap but scans code-mode chunks, ~1.4 ms on 2 MB).
     private var rowSummaryCache: [Int: (stamp: Int, status: ToolStatus, summary: ToolRowSummary)] = [:]
     /// `ToolInvocationBuilder.build` results (expensive, built off the main
-    /// thread), keyed by "id|stamp|status". Cost: the model's text in UTF-16
-    /// units (`ToolPresentationRenderer.cost(of:)`), so a few Show-all sized
-    /// outputs cannot pin hundreds of MB.
-    private let toolInvocationCache = NSCacheMemo<ToolInvocation>(
+    /// thread), keyed by `ToolSearchTextStore.invocationKey` ("session|id|stamp|status").
+    /// Cost: the model's text in UTF-16 units (`ToolPresentationRenderer.cost(of:)`), so a
+    /// few Show-all sized outputs cannot pin hundreds of MB. In the app it is the Find decode
+    /// pass's cache (`apply(sharedToolInvocationCache:)`), so a row Find decoded opens without
+    /// a build, and the pass reuses what a row built.
+    private var toolInvocationCache = NSCacheMemo<ToolInvocation>(
         countLimit: 64, totalCostLimit: BlockTableController.toolCacheCostLimit)
+    private var usesSharedToolInvocationCache = false
     /// Rendered and measured L2 bodies, keyed by "id|stamp|status|font|width";
     /// an entry is valid while its fold state and script flag match. Cost: the
     /// rendered body's UTF-16 length.
@@ -1266,8 +1277,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                repoRootPath: String? = nil,
                ideTarget: IDEOpener.Target = .systemDefault,
                ideBinaryOverridePath: String = "",
-               activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) -> Bool {
+               activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases),
+               sharedToolInvocationCache: NSCacheMemo<ToolInvocation>? = nil) -> Bool {
         guard let table else { return false }
+
+        if let shared = sharedToolInvocationCache, shared !== toolInvocationCache {
+            toolInvocationCache = shared
+            usesSharedToolInvocationCache = true
+        }
 
         let newMarkers = TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: allBlocks)
         let markersChanged = newMarkers != telemetryMarkers
@@ -2343,8 +2360,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         scriptShownInvocations.removeAll()
         autoOpenedGroupsByFind.removeAll()
         autoOpenedInvocationsByFind.removeAll()
+        autoChangedFoldsByFind.removeAll()
+        pendingFindReveal = nil
         rowSummaryCache.removeAll()
-        toolInvocationCache.removeAll()
+        // Keys are session-qualified; the shared cache also holds the decode pass's work.
+        if !usesSharedToolInvocationCache { toolInvocationCache.removeAll() }
         toolPresentationCache.removeAll()
         latestToolPresentation.removeAll()
         toolPresentationInFlight.removeAll()
@@ -2378,12 +2398,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// `TranscriptToolRows.contentStamp` over the member blocks in the FULL
     /// stream: it changes when an output arrives or grows.
     private func contentStamp(of ref: ToolInvocationRef) -> Int {
-        let members = Self.memberBlocks(of: ref)
-        var length = 0
-        for member in members where allBlocksCache.indices.contains(member) {
-            length += allBlocksCache[member].text.utf16.count
-        }
-        return TranscriptToolRows.contentStamp(memberCount: members.count, utf16Length: length)
+        ToolSearchTextStore.contentStamp(of: ref, blocks: allBlocksCache)
     }
 
     /// Cached L1 summary (`ToolInvocationBuilder.rowSummary`), keyed by
@@ -2657,12 +2672,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             applyLinkAttributes(rowID: rowModel.id, text: cell.bodyText.string, to: storage,
                                 skippingExistingLinks: true)
         }
+        paintToolBodyFind(on: cell, rowModel: rowModel)
         finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
     }
 
+    /// Find highlights inside an open invocation's L2 body (Task 15, spec §6.8): each decoded
+    /// match of the row maps through the shown presentation's `findMap` (a match over several
+    /// rendered lines paints each piece; the current match in the accent tint). Raw-space
+    /// matches (invocation not decoded yet) and folded text paint nothing: the pill counts them.
+    private func paintToolBodyFind(on cell: ToolInvocationCellView, rowModel: BlockRowModel) {
+        guard case .toolInvocation(let model) = rowModel.content else { return }
+        var highlights: [(range: NSRange, isCurrent: Bool)] = []
+        if !findQuery.isEmpty, model.isOpen, let presentation = latestToolPresentation[model.invocationID],
+           cell.showsBody(presentation.attributed) {
+            let currentOrdinal = findMatches.indices.contains(findCurrentOrdinal) ? findMatches[findCurrentOrdinal].ordinal : nil
+            for match in findMatchesByRowID[rowModel.id] ?? [] where match.space == .decoded {
+                for range in presentation.findMap.renderedRanges(forSearchRange: match.rangeInBlockText) {
+                    highlights.append((range, match.ordinal == currentOrdinal))
+                }
+            }
+        }
+        cell.applyBodyFindHighlights(highlights)
+    }
+
     /// The count a tool row's pill shows: a closed group header counts its
-    /// invocations' matches; an invocation row its own (L2 highlights come
-    /// with decoded-text Find).
+    /// invocations' matches; an invocation row its own (its L2 body also
+    /// highlights the shown ones, `paintToolBodyFind`).
     private func toolFindMatchCount(for rowModel: BlockRowModel) -> Int {
         if case .toolGroupHeader(let header) = rowModel.content, header.isOpen { return 0 }
         return findMatchCount(forRowID: rowModel.id)
@@ -2718,6 +2753,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .copyOutput(let action):
             copyToolOutput(action: action, invocationID: invocationID)
             return
+        }
+        // The reader's own fold choice wins over Find's: Esc leaves this pane as set.
+        switch link {
+        case .showMore(let key), .showAll(let key), .openLongLine(let key, _), .showFullCommand(let key):
+            autoChangedFoldsByFind[invocationID]?.removeValue(forKey: key)
+        case .showScript, .copyOutput:
+            break
         }
         foldStates[invocationID] = folds
         // The body's text changes: a selection over it would be stale.
@@ -3027,7 +3069,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func toolPresentationRequest(for invocationID: Int) -> ToolPresentationRequest? {
         guard let ref = toolInvocationRef(id: invocationID) else { return nil }
-        let invocationKey = "\(ref.id)|\(contentStamp(of: ref))|\(ref.status)"
+        // The Find decode pass builds under the same key (`ToolSearchTextStore`).
+        let invocationKey = ToolSearchTextStore.invocationKey(sessionID: sessionID ?? "", ref: ref, blocks: allBlocksCache)
         let width = max(1, currentBodyWidth() - ToolRowMetrics.bodyLeadingIndent)
         let contrast = increaseContrastProvider()
         return ToolPresentationRequest(
@@ -3085,7 +3128,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
               let rowIndex = invocationRowIndex(id),
               case .toolInvocation(let model) = rows[rowIndex].content, model.isOpen else { return }
         latestToolPresentation[id] = presentation
-        reloadToolRows(IndexSet(integer: rowIndex))
+        // A navigated Find match in this body: the reader looks at the match, not the tail, so
+        // the reload does not pin the end; then highlight-and-scroll, or open its fold.
+        let revealsFindMatch = pendingFindReveal?.invocationID == id
+        reloadToolRows(IndexSet(integer: rowIndex), followTail: !revealsFindMatch)
+        if revealsFindMatch { revealPendingFindMatch() }
     }
 
     /// Re-stamps every realized row cell with its current row index. Rows that
@@ -3102,10 +3149,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// landed off the main thread). A reader following the tail stays pinned
     /// to the bottom — the grown row would otherwise push the end out of view
     /// and the document-frame observer would turn follow-tail off. Otherwise
-    /// the viewport stays still when a reloaded row sits above it.
-    private func reloadToolRows(_ indexes: IndexSet) {
+    /// the viewport stays still when a reloaded row sits above it. `followTail: false` (a Find
+    /// jump into the row) never pins the end.
+    private func reloadToolRows(_ indexes: IndexSet, followTail: Bool = true) {
         guard let table, !indexes.isEmpty else { return }
-        let sticky = isNearBottom || isScrolledToBottom()
+        let sticky = followTail && (isNearBottom || isScrolledToBottom())
         let visible = table.rows(in: table.visibleRect)
         let aboveViewport = visible.length > 0 && (indexes.first ?? Int.max) < visible.lowerBound
         let anchor = !sticky && aboveViewport ? captureScrollAnchor() : nil
@@ -3564,6 +3612,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         guard !matches.isEmpty else {
             findCurrentOrdinal = 0
+            pendingFindReveal = nil
+            // Spec §6.8: the search index still matches raw tool text (until P3), so a jump from
+            // search can find nothing in the decoded text. Then open the tool row whose raw text
+            // matched to L2 and flash it.
+            if source == .unified, shouldJump, reset || queryChanged { jumpToRawOnlyToolMatch(query: q) }
             repaintAllVisibleFind()
             return (0, 0)
         }
@@ -3610,8 +3663,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             findMatches.indices.contains(findCurrentOrdinal) ? findMatches[findCurrentOrdinal] : nil
         findMatches = matches
         rebuildFindMatchesByRowID()
+        // A vanished match (the decode pass turned an invocation's raw matches into decoded ones)
+        // hands the current match to the first one of the same invocation or later.
         guard let newOrdinal = TranscriptFindNavigator.reconciledOrdinal(
-            previous: previous, previousOrdinal: findCurrentOrdinal, newMatches: matches) else {
+            previous: previous, previousOrdinal: findCurrentOrdinal, newMatches: matches,
+            owner: { block in self.toolInvocationID(forBlock: block) ?? block }) else {
             findCurrentOrdinal = 0
             repaintAllVisibleFind()
             return (0, 0)
@@ -3752,18 +3808,127 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let match = findMatches[findCurrentOrdinal]
         let target = match.globalBlockIndex
         widen(toIncludeBlock: target)
-        autoExpandCollapsedMatch(match)
+        autoExpandCollapsedMatch(block: target)
         scrollToBlock(target) // widens (no-op here) if off-window, then scrolls + flashes
+        // Task 15: a decoded match sits in the invocation's L2 body. Show it there: open the
+        // fold that hides it, then scroll the match itself into view (the row can be taller
+        // than the viewport).
+        pendingFindReveal = nil
+        if match.space == .decoded, let invocationID = toolInvocationID(forBlock: target) {
+            pendingFindReveal = (invocationID, match)
+            revealPendingFindMatch()
+        }
+    }
+
+    /// Shows the navigated decoded match in its open invocation's L2 body (spec §6.8): when the
+    /// current body shows it, scroll its rect into view; when a fold hides it, open that fold
+    /// (recorded for Esc) and come back when the new body lands (`finishToolPresentation`). Each
+    /// opening changes a fold state that only grows, so this ends; when nothing more opens (past
+    /// the Show-all caps, or a footer word) the row's pill counts the match.
+    private func revealPendingFindMatch() {
+        guard let reveal = pendingFindReveal else { return }
+        let id = reveal.invocationID
+        guard findMatches.indices.contains(findCurrentOrdinal), findMatches[findCurrentOrdinal] == reveal.match,
+              let rowIndex = invocationRowIndex(id),
+              case .toolInvocation(let model) = rows[rowIndex].content, model.isOpen else {
+            pendingFindReveal = nil
+            return
+        }
+        // Not rendered for the current folds and width yet: the landing calls back.
+        guard let presentation = shownToolPresentation(for: model) else { return }
+        let pieces = presentation.findMap.renderedRanges(forSearchRange: reveal.match.rangeInBlockText)
+        if !pieces.isEmpty {
+            pendingFindReveal = nil
+            scrollToolBodyRangeIntoView(row: rowIndex, ranges: pieces, body: presentation.attributed)
+            return
+        }
+        let foldLinks = presentation.foldLinks
+        withToolInvocation(id) { [weak self] invocation in
+            guard let self, let pending = self.pendingFindReveal, pending.invocationID == id,
+                  pending.match == reveal.match else { return }
+            guard let opening = ToolFindFolds.opening(forSearchRange: reveal.match.rangeInBlockText, in: invocation,
+                                                      folds: self.foldStates[id] ?? [:], foldLinks: foldLinks) else {
+                self.pendingFindReveal = nil
+                return
+            }
+            self.openFoldForFind(invocationID: id, key: opening.key, state: opening.state)
+        }
+    }
+
+    /// The presentation the open row shows, when it is the one for the current request (folds,
+    /// width, font); otherwise starts that render and returns nil.
+    private func shownToolPresentation(for model: ToolInvocationRowModel) -> ToolPresentation? {
+        let id = model.invocationID
+        guard let shown = toolPresentation(for: model), let request = toolPresentationRequest(for: id),
+              let cached = toolPresentationCache.object(forKey: request.key as NSString),
+              request.isSatisfied(by: cached), cached.attributed === shown.attributed else { return nil }
+        return shown
+    }
+
+    /// Sets a fold Find opens and re-renders the row; the state before is kept for Esc (only the
+    /// first time per pane, so Esc goes back to the reader's own state).
+    private func openFoldForFind(invocationID id: Int, key: Int, state: FoldState) {
+        var folds = foldStates[id] ?? [:]
+        if autoChangedFoldsByFind[id]?.keys.contains(key) != true {
+            autoChangedFoldsByFind[id, default: [:]].updateValue(folds[key], forKey: key)
+        }
+        folds[key] = state
+        foldStates[id] = folds
+        // The body's text changes: a selection over it would be stale.
+        clearCrossBlockSelection()
+        guard let rowIndex = invocationRowIndex(id), case .toolInvocation(let model) = rows[rowIndex].content,
+              model.isOpen else { return }
+        _ = toolPresentation(for: model)
+    }
+
+    /// Scrolls so the body text `ranges` of the invocation at `row` are in view (a third from the
+    /// top), when they are not already. The row itself was scrolled to by `scrollToBlock`. `body`
+    /// is the presentation the ranges index; a cell that still shows an older one reloads first.
+    private func scrollToolBodyRangeIntoView(row rowIndex: Int, ranges: [NSRange], body: NSAttributedString) {
+        guard let table, let scroll, let first = ranges.first, rows.indices.contains(rowIndex) else { return }
+        table.layoutSubtreeIfNeeded()
+        var candidate = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? ToolInvocationCellView
+        if let shown = candidate, !shown.showsBody(body) {
+            reloadToolRows(IndexSet(integer: rowIndex), followTail: false)
+            table.layoutSubtreeIfNeeded()
+            candidate = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? ToolInvocationCellView
+        }
+        let span = ranges.dropFirst().reduce(first) { NSUnionRange($0, $1) }
+        guard let cell = candidate, cell.showsBody(body),
+              let rect = cell.bodyRect(forCharacterRange: span, in: table) else { return }
+        let visible = scroll.contentView.bounds
+        guard !visible.contains(rect) else { return }
+        let maxY = max(0, table.bounds.height - visible.height)
+        let target = min(max(0, rect.minY - visible.height / 3), maxY)
+        scroll.contentView.scroll(to: NSPoint(x: visible.minX, y: target))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    /// Spec §6.8 unified-search jump with 0 decoded matches: the first tool block (from the
+    /// viewport top, wrapping) whose RAW text matches `query` — what the search index matched —
+    /// opens to L2 and its row flashes. Nothing when the Tools filter hides tool rows or no raw
+    /// tool text matches (the search hit was elsewhere, for example in the title).
+    private func jumpToRawOnlyToolMatch(query: String) {
+        guard activeRoleFilters.isEmpty || activeRoleFilters.contains(.tools), !allBlocksCache.isEmpty else { return }
+        let start = min(max(0, firstVisibleBlockIndex() ?? 0), allBlocksCache.count - 1)
+        let order = Array(allBlocksCache.indices[start...]) + Array(allBlocksCache.indices[..<start])
+        guard let block = order.first(where: { index in
+            toolInvocationID(forBlock: index) != nil
+                && SearchTextMatcher.hasMatch(in: allBlocksCache[index].text, query: query)
+        }) else { return }
+        widen(toIncludeBlock: block)
+        autoExpandCollapsedMatch(block: block)
+        scrollToBlock(block)   // scrolls to the invocation row and flashes it
     }
 
     /// Open (Task 16, spec §6.8) the closed group and the closed invocation
-    /// that own a tool `match`, so the jump lands on the invocation row with
+    /// that own a tool block, so the jump lands on the invocation row with
     /// its L2 detail. No-ops for a non-tool block or one that is already open.
-    /// Opening a fold to the match (and painting the match inside L2) is the
-    /// decoded-text Find's job (Task 15); until then the row's pill counts it.
+    /// Opening a fold to the match and painting it inside L2 follow when the
+    /// body lands (`revealPendingFindMatch`, Task 15).
     /// No animation: a find jump lands instantly, `flashRow` gives confirmation.
-    private func autoExpandCollapsedMatch(_ match: TranscriptDerivedState.BlockMatch) {
-        guard let invocationID = toolInvocationID(forBlock: match.globalBlockIndex) else { return }
+    private func autoExpandCollapsedMatch(block: Int) {
+        guard let invocationID = toolInvocationID(forBlock: block) else { return }
         var changed = false
         if let header = toolGroupHeader(containing: invocationID), !openGroups.contains(header.groupID) {
             openGroups.insert(header.groupID)
@@ -3786,12 +3951,28 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// open). Called from `applyFind`'s empty-query clear branch; always
     /// empties both sets, so a stale id can never leak into the next find.
     private func recollapseAutoExpandedFindRows() {
-        guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty else { return }
+        pendingFindReveal = nil
+        guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty
+                || !autoChangedFoldsByFind.isEmpty else { return }
+        // Folds Find opened go back to their state before (Task 15).
+        let restoredFolds = autoChangedFoldsByFind
+        autoChangedFoldsByFind.removeAll()
+        for (id, panes) in restoredFolds {
+            var folds = foldStates[id] ?? [:]
+            for (key, before) in panes { folds[key] = before }
+            foldStates[id] = folds.isEmpty ? nil : folds
+        }
         openGroups.subtract(autoOpenedGroupsByFind)
         openInvocations.subtract(autoOpenedInvocationsByFind)
         autoOpenedGroupsByFind.removeAll()
         autoOpenedInvocationsByFind.removeAll()
         applyToolRowsChange()
+        // An invocation that stays open re-renders with its restored folds.
+        for id in restoredFolds.keys {
+            guard let row = invocationRowIndex(id), case .toolInvocation(let model) = rows[row].content,
+                  model.isOpen else { continue }
+            _ = toolPresentation(for: model)
+        }
     }
 
     /// Re-paint find highlights (and pills, via reconfigure) on every visible
@@ -3813,12 +3994,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// branch can't recurse).
     private func paintFind(on cell: TranscriptRowCell, rowModel: BlockRowModel, ordinal: Int) {
         if rowModel.isToolRow {
-            // Tool rows show their count on a pill (header or L1 line). Update
-            // the pill only: a reconfigure would reset the L2 body (dropping
-            // the reader's selection in it) on every find keystroke.
+            // Tool rows show their count on a pill (header or L1 line), and an
+            // open invocation highlights its shown matches in L2. No
+            // reconfigure: it would reset the L2 body (dropping the reader's
+            // selection in it) on every find keystroke.
             let count = toolFindMatchCount(for: rowModel)
             (cell as? ToolGroupHeaderCellView)?.updateFindMatchCount(count)
-            (cell as? ToolInvocationCellView)?.updateFindMatchCount(count)
+            if let invocationCell = cell as? ToolInvocationCellView {
+                invocationCell.updateFindMatchCount(count)
+                paintToolBodyFind(on: invocationCell, rowModel: rowModel)
+            }
             return
         }
         guard !findQuery.isEmpty, let card = cell as? BlockCardCellView else {
@@ -3834,8 +4019,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Classify the row's rendered shape for find-highlight mapping. Message
     /// rows map block.text directly (markdown rows through their source map);
-    /// tool rows (until decoded-text Find maps L2 through
-    /// `RenderedToolBody.sourceMap`, Task 15) and meta rows are non-renderable.
+    /// meta rows are non-renderable. Tool rows are non-renderable here: their
+    /// L2 bodies paint decoded matches through the presentation's find map
+    /// (`paintToolBodyFind`, Task 15).
     private func findRowShape(for row: BlockRowModel) -> TranscriptFindNavigator.RowShape {
         if row.isMeta || row.isToolRow { return .nonRenderable }
         // Review cards (Task C2): the displayed summary is DERIVED text (≠
@@ -4960,18 +5146,23 @@ final class SelectableBlockTextView: NSTextView {
     /// UTF-16 into THIS view's string, which for renderable rows is identical to
     /// the block text the match ranges index.
     func applyFindHighlights(all ranges: [NSRange], current: NSRange?) {
+        applyFindHighlights(ranges.map { r in (range: r, isCurrent: current.map { NSEqualRanges($0, r) } ?? false) })
+    }
+
+    /// The same highlights with the current flag per range: a decoded tool match (Task 15) can
+    /// show as several ranges (one per rendered line), all of them current.
+    func applyFindHighlights(_ highlights: [(range: NSRange, isCurrent: Bool)]) {
         guard let storage = textStorage else { return }
         let fullLen = storage.length
         clearFindHighlights()
         guard fullLen > 0 else { return }
         storage.beginEditing()
-        for r in ranges {
-            guard NSMaxRange(r) <= fullLen else { continue }
-            let isCurrent = current.map { NSEqualRanges($0, r) } ?? false
-            let color: NSColor = isCurrent
+        for h in highlights {
+            guard NSMaxRange(h.range) <= fullLen else { continue }
+            let color: NSColor = h.isCurrent
                 ? NSColor.controlAccentColor.withAlphaComponent(0.45)
                 : NSColor.systemYellow.withAlphaComponent(0.35)
-            storage.addAttribute(.backgroundColor, value: color, range: r)
+            storage.addAttribute(.backgroundColor, value: color, range: h.range)
         }
         storage.endEditing()
     }

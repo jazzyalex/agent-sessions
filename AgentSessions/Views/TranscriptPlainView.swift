@@ -1924,6 +1924,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             Spacer(minLength: 0)
 
+            // Session view Find searches decoded tool output (spec §6.8). Until the decode pass
+            // ends, outputs not decoded yet are searched raw, and Find re-runs once at the end.
+            if viewMode == .blocks, derivedState.isDecodingToolText, !findQuery.isEmpty {
+                Text(String(localized: "Searching tool output…",
+                            comment: "Session view find bar status: tool outputs are still being prepared for search, so the match count can still change."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
             HStack(spacing: 6) {
                 Button(action: { performFind(resetIndex: false, direction: -1, shouldJump: true) }) {
                     Image(systemName: "chevron.left")
