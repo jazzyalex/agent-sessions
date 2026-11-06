@@ -1,17 +1,18 @@
-## 2026-11-05 · transcript-tool-rendering · P0+P1 tool view built; owner QA and one perf finding open
+## 2026-11-05 · transcript-tool-rendering · P0+P1 tool view built; owner QA open
 status: in-progress
 
 **State:** Branch `feature/transcript-tool-rendering` (worktree `.claude/worktrees/transcript-tool-rendering`), all 18 tasks done and reviewed. Nothing is pushed or merged. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree.
 
 **Verified:**
-- Full suite: 4228 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
+- Full suite: 4236 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
 - Corpus check (Task 17): 1,119 sessions, 30,763 invocations, 0 violations.
 - L2 open on a 2.4 MB output: main thread 0.7-1.5 ms in `toggleInvocation` (limit 50 ms); body lands ~585 ms later, off main.
-- Snapshot perf (coalescedBlocks + computeSnapshot, 5 runs, medians, `main` 555fbfdd vs HEAD). The gate is judged on Release (`-configuration Release ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`, because the test target needs the DEBUG hooks): Codex 78 MB 614 -> 616 ms (1.00), Claude 45 MB 509 -> 529 ms (1.04). PASS. Debug, for information: Codex 666 -> 759 ms (1.14; it was 1294 ms before the label fixes), Claude 528 -> 555 ms (1.05). Debug Codex gap: coalesce +40 ms, `ToolInvocationIndex.build` +48 ms spread over many small parts (isPollCall 15, status of outputs 14, codeModeFacts 6, runningProcessID 5, status of calls 2); no single hot spot, so nothing was changed.
+- Snapshot perf (coalescedBlocks + computeSnapshot, 5 runs, medians, `main` 555fbfdd vs 92c07346). The gate is judged on Release (`-configuration Release ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`, because the test target needs the DEBUG hooks): Codex 78 MB 614 -> 616 ms (1.00), Claude 45 MB 509 -> 529 ms (1.04). PASS. Debug, for information: Codex 666 -> 759 ms (1.14; it was 1294 ms before the label fixes), Claude 528 -> 555 ms (1.05). Debug Codex gap: coalesce +40 ms, `ToolInvocationIndex.build` +48 ms spread over many small parts (isPollCall 15, status of outputs 14, codeModeFacts 6, runningProcessID 5, status of calls 2); no single hot spot, so nothing was changed.
+- Exec label pass, measured with a throwaway timer (78 MB Codex session, 1,809 `exec` calls, 2.8 MB of script, 5 runs, medians): full parser only 375 ms Release / 606 ms Debug; `callLabelArgument` with the fast path 85 ms Release / 158 ms Debug. The fast path decides 1,360 calls; 448 calls have no `cmd` in their first call and go to the parser. The stricter fast path of the last fix round costs +4.7 ms Release over the 92c07346 one (36 vs 31 ms, fast path only). The end-to-end snapshot was not measured again; adding 4.7 ms gives an estimated 621 ms (1.01x `main`). The stricter fast path causes no extra parser fallbacks on this session.
 
 **Decided / don't redo:**
 - Spec: `docs/superpowers/specs/2026-11-04-transcript-tool-rendering-design.md`; plan: `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-p0-p1.md`.
-- Perf fixes done: inputs above 8 KB are scanned on a 16 KB prefix, and Codex `exec` labels use a UTF-8 fast path (`ExecFirstCommandScan`) that falls back to `CodexExecScript.parse` when undecided. The fast path cut the 608 ms exec label cost to a few ms.
+- Perf fixes done: inputs above 8 KB are scanned on a 16 KB prefix, and Codex `exec` labels use a UTF-8 fast path (`ExecFirstCommandScan`). The fast path returns nil, so `CodexExecScript.parse` runs, wherever it could read the script differently: a second `cmd`, input the parser rejects, or a spot where the parser's Characters differ from the bytes. A `cmd` that runs past the 16 KB prefix keeps the part that was read. A label for an input above 8 KB with no primary argument shows the start of the raw input, whitespace collapsed, with no full parse. Measured cost: see Verified.
 - `exitCode(from: rawJSON)` over all blocks costs ~225 ms in Debug on Codex 78 MB, and it was already on `main`; it is the largest remaining coalesce cost if a later release wants more speed.
 - P2 deferred: Claude rejected rows, process-poll collapse, per-action jump stops, JSON value unescaping in output panes, item_completed sidecar, persisted-output Open link, markdown/image rendering.
 
