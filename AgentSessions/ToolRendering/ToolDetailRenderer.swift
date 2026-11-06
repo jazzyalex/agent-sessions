@@ -103,12 +103,34 @@ struct RenderedToolBody {
 /// Pure: no views and no main-actor state; colors are dynamic and resolve at draw time (Increase
 /// Contrast is the cell's job). Call it off the main thread, like `ToolInvocationBuilder.build`.
 enum ToolDetailRenderer {
+    /// - Parameters:
+    ///   - scriptShown: the "Show script" pane is open, so its link reads "Hide script".
+    ///   - increaseContrast: the system Increase Contrast setting is on; pane fills are stronger.
     static func render(_ invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat,
-                       folds: [Int: FoldState], appearance: NSAppearance) -> RenderedToolBody {
+                       folds: [Int: FoldState], appearance: NSAppearance,
+                       scriptShown: Bool = false, increaseContrast: Bool = false) -> RenderedToolBody {
         _ = appearance  // dynamic colors only; see the type comment
-        var builder = Builder(invocation: invocation, fontSize: fontSize, width: width, folds: folds)
+        var builder = Builder(invocation: invocation, fontSize: fontSize, width: width, folds: folds,
+                              scriptShown: scriptShown, increaseContrast: increaseContrast)
         builder.renderInvocation()
         return builder.finish()
+    }
+
+    /// The pane fill: the 4.2 code card fill. With Increase Contrast it takes a 9% mix of the label
+    /// color (the 6% card tint x1.5), so it sits farther from the page in light and dark. Dynamic:
+    /// it resolves per appearance when drawn.
+    static func paneFill(increaseContrast: Bool) -> NSColor {
+        let base = MarkdownStyle.codeBlockBackground
+        guard increaseContrast else { return base }
+        return NSColor(name: nil) { appearance in
+            var resolved = base
+            appearance.performAsCurrentDrawingAppearance {
+                let fill = base.usingColorSpace(.sRGB) ?? base
+                let label = NSColor.labelColor.usingColorSpace(.sRGB) ?? NSColor.labelColor
+                resolved = fill.blended(withFraction: 0.09, of: label) ?? fill
+            }
+            return resolved
+        }
     }
 }
 
@@ -167,6 +189,10 @@ enum ToolDetailText {
 
     static var showScript: String {
         String(localized: "Show script", comment: "Transcript tool detail link: shows the script the agent ran.")
+    }
+
+    static var hideScript: String {
+        String(localized: "Hide script", comment: "Transcript tool detail link: hides the script pane the agent's script was shown in.")
     }
 
     static var systemNote: String {
@@ -232,11 +258,17 @@ private struct Builder {
     /// The current pane's fill: one instance per pane, used for both `.backgroundColor` and the
     /// find-restore marker (`clearFindHighlights` restores the exact instance).
     private var paneFill: NSColor = MarkdownStyle.codeBlockBackground
+    private let increaseContrast: Bool
+    private let scriptShown: Bool
 
-    init(invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat, folds: [Int: FoldState]) {
+    init(invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat, folds: [Int: FoldState],
+         scriptShown: Bool, increaseContrast: Bool) {
         self.invocation = invocation
         self.folds = folds
         self.width = width
+        self.scriptShown = scriptShown
+        self.increaseContrast = increaseContrast
+        paneFill = ToolDetailRenderer.paneFill(increaseContrast: increaseContrast)
         mono = NSFont.monospacedSystemFont(ofSize: max(1, fontSize - 0.5), weight: .regular)
         let measured = ("0" as NSString).size(withAttributes: [.font: mono]).width
         advance = measured > 0 ? measured : mono.pointSize * 0.6
@@ -259,7 +291,7 @@ private struct Builder {
            !actions.contains(where: { $0.exactCommand == source }) {
             if out.length > 0 { gap(Style.partGap) }
             startBlock(proseBase(size: Style.foldFontSize, color: .secondaryLabelColor))
-            link(ToolDetailText.showScript, .showScript, base: blockBase)
+            link(scriptShown ? ToolDetailText.hideScript : ToolDetailText.showScript, .showScript, base: blockBase)
         }
     }
 
@@ -804,7 +836,7 @@ private struct Builder {
     /// line starts at the first glyph), and never over paragraph spacing. A spacer line whose "\n"
     /// sits at x = 0 starts the fill at the left edge, so every pane line is filled edge to edge.
     private mutating func beginPane() {
-        paneFill = MarkdownStyle.codeBlockBackground
+        paneFill = ToolDetailRenderer.paneFill(increaseContrast: increaseContrast)
         gap(Style.paneVerticalPadding, filled: true)
     }
 

@@ -458,6 +458,44 @@ final class ToolDetailRendererTests: XCTestCase {
         XCTAssertTrue(body.plainCopyText.contains("a.txt\n\n$ pwd"), "a blank line between actions: \(body.plainCopyText)")
     }
 
+    func testShowScriptLinkReadsHideScriptWhileShown() {
+        var invocation = invocation([shell("ls", output: "a.txt")])
+        invocation.scriptSource = "const a = await tools.exec_command({cmd: \"ls\"});"
+        invocation.scriptOutput = decoded("summary")
+        let shown = ToolDetailRenderer.render(invocation, fontSize: fontSize, width: width, folds: [:],
+                                              appearance: NSAppearance(named: .aqua)!, scriptShown: true)
+        let text = shown.attributed.string as NSString
+        let link = shown.foldLinks.first { $0.action == .showScript }
+        XCTAssertEqual(link.map { text.substring(with: $0.range) }, "Hide script")
+        XCTAssertEqual(render(invocation).foldLinks.first { $0.action == .showScript }
+            .map { (render(invocation).attributed.string as NSString).substring(with: $0.range) }, "Show script")
+    }
+
+    func testIncreaseContrastStrengthensPaneFill() {
+        let source = invocation([shell("make", output: "built")])
+        let normal = render(source)
+        let contrast = ToolDetailRenderer.render(source, fontSize: fontSize, width: width, folds: [:],
+                                                 appearance: NSAppearance(named: .aqua)!, increaseContrast: true)
+        XCTAssertEqual(normal.attributed.string, contrast.attributed.string, "only the colors change")
+        let at = (normal.attributed.string as NSString).range(of: "built").location
+        let normalFill = normal.attributed.attribute(.backgroundColor, at: at, effectiveRange: nil) as? NSColor
+        let contrastFill = contrast.attributed.attribute(.backgroundColor, at: at, effectiveRange: nil) as? NSColor
+        XCTAssertNotNil(contrastFill)
+        XCTAssertFalse(sameColor(contrastFill, normalFill ?? .clear), "the pane fill is stronger")
+        // Strength: farther from the page background (white in light, black in dark) than before.
+        for (name, page) in [(NSAppearance.Name.aqua, CGFloat(1)), (.darkAqua, CGFloat(0))] {
+            var normalGray: CGFloat = 0
+            var contrastGray: CGFloat = 0
+            NSAppearance(named: name)!.performAsCurrentDrawingAppearance {
+                normalGray = normalFill?.usingColorSpace(.deviceGray)?.whiteComponent ?? -1
+                contrastGray = contrastFill?.usingColorSpace(.deviceGray)?.whiteComponent ?? -1
+            }
+            XCTAssertGreaterThan(abs(contrastGray - page), abs(normalGray - page), "\(name.rawValue)")
+        }
+        XCTAssertTrue(sameColor(contrast.attributed.attribute(.markdownCodeBlockBg, at: at, effectiveRange: nil),
+                                contrastFill ?? .clear), "the find-restore marker keeps the same fill")
+    }
+
     func testErrorOutputShowsTailFirst() {
         let action = shell("make", output: numbered(1...100), status: .failed(exitCode: 2),
                            facts: [AgentFact(kind: .exitCode(2))], bracket: "exit 2")

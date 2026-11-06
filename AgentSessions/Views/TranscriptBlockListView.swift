@@ -577,10 +577,21 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Bumped when the linkify inputs (gate, cwd, repo root) change.
     private var toolBodyLinkGeneration = 0
 
-    /// True while an L2 render is running or queued (test seam).
+    /// True while an L2 render is running or queued, or a menu / hover action still waits for its
+    /// off-main build (test seam).
     var hasPendingToolPresentations: Bool {
-        !toolPresentationInFlight.isEmpty || !toolPresentationQueued.isEmpty
+        !toolPresentationInFlight.isEmpty || !toolPresentationQueued.isEmpty || pendingToolActions > 0
     }
+
+    /// Menu and hover actions waiting for `ToolInvocationBuilder.build` to land.
+    private var pendingToolActions = 0
+    /// Where the Copy actions of tool rows write (tests use a private pasteboard).
+    var toolPasteboard: NSPasteboard = .general
+    /// The system Increase Contrast setting (tests replace it).
+    var increaseContrastProvider: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
+    private var contrastObserver: NSObjectProtocol?
+    /// The raw event popover that is open, if any.
+    private var rawEventPopover: NSPopover?
 
     /// Full coalesced stream length last seen (drives window re-pinning).
     private var totalBlockCount: Int = 0
@@ -899,11 +910,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         installScrollObserver(on: scroll)
         installDocumentFrameObserver(on: scroll)
         installAppearanceObserver(on: table)
+        installContrastObserver()
         emitProximityIfNeeded(force: true)
     }
 
     func tearDown() {
         proximityReportGeneration &+= 1
+        if let contrastObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(contrastObserver)
+            self.contrastObserver = nil
+        }
+        rawEventPopover?.close()
+        rawEventPopover = nil
         if let frameObserver {
             NotificationCenter.default.removeObserver(frameObserver)
             self.frameObserver = nil
@@ -2604,6 +2622,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let groupID = header.groupID
         cell.configure(header: header, accent: Self.toolAccent,
                        findMatchCount: toolFindMatchCount(for: rowModel),
+                       increaseContrast: increaseContrastProvider(),
                        onToggle: { [weak self] allRows in self?.toggleGroup(groupID: groupID, allRows: allRows) })
         finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
     }
@@ -2617,8 +2636,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             findMatchCount: toolFindMatchCount(for: rowModel),
             body: presentation?.attributed, bodyHeight: presentation?.bodyHeight ?? 0,
             bodyGeneration: toolBodyLinkGeneration,
+            increaseContrast: increaseContrastProvider(),
             onToggle: { [weak self] allInGroup in
                 self?.toggleInvocation(invocationID: invocationID, allInGroup: allInGroup)
+            },
+            onCopy: { [weak self] actionIndex in
+                self?.copyTool(.plain, invocationID: invocationID, actionIndex: actionIndex)
+            },
+            onRaw: { [weak self] anchor, view in
+                self?.showRawEvent(invocationID: invocationID, relativeTo: anchor, of: view)
+            },
+            menuProvider: { [weak self] actionIndex, selection in
+                self?.toolContextMenu(invocationID: invocationID, actionIndex: actionIndex, selectionText: selection)
             })
         // File-path links in the L2 text (Task C3 parity), around the fold
         // controls the renderer already linked — only when the body text was
@@ -2702,8 +2731,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// "Copy output": the pane's whole decoded output (an action's output, the
     /// script output at `actions.count`, the script at `actions.count + 1`).
     private func copyToolOutput(action: Int, invocationID: Int) {
-        guard let request = toolPresentationRequest(for: invocationID) else { return }
-        let copy: (ToolInvocation) -> Void = { invocation in
+        withToolInvocation(invocationID) { [weak self] invocation in
             let text: String?
             if action < invocation.actions.count {
                 text = invocation.actions[action].output?.text
@@ -2713,27 +2741,188 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 text = invocation.scriptSource
             }
             guard let text, !text.isEmpty else { return }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            self?.writeToolText(text)
         }
+    }
+
+    private func writeToolText(_ text: String) {
+        toolPasteboard.clearContents()
+        toolPasteboard.setString(text, forType: .string)
+    }
+
+    /// Runs `perform` with the built `ToolInvocation`: at once when it is cached, else after
+    /// `ToolInvocationBuilder.build` ran off the main thread (never a build on main). The result
+    /// is cached; a session switch in between drops the action.
+    private func withToolInvocation(_ invocationID: Int, perform: @escaping (ToolInvocation) -> Void) {
+        guard let request = toolPresentationRequest(for: invocationID) else { return }
         if let cached = toolInvocationCache.object(forKey: request.invocationKey as NSString) {
-            copy(cached)
+            perform(cached)
             return
         }
         let blocks = allBlocksCache
         let index = invocationIndex
         let source = source
-        let cache = toolInvocationCache
-        Task.detached(priority: .userInitiated) {
+        let generation = toolPresentationGeneration
+        pendingToolActions += 1
+        Task.detached(priority: .userInitiated) { [weak self] in
             let invocation = ToolInvocationBuilder.build(request.ref, blocks: blocks, index: index, source: source,
                                                          duration: request.duration)
             let cost = ToolPresentationRenderer.cost(of: invocation)
-            await MainActor.run {
-                cache.setObject(invocation, forKey: request.invocationKey as NSString, cost: cost)
-                copy(invocation)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.pendingToolActions -= 1
+                guard generation == self.toolPresentationGeneration else { return }
+                self.toolInvocationCache.setObject(invocation, forKey: request.invocationKey as NSString, cost: cost)
+                perform(invocation)
             }
         }
+    }
+
+    // MARK: Context menu, hover actions, raw event (Task 13b)
+
+    /// What a menu item of an invocation row does.
+    private enum ToolMenuCommand {
+        case copy(ToolCopyKind)
+        /// Copy the text the reader selected in the body.
+        case copySelection(String)
+        case showRaw
+        case expandAllInGroup
+        case speak
+        case stopSpeaking
+    }
+
+    private struct ToolMenuPayload {
+        var command: ToolMenuCommand
+        var invocationID: Int
+        var actionIndex: Int?
+    }
+
+    /// The context menu of an invocation row. `actionIndex` names the line that was clicked (the
+    /// menu then covers that action only); nil covers the whole invocation. `selectionText` is the
+    /// text selected in the body: Copy copies it.
+    func toolContextMenu(invocationID: Int, actionIndex: Int?, selectionText: String? = nil) -> NSMenu {
+        let menu = NSMenu(title: ToolMenuText.contextMenuTitle)
+        menu.autoenablesItems = false
+        let ref = toolInvocationRef(id: invocationID)
+        let actions = ref.map { rowSummary(for: $0).actions } ?? []
+        let target = actionIndex.flatMap { actions.indices.contains($0) ? [actions[$0]] : nil } ?? actions
+        let group = toolGroupHeader(containing: invocationID)
+
+        func add(_ title: String, _ command: ToolMenuCommand, enabled: Bool = true) {
+            let item = NSMenuItem(title: title, action: #selector(toolMenuAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = enabled
+            item.representedObject = ToolMenuPayload(command: command, invocationID: invocationID,
+                                                     actionIndex: actionIndex)
+            menu.addItem(item)
+        }
+
+        add(ToolMenuText.copy, selectionText.map { .copySelection($0) } ?? .copy(.plain))
+        add(ToolMenuText.copyCommand, .copy(.command), enabled: target.contains { $0.category == .shell })
+        add(ToolMenuText.copyOutput, .copy(.output), enabled: ref?.outputBlockIndices.isEmpty == false)
+        add(ToolMenuText.copyAsMarkdown, .copy(.markdown))
+        menu.addItem(.separator())
+        add(ToolMenuText.showRawEvent, .showRaw)
+        if let group {
+            add(ToolMenuText.expandAllInGroup, .expandAllInGroup,
+                enabled: !group.isOpen || group.invocationIDs.contains { !openInvocations.contains($0) })
+        }
+        menu.addItem(.separator())
+        add(ToolMenuText.speak, .speak)
+        add(ToolMenuText.stopSpeaking, .stopSpeaking, enabled: isSpeaking)
+        return menu
+    }
+
+    @objc private func toolMenuAction(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ToolMenuPayload else { return }
+        switch payload.command {
+        case .copy(let kind):
+            copyTool(kind, invocationID: payload.invocationID, actionIndex: payload.actionIndex)
+        case .copySelection(let text):
+            writeToolText(text)
+        case .showRaw:
+            showRawEventFromRow(invocationID: payload.invocationID)
+        case .expandAllInGroup:
+            expandAllInGroup(invocationID: payload.invocationID)
+        case .speak:
+            speakTool(invocationID: payload.invocationID, actionIndex: payload.actionIndex)
+        case .stopSpeaking:
+            stopSpeaking()
+        }
+    }
+
+    /// Copies one of the forms of an invocation (or of one action of it) to the pasteboard.
+    func copyTool(_ kind: ToolCopyKind, invocationID: Int, actionIndex: Int?) {
+        withToolInvocation(invocationID) { [weak self] invocation in
+            guard let text = ToolCopyFormat.text(kind, invocation: invocation, actionIndex: actionIndex) else { return }
+            self?.writeToolText(text)
+        }
+    }
+
+    private func speakTool(invocationID: Int, actionIndex: Int?) {
+        withToolInvocation(invocationID) { [weak self] invocation in
+            guard let text = ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: actionIndex) else { return }
+            self?.speak(text)
+        }
+    }
+
+    /// Opens every invocation of the group of `invocationID` (and the group).
+    func expandAllInGroup(invocationID: Int) {
+        guard let header = toolGroupHeader(containing: invocationID) else { return }
+        openGroups.insert(header.groupID)
+        autoOpenedGroupsByFind.remove(header.groupID)
+        userToggledGroupMembers.formUnion(header.invocationIDs)
+        for id in header.invocationIDs {
+            openInvocations.insert(id)
+            autoOpenedInvocationsByFind.remove(id)
+        }
+        applyToolRowsChange()
+    }
+
+    /// The pretty-printed stored events of an invocation and the notice, as the popover shows them.
+    /// Needs only the blocks' `rawJSON`: no build.
+    func makeRawEventViewController(invocationID: Int) -> ToolRawEventViewController {
+        let members = toolInvocationRef(id: invocationID).map(Self.memberBlocks(of:)) ?? []
+        let blocks = members.compactMap { allBlocksCache.indices.contains($0) ? allBlocksCache[$0] : nil }
+        return ToolRawEventViewController(rawText: ToolRawEvent.text(for: blocks))
+    }
+
+    /// Shows the raw event popover of an invocation, anchored at `rect` of `view`.
+    @discardableResult
+    func showRawEvent(invocationID: Int, relativeTo rect: NSRect, of view: NSView) -> NSPopover? {
+        guard view.window != nil else { return nil }
+        rawEventPopover?.close()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = makeRawEventViewController(invocationID: invocationID)
+        popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+        rawEventPopover = popover
+        return popover
+    }
+
+    private func showRawEventFromRow(invocationID: Int) {
+        guard let rowIndex = invocationRowIndex(invocationID), let table,
+              let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: false) as? ToolInvocationCellView
+        else { return }
+        showRawEvent(invocationID: invocationID, relativeTo: cell.bounds, of: cell)
+    }
+
+    // MARK: Increase Contrast
+
+    private func installContrastObserver() {
+        if let contrastObserver { NSWorkspace.shared.notificationCenter.removeObserver(contrastObserver) }
+        contrastObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.accessibilityDisplayOptionsDidChange()
+        }
+    }
+
+    /// The system accessibility display options changed: visible rows are configured again (card
+    /// tint and border), and open rows render again with the new setting (it is part of the
+    /// presentation cache key; the old body stays until the new one lands).
+    func accessibilityDisplayOptionsDidChange() {
+        reconfigureVisibleRows()
     }
 
     // MARK: Off-main L2 presentation
@@ -2759,11 +2948,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard let ref = toolInvocationRef(id: invocationID) else { return nil }
         let invocationKey = "\(ref.id)|\(contentStamp(of: ref))|\(ref.status)"
         let width = max(1, currentBodyWidth() - ToolRowMetrics.bodyLeadingIndent)
+        let contrast = increaseContrastProvider()
         return ToolPresentationRequest(
             ref: ref, invocationKey: invocationKey,
-            key: "\(invocationKey)|\(fontBucket(fontSize))|\(widthBucket(width))",
+            key: "\(invocationKey)|\(fontBucket(fontSize))|\(widthBucket(width))|\(contrast ? "ic" : "std")",
             folds: foldStates[invocationID] ?? [:], scriptShown: scriptShownInvocations.contains(invocationID),
-            fontSize: fontSize, width: width, duration: invocationDuration(ref))
+            fontSize: fontSize, width: width, duration: invocationDuration(ref), increaseContrast: contrast)
     }
 
     /// Runs one request off the main thread: `ToolInvocationBuilder.build`
@@ -2789,7 +2979,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             let invocationCost = ToolPresentationRenderer.cost(of: invocation)
             let presentation = ToolPresentationRenderer.render(invocation, folds: request.folds,
                                                                scriptShown: request.scriptShown,
-                                                               fontSize: request.fontSize, width: request.width)
+                                                               fontSize: request.fontSize, width: request.width,
+                                                               increaseContrast: request.increaseContrast)
             await MainActor.run { [weak self] in
                 self?.finishToolPresentation(request, invocation: invocation, invocationCost: invocationCost,
                                              presentation: presentation, generation: generation)
@@ -3975,6 +4166,9 @@ final class DynamicFillView: NSView {
     /// the (possibly stale) `layer` reference.
     var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
     var masksToBounds: Bool = false { didSet { needsDisplay = true } }
+    /// Optional 1 pt border (dynamic color, resolved at draw time). Tool cards use
+    /// `separatorColor` here under Increase Contrast.
+    var borderColor: NSColor? { didSet { needsDisplay = true } }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -3992,6 +4186,8 @@ final class DynamicFillView: NSView {
         layer?.backgroundColor = fillColor.withAlphaComponent(fillAlpha).cgColor
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = masksToBounds
+        layer?.borderWidth = borderColor == nil ? 0 : 1
+        layer?.borderColor = borderColor?.cgColor
     }
 
     /// Animate the fill alpha from its current value down to `target` (used for
@@ -4629,11 +4825,16 @@ final class SelectableBlockTextView: NSTextView {
 
     // MARK: Context menu (parity with SessionTerminalView's transcript menu)
 
+    /// Set by tool invocation cells: the menu of the whole row, shown instead of the block menu.
+    var rowMenuProvider: ((NSEvent) -> NSMenu?)?
+
     /// Custom right-click menu: Copy · Copy Block · Speak · Stop Speaking —
     /// restoring the affordances the retired Terminal view had. Each block card
     /// is its own text view, so "the block" is simply this view's full string
     /// (no charIndex→block mapping needed, unlike Terminal's single big view).
     override func menu(for event: NSEvent) -> NSMenu? {
+        // A tool invocation's body shows the row's menu (Copy, Copy Command, … Show Raw Event).
+        if let rowMenuProvider, let rowMenu = rowMenuProvider(event) { return rowMenu }
         let menu = NSMenu(title: String(localized: "Transcript", comment: "Title of a transcript context menu."))
         menu.autoenablesItems = false
 

@@ -358,6 +358,118 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "显示脚本" } }
       }
     },
+    "Hide script": {
+      "comment": "Transcript tool detail link: hides the script pane the agent's script was shown in.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hide script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "隐藏脚本" } }
+      }
+    },
+    "Copy Command": {
+      "comment": "Transcript tool row context menu: copies the shell command of the call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy Command" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "拷贝命令" } }
+      }
+    },
+    "Copy Output": {
+      "comment": "Transcript tool row context menu: copies the decoded output of the call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy Output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "拷贝输出" } }
+      }
+    },
+    "Copy as Markdown": {
+      "comment": "Transcript tool row context menu: copies the call as Markdown, one fenced block per action.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy as Markdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "以 Markdown 格式拷贝" } }
+      }
+    },
+    "Show Raw Event": {
+      "comment": "Transcript tool row context menu and hover button: shows the raw JSON of the call and its output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show Raw Event" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "显示原始事件" } }
+      }
+    },
+    "Expand All in Group": {
+      "comment": "Transcript tool row context menu: opens every tool call of the group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Expand All in Group" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "展开组内全部" } }
+      }
+    },
+    "Tool call": {
+      "comment": "Title of the context menu of a transcript tool call row.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tool call" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工具调用" } }
+      }
+    },
+    "Large strings were shortened when the app stored this event.": {
+      "comment": "Notice in the raw event popover of a tool call: very long strings in the stored event were cut.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Large strings were shortened when the app stored this event." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "存储此事件时，过长的字符串已被截短。" } }
+      }
+    },
+    "No raw event was stored for this call.": {
+      "comment": "Text in the raw event popover of a tool call when the session holds no raw event for it.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No raw event was stored for this call." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此调用没有存储原始事件。" } }
+      }
+    },
+    "tool.status.succeeded": {
+      "comment": "VoiceOver status of a transcript tool call that finished without an error.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "succeeded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已成功" } }
+      }
+    },
+    "tool.status.failed": {
+      "comment": "VoiceOver status of a transcript tool call that failed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已失败" } }
+      }
+    },
+    "tool.status.rejected": {
+      "comment": "VoiceOver status of a transcript tool call the user declined.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "rejected" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已拒绝" } }
+      }
+    },
+    "tool.status.noResult": {
+      "comment": "VoiceOver status of a transcript tool call that has no stored result.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无结果" } }
+      }
+    },
+    "tool.status.running": {
+      "comment": "VoiceOver status of a transcript tool call that has no result yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "running" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行中" } }
+      }
+    },
+    "tool.row.expanded": {
+      "comment": "VoiceOver state of an open transcript tool row or group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "expanded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已展开" } }
+      }
+    },
+    "tool.row.collapsed": {
+      "comment": "VoiceOver state of a closed transcript tool row or group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "collapsed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已折叠" } }
+      }
+    },
     "system note": {
       "comment": "Transcript tool detail: a collapsed note the agent's app added to the tool output (for example a system reminder).",
       "localizations": {

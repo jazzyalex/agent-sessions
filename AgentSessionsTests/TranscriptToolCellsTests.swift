@@ -364,6 +364,192 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5, 6], "the closed group stays closed")
     }
 
+    // MARK: - Task 13b: copy, raw event, VoiceOver, Increase Contrast
+
+    /// A private pasteboard, so the tests never touch the user's.
+    private func privatePasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("tool-cells-test-\(UUID().uuidString)"))
+    }
+
+    /// Runs the main run loop until `condition` holds.
+    private func spin(until condition: () -> Bool, timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+    }
+
+    private func menuItem(_ menu: NSMenu, _ title: String) -> NSMenuItem? {
+        menu.items.first { $0.title == title }
+    }
+
+    private func perform(_ item: NSMenuItem?, in menu: NSMenu) {
+        guard let item else { return XCTFail("menu item missing") }
+        menu.performActionForItem(at: menu.index(of: item))
+    }
+
+    func testCopyReturnsPlainText() throws {
+        // Two actions in one invocation are not available through a plain Claude pair, so the
+        // single-action forms are checked here and the multi-action join by the format helpers.
+        let h = Harness([user(), bash("t1", "make"), output("t1", "built 3 targets\nok"), assistant()])
+        let pasteboard = privatePasteboard()
+        h.controller.toolPasteboard = pasteboard
+        let menu = h.controller.toolContextMenu(invocationID: 1, actionIndex: nil)
+        XCTAssertEqual(menu.items.map(\.title).filter { !$0.isEmpty },
+                       ["Copy", "Copy Command", "Copy Output", "Copy as Markdown", "Show Raw Event", "Speak",
+                        "Stop Speaking"], "a solo invocation has no group to expand")
+
+        perform(menuItem(menu, "Copy"), in: menu)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "$ make\nbuilt 3 targets\nok",
+                       "Copy is the plain form: no gutter, no fold rows")
+
+        pasteboard.clearContents()
+        perform(menuItem(menu, "Copy Command"), in: menu)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "make")
+
+        pasteboard.clearContents()
+        perform(menuItem(menu, "Copy Output"), in: menu)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "built 3 targets\nok")
+
+        pasteboard.clearContents()
+        perform(menuItem(menu, "Copy as Markdown"), in: menu)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "**Ran make**\n```\n$ make\nbuilt 3 targets\nok\n```")
+        XCTAssertFalse(h.controller.hasPendingToolPresentations, "the menu action built off the main thread and finished")
+    }
+
+    func testCopyFormatsJoinActionsAndFenceSafely() {
+        func action(_ command: String?, _ verb: String, _ object: String, output: String?, plain: String) -> ToolAction {
+            ToolAction(category: command == nil ? .read : .shell, verbKey: verb, object: object,
+                       objectIsAgentLabel: false, objectDetail: nil, context: [], command: command,
+                       exactCommand: command, heredoc: nil, inputFields: [],
+                       output: output.map { DecodedText(text: $0, sourceMap: [], shape: .plain) }, facts: [],
+                       hiddenNotes: [], status: .success, plainText: plain)
+        }
+        let a = action("make", ToolVerb.ran, "make", output: "ok", plain: "$ make\nok")
+        let b = action(nil, ToolVerb.read, "App.swift", output: "code ``` fence", plain: "Read App.swift\ncode ``` fence")
+        var invocation = ToolInvocation(ref: ToolInvocationRef(id: 1, callBlockIndex: 1, outputBlockIndices: [2], status: .success),
+                                        displayToolName: "exec", actions: [a, b], scriptSource: nil,
+                                        scriptOutput: DecodedText(text: "loose", sourceMap: [], shape: .plain),
+                                        durationSeconds: nil)
+        XCTAssertEqual(ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: nil),
+                       "$ make\nok\n\nRead App.swift\ncode ``` fence\n\nloose")
+        XCTAssertEqual(ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: 1), "Read App.swift\ncode ``` fence")
+        XCTAssertEqual(ToolCopyFormat.text(.command, invocation: invocation, actionIndex: nil), "make")
+        XCTAssertNil(ToolCopyFormat.text(.command, invocation: invocation, actionIndex: 1), "no shell action: nothing to copy")
+        XCTAssertEqual(ToolCopyFormat.text(.output, invocation: invocation, actionIndex: nil),
+                       "ok\n\ncode ``` fence\n\nloose")
+        XCTAssertEqual(ToolCopyFormat.text(.markdown, invocation: invocation, actionIndex: nil),
+                       "**Ran make**\n```\n$ make\nok\n```\n\n**Read App.swift**\n````\nRead App.swift\ncode ``` fence\n````",
+                       "a fence longer than any backtick run inside the text")
+        invocation.scriptOutput = nil
+        XCTAssertEqual(ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: nil),
+                       "$ make\nok\n\nRead App.swift\ncode ``` fence")
+    }
+
+    func testHoverCopyAndRawReachTheController() throws {
+        let h = Harness([user(), bash("t1", "make"), output("t1", "ok")])
+        let pasteboard = privatePasteboard()
+        h.controller.toolPasteboard = pasteboard
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        cell.performHoverCopy(actionIndex: 0)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "$ make\nok")
+    }
+
+    func testShowRawMentionsShortenedStrings() throws {
+        var call = bash("t1", "make")
+        call.rawJSON = #"{"type":"tool_use","input":{"command":"make","blob":"[OMITTED bytes=9000]"}}"#
+        var out = output("t1", "ok")
+        // Claude stores rawJSON base64-encoded.
+        out.rawJSON = Data(#"{"type":"tool_result","content":"ok"}"#.utf8).base64EncodedString()
+        var other = bash("t2", "ls")
+        other.rawJSON = #"{"type":"tool_use","input":{"command":"ls"}}"#
+        let h = Harness([user(), call, out, other, output("t2")])
+
+        let controller = h.controller.makeRawEventViewController(invocationID: 1)
+        let text = controller.displayedText
+        XCTAssertTrue(text.contains("Large strings were shortened when the app stored this event."), text)
+        XCTAssertTrue(text.contains("[OMITTED bytes=9000]"))
+        XCTAssertTrue(text.contains("\"tool_use\""), "the call, pretty-printed")
+        XCTAssertTrue(controller.rawText.contains("\n  \"input\""), "pretty-printed with indentation: \(controller.rawText)")
+        XCTAssertTrue(controller.rawText.contains("\"tool_result\""), "the base64 output event is decoded")
+        XCTAssertTrue(controller.rawText.contains("tool_use") && controller.rawText.contains("tool_result"))
+
+        let clean = h.controller.makeRawEventViewController(invocationID: 3)
+        XCTAssertFalse(clean.displayedText.contains("Large strings were shortened"))
+        XCTAssertTrue(clean.rawText.contains("\"ls\""))
+
+        // The popover itself opens from the invocation's cell (the two calls form a closed group).
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let popover = try XCTUnwrap(h.controller.showRawEvent(invocationID: 1, relativeTo: cell.bounds, of: cell))
+        // (The test window is never ordered in, so the popover does not report `isShown`.)
+        XCTAssertEqual((popover.contentViewController as? ToolRawEventViewController)?.rawText, controller.rawText)
+        popover.close()
+    }
+
+    func testVoiceOverLabel() throws {
+        let failed = F.block(.toolOut, id: "t1", text: "boom", isError: true, sidecar: ToolSidecar(exitCode: 2))
+        let h = Harness([user(), bash("t1", "make"), failed, bash("t2", "ls"), output("t2"), assistant()])
+        // The failed row is seeded open; the group is open with it.
+        let failedCell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertEqual(failedCell.lineAccessibilityLabels, ["Ran make, failed, exit 2"])
+        XCTAssertEqual(failedCell.accessibilityDisclosureValue, "expanded")
+
+        let okCell = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
+        XCTAssertEqual(okCell.lineAccessibilityLabels, ["Ran ls, succeeded"], "no chips: no third part")
+        XCTAssertEqual(okCell.accessibilityDisclosureValue, "collapsed")
+
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        let header = try XCTUnwrap(h.view(id: hid(1), as: ToolGroupHeaderCellView.self))
+        XCTAssertEqual(header.accessibilityDisclosureValue, "collapsed")
+        XCTAssertTrue(header.accessibilityLabelText.hasPrefix("2 tool calls"), header.accessibilityLabelText)
+        XCTAssertTrue(header.accessibilityLabelText.contains("1 failed"), header.accessibilityLabelText)
+
+        XCTAssertEqual(ToolAccessibility.statusWord(.pending), "running")
+        XCTAssertEqual(ToolAccessibility.statusWord(.rejected), "rejected")
+        XCTAssertEqual(ToolAccessibility.statusWord(.noResult), "no result")
+        XCTAssertEqual(ToolAccessibility.statusWord(.interrupted), "interrupted")
+        XCTAssertNil(ToolAccessibility.statusWord(.unknown))
+    }
+
+    func testIncreaseContrastReachesRenderedRows() throws {
+        var contrast = false
+        let h = Harness([user(), bash("t1", "make"), output("t1", "built")])
+        h.controller.increaseContrastProvider = { contrast }
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+
+        func fill(_ cell: ToolInvocationCellView) -> NSColor? {
+            let text = cell.bodyText.string as NSString
+            let at = text.range(of: "built").location
+            guard at != NSNotFound else { return nil }
+            return cell.bodyText.textStorage?.attribute(.backgroundColor, at: at, effectiveRange: nil) as? NSColor
+        }
+        func white(_ color: NSColor?) -> CGFloat {
+            var value: CGFloat = -1
+            NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
+                value = color?.usingColorSpace(.deviceGray)?.whiteComponent ?? -1
+            }
+            return value
+        }
+        let before = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let normalWhite = white(fill(before))
+        XCTAssertGreaterThan(normalWhite, 0)
+        XCTAssertNil(before.cardBackground.borderColor, "no border without Increase Contrast")
+        let tint = before.cardBackground.fillAlpha
+
+        contrast = true
+        h.controller.accessibilityDisplayOptionsDidChange()
+        XCTAssertTrue(h.waitForPresentations(), "open rows render again")
+        let after = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertLessThan(white(fill(after)), normalWhite, "darker pane fill in light mode")
+        XCTAssertNotNil(after.cardBackground.borderColor, "the card gets a separator border")
+        XCTAssertEqual(after.cardBackground.fillAlpha, tint * 1.5, accuracy: 0.0001, "tint x1.5")
+    }
+
     func testRekeyedGroupKeepsOpenStateWhenWindowWidens() throws {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 c3 · 6 o3 · 7 assistant, then filler. The tail
         // window starts at block 4, so the group is keyed by invocation 3 until the window widens.
