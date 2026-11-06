@@ -17,6 +17,8 @@ import Foundation
 ///   sidecar first, then outputs), then the command's first line.
 /// - **Every other tool**: one action with the category's verb (a structured action's verb is
 ///   its tool name), the primary argument as object, and the input as fields.
+/// - **Antigravity** writes every argument value as JSON text; each value is decoded once before any
+///   of the above reads it (spec §7.1 item 4).
 ///
 /// Per-action status: a code-mode command whose chunk maps to it (chunk count == call count, every
 /// call `exec_command` / `write_stdin`) takes that chunk's status from the metadata-only scan
@@ -177,7 +179,7 @@ enum ToolInvocationBuilder {
                              scriptSource: input)
         }
 
-        let arguments = parseInput(input)
+        let arguments = parseInput(input, source: source)
         if ToolStatusProbe.isPoll(toolName: toolName) {
             return InputPlan(displayToolName: display,
                              drafts: [pollDraft(toolName: toolName ?? "", arguments: arguments.object,
@@ -281,7 +283,7 @@ enum ToolInvocationBuilder {
             }
             return commands.lazy.compactMap { $0 }.first.map(singleLine)
         }
-        guard let command = shellParts(parseInput(call.toolInput).object)?.command else { return nil }
+        guard let command = shellParts(parseInput(call.toolInput, source: source).object)?.command else { return nil }
         return singleLine(command)
     }
 
@@ -320,7 +322,8 @@ enum ToolInvocationBuilder {
         var isScript = false
         switch arguments["command"] ?? arguments["cmd"] ?? arguments["CommandLine"] {
         case .string(let raw)?:
-            command = unwrapJSONString(raw)
+            // Antigravity's double-encoded `CommandLine` is already decoded (`parseInput`).
+            command = raw
             exact = command
             if let lifted = liftStringWrapper(command) {
                 command = lifted.command
@@ -494,14 +497,6 @@ enum ToolInvocationBuilder {
         return "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// A value that is itself a JSON string literal (Antigravity double-encodes arguments) is
-    /// unwrapped once.
-    private static func unwrapJSONString(_ text: String) -> String {
-        guard text.count >= 2, text.first == "\"", text.last == "\"",
-              case .string(let inner)? = ToolTextDecoding.decodeJSONString(text, maxDepth: 1) else { return text }
-        return inner
-    }
-
     private static func baseName(_ word: String) -> String {
         word.split(separator: "/").last.map(String.init) ?? word
     }
@@ -515,16 +510,28 @@ enum ToolInvocationBuilder {
         var other: ToolPayloadValue?
     }
 
-    private static func parseInput(_ input: String?) -> Arguments {
+    private static func parseInput(_ input: String?, source: SessionSource) -> Arguments {
         guard let input, !input.isEmpty else { return Arguments(object: [:], other: nil) }
         if let first = input.first(where: { !$0.isWhitespace }), first == "{" || first == "[",
            let data = input.data(using: .utf8),
            let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
            let value = ToolPayloadValue(jsonObject: parsed) {
-            if case .object(let object) = value { return Arguments(object: object, other: nil) }
+            if case .object(let object) = value {
+                return Arguments(object: source == .antigravity ? object.mapValues(decodedArgument) : object, other: nil)
+            }
             return Arguments(object: [:], other: value)
         }
         return Arguments(object: [:], other: .string(input))
+    }
+
+    /// Spec §7.1 item 4: Antigravity writes every argument value as JSON text (`"CommandLine":"\"date\""`,
+    /// `"AllowMultiple":"false"`, `"StartLine":"12"`). Such a value is decoded once, so labels, fields and
+    /// plain text show the value itself. A value that is not JSON text stays as written.
+    private static func decodedArgument(_ value: ToolPayloadValue) -> ToolPayloadValue {
+        guard case .string(let text) = value, let data = text.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              let decoded = ToolPayloadValue(jsonObject: parsed) else { return value }
+        return decoded
     }
 
     /// Spec §6.3 primary arguments, in the order the label reads them.

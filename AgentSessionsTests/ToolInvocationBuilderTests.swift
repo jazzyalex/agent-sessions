@@ -486,6 +486,46 @@ final class ToolInvocationBuilderTests: XCTestCase {
 
     // MARK: - Generic tools
 
+    /// Corpus check (Task 17): Antigravity writes every argument value as JSON text. Each value is
+    /// decoded once (spec §7.1 item 4), so no field, label or plain text shows its quotes and escapes.
+    func testAntigravityArgumentValuesAreDecodedOnce() {
+        let edit = json(["TargetFile": "\"/a/b/Foo.swift\"", "ReplacementContent": "\"let a = \\\"x\\\"\\nlet b = 2\"",
+                         "AllowMultiple": "false", "StartLine": "12", "Note": "plain text"])
+        let s = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "ag:1:0", toolName: "replace_file_content", toolInput: edit),                // 1
+            F.block(.toolOut, id: "ag:1:0", text: "ok", toolName: "replace_file_content"),
+            F.block(.toolCall, id: "ag:2:0", toolName: "search_web", toolInput: json(["query": "\"swift \\\"actor\\\"\""])), // 3
+            F.block(.toolOut, id: "ag:2:0", text: "results", toolName: "search_web"),
+            F.block(.toolCall, id: "ag:3:0", toolName: "run_command",
+                    toolInput: json(["CommandLine": "\"echo \\\"hi\\\"\"", "WaitMsBeforeAsync": "500"])),         // 5
+            F.block(.toolOut, id: "ag:3:0", text: "hi", toolName: "run_command"),
+        ], source: .antigravity)
+
+        let fields = s.invocation(at: 1).actions[0].inputFields
+        XCTAssertEqual(fields.first { $0.key == "ReplacementContent" }?.value, .string("let a = \"x\"\nlet b = 2"))
+        XCTAssertEqual(fields.first { $0.key == "TargetFile" }?.value, .string("/a/b/Foo.swift"))
+        XCTAssertEqual(fields.first { $0.key == "AllowMultiple" }?.value, .bool(false))
+        XCTAssertEqual(fields.first { $0.key == "StartLine" }?.value, .number(12))
+        XCTAssertEqual(fields.first { $0.key == "Note" }?.value, .string("plain text"), "not JSON text: kept as written")
+
+        let search = s.invocation(at: 3).actions[0]
+        XCTAssertEqual(search.object, "swift \"actor\"")
+        XCTAssertEqual(s.summary(at: 3).actions.first?.object, "swift \"actor\"")
+
+        let run = s.invocation(at: 5).actions[0]
+        XCTAssertEqual(run.command, "echo \"hi\"")
+        XCTAssertEqual(run.exactCommand, "echo \"hi\"")
+
+        // Another source keeps a value that happens to be JSON text as written.
+        let claude = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "Grep", toolInput: json(["pattern": "\"use strict\""])),
+            F.block(.toolOut, id: "t1", text: "x", toolName: "Grep"),
+        ], source: .claude)
+        XCTAssertEqual(claude.invocation(at: 1).actions[0].object, "\"use strict\"")
+    }
+
     func testGenericToolsKeepTheirVerbAndFields() {
         let patch = "*** Begin Patch\n*** Update File: Sources/A.swift\n@@\n-x\n+y\n*** Add File: Sources/B.swift\n+z\n*** End Patch"
         let claude = session([
