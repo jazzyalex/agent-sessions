@@ -7,15 +7,15 @@ status: in-progress
 - Full suite: 4228 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
 - Corpus check (Task 17): 1,119 sessions, 30,763 invocations, 0 violations.
 - L2 open on a 2.4 MB output: main thread 0.7-1.5 ms in `toggleInvocation` (limit 50 ms); body lands ~585 ms later, off main.
-- Snapshot perf (coalescedBlocks + computeSnapshot, Debug, 5 runs, medians, `main` 555fbfdd vs HEAD): Claude 45 MB 528 -> 544 ms (1.03, passes). Codex 78 MB 666 -> 1294 ms (1.94, FAILS the 1.05 gate).
+- Snapshot perf (coalescedBlocks + computeSnapshot, Debug, 5 runs, medians, `main` 555fbfdd vs HEAD): Claude 45 MB 528 -> 544 ms (1.03) before the label fix, 560 ms (1.06, noise-level) after. Codex 78 MB 666 -> 1294 ms (1.94) before; 1222 ms (1.83) after the label bound. The 1.05 gate still FAILS on Codex.
 
 **Decided / don't redo:**
 - Spec: `docs/superpowers/specs/2026-11-04-transcript-tool-rendering-design.md`; plan: `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-p0-p1.md`.
-- Perf cause (coarse split): coalesce phase 484 -> 1058 ms on the Codex session. `TranscriptToolSummary.callLabelArgument` (called from `renderToolCallLabel`) costs ~730 ms over 2449 calls / 3.1 MB of inputs; Codex `exec` goes through `CodexExecScript.parse`. Not optimised in Task 18. Cache the label or parse lazily.
+- Perf cause (coarse split): coalesce phase 484 -> 986 ms on the Codex session. Inputs above 8 KB are now scanned on a 16 KB prefix (commit `perf(transcript): bound call-label parsing`), but that was not the main cost: 1809 `exec` calls average 1.5 KB (2.78 MB total) and take ~608 ms in `CodexExecScript.parse(_, maxCalls: 1)` (~0.34 ms per call, Character-based reader). Next fix: a UTF-8 level first-`cmd` scan for exec scripts, or cache labels per event id across coalesce runs.
 - P2 deferred: Claude rejected rows, process-poll collapse, per-action jump stops, JSON value unescaping in output panes, item_completed sidecar, persisted-output Open link, markdown/image rendering.
 
 **Next:**
-1. Fix the `callLabelArgument` cost, then re-measure Codex 78 MB (target <= 1.05x).
+1. Cut the per-call `CodexExecScript.parse` cost (see Decided), then re-measure Codex 78 MB (target <= 1.05x).
 2. Owner QA with the build above: P0 screenshot session (Codex rollout 2026-11-04T11-32-12, "6 tool calls", readable commands, no `\/`); Claude session with parallel Bash calls (one row per call); one OpenCode, Hermes and Cursor session; light and dark; narrow and wide; Find for a quoted string inside an output (opens the fold, Esc closes); Errors filter and ▲▼; right-click on a row header and on its open body (Copy / Copy Command / Show Raw Event); live tail of a running session.
 3. Whole-branch review via Repo MCP, then the merge decision.
 
