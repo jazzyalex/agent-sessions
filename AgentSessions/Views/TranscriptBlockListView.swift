@@ -3543,9 +3543,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     /// Handle a role ▲▼ jump intent: compute the target block for `role` relative
-    /// to the current viewport top and scroll to it. Indices are derived from
-    /// `allBlocksCache` (position == `globalBlockIndex`), so this stays in sync
-    /// with whatever the snapshot currently holds and needs no external list.
+    /// to the current viewport top and scroll to it. User and Assistant stops are
+    /// derived from `allBlocksCache` (position == `globalBlockIndex`); Tools and
+    /// Errors stops come from the snapshot's `toolJumpIDs` / `errorJumpIDs`
+    /// (Task 16), one per invocation.
     func handleRoleJumpIntent(token: Int, role: TranscriptRoleFilter?, direction: Int) {
         guard token != lastConsumedRoleJumpToken else { return }
         lastConsumedRoleJumpToken = token
@@ -3561,8 +3562,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 TranscriptRoleFilter.governing(block.kind) == role ? offset : nil
             }
         }
+        var currentTop = firstVisibleBlockIndex()
+        // A group header at the top is anchored on its first invocation's id, which ▼ must still
+        // reach: step from just before it.
+        if direction >= 0, let top = currentTop, let row = firstVisibleRow(),
+           case .toolGroupHeader = row.content {
+            currentTop = top - 1
+        }
         guard let target = Self.roleJumpTarget(indices: indices,
-                                               currentTop: firstVisibleBlockIndex(),
+                                               currentTop: currentTop,
                                                direction: direction) else { return }
         // A stop inside a closed group opens the group first, as a user open (Find's auto-open is
         // undone by Esc; this one stays).
@@ -3841,10 +3849,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// The global block index at the top of the viewport (first visible row's
     /// primary block), used to anchor the query-change reset.
     private func firstVisibleBlockIndex() -> Int? {
+        firstVisibleRow()?.anchorBlockIndex
+    }
+
+    private func firstVisibleRow() -> BlockRowModel? {
         guard let table, let scroll = scroll, !rows.isEmpty else { return nil }
         let visible = table.rows(in: scroll.contentView.bounds)
         guard visible.length > 0, rows.indices.contains(visible.lowerBound) else { return nil }
-        return rows[visible.lowerBound].anchorBlockIndex
+        return rows[visible.lowerBound]
     }
 
     /// Scroll to the row backing the current match's block, widening the window

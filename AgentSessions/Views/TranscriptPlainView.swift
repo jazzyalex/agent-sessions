@@ -1385,8 +1385,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
     }
 
-    /// Number of blocks of the given role in the current snapshot — drives the
-    /// ▲▼ jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
+    /// Number of ▲▼ stops of the given role in the current snapshot (one per tool invocation for
+    /// Tools and Errors, one per block otherwise) — drives the jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
     /// dependency so the chevrons enable/disable as the snapshot lands.
     private func roleOccurrenceCount(_ role: TranscriptRoleFilter) -> Int {
         let snap = derivedState.snapshot

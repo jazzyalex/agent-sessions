@@ -37,6 +37,9 @@ final class TranscriptDerivedState {
         var totalBlockCount: Int = 0
         var eventIDToAnchorBlockIndex: [String: Int] = [:]
         var userBlockIndices: [Int] = []
+        /// Legacy block-level lists: the ▲▼ jumps and their enabled state use `toolJumpIDs` /
+        /// `errorJumpIDs`. `toolBlockIndices` still gates the tool decode pass; `errorBlockIndices`
+        /// is only read by tests.
         var toolBlockIndices: [Int] = []
         var errorBlockIndices: [Int] = []
         var preambleUserBlockIndexes: Set<Int> = []

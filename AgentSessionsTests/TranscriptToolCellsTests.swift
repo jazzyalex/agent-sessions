@@ -431,6 +431,63 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(h.controller.openGroups.contains(1))
     }
 
+    /// A short window over a long stream so the table can scroll; filler messages keep the end reachable.
+    private func jumpHarness(_ blocks: [Block]) -> Harness {
+        Harness(blocks + (0..<40).map { _ in assistant("filler") }, size: NSSize(width: 640, height: 160))
+    }
+
+    /// Puts row `index` at the top of the viewport.
+    private func scrollRowToTop(_ h: Harness, row index: Int) {
+        h.layout()
+        h.scroll.contentView.scroll(to: NSPoint(x: 0, y: h.table.rect(ofRow: index).minY))
+        h.scroll.reflectScrolledClipView(h.scroll.contentView)
+        h.layout()
+    }
+
+    func testDownFromClosedHeaderLandsOnFirstInvocationThenStepsThroughGroup() {
+        // 0 user · 1 c o (solo) · 3 assistant · 4 c5 o · 6 c7 o (group 4: ids 4, 6) · 8 assistant
+        let h = jumpHarness([user(), bash("t1", "ls"), output("t1"), assistant(),
+                             bash("t2", "make"), output("t2"), read("t3", "/repo/a.swift"), output("t3"), assistant()])
+        XCTAssertEqual(Array(h.rowIDs.prefix(4)), [0, 1, 3, hid(4)])
+        scrollRowToTop(h, row: h.rowIndex(id: hid(4))!)
+
+        // (a) ▼ from the closed header lands on the group's first invocation and opens the group.
+        h.controller.handleRoleJumpIntent(token: 1, role: .tools, direction: 1)
+        XCTAssertTrue(h.controller.openGroups.contains(4))
+        XCTAssertTrue(h.controller.isFlashing(rowID: 4))
+
+        // (b) ▼ again: the second invocation of the now open group.
+        h.controller.handleRoleJumpIntent(token: 2, role: .tools, direction: 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 6))
+
+        // (c) ▲ from inside the group: the previous invocation, then out of the group.
+        h.controller.handleRoleJumpIntent(token: 3, role: .tools, direction: -1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 4))
+        h.controller.handleRoleJumpIntent(token: 4, role: .tools, direction: -1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testErrorsJumpOpensClosedGroupThenReachesPlainError() {
+        // 0 user · 1 c o ✗ · 3 c o (group 1: ids 1, 3) · 5 assistant · 6 plain .error
+        let h = jumpHarness([user(), bash("t1", "make"), output("t1", "boom", failed: true),
+                             bash("t2", "ls"), output("t2"), assistant(),
+                             F.block(.error, text: "plain error", isError: true)])
+        // A group with a failure opens by default; the user closes it.
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertFalse(h.controller.openGroups.contains(1))
+        scrollRowToTop(h, row: 0)
+
+        // (d) ▼ Errors reaches the failed invocation inside the closed group and opens it.
+        h.controller.handleRoleJumpIntent(token: 1, role: .errors, direction: 1)
+        XCTAssertTrue(h.controller.openGroups.contains(1))
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+
+        // The next stop is the plain error block; groups stay as they are.
+        h.controller.handleRoleJumpIntent(token: 2, role: .errors, direction: 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 6))
+        XCTAssertEqual(h.controller.openGroups, [1])
+    }
+
     // MARK: - Card chrome
 
     func testCardPositionsDrawContinuousBar() throws {
