@@ -298,4 +298,57 @@ final class TranscriptToolSummaryTests: XCTestCase {
     func testCallLabelForExecScriptIsFirstCmd() {
         XCTAssertEqual(callLabel(toolName: "exec", input: #"text(await tools.exec_command({cmd:"pwd; rg x"}));"#), "exec pwd; rg x")
     }
+
+    // MARK: - Large inputs (bounded label parsing)
+
+    private func seconds(_ body: () -> Void) -> Double {
+        let start = CFAbsoluteTimeGetCurrent()
+        body()
+        return CFAbsoluteTimeGetCurrent() - start
+    }
+
+    func testLargeJSONInputLabelIsBoundedAndCorrect() {
+        let command = "echo " + String(repeating: "abcdefghij\\n", count: 200_000)   // ~2.4 MB, escaped newlines
+        let input = #"{"command":""# + command + #"","description":"d","pad":""# + String(repeating: "x", count: 100) + #""}"#
+        XCTAssertGreaterThan(input.utf8.count, 2_000_000)
+        let expected = ("echo " + String(repeating: "abcdefghij\n", count: 20)).prefix(120)
+        var label: String?
+        let elapsed = seconds { label = TranscriptToolSummary.callLabelArgument(toolName: "Bash", toolInput: input) }
+        XCTAssertLessThan(elapsed, 0.005)
+        XCTAssertEqual(label.map { String($0.prefix(120)) }, String(expected))
+        var summary = ""
+        XCTAssertLessThan(seconds { summary = TranscriptToolSummary.summary(toolName: "Bash", toolInput: input) }, 0.005)
+        XCTAssertEqual(String(summary.prefix(120)), String(expected))
+        // Through the builder: the label is cut to 120 characters plus an ellipsis.
+        let built = callLabel(toolName: "Bash", input: input)
+        let words = Array(repeating: "abcdefghij", count: 30).joined(separator: " ")
+        XCTAssertEqual(built, String(("Bash echo " + words).prefix(120)) + "…")
+    }
+
+    func testLargeJSONInputSkipsNestedAndFindsLaterKeys() {
+        let pad = String(repeating: "z", count: 20_000)
+        let input = #"{"blob":{"command":"nested"},"list":[1,"a"],"pad":""# + pad + #"","file_path":"/a/b.txt"}"#
+        // The key sits past the 16 KB scan prefix: no label, and no work on the rest.
+        XCTAssertNil(TranscriptToolSummary.callLabelArgument(toolName: "Read", toolInput: input))
+        let near = #"{"blob":{"command":"nested"},"list":[1,"a"],"file_path":"/a/b.txt","pad":""# + pad + #""}"#
+        XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "Read", toolInput: near), "/a/b.txt")
+        XCTAssertEqual(TranscriptToolSummary.summary(toolName: "Read", toolInput: near), "b.txt")
+    }
+
+    func testLargeJSONInputArrayCommandDropsShellWrapper() {
+        let input = #"{"command":["bash","-lc","ls -la"],"pad":""# + String(repeating: "p", count: 20_000) + #""}"#
+        XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "shell", toolInput: input), "ls -la")
+    }
+
+    func testLargeExecScriptLabelIsBoundedAndCorrect() {
+        let cmd = String(repeating: "q", count: 150)
+        let script = #"text(await tools.exec_command({cmd:""# + cmd + #"",workdir:"/x"}));"# + "\n"
+            + String(repeating: "// padding line to make the script large\n", count: 60_000)
+        XCTAssertGreaterThan(script.utf8.count, 2_000_000)
+        var label: String?
+        let elapsed = seconds { label = TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script) }
+        XCTAssertLessThan(elapsed, 0.005)
+        XCTAssertEqual(label, cmd)
+        XCTAssertEqual(callLabel(toolName: "exec", input: script), String(("exec " + cmd).prefix(120)) + "…")
+    }
 }

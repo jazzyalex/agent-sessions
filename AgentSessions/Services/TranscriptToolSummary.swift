@@ -16,6 +16,9 @@ enum TranscriptToolSummary {
     /// toolInput is JSON; when it isn't parseable, junk shouldn't beat a
     /// real tool name, but the raw-line rung still serves nameless tools.
     static func summary(toolName: String?, toolInput: String?) -> String {
+        if let input = toolInput, isLarge(input) {
+            return largeInputSummary(toolName: toolName, input: input)
+        }
         if toolName == "exec", let input = toolInput, let cmd = execScriptCommand(input) {
             return cmd
         }
@@ -57,6 +60,16 @@ enum TranscriptToolSummary {
     /// script it is the first call's `cmd`. Nil when there is none.
     static func callLabelArgument(toolName: String?, toolInput: String?) -> String? {
         guard let input = toolInput, !input.isEmpty else { return nil }
+        if isLarge(input) {
+            let prefix = boundedPrefix(input)
+            if toolName == "exec", let cmd = execScriptCommand(prefix) { return cmd }
+            let fields = LargeInputScanner.scan(prefix)
+            if let command = fields.command { return command }
+            for key in ["file_path", "filePath", "target_file", "pattern", "query", "url", "path", "description"] {
+                if let value = fields.strings[key], !value.isEmpty { return value }
+            }
+            return nil
+        }
         if toolName == "exec", let cmd = execScriptCommand(input) {
             return cmd
         }
@@ -115,6 +128,182 @@ enum TranscriptToolSummary {
                        .replacingOccurrences(of: "__", with: " › ")
         guard !server.isEmpty else { return name }
         return "\(server) › \(name)"
+    }
+
+    // MARK: - Large inputs
+
+    /// Inputs above this size (UTF-8 bytes) are never fully parsed for a label or summary.
+    static let largeInputBytes = 8 * 1024
+    /// A large input is read up to this many UTF-8 bytes.
+    static let scanPrefixBytes = 16 * 1024
+
+    private static func isLarge(_ input: String) -> Bool { input.utf8.count > largeInputBytes }
+
+    private static func boundedPrefix(_ input: String) -> String {
+        String(decoding: input.utf8.prefix(scanPrefixBytes), as: UTF8.self)
+    }
+
+    /// `summary` for a large input: same priority order, fed by a bounded scan of the top-level fields.
+    private static func largeInputSummary(toolName: String?, input: String) -> String {
+        let prefix = boundedPrefix(input)
+        if toolName == "exec", let cmd = execScriptCommand(prefix) { return cmd }
+        let fields = LargeInputScanner.scan(prefix)
+        if let command = fields.command { return command }
+        let strings = fields.strings
+        if let description = strings["description"], !description.isEmpty { return description }
+        if let path = strings["file_path"] ?? strings["path"], !path.isEmpty { return lastPathComponent(path) }
+        for key in ["pattern", "query", "url"] {
+            if let value = strings[key], !value.isEmpty { return value }
+        }
+        if let toolName, !toolName.isEmpty { return toolName }
+        if let firstLine = firstNonEmptyLine(String(prefix.prefix(2_000))) { return cap(firstLine, at: 80) }
+        return "Tool call"
+    }
+
+    /// Reads the top-level string fields of a JSON object prefix without building the object.
+    /// Values are decoded to at most `maxValueBytes`; a literal cut off by the prefix keeps what was read.
+    private enum LargeInputScanner {
+        static let maxValueBytes = 4096
+        static let targets: Set<String> = ["command", "cmd", "file_path", "filePath", "target_file", "pattern",
+                                           "query", "url", "path", "description"]
+
+        struct Fields {
+            var strings: [String: String] = [:]
+            var command: String?
+        }
+
+        static func scan(_ text: String) -> Fields {
+            let b = Array(text.utf8)
+            var fields = Fields()
+            var rawCommand: String?
+            var rawCmd: String?
+            var i = 0
+            func skipSpace() { while i < b.count, b[i] == 0x20 || b[i] == 0x0A || b[i] == 0x0D || b[i] == 0x09 { i += 1 } }
+            skipSpace()
+            guard i < b.count, b[i] == UInt8(ascii: "{") else { return fields }
+            i += 1
+            while i < b.count {
+                skipSpace()
+                while i < b.count, b[i] == UInt8(ascii: ",") { i += 1; skipSpace() }
+                guard i < b.count, b[i] == UInt8(ascii: "\"") else { break }
+                let key = readString(b, &i, limit: 64)
+                skipSpace()
+                guard i < b.count, b[i] == UInt8(ascii: ":") else { break }
+                i += 1
+                skipSpace()
+                guard i < b.count else { break }
+                let isTarget = targets.contains(key.value)
+                if b[i] == UInt8(ascii: "\"") {
+                    let value = readString(b, &i, limit: isTarget ? maxValueBytes : 0)
+                    if isTarget {
+                        if key.value == "command" { rawCommand = rawCommand ?? value.value }
+                        else if key.value == "cmd" { rawCmd = rawCmd ?? value.value }
+                        else if fields.strings[key.value] == nil { fields.strings[key.value] = value.value }
+                    }
+                    if !value.terminated { break }
+                } else if b[i] == UInt8(ascii: "["), key.value == "command" || key.value == "cmd" {
+                    i += 1
+                    var parts: [String] = []
+                    var closed = false
+                    while i < b.count {
+                        skipSpace()
+                        while i < b.count, b[i] == UInt8(ascii: ",") { i += 1; skipSpace() }
+                        guard i < b.count else { break }
+                        if b[i] == UInt8(ascii: "]") { i += 1; closed = true; break }
+                        guard b[i] == UInt8(ascii: "\"") else { break }
+                        let part = readString(b, &i, limit: maxValueBytes)
+                        parts.append(part.value)
+                        if !part.terminated { break }
+                    }
+                    let filtered = Array(parts.drop(while: { ["bash", "sh", "zsh", "-lc", "-c"].contains($0) }))
+                    let joined = (filtered.isEmpty ? parts : filtered).joined(separator: " ")
+                    if !joined.isEmpty {
+                        if key.value == "command" { rawCommand = rawCommand ?? joined } else { rawCmd = rawCmd ?? joined }
+                    }
+                    if !closed { break }
+                } else if !skipValue(b, &i) {
+                    break
+                }
+            }
+            if let c = rawCommand, !c.isEmpty { fields.command = c }
+            else if let c = rawCmd, !c.isEmpty { fields.command = c }
+            return fields
+        }
+
+        /// Skips a non-string value (object, array, number, literal). False when the prefix ends inside it.
+        private static func skipValue(_ b: [UInt8], _ i: inout Int) -> Bool {
+            var depth = 0
+            while i < b.count {
+                let c = b[i]
+                if c == UInt8(ascii: "\"") {
+                    let s = readString(b, &i, limit: 0)
+                    if !s.terminated { return false }
+                    if depth == 0 { return true }
+                    continue
+                }
+                if c == UInt8(ascii: "{") || c == UInt8(ascii: "[") { depth += 1 }
+                else if c == UInt8(ascii: "}") || c == UInt8(ascii: "]") {
+                    if depth == 0 { return true }
+                    depth -= 1
+                    if depth == 0 { i += 1; return true }
+                } else if c == UInt8(ascii: ","), depth == 0 { return true }
+                i += 1
+            }
+            return false
+        }
+
+        /// Reads the string literal at `b[i] == '"'` and moves `i` past its closing quote.
+        /// Keeps at most `limit` decoded UTF-8 bytes.
+        static func readString(_ b: [UInt8], _ i: inout Int, limit: Int) -> (value: String, terminated: Bool) {
+            i += 1
+            var out: [UInt8] = []
+            func put(_ scalar: UnicodeScalar) {
+                guard out.count < limit else { return }
+                out.append(contentsOf: Array(String(scalar).utf8))
+            }
+            func hex4(_ at: Int) -> UInt32? {
+                guard at + 4 <= b.count else { return nil }
+                var v: UInt32 = 0
+                for k in at..<(at + 4) {
+                    guard let d = Character(UnicodeScalar(b[k])).hexDigitValue else { return nil }
+                    v = v * 16 + UInt32(d)
+                }
+                return v
+            }
+            while i < b.count {
+                let c = b[i]
+                if c == UInt8(ascii: "\"") {
+                    i += 1
+                    return (String(decoding: out, as: UTF8.self), true)
+                }
+                if c == UInt8(ascii: "\\") {
+                    guard i + 1 < b.count else { break }
+                    let e = b[i + 1]
+                    i += 2
+                    switch e {
+                    case UInt8(ascii: "n"): put("\n")
+                    case UInt8(ascii: "t"): put("\t")
+                    case UInt8(ascii: "r"): put("\r")
+                    case UInt8(ascii: "b"): put("\u{08}")
+                    case UInt8(ascii: "f"): put("\u{0C}")
+                    case UInt8(ascii: "u"):
+                        guard var v = hex4(i) else { return (String(decoding: out, as: UTF8.self), false) }
+                        i += 4
+                        if (0xD800..<0xDC00).contains(v), i + 6 <= b.count, b[i] == UInt8(ascii: "\\"),
+                           b[i + 1] == UInt8(ascii: "u"), let low = hex4(i + 2), (0xDC00..<0xE000).contains(low) {
+                            v = 0x10000 + ((v - 0xD800) << 10) + (low - 0xDC00)
+                            i += 6
+                        }
+                        put(UnicodeScalar(v) ?? "\u{FFFD}")
+                    default: put(UnicodeScalar(e))   // \" \\ \/
+                    }
+                    continue
+                }
+                if out.count < limit { out.append(c) }
+                i += 1
+            }
+            return (String(decoding: out, as: UTF8.self), false)
+        }
     }
 
     // MARK: - JSON helpers
