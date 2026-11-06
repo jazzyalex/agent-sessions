@@ -1392,8 +1392,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let snap = derivedState.snapshot
         switch role {
         case .user: return snap.userBlockIndices.count
-        case .tools: return snap.toolBlockIndices.count
-        case .errors: return snap.errorBlockIndices.count
+        case .tools: return snap.toolJumpIDs.count
+        case .errors: return snap.errorJumpIDs.count
         case .assistant: return snap.blocks.reduce(0) { $0 + ($1.kind == .assistant ? 1 : 0) }
         }
     }

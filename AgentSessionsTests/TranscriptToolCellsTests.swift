@@ -58,7 +58,9 @@ final class TranscriptToolCellsTests: XCTestCase {
             for invocation in index.invocations {
                 if case .failed = invocation.status { failed.insert(invocation.id) }
             }
+            let jumps = TranscriptDerivedState.jumpIDs(blocks: blocks, index: index, failedInvocationIDs: failed)
             controller.apply(allBlocks: blocks, invocationIndex: index, failedInvocationIDs: failed,
+                             toolJumpIDs: jumps.tools, errorJumpIDs: jumps.errors,
                              totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID,
                              activeRoleFilters: activeRoleFilters)
             layout()
@@ -408,6 +410,25 @@ final class TranscriptToolCellsTests: XCTestCase {
         h.controller.applyFind(source: .unified, query: "", matches: [], token: 2, direction: 1, reset: true,
                                shouldJump: false)
         XCTAssertFalse(h.controller.openInvocations.contains(1))
+    }
+
+    // MARK: - ▲▼ jumps (Task 16)
+
+    func testJumpIntoClosedGroupOpensIt() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant: one closed group of two invocations (1, 3).
+        let h = Harness(twoCallGroup)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
+        XCTAssertFalse(h.controller.openGroups.contains(1))
+
+        h.controller.handleRoleJumpIntent(token: 1, role: .tools, direction: 1)
+        XCTAssertTrue(h.controller.openGroups.contains(1), "the jump opens the group that hides invocation 1")
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1), "and lands on the invocation row")
+
+        // The open is a user open: clearing a find does not close it again.
+        h.controller.applyFind(source: .local, query: "", matches: [], token: 2, direction: 1, reset: true,
+                               shouldJump: false)
+        XCTAssertTrue(h.controller.openGroups.contains(1))
     }
 
     // MARK: - Card chrome

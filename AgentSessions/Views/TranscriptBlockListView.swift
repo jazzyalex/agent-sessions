@@ -311,6 +311,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             allBlocks: snapshot.blocks,
             invocationIndex: snapshot.invocationIndex,
             failedInvocationIDs: snapshot.failedInvocationIDs,
+            toolJumpIDs: snapshot.toolJumpIDs,
+            errorJumpIDs: snapshot.errorJumpIDs,
             totalBlockCount: snapshot.totalBlockCount,
             fontSize: fontSize,
             source: session.source,
@@ -695,6 +697,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private(set) var invocationIndex: ToolInvocationIndex = .empty
     /// Invocation ids whose status is `.failed`, from the same snapshot.
     private(set) var failedInvocationIDs: Set<Int> = []
+    /// ▲▼ stops of the Tools / Errors filters from the same snapshot (Task 16), ascending.
+    private(set) var toolJumpIDs: [Int] = []
+    private(set) var errorJumpIDs: [Int] = []
     /// Row id currently flashing (widen/jump highlight), so a recycled cell for
     /// that row re-raises the pulse and every other cell resets to base alpha.
     private var flashingRowID: Int?
@@ -1273,6 +1278,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     func apply(allBlocks: [SessionTranscriptBuilder.LogicalBlock],
                invocationIndex: ToolInvocationIndex = .empty,
                failedInvocationIDs: Set<Int> = [],
+               toolJumpIDs: [Int] = [],
+               errorJumpIDs: [Int] = [],
                totalBlockCount: Int,
                fontSize: CGFloat,
                source: SessionSource,
@@ -1417,6 +1424,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         allBlocksCache = allBlocks
         self.invocationIndex = invocationIndex
         self.failedInvocationIDs = failedInvocationIDs
+        self.toolJumpIDs = toolJumpIDs
+        self.errorJumpIDs = errorJumpIDs
         if fontChanged {
             // L2 bodies render at the transcript font size − 0.5 pt: drop the
             // shown fallbacks so an open row re-renders (its key misses anyway).
@@ -3542,12 +3551,27 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         lastConsumedRoleJumpToken = token
         guard let role, !allBlocksCache.isEmpty else { return }
 
-        let indices = allBlocksCache.enumerated().compactMap { offset, block in
-            TranscriptRoleFilter.governing(block.kind) == role ? offset : nil
+        // Tools and Errors step per invocation (Task 16, spec §6.8); the other roles per block.
+        let indices: [Int]
+        switch role {
+        case .tools: indices = toolJumpIDs
+        case .errors: indices = errorJumpIDs
+        case .user, .assistant:
+            indices = allBlocksCache.enumerated().compactMap { offset, block in
+                TranscriptRoleFilter.governing(block.kind) == role ? offset : nil
+            }
         }
         guard let target = Self.roleJumpTarget(indices: indices,
                                                currentTop: firstVisibleBlockIndex(),
                                                direction: direction) else { return }
+        // A stop inside a closed group opens the group first, as a user open (Find's auto-open is
+        // undone by Esc; this one stays).
+        if role == .tools || role == .errors, toolInvocationID(forBlock: target) != nil {
+            widen(toIncludeBlock: target)
+            if let header = toolGroupHeader(containing: target), !openGroups.contains(header.groupID) {
+                toggleGroup(groupID: header.groupID, allRows: false)
+            }
+        }
         scrollToBlock(target)
     }
 

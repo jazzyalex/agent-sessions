@@ -82,6 +82,11 @@ final class TranscriptDerivedStateTests: XCTestCase {
         XCTAssertEqual(snap.failedInvocationIDs, [1])
         // Errors stay block-based: a failed tool output is not an `.error` block.
         XCTAssertEqual(snap.errorBlockIndices, [])
+        // Jump stops (Task 16): one per invocation; the failed one is the only error stop.
+        XCTAssertEqual(snap.toolJumpIDs, [1, 3])
+        XCTAssertEqual(snap.errorJumpIDs, [1])
+        XCTAssertTrue(TranscriptDerivedState.Snapshot().toolJumpIDs.isEmpty)
+        XCTAssertTrue(TranscriptDerivedState.Snapshot().errorJumpIDs.isEmpty)
         XCTAssertTrue(TranscriptDerivedState.Snapshot().invocationIndex.invocations.isEmpty)
         XCTAssertTrue(TranscriptDerivedState.Snapshot().failedInvocationIDs.isEmpty)
     }

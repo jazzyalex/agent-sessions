@@ -201,6 +201,38 @@ final class TranscriptToolRowsTests: XCTestCase {
         XCTAssertTrue(none.invocations.isEmpty)
     }
 
+    // MARK: - ▲▼ jump stops (Task 16, spec §6.8)
+
+    func testToolJumpStepsPerInvocation() {
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant · 6 c3 (no output yet)
+        let s = built([user(), bash("t1", "make"), output("t1"), bash("t2", "ls"), output("t2"),
+                       assistant(), bash("t3", "pwd")])
+        let ids = TranscriptDerivedState.jumpIDs(blocks: s.blocks, index: s.index, failedInvocationIDs: s.failed)
+        XCTAssertEqual(ids.tools, [1, 3, 6], "one stop per invocation, never per call or output block")
+    }
+
+    func testErrorJumpIncludesFailedInvocations() {
+        // 0 user · 1 c1 · 2 o1 ✗ · 3 c2 · 4 o2 · 5 plain .error · 6 c3 · 7 o3 ✗
+        let s = built([user(), bash("t1", "make"), output("t1", "boom", failed: true),
+                       bash("t2", "ls"), output("t2"),
+                       F.block(.error, text: "plain error", isError: true),
+                       bash("t3", "make"), output("t3", "boom", failed: true)])
+        XCTAssertEqual(s.failed, [1, 6])
+        let ids = TranscriptDerivedState.jumpIDs(blocks: s.blocks, index: s.index, failedInvocationIDs: s.failed)
+        XCTAssertEqual(ids.errors, [1, 5, 6], "failed invocations and unpaired error blocks, ascending")
+    }
+
+    func testRuntimeErrorBlockIsOneErrorStop() {
+        // 0 user · 1 c1 · 2 paired runtime .error for c1
+        let s = built([user(), bash("t1", "make"),
+                       F.block(.error, id: "t1", text: "Error: permission denied", isError: true,
+                               disposition: .runtimeError)])
+        XCTAssertEqual(s.failed, [1])
+        let ids = TranscriptDerivedState.jumpIDs(blocks: s.blocks, index: s.index, failedInvocationIDs: s.failed)
+        XCTAssertEqual(ids.errors, [1], "the paired error block is the invocation's failure, not a second stop")
+        XCTAssertEqual(ids.tools, [1])
+    }
+
     func testErrorsOnlyFilterShowsFailedInvocations() {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 ✗ · 5 c3 · 6 o3 · 7 assistant · 8 c4 · 9 o4 · 10 c5 · 11 o5 ·
         // 12 user · 13 c6 · 14 o6 ✗ · 15 assistant · 16 c7 · 17 o7 · 18 plain .error

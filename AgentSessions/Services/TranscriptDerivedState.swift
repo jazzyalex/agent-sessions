@@ -44,6 +44,11 @@ final class TranscriptDerivedState {
         var invocationIndex: ToolInvocationIndex = .empty
         /// Ids of invocations whose status is `.failed` (the Errors filter's tool half, spec §6.8).
         var failedInvocationIDs: Set<Int> = []
+        /// ▲▼ stops of the Tools filter (Task 16, spec §6.8): invocation ids, ascending.
+        var toolJumpIDs: [Int] = []
+        /// ▲▼ stops of the Errors filter: `.error` blocks that belong to no invocation, plus failed
+        /// invocation ids (a paired `.error` block is its invocation's stop, not a second one), ascending.
+        var errorJumpIDs: [Int] = []
         /// The session's agent (tool decoding depends on it).
         var source: SessionSource = .codex
         var key: Key?
@@ -224,6 +229,20 @@ final class TranscriptDerivedState {
         endToolDecodePass()
     }
 
+    /// The ▲▼ stops of the Tools and Errors filters (Task 16, spec §6.8), both ascending.
+    /// Tools: every invocation id. Errors: failed invocation ids plus `.error` blocks that no
+    /// invocation owns. Pure and off-main-callable.
+    nonisolated static func jumpIDs(blocks: [SessionTranscriptBuilder.LogicalBlock],
+                                    index: ToolInvocationIndex,
+                                    failedInvocationIDs: Set<Int>) -> (tools: [Int], errors: [Int]) {
+        let tools = index.invocations.map(\.id).sorted()
+        var errors = failedInvocationIDs
+        for block in blocks where block.kind == .error && index.invocationIDByBlock[block.globalBlockIndex] == nil {
+            errors.insert(block.globalBlockIndex)
+        }
+        return (tools, errors.sorted())
+    }
+
     /// Pure, off-main-callable. Relocates the block-space parts of
     /// SessionTerminalView.buildRebuildResult (see SessionTerminalView.swift,
     /// the eventIDToAnchorBlockIndex construction inside the whole-session
@@ -259,6 +278,9 @@ final class TranscriptDerivedState {
             if case .failed = invocation.status { failedInvocationIDs.insert(invocation.id) }
         }
         snap.failedInvocationIDs = failedInvocationIDs
+        let jumps = jumpIDs(blocks: blocks, index: invocationIndex, failedInvocationIDs: failedInvocationIDs)
+        snap.toolJumpIDs = jumps.tools
+        snap.errorJumpIDs = jumps.errors
 
         snap.preambleUserBlockIndexes = settings.skipAgentsPreamble
             ? SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: blocks)
