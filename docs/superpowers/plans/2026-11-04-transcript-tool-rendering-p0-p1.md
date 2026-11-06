@@ -805,7 +805,7 @@ func testCallOutsideWindowStillEmitsCompleteRow()    // window starts at the out
   - duration;
   - hover buttons Copy (`doc.on.doc`) and Raw (`curlybraces`).
 - VoiceOver: label `"<verb> <object>, <status>, <chips joined>"`, with the disclosure trait and expanded state.
-- Card chrome by `CardPosition`: `solo` = full rounded card; `first` = top corners; `middle` = none; `last` = bottom corners. The accent bar is continuous across rows.
+- Card chrome by `CardPosition`: `solo` = full rounded card. In a group the header row is the top of the card (top corners), so `first` and `middle` are square and `last` has the bottom corners (decision after Task 13a, matching the mockup). The accent bar is continuous across rows.
 - Increase Contrast (`NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`): pane borders use `separatorColor`, and the pane fill alpha ×1.5.
 
 - [ ] **Step 1: Write failing tests** (controller-level). No existing test hosts a table: add a test helper that builds `NSWindow` + `NSScrollView` + `NSTableView`, attaches a `BlockTableController`, and calls `apply(...)` with fixture blocks and an index. This helper is part of the task's work.
