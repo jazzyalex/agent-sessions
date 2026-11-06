@@ -188,23 +188,41 @@ final class TranscriptDerivedStateTests: XCTestCase {
 
     // MARK: - Find on decoded tool text (Task 15)
 
+    private func codexCall(_ id: String, _ callID: String, _ command: String) -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                     toolName: "exec_command", toolInput: #"{"cmd":"\#(command)"}"#, toolOutput: nil,
+                     toolNamespace: nil, toolCallID: callID,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+    }
+
+    private func codexResult(_ id: String, _ callID: String, _ output: String) -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .tool_result, role: "tool", text: nil,
+                     toolName: nil, toolInput: nil, toolOutput: output,
+                     toolNamespace: nil, toolCallID: callID,
+                     messageID: "m-\(id)", parentID: nil, isDelta: false, rawJSON: "{}")
+    }
+
+    private func codexSession(id: String, _ events: [SessionEvent]) -> Session {
+        Session(id: id, source: .codex, startTime: nil, endTime: nil,
+                model: "test", filePath: "/tmp/\(id).jsonl", fileSizeBytes: nil,
+                eventCount: events.count, events: events)
+    }
+
     /// 0 user · 1 exec_command call · 2 its output (a JSON string literal with escapes) · 3 assistant.
-    private func codexToolSession(id: String) -> Session {
-        let events = [
+    /// `appended`: · 4 a second call · 5 its output · 6 assistant (a live append).
+    private func codexToolSession(id: String, appended: Bool = false) -> Session {
+        var events = [
             TranscriptTestFixtures.userEvent("u1", "go"),
-            SessionEvent(id: "c1", timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
-                         toolName: "exec_command", toolInput: #"{"cmd":"printf hi"}"#, toolOutput: nil,
-                         toolNamespace: nil, toolCallID: "k1",
-                         messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}"),
-            SessionEvent(id: "r1", timestamp: nil, kind: .tool_result, role: "tool", text: nil,
-                         toolName: nil, toolInput: nil, toolOutput: #""say \"x\"\nline2 done""#,
-                         toolNamespace: nil, toolCallID: "k1",
-                         messageID: "m-r1", parentID: nil, isDelta: false, rawJSON: "{}"),
+            codexCall("c1", "k1", "printf hi"),
+            codexResult("r1", "k1", #""say \"x\"\nline2 done""#),
             TranscriptTestFixtures.assistantDelta("a1", "ok", messageID: "m-a1"),
         ]
-        return Session(id: id, source: .codex, startTime: nil, endTime: nil,
-                       model: "test", filePath: "/tmp/\(id).jsonl", fileSizeBytes: nil,
-                       eventCount: events.count, events: events)
+        if appended {
+            events += [codexCall("c2", "k2", "printf again"),
+                       codexResult("r2", "k2", #""done again""#),
+                       TranscriptTestFixtures.assistantDelta("a2", "ok", messageID: "m-a2")]
+        }
+        return codexSession(id: id, events)
     }
 
     @MainActor
@@ -221,10 +239,11 @@ final class TranscriptDerivedStateTests: XCTestCase {
     func testFindRerunsOnceWhenDecodePassCompletes() {
         let gate = DecodeGate()
         defer { gate.open() }
-        let state = TranscriptDerivedState(toolSearchStore: ToolSearchTextStore(build: gate.build))
+        let state = TranscriptDerivedState(toolSearchStore: ToolSearchTextStore(build: gate.build), decodesToolText: true)
         state.update(session: codexToolSession(id: "decode-rerun"), settings: settings)
         spin { !state.isComputing }
-        spin(0.2) { false }   // the pass starts after the snapshot landed, then waits at the gate
+        XCTAssertFalse(state.isDecodingToolText, "no find-bar label for a pass shorter than 300 ms")
+        spin(0.6) { false }   // the pass starts after the snapshot landed, then waits at the gate
         XCTAssertTrue(state.isDecodingToolText, "the pass is still running")
 
         // A query before the pass ends searches the raw text where nothing is decoded yet.
@@ -253,7 +272,7 @@ final class TranscriptDerivedStateTests: XCTestCase {
         let gate = DecodeGate()
         defer { gate.open() }
         let store = ToolSearchTextStore(build: gate.build)
-        let state = TranscriptDerivedState(toolSearchStore: store)
+        let state = TranscriptDerivedState(toolSearchStore: store, decodesToolText: true)
         state.update(session: codexToolSession(id: "decode-open"), settings: settings)
         spin { !state.isComputing }
 
@@ -261,7 +280,7 @@ final class TranscriptDerivedStateTests: XCTestCase {
         XCTAssertFalse(state.isComputing)
         XCTAssertEqual(state.snapshot.totalBlockCount, 4)
         XCTAssertEqual(state.snapshot.invocationIndex.invocations.map(\.id), [1])
-        spin(0.2) { false }
+        spin(0.6) { false }
         XCTAssertTrue(state.isDecodingToolText)
         XCTAssertFalse(store.isComplete)
         XCTAssertNil(store.text(forBlock: 1))
@@ -275,5 +294,90 @@ final class TranscriptDerivedStateTests: XCTestCase {
         state.update(session: TranscriptTestFixtures.makeSyntheticSession(eventCount: 10, id: "decode-other"),
                      settings: settings)
         XCTAssertNil(store.text(forBlock: 1))
+    }
+
+    // MARK: - Task 15 fix round 1
+
+    @MainActor
+    func testAppendWithFindActiveScansOnce() {
+        let store = ToolSearchTextStore()
+        let state = TranscriptDerivedState(toolSearchStore: store, decodesToolText: true)
+        state.update(session: codexToolSession(id: "decode-append"), settings: settings)
+        spin { state.toolTextGeneration == 1 }
+        XCTAssertEqual(state.toolTextGeneration, 1, "the opening pass decoded the session")
+        XCTAssertEqual(state.findMatches(query: "done").map(\.space), [.decoded])
+        let scansBefore = state.findComputeCount
+
+        // A live append with Find open: the new invocation decodes in the snapshot task, so the
+        // scan at landing is final and no pass (and no second scan) follows.
+        state.update(session: codexToolSession(id: "decode-append", appended: true), settings: settings)
+        spin { !state.isComputing }
+        let landing = state.findMatches(query: "done")
+        XCTAssertEqual(landing.map(\.space), [.decoded, .decoded])
+        XCTAssertEqual(landing.map(\.globalBlockIndex), [1, 4])
+        spin(0.6) { false }
+        _ = state.findMatches(query: "done")
+        XCTAssertEqual(state.findComputeCount, scansBefore + 1, "one Find scan per append")
+        XCTAssertEqual(state.toolTextGeneration, 1, "no pass ran after the append")
+        XCTAssertFalse(state.isDecodingToolText, "the find bar never said Searching")
+        XCTAssertTrue(store.isComplete)
+    }
+
+    @MainActor
+    func testDecodePassStartsAtTheViewportBlock() {
+        final class Recorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var ids: [Int] = []
+            func add(_ id: Int) { lock.lock(); ids.append(id); lock.unlock() }
+            var order: [Int] { lock.lock(); defer { lock.unlock() }; return ids }
+        }
+        let recorder = Recorder()
+        let store = ToolSearchTextStore(build: { ref, blocks, index, source, duration in
+            recorder.add(ref.id)
+            return ToolInvocationBuilder.build(ref, blocks: blocks, index: index, source: source, duration: duration)
+        })
+        // 0 user · invocations at 1, 3, …, 19 (call + output each) · 21 assistant.
+        var events = [TranscriptTestFixtures.userEvent("u1", "go")]
+        for n in 1...10 {
+            events += [codexCall("c\(n)", "k\(n)", "printf \(n)"), codexResult("r\(n)", "k\(n)", "\"out \(n)\"")]
+        }
+        events.append(TranscriptTestFixtures.assistantDelta("a1", "ok", messageID: "m-a1"))
+        let state = TranscriptDerivedState(toolSearchStore: store, decodesToolText: true)
+        state.toolDecodeViewportProvider = { 9 }
+        state.update(session: codexSession(id: "decode-viewport", events), settings: settings)
+        spin { state.toolTextGeneration == 1 }
+        XCTAssertEqual(state.snapshot.invocationIndex.invocations.map(\.id), Array(stride(from: 1, through: 19, by: 2)))
+        XCTAssertEqual(Array(recorder.order.prefix(3)), [9, 11, 7], "nearest the viewport block first")
+        XCTAssertEqual(recorder.order.count, 10)
+    }
+
+    @MainActor
+    func testDecodePassRunsOnlyWhileTheSessionViewAsksForIt() {
+        let gate = DecodeGate()
+        defer { gate.open() }
+        let store = ToolSearchTextStore(build: gate.build)
+        let state = TranscriptDerivedState(toolSearchStore: store)   // not in the Session view
+        state.update(session: codexToolSession(id: "decode-mode"), settings: settings)
+        spin { !state.isComputing }
+        spin(0.6) { false }
+        XCTAssertFalse(state.isDecodingToolText, "no pass outside the Session view")
+        XCTAssertNil(store.text(forBlock: 1))
+
+        state.setDecodesToolText(true)
+        spin(0.6) { false }
+        XCTAssertTrue(state.isDecodingToolText, "the Session view showed: the pass runs")
+
+        // The view goes away mid-pass: the pass stops and never reports.
+        state.setDecodesToolText(false)
+        XCTAssertFalse(state.isDecodingToolText)
+        gate.open()
+        spin(0.5) { false }
+        XCTAssertEqual(state.toolTextGeneration, 0)
+        XCTAssertNil(store.text(forBlock: 1), "the stopped pass stored nothing")
+
+        // Back in the Session view: it decodes what is missing.
+        state.setDecodesToolText(true)
+        spin { state.toolTextGeneration == 1 }
+        XCTAssertNotNil(store.text(forBlock: 1))
     }
 }

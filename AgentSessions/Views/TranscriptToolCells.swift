@@ -935,18 +935,25 @@ final class ToolInvocationCellView: ToolCardCellView {
         bodyFindHighlights = []
     }
 
-    /// The rect of `range` of the body text, in `view`'s coordinates. Nil when the body is hidden
-    /// or the range is outside it.
-    func bodyRect(forCharacterRange range: NSRange, in view: NSView) -> NSRect? {
-        guard !bodyText.isHidden, let manager = bodyText.layoutManager, let container = bodyText.textContainer,
-              range.length > 0, NSMaxRange(range) <= bodyText.textStorage?.length ?? 0 else { return nil }
-        layoutSubtreeIfNeeded()
-        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+    /// A rect in the body's text coordinates (`ToolPresentationRenderer.textRect`), in `view`'s.
+    func convertBodyTextRect(_ textRect: NSRect, to view: NSView) -> NSRect {
+        var rect = textRect
         let origin = bodyText.textContainerOrigin
         rect.origin.x += origin.x
         rect.origin.y += origin.y
         return bodyText.convert(rect, to: view)
+    }
+
+    /// The rect of `range` of the body text, in `view`'s coordinates, from the body's own layout
+    /// (laid out up to the range first, so it is exact; tests). Nil when the body is hidden or the
+    /// range is outside it.
+    func bodyRect(forCharacterRange range: NSRange, in view: NSView) -> NSRect? {
+        guard !bodyText.isHidden, let manager = bodyText.layoutManager, let container = bodyText.textContainer,
+              range.length > 0, NSMaxRange(range) <= bodyText.textStorage?.length ?? 0 else { return nil }
+        layoutSubtreeIfNeeded()
+        manager.ensureLayout(forCharacterRange: NSRange(location: 0, length: NSMaxRange(range)))
+        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        return convertBodyTextRect(manager.boundingRect(forGlyphRange: glyphs, in: container), to: view)
     }
 
     /// Find repaint: updates the L1 pill only (no reconfigure: the L2 body, its links and any
@@ -1218,6 +1225,22 @@ enum ToolPresentationRenderer {
         storage.addLayoutManager(manager)
         manager.ensureLayout(for: container)
         return ceil(manager.usedRect(for: container).height)
+    }
+
+    /// The rect of `range` in `attributed` laid out at `width` like the cell's body (TextKit 1, no
+    /// line-fragment padding), in text coordinates. Lays out the text up to the range's end, so
+    /// call it off the main thread (Find scrolls a match in a Show-all body into view with it).
+    static func textRect(of range: NSRange, in attributed: NSAttributedString, width: CGFloat) -> NSRect {
+        guard range.length > 0, NSMaxRange(range) <= attributed.length else { return .zero }
+        let storage = NSTextStorage(attributedString: attributed)
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        let manager = NSLayoutManager()
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        manager.ensureLayout(forCharacterRange: NSRange(location: 0, length: NSMaxRange(range)))
+        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        return manager.boundingRect(forGlyphRange: glyphs, in: container)
     }
 
     /// "Show script" (spec §9): the script the agent ran, as a folded mono pane under the body.

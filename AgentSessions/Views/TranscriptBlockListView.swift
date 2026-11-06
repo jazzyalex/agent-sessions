@@ -294,6 +294,11 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.onTopProximityChange = onTopProximityChange
 
         context.coordinator.attach(table: table, scroll: scroll)
+        // Find's decode pass starts at the block the reader sees (read when a pass starts). Weak:
+        // the derived state never keeps this controller alive.
+        derivedState.toolDecodeViewportProvider = { [weak coordinator = context.coordinator] in
+            coordinator?.viewportBlockIndex
+        }
         return scroll
     }
 
@@ -554,6 +559,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// The navigated decoded match that still waits for its invocation's L2 body (a render, or a
     /// fold Find opened) before it can be highlighted and scrolled into view.
     private var pendingFindReveal: (invocationID: Int, match: TranscriptDerivedState.BlockMatch)?
+    /// The match the last Find jump landed on. When it was raw (its invocation not decoded yet)
+    /// and the decode pass turns it into a decoded match of the same invocation, the re-run shows
+    /// that match in L2 (fold and match scroll), without a second row scroll.
+    private var lastJumpedFindMatch: TranscriptDerivedState.BlockMatch?
 
     /// L1 summaries, keyed by invocation id; an entry is valid while its
     /// content stamp and status match (`ToolInvocationBuilder.rowSummary` is
@@ -2362,6 +2371,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         autoOpenedInvocationsByFind.removeAll()
         autoChangedFoldsByFind.removeAll()
         pendingFindReveal = nil
+        lastJumpedFindMatch = nil
         rowSummaryCache.removeAll()
         // Keys are session-qualified; the shared cache also holds the decode pass's work.
         if !usesSharedToolInvocationCache { toolInvocationCache.removeAll() }
@@ -3673,8 +3683,26 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             return (0, 0)
         }
         findCurrentOrdinal = newOrdinal
+        revealJumpedMatchIfDecoded(previous: previous)
         repaintAllVisibleFind()
         return (findCurrentOrdinal + 1, matches.count)
+    }
+
+    /// The decode pass ended under a match the reader jumped to while its invocation was still
+    /// raw: when the reconciled current match is the decoded match of that same invocation, show
+    /// it in L2 now (open its fold, scroll the match), without scrolling to the row again.
+    private func revealJumpedMatchIfDecoded(previous: TranscriptDerivedState.BlockMatch?) {
+        // Same match by identity (an earlier refresh can have shifted its ordinal).
+        guard let previous, previous.space == .raw, let jumped = lastJumpedFindMatch,
+              jumped.globalBlockIndex == previous.globalBlockIndex, jumped.space == previous.space,
+              jumped.rangeInBlockText == previous.rangeInBlockText,
+              findMatches.indices.contains(findCurrentOrdinal) else { return }
+        let current = findMatches[findCurrentOrdinal]
+        guard current.space == .decoded, let owner = toolInvocationID(forBlock: previous.globalBlockIndex),
+              toolInvocationID(forBlock: current.globalBlockIndex) == owner else { return }
+        lastJumpedFindMatch = current
+        pendingFindReveal = (owner, current)
+        revealPendingFindMatch()
     }
 
     /// Whether a find query is currently active (drives whether the SwiftUI
@@ -3783,6 +3811,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         findMatchesByRowID = byRow
     }
 
+    /// The block at the top of the viewport (Find's decode pass starts there, Task 15).
+    var viewportBlockIndex: Int? { firstVisibleBlockIndex() }
+
     /// The global block index at the top of the viewport (first visible row's
     /// primary block), used to anchor the query-change reset.
     private func firstVisibleBlockIndex() -> Int? {
@@ -3810,6 +3841,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         widen(toIncludeBlock: target)
         autoExpandCollapsedMatch(block: target)
         scrollToBlock(target) // widens (no-op here) if off-window, then scrolls + flashes
+        lastJumpedFindMatch = match
         // Task 15: a decoded match sits in the invocation's L2 body. Show it there: open the
         // fold that hides it, then scroll the match itself into view (the row can be taller
         // than the viewport).
@@ -3839,7 +3871,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let pieces = presentation.findMap.renderedRanges(forSearchRange: reveal.match.rangeInBlockText)
         if !pieces.isEmpty {
             pendingFindReveal = nil
-            scrollToolBodyRangeIntoView(row: rowIndex, ranges: pieces, body: presentation.attributed)
+            scrollToolBodyRangeIntoView(row: rowIndex, match: reveal.match, ranges: pieces, body: presentation.attributed)
             return
         }
         let foldLinks = presentation.foldLinks
@@ -3884,8 +3916,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Scrolls so the body text `ranges` of the invocation at `row` are in view (a third from the
     /// top), when they are not already. The row itself was scrolled to by `scrollToBlock`. `body`
     /// is the presentation the ranges index; a cell that still shows an older one reloads first.
-    private func scrollToolBodyRangeIntoView(row rowIndex: Int, ranges: [NSRange], body: NSAttributedString) {
-        guard let table, let scroll, let first = ranges.first, rows.indices.contains(rowIndex) else { return }
+    ///
+    /// The match's position comes from a contiguous TextKit 1 layout off the main thread: the
+    /// body view lays out non-contiguously, so its own rect for text it has not laid out yet is an
+    /// estimate (a Show-all body can hold 20,000 lines, too many to lay out on main).
+    private func scrollToolBodyRangeIntoView(row rowIndex: Int, match: TranscriptDerivedState.BlockMatch,
+                                             ranges: [NSRange], body: NSAttributedString) {
+        guard let table, let first = ranges.first, rows.indices.contains(rowIndex),
+              case .toolInvocation(let model) = rows[rowIndex].content else { return }
         table.layoutSubtreeIfNeeded()
         var candidate = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? ToolInvocationCellView
         if let shown = candidate, !shown.showsBody(body) {
@@ -3893,12 +3931,40 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             table.layoutSubtreeIfNeeded()
             candidate = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? ToolInvocationCellView
         }
+        guard let cell = candidate, cell.showsBody(body) else { return }
         let span = ranges.dropFirst().reduce(first) { NSUnionRange($0, $1) }
-        guard let cell = candidate, cell.showsBody(body),
-              let rect = cell.bodyRect(forCharacterRange: span, in: table) else { return }
+        let width = cell.bodyText.bounds.width
+        let invocationID = model.invocationID
+        let generation = toolPresentationGeneration
+        let bodyID = ObjectIdentifier(body)
+        pendingToolActions += 1
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let textRect = ToolPresentationRenderer.textRect(of: span, in: body, width: width)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.pendingToolActions -= 1
+                // Still this session, and still the current match (the reader may have moved on).
+                guard generation == self.toolPresentationGeneration,
+                      self.findMatches.indices.contains(self.findCurrentOrdinal),
+                      self.findMatches[self.findCurrentOrdinal] == match else { return }
+                self.scrollToolBodyTextRect(textRect, invocationID: invocationID, bodyID: bodyID)
+            }
+        }
+    }
+
+    /// Scrolls `textRect` (in the body text of invocation `invocationID`) into view, when the row
+    /// still shows the body it was measured in (`bodyID`).
+    private func scrollToolBodyTextRect(_ textRect: NSRect, invocationID: Int, bodyID: ObjectIdentifier) {
+        guard let table, let scroll, !textRect.isEmpty, let rowIndex = invocationRowIndex(invocationID),
+              let body = latestToolPresentation[invocationID]?.attributed, ObjectIdentifier(body) == bodyID else { return }
+        table.layoutSubtreeIfNeeded()
+        guard let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: true) as? ToolInvocationCellView,
+              cell.showsBody(body) else { return }
+        let rect = cell.convertBodyTextRect(textRect, to: table)
         let visible = scroll.contentView.bounds
         guard !visible.contains(rect) else { return }
-        let maxY = max(0, table.bounds.height - visible.height)
+        let documentHeight = max(table.bounds.height, table.rect(ofRow: table.numberOfRows - 1).maxY)
+        let maxY = max(0, documentHeight - visible.height)
         let target = min(max(0, rect.minY - visible.height / 3), maxY)
         scroll.contentView.scroll(to: NSPoint(x: visible.minX, y: target))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -3952,6 +4018,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// empties both sets, so a stale id can never leak into the next find.
     private func recollapseAutoExpandedFindRows() {
         pendingFindReveal = nil
+        lastJumpedFindMatch = nil
         guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty
                 || !autoChangedFoldsByFind.isEmpty else { return }
         // Folds Find opened go back to their state before (Task 15).

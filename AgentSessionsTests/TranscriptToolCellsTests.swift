@@ -110,7 +110,7 @@ final class TranscriptToolCellsTests: XCTestCase {
             let store = ToolSearchTextStore()
             var done = false
             store.start(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: source), source: source,
-                        sessionID: sessionID, viewportBlock: blocks.count - 1) { done = true }
+                        sessionID: sessionID, viewportBlock: blocks.count - 1) { _ in done = true }
             let deadline = Date().addingTimeInterval(10)
             while !done, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
             return TranscriptDerivedState.computeFindMatches(blocks: blocks, query: query, toolText: store.text(forBlock:))
@@ -351,6 +351,38 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertFalse(h.controller.openGroups.contains(1))
         XCTAssertFalse(h.controller.openInvocations.contains(3))
         XCTAssertNil(h.controller.foldStates[3], "the fold is back to its state before Find")
+    }
+
+    func testRawJumpRevealsDecodedMatchAfterDecodePass() throws {
+        var lines = (1...200).map { "line \($0)" }
+        lines[149] = "needle here"
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant: a closed group of invocations 1 and 3.
+        let h = Harness([user(), bash("t1", "make"), output("t1"), bash("t2", "seq 1 200"),
+                         output("t2", lines.joined(separator: "\n")), assistant()])
+        // Before the decode pass: the match is raw, in output block 4. The jump opens the row only.
+        let raw = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle")
+        XCTAssertEqual(raw.map(\.space), [.raw])
+        h.controller.applyFind(source: .local, query: "needle", matches: raw, token: 1, direction: 1,
+                               reset: true, shouldJump: true)
+        XCTAssertTrue(h.waitForPresentations())
+        XCTAssertTrue(h.controller.openInvocations.contains(3))
+        XCTAssertNil(h.controller.foldStates[3], "a raw match cannot open a fold")
+
+        // The pass ends: Find re-runs once with the decoded match of the same invocation.
+        let decoded = h.decodedMatches("needle")
+        XCTAssertEqual(decoded.map(\.space), [.decoded])
+        let counts = h.controller.refreshFindAfterRowsChanged(matches: decoded)
+        XCTAssertEqual(counts.current, 1)
+        XCTAssertTrue(h.waitForPresentations())
+
+        XCTAssertEqual(h.controller.foldStates[3]?[0]?.showAll, true, "the fold hiding line 150 opened")
+        let cell = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
+        let needle = (cell.bodyText.string as NSString).range(of: "needle")
+        XCTAssertNotEqual(needle.location, NSNotFound)
+        XCTAssertTrue(cell.bodyFindHighlights.contains { $0.range == needle && $0.isCurrent },
+                      "\(cell.bodyFindHighlights)")
+        let rect = try XCTUnwrap(cell.bodyRect(forCharacterRange: needle, in: h.table))
+        XCTAssertTrue(h.scroll.contentView.bounds.contains(rect))
     }
 
     func testUnifiedJumpWithNoLocalMatchFlashesRow() {

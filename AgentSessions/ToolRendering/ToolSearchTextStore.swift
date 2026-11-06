@@ -204,6 +204,10 @@ final class ToolSearchTextStore: @unchecked Sendable {
 
     /// Built invocations, shared with the Session view's L2 renderer (keys from `invocationKey`).
     let invocationCache: NSCacheMemo<ToolInvocation>
+    /// A pass puts only the invocations this near the viewport (in pass order) into
+    /// `invocationCache`, so a whole-session pass does not evict open rows' entries. The search
+    /// text of every invocation stays in the store's own map.
+    private let cacheInsertLimit: Int
     private let build: Build
 
     private let lock = NSLock()
@@ -217,9 +221,15 @@ final class ToolSearchTextStore: @unchecked Sendable {
     private var task: Task<Void, Never>?
 
     init(invocationCache: NSCacheMemo<ToolInvocation> = NSCacheMemo(countLimit: 512, totalCostLimit: 8_000_000),
+         cacheInsertLimit: Int = 64,
          build: @escaping Build = { ToolInvocationBuilder.build($0, blocks: $1, index: $2, source: $3, duration: $4) }) {
         self.invocationCache = invocationCache
+        self.cacheInsertLimit = cacheInsertLimit
         self.build = build
+    }
+
+    deinit {
+        task?.cancel()
     }
 
     // MARK: Keys
@@ -264,50 +274,93 @@ final class ToolSearchTextStore: @unchecked Sendable {
 
     /// Starts a pass over `blocks` (the full stream of one snapshot), cancelling a running one.
     /// `onComplete` runs on the main actor once, when this pass decoded every invocation, unless
-    /// `start` or `cancel` ran since.
+    /// `start`, `refresh`, `stop` or `cancel` ran since. `decodedAny` is false when every text was
+    /// already there (Find has nothing new to re-run for).
+    ///
+    /// The task holds the store weakly and re-checks it per invocation, so a released store (its
+    /// owner went away) ends the pass at the next invocation.
     func start(blocks: [Block], index: ToolInvocationIndex, source: SessionSource, sessionID: String,
-               viewportBlock: Int, onComplete: @escaping @MainActor () -> Void) {
-        lock.lock()
-        task?.cancel()
-        generation &+= 1
-        let pass = generation
-        complete = false
-        lock.unlock()
-
+               viewportBlock: Int, onComplete: @escaping @MainActor (_ decodedAny: Bool) -> Void) {
+        let pass = beginPass()
         let build = self.build
         let cache = invocationCache
+        let cacheInsertLimit = self.cacheInsertLimit
         let running = Task.detached(priority: .utility) { [weak self] in
-            let refs = Self.invocationRefs(blocks: blocks, index: index)
-            var idByBlock: [Int: Int] = [:]
-            var keyByID: [Int: String] = [:]
-            for ref in refs {
-                for member in Self.memberBlocks(of: ref) { idByBlock[member] = ref.id }
-                keyByID[ref.id] = Self.invocationKey(sessionID: sessionID, ref: ref, blocks: blocks)
-            }
-            guard let self, self.install(pass: pass, idByBlock: idByBlock, keyByID: keyByID) else { return }
+            let maps = Self.maps(blocks: blocks, index: index, sessionID: sessionID)
+            guard self?.install(pass: pass, idByBlock: maps.idByBlock, keyByID: maps.keyByID) == true else { return }
             let durations = TranscriptTurnTiming.compute(blocks: blocks, index: index).tools
-            for ref in Self.viewportOutward(refs, from: viewportBlock) {
+            var decodedAny = false
+            for (position, ref) in Self.viewportOutward(maps.refs, from: viewportBlock).enumerated() {
                 if Task.isCancelled { return }
-                guard let key = keyByID[ref.id], !self.hasText(id: ref.id, key: key) else { continue }
-                let invocation: ToolInvocation
-                if let cached = cache.object(forKey: key as NSString) {
-                    invocation = cached
-                } else {
-                    let duration = ref.outputBlockIndices.last.flatMap { durations[$0]?.durationSeconds }
-                    invocation = build(ref, blocks, index, source, duration)
-                    cache.setObject(invocation, forKey: key as NSString, cost: ToolPresentationRenderer.cost(of: invocation))
-                    self.noteBuild()
-                }
-                guard self.store(ToolSearchText.text(of: invocation), id: ref.id, key: key, pass: pass) else { return }
+                guard let key = maps.keyByID[ref.id] else { continue }
+                guard let store = self else { return }
+                if store.hasText(id: ref.id, key: key) { continue }
+                let invocation = Self.invocation(ref, key: key, blocks: blocks, index: index, source: source,
+                                                 durations: durations, build: build, cache: cache,
+                                                 insertIntoCache: position < cacheInsertLimit, store: store)
+                guard store.store(ToolSearchText.text(of: invocation), id: ref.id, key: key, pass: pass) else { return }
+                decodedAny = true
             }
-            guard self.finish(pass: pass) else { return }
-            await MainActor.run {
-                guard self.isCurrent(pass) else { return }
-                onComplete()
+            guard self?.finish(pass: pass) == true else { return }
+            let report = decodedAny
+            await MainActor.run { [weak self] in
+                guard let self, self.isCurrent(pass) else { return }
+                onComplete(report)
             }
         }
         lock.lock()
         if generation == pass { task = running }
+        lock.unlock()
+    }
+
+    /// A recompute of the same session (a live append), called off the main thread BEFORE the new
+    /// snapshot is published: stops a running pass, installs the new block and key maps (an
+    /// invocation whose output grew or whose status changed stops returning its old text), and
+    /// decodes here up to `decodeLimit` invocations without text, nearest `viewportBlock` first,
+    /// within `decodeBudget` UTF-16 units of raw member text. Returns true when every invocation
+    /// has its text, so the Find scan at landing is final and no pass needs to run.
+    @discardableResult
+    func refresh(blocks: [Block], index: ToolInvocationIndex, source: SessionSource, sessionID: String,
+                 viewportBlock: Int, decodeLimit: Int, decodeBudget: Int) -> Bool {
+        let pass = beginPass()
+        let maps = Self.maps(blocks: blocks, index: index, sessionID: sessionID)
+        guard install(pass: pass, idByBlock: maps.idByBlock, keyByID: maps.keyByID) else { return false }
+        let missing = Self.viewportOutward(maps.refs, from: viewportBlock).filter { ref in
+            guard let key = maps.keyByID[ref.id] else { return false }
+            return !hasText(id: ref.id, key: key)
+        }
+        guard !missing.isEmpty else { return finish(pass: pass) }
+        guard decodeLimit > 0 else { return false }
+        var budget = decodeBudget
+        var chosen: [ToolInvocationRef] = []
+        for ref in missing.prefix(decodeLimit) {
+            let size = Self.memberBlocks(of: ref).reduce(0) { total, member in
+                total + (blocks.indices.contains(member) ? blocks[member].text.utf16.count : 0)
+            }
+            guard size <= budget else { break }
+            budget -= size
+            chosen.append(ref)
+        }
+        guard !chosen.isEmpty else { return false }
+        let durations = TranscriptTurnTiming.compute(blocks: blocks, index: index).tools
+        for ref in chosen {
+            guard let key = maps.keyByID[ref.id] else { continue }
+            let invocation = Self.invocation(ref, key: key, blocks: blocks, index: index, source: source,
+                                             durations: durations, build: build, cache: invocationCache,
+                                             insertIntoCache: true, store: self)
+            guard store(ToolSearchText.text(of: invocation), id: ref.id, key: key, pass: pass) else { return false }
+        }
+        return chosen.count == missing.count && finish(pass: pass)
+    }
+
+    /// Stops the running pass and keeps the decoded text (the Session view went away; a later
+    /// `start` reuses every text whose key still holds).
+    func stop() {
+        lock.lock()
+        task?.cancel()
+        task = nil
+        generation &+= 1
+        complete = false
         lock.unlock()
     }
 
@@ -322,6 +375,46 @@ final class ToolSearchTextStore: @unchecked Sendable {
         keyByID = [:]
         texts = [:]
         lock.unlock()
+    }
+
+    // MARK: Pass helpers
+
+    /// Cancels a running pass and opens a new generation; a stale pass can no longer write.
+    private func beginPass() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        task?.cancel()
+        task = nil
+        generation &+= 1
+        complete = false
+        return generation
+    }
+
+    private static func maps(blocks: [Block], index: ToolInvocationIndex, sessionID: String)
+        -> (refs: [ToolInvocationRef], idByBlock: [Int: Int], keyByID: [Int: String]) {
+        let refs = invocationRefs(blocks: blocks, index: index)
+        var idByBlock: [Int: Int] = [:]
+        var keyByID: [Int: String] = [:]
+        for ref in refs {
+            for member in memberBlocks(of: ref) { idByBlock[member] = ref.id }
+            keyByID[ref.id] = invocationKey(sessionID: sessionID, ref: ref, blocks: blocks)
+        }
+        return (refs, idByBlock, keyByID)
+    }
+
+    /// The cached invocation for `key`, or a fresh build (cached when `insertIntoCache`).
+    private static func invocation(_ ref: ToolInvocationRef, key: String, blocks: [Block], index: ToolInvocationIndex,
+                                   source: SessionSource, durations: [Int: ToolTiming], build: Build,
+                                   cache: NSCacheMemo<ToolInvocation>, insertIntoCache: Bool,
+                                   store: ToolSearchTextStore) -> ToolInvocation {
+        if let cached = cache.object(forKey: key as NSString) { return cached }
+        let duration = ref.outputBlockIndices.last.flatMap { durations[$0]?.durationSeconds }
+        let invocation = build(ref, blocks, index, source, duration)
+        if insertIntoCache {
+            cache.setObject(invocation, forKey: key as NSString, cost: ToolPresentationRenderer.cost(of: invocation))
+        }
+        store.noteBuild()
+        return invocation
     }
 
     // MARK: Reading

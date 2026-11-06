@@ -49,21 +49,34 @@ final class ToolSearchTextStoreTests: XCTestCase {
         ])
     }
 
-    /// Starts a pass and runs the main run loop until it completed.
+    /// Starts a pass and runs the main run loop until it completed. `decodedAny` receives the
+    /// pass's report.
     @MainActor
     @discardableResult
     private func runPass(_ store: ToolSearchTextStore, _ blocks: [Block], source: SessionSource,
-                         viewport: Int? = nil) -> Int {
+                         viewport: Int? = nil, decodedAny: ((Bool) -> Void)? = nil) -> Int {
         let index = ToolInvocationIndex.build(blocks: blocks, source: source)
         var completions = 0
-        store.start(blocks: blocks, index: index, source: source, sessionID: "s", viewportBlock: viewport ?? blocks.count - 1) {
+        store.start(blocks: blocks, index: index, source: source, sessionID: "s", viewportBlock: viewport ?? blocks.count - 1) { any in
             completions += 1
+            decodedAny?(any)
         }
         let deadline = Date().addingTimeInterval(10)
         while completions == 0, Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         return completions
+    }
+
+    /// 0 user · 1/2 · 3/4 · 5/6 · 7/8 (Bash call/output, outputs "built stepN") · 9 assistant.
+    private var fourBashCalls: [Block] {
+        var blocks: [Block] = [F.block(.user, text: "go")]
+        for n in 1...4 {
+            blocks.append(F.block(.toolCall, id: "t\(n)", toolName: "Bash", toolInput: json(["command": "make step\(n)"])))
+            blocks.append(F.block(.toolOut, id: "t\(n)", text: "built step\(n)", toolName: "Bash"))
+        }
+        blocks.append(F.block(.assistant, text: "done"))
+        return F.sequence(blocks)
     }
 
     // MARK: - Store
@@ -101,7 +114,7 @@ final class ToolSearchTextStoreTests: XCTestCase {
         let blocks = codexEscaped
         let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
         var completions = 0
-        store.start(blocks: blocks, index: index, source: .codex, sessionID: "s", viewportBlock: 3) { completions += 1 }
+        store.start(blocks: blocks, index: index, source: .codex, sessionID: "s", viewportBlock: 3) { _ in completions += 1 }
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
 
         XCTAssertNil(store.text(forBlock: 1))
@@ -167,6 +180,65 @@ final class ToolSearchTextStoreTests: XCTestCase {
         second.cancel()
         XCTAssertNil(second.text(forBlock: 3), "a session change drops the decoded text")
         XCTAssertFalse(second.isComplete)
+    }
+
+    @MainActor
+    func testPassReportsWhetherItDecodedAnything() {
+        let store = ToolSearchTextStore()
+        var reports: [Bool] = []
+        XCTAssertEqual(runPass(store, fourBashCalls, source: .claude, decodedAny: { reports.append($0) }), 1)
+        XCTAssertEqual(runPass(store, fourBashCalls, source: .claude, decodedAny: { reports.append($0) }), 1)
+        XCTAssertEqual(reports, [true, false], "a pass that found every text in place has nothing new for Find")
+    }
+
+    @MainActor
+    func testPassCachesOnlyTheInvocationsNearestTheViewport() {
+        let blocks = fourBashCalls
+        let cache = NSCacheMemo<ToolInvocation>(countLimit: 64, totalCostLimit: 1_000_000)
+        let store = ToolSearchTextStore(invocationCache: cache, cacheInsertLimit: 2)
+        XCTAssertEqual(runPass(store, blocks, source: .claude, viewport: 5), 1)
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+        let cached = index.invocations.filter { ref in
+            cache.contains(ToolSearchTextStore.invocationKey(sessionID: "s", ref: ref, blocks: blocks) as NSString)
+        }.map(\.id)
+        XCTAssertEqual(cached, [5, 7], "the two nearest the viewport; the others are not pushed into the shared cache")
+        for id in [1, 3, 5, 7] {
+            XCTAssertNotNil(store.text(forBlock: id), "every invocation keeps its search text (\(id))")
+        }
+    }
+
+    func testRefreshDropsChangedTextBeforeLandingAndDecodesIt() {
+        let blocks = fourBashCalls
+        let store = ToolSearchTextStore()
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+        XCTAssertTrue(store.refresh(blocks: blocks, index: index, source: .claude, sessionID: "s", viewportBlock: 9,
+                                    decodeLimit: 8, decodeBudget: 1_000_000), "four small invocations decode here")
+        XCTAssertTrue(store.isComplete)
+
+        // The last output grows (a live append). Before the new snapshot lands, the old text of
+        // that invocation is no longer served; the others stay.
+        var grown = blocks
+        grown[8].text = "built step4 and more"
+        let grownIndex = ToolInvocationIndex.build(blocks: grown, source: .claude)
+        XCTAssertFalse(store.refresh(blocks: grown, index: grownIndex, source: .claude, sessionID: "s",
+                                     viewportBlock: 9, decodeLimit: 0, decodeBudget: 1_000_000))
+        XCTAssertNil(store.text(forBlock: 7), "stale text of a changed invocation")
+        XCTAssertTrue(store.text(forBlock: 3)?.contains("built step2") ?? false)
+        XCTAssertFalse(store.isComplete)
+
+        // With a decode allowance the changed one decodes in the same call: the landing scan is final.
+        XCTAssertTrue(store.refresh(blocks: grown, index: grownIndex, source: .claude, sessionID: "s",
+                                    viewportBlock: 9, decodeLimit: 8, decodeBudget: 1_000_000))
+        XCTAssertTrue(store.text(forBlock: 7)?.contains("and more") ?? false)
+        XCTAssertTrue(store.isComplete)
+
+        // Over the budget: left to the background pass.
+        var bigger = grown
+        bigger[8].text = String(repeating: "x", count: 2_000)
+        let biggerIndex = ToolInvocationIndex.build(blocks: bigger, source: .claude)
+        XCTAssertFalse(store.refresh(blocks: bigger, index: biggerIndex, source: .claude, sessionID: "s",
+                                     viewportBlock: 9, decodeLimit: 8, decodeBudget: 100))
+        XCTAssertNil(store.text(forBlock: 7))
     }
 
     // MARK: - Search text

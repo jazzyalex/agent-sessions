@@ -73,17 +73,40 @@ final class TranscriptDerivedState {
     /// Decoded tool text for Find (spec §6.8 cost rule): one pass per snapshot, after the snapshot
     /// landed, off the main thread. Its invocation cache is shared with the Session view's L2 renderer.
     let toolSearchStore: ToolSearchTextStore
-    /// A decode pass for the current snapshot is running (the find bar says "Searching tool output…").
+    /// A decode pass for the current snapshot has been running for more than
+    /// `toolTextLabelDelayNanoseconds` (the find bar says "Searching tool output…"). A short pass, such as
+    /// the few invocations of a live append, never sets it.
     private(set) var isDecodingToolText = false
-    /// Bumped once when a decode pass ends: Find re-runs once over the decoded text.
+    /// Bumped once when a decode pass that decoded something ends: Find re-runs once over the
+    /// decoded text.
     private(set) var toolTextGeneration = 0
     /// `computeFindMatches` runs (cache misses), for tests.
     @ObservationIgnored private(set) var findComputeCount = 0
     /// Identifies the latest decode request; a stale start or completion is dropped.
     @ObservationIgnored private var toolDecodeRequest = 0
+    /// Only the Session view's Find uses decoded tool text, so the pass runs only while that view
+    /// asks for it (`setDecodesToolText`).
+    @ObservationIgnored private var decodesToolText: Bool
+    @ObservationIgnored private var toolDecodePassRunning = false
+    /// The Session view's first visible block, read when a pass starts: the pass decodes from
+    /// there outward. Nil (or no provider): the tail, where a session opens.
+    @ObservationIgnored var toolDecodeViewportProvider: (@MainActor () -> Int?)?
 
-    init(toolSearchStore: ToolSearchTextStore = ToolSearchTextStore()) {
+    /// A live append decodes at most this many changed invocations (and this much raw member
+    /// text, UTF-16) in the snapshot task, so the Find scan at landing is final; the rest goes to
+    /// the background pass.
+    nonisolated static let landingDecodeLimit = 8
+    nonisolated static let landingDecodeBudget = 512 * 1024
+    /// A pass shorter than this never shows "Searching tool output…".
+    static let toolTextLabelDelayNanoseconds: UInt64 = 300_000_000
+
+    init(toolSearchStore: ToolSearchTextStore = ToolSearchTextStore(), decodesToolText: Bool = false) {
         self.toolSearchStore = toolSearchStore
+        self.decodesToolText = decodesToolText
+    }
+
+    deinit {
+        toolSearchStore.cancel()
     }
 
     /// Find-match memo, keyed by (snapshot key, decode generation, query). Bounded to a few entries
@@ -102,53 +125,103 @@ final class TranscriptDerivedState {
         if key == snapshot.key { return }
         // A session change cancels the decode pass and drops the decoded text (block indices
         // mean another session's blocks now).
-        if key.sessionID != snapshot.key?.sessionID { stopToolTextDecode() }
+        let sameSession = key.sessionID == snapshot.key?.sessionID
+        if !sameSession { stopToolTextDecode(dropText: true) }
+        // A pass start the previous landing deferred must not install older maps after this
+        // snapshot's refresh; the new landing schedules what is still missing.
+        toolDecodeRequest &+= 1
         computeTask?.cancel()
         isComputing = true
         let sessionCopy = session
+        let store = toolSearchStore
+        let decodeLimit = decodesToolText ? Self.landingDecodeLimit : 0
+        let viewport = toolDecodeViewportProvider?()
         computeTask = Task.detached(priority: .userInitiated) { [weak self] in
             let snap = Self.computeSnapshot(session: sessionCopy, settings: settings)
+            if Task.isCancelled { return }
+            // A live append (same session): before the snapshot is published, the store learns the
+            // new invocation keys (an invocation whose output grew stops returning its old text)
+            // and decodes the few that changed, so the one Find scan at landing is final.
+            let decodedAll: Bool
+            if sameSession, let snapKey = snap.key {
+                decodedAll = store.refresh(blocks: snap.blocks, index: snap.invocationIndex, source: snap.source,
+                                           sessionID: snapKey.sessionID,
+                                           viewportBlock: viewport ?? max(0, snap.blocks.count - 1),
+                                           decodeLimit: decodeLimit, decodeBudget: Self.landingDecodeBudget)
+            } else {
+                decodedAll = false
+            }
             if Task.isCancelled { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.snapshot = snap
                 self.isComputing = false
                 self.findMatchesCache.removeAll()   // block content changed
-                self.scheduleToolTextDecode()
+                self.scheduleToolTextDecode(decodedAll: decodedAll)
             }
         }
     }
 
     // MARK: Decoded tool text (Task 15)
 
-    /// Starts the decode pass for the snapshot that just landed. Opening the session never waits
-    /// for it (spec A3): the snapshot is published first, and the pass starts in a later main-actor
-    /// turn (after the views took the snapshot) and runs at utility priority, from the tail (where
-    /// a session opens) outward. A restart for a live append reuses every unchanged invocation.
-    private func scheduleToolTextDecode() {
-        toolDecodeRequest &+= 1
-        let request = toolDecodeRequest
-        let snap = snapshot
-        guard let key = snap.key, !snap.invocationIndex.invocations.isEmpty || !snap.toolBlockIndices.isEmpty else {
-            isDecodingToolText = false
-            return
-        }
-        isDecodingToolText = true
-        Task { @MainActor [weak self] in
-            guard let self, self.toolDecodeRequest == request else { return }
-            self.toolSearchStore.start(blocks: snap.blocks, index: snap.invocationIndex, source: snap.source,
-                                       sessionID: key.sessionID, viewportBlock: max(0, snap.blocks.count - 1)) { [weak self] in
-                guard let self, self.toolDecodeRequest == request else { return }
-                self.isDecodingToolText = false
-                self.toolTextGeneration &+= 1
-            }
+    /// The Session view shows (true) or went away (false). Off stops a running pass and keeps
+    /// the decoded text; on decodes what is missing for the current snapshot.
+    func setDecodesToolText(_ on: Bool) {
+        guard on != decodesToolText else { return }
+        decodesToolText = on
+        if on {
+            guard snapshot.key != nil, !isComputing else { return }   // the landing schedules it
+            scheduleToolTextDecode(decodedAll: toolSearchStore.isComplete)
+        } else {
+            stopToolTextDecode(dropText: false)
         }
     }
 
-    private func stopToolTextDecode() {
+    /// Starts the decode pass for the snapshot that just landed, unless the snapshot task already
+    /// decoded everything (`decodedAll`, a live append) or the Session view is not showing.
+    /// Opening the session never waits for it (spec A3): the snapshot is published first, and the
+    /// pass starts in a later main-actor turn (after the views took the snapshot) and runs at
+    /// utility priority, from the Session view's first visible block outward. "Searching tool
+    /// output…" shows only when the pass still runs after `toolTextLabelDelayNanoseconds`.
+    private func scheduleToolTextDecode(decodedAll: Bool) {
         toolDecodeRequest &+= 1
-        toolSearchStore.cancel()
-        isDecodingToolText = false
+        let request = toolDecodeRequest
+        let snap = snapshot
+        guard decodesToolText, !decodedAll, let key = snap.key,
+              !snap.invocationIndex.invocations.isEmpty || !snap.toolBlockIndices.isEmpty else {
+            endToolDecodePass()
+            return
+        }
+        toolDecodePassRunning = true
+        Task { @MainActor [weak self] in
+            guard let self, self.toolDecodeRequest == request else { return }
+            let viewport = self.toolDecodeViewportProvider?() ?? max(0, snap.blocks.count - 1)
+            self.toolSearchStore.start(blocks: snap.blocks, index: snap.invocationIndex, source: snap.source,
+                                       sessionID: key.sessionID, viewportBlock: viewport) { [weak self] decodedAny in
+                guard let self, self.toolDecodeRequest == request else { return }
+                self.endToolDecodePass()
+                // Nothing new decoded: the last Find scan already saw every text.
+                if decodedAny { self.toolTextGeneration &+= 1 }
+            }
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.toolTextLabelDelayNanoseconds)
+            guard let self, self.toolDecodeRequest == request, self.toolDecodePassRunning,
+                  !self.isDecodingToolText else { return }
+            self.isDecodingToolText = true
+        }
+    }
+
+    /// Ends the pass state; observers hear about it only when the label was showing.
+    private func endToolDecodePass() {
+        toolDecodePassRunning = false
+        if isDecodingToolText { isDecodingToolText = false }
+    }
+
+    private func stopToolTextDecode(dropText: Bool) {
+        toolDecodeRequest &+= 1
+        if dropText { toolSearchStore.cancel() } else { toolSearchStore.stop() }
+        endToolDecodePass()
     }
 
     /// Pure, off-main-callable. Relocates the block-space parts of

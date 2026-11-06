@@ -688,6 +688,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         resolveViewMode(viewModeRaw: viewModeRaw, renderModeRaw: renderModeRaw)
     }
 
+    /// The tool-output decode pass serves only the Session view's Find (Task 15), so it runs only
+    /// in that view mode.
+    private func syncToolTextDecoding() {
+        derivedState.setDecodesToolText(viewMode == .blocks)
+    }
+
     /// Keep the legacy TranscriptRenderMode preference in sync with SessionViewMode
     /// so existing callers that read only renderModeRaw still behave correctly.
     private func syncRenderModeWithViewMode() {
@@ -1006,10 +1012,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 isNearTranscriptTop = true
                 loadRoleFilters()
                 refreshRichInlineImages(session: session)
+                syncToolTextDecoding()
             }
             .onDisappear {
                 richInlineImagesTask?.cancel()
                 richInlineImagesTask = nil
+                derivedState.setDecodesToolText(false)
             }
             .onChange(of: session.id) { _, _ in
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -1054,6 +1062,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .onChange(of: viewModeRaw) { _, _ in
                 syncRenderModeWithViewMode()
+                syncToolTextDecoding()
                 // Switching INTO Rich must kick the (previously skipped) inline
                 // image scan; switching OUT clears it and cancels any in-flight
                 // scan so we never double-run alongside Terminal's own refresh.
@@ -1926,7 +1935,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // Session view Find searches decoded tool output (spec §6.8). Until the decode pass
             // ends, outputs not decoded yet are searched raw, and Find re-runs once at the end.
-            if viewMode == .blocks, derivedState.isDecodingToolText, !findQuery.isEmpty {
+            // The query is checked first: without one the body does not depend on the pass.
+            if !findQuery.isEmpty, viewMode == .blocks, derivedState.isDecodingToolText {
                 Text(String(localized: "Searching tool output…",
                             comment: "Session view find bar status: tool outputs are still being prepared for search, so the match count can still change."))
                     .font(.system(size: 11))
