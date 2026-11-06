@@ -85,6 +85,14 @@ struct ToolRowAction: Equatable, Sendable {
     var chips: [String]
 }
 
+extension ToolRowAction {
+    /// The L1 line as plain text: `<verb> <object>`, then ` <detail>` when there is one. Selection
+    /// copy uses it; empty parts leave out their space.
+    var lineText: String {
+        [ToolVerb.text(verbKey), object, objectDetail ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
 /// What an L1 row needs, built without decoding any output body.
 struct ToolRowSummary: Equatable, Sendable {
     var actions: [ToolRowAction]

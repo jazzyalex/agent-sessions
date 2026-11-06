@@ -724,4 +724,80 @@ final class TranscriptToolCellsTests: XCTestCase {
         h.controller.widen(toIncludeBlock: 0)
         XCTAssertEqual(Array(h.rowIDs.prefix(6)), [0, hid(1), 1, 3, 5, 7], "the re-keyed group stays open")
     }
+
+    // MARK: - Selection and copy (Task 14)
+
+    private func selectionLength(_ h: Harness, row id: Int) -> Int {
+        h.controller.selectableText(atRow: h.rowIndex(id: id)!).utf16.count
+    }
+
+    func testDragAcrossClosedRowsCopiesSummaries() {
+        // Rows: 0 user, group header, inv 1, inv 3, 5 assistant (group open, L2 closed).
+        let h = Harness(twoCallGroup)
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
+
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (4, 4))
+        XCTAssertEqual(h.controller.assembleSelectedText(),
+                       "go\n\n2 tool calls\n\nRan make\n\nRead App.swift\n\ndone",
+                       "a header copies its title, a closed row its L1 lines")
+
+        // A drag that ends at the end of the second closed row leaves the assistant out.
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (3, selectionLength(h, row: 3)))
+        XCTAssertEqual(h.controller.assembleSelectedText(), "go\n\n2 tool calls\n\nRan make\n\nRead App.swift")
+
+        // Upward drag: a focus at the start of a closed row keeps the whole row.
+        h.controller.setCrossBlockSelection(anchor: (4, 4), focus: (3, 0))
+        XCTAssertEqual(h.controller.assembleSelectedText(), "Read App.swift\n\ndone")
+    }
+
+    func testOpenRowCopiesVisibleTextWithoutGutter() throws {
+        let numbered = "     1→let a = 1\n     2→let b = 2\n     3→let c = 3"
+        let h = Harness([user(), read("t1", "/repo/Sources/App.swift"), output("t1", numbered), assistant()])
+        XCTAssertEqual(h.rowIDs, [0, 1, 3])
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertTrue(cell.bodyText.string.contains("\t"), "the shown body has a gutter (precondition)")
+
+        // Whole-row selection: L1 lines, a blank line, then the visible L2 text.
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (2, 4))
+        let whole = h.controller.assembleSelectedText()
+        XCTAssertEqual(whole, "go\n\nRead App.swift\n\nfile_path  /repo/Sources/App.swift\n"
+                       + "let a = 1\nlet b = 2\nlet c = 3\n\ndone")
+        XCTAssertFalse(whole.contains("\t"), "gutter text is never copied")
+
+        // Partial: the drag ends inside the body. The L1 lines are covered (the drag started
+        // above); the body part is the selected text without its gutter.
+        let lead = h.controller.toolLeadLength(atRow: 1)
+        let body = cell.bodyText.string as NSString
+        let second = body.range(of: "let b")
+        XCTAssertNotEqual(second.location, NSNotFound)
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (1, lead + second.location + second.length))
+        let partial = h.controller.assembleSelectedText()
+        XCTAssertTrue(partial.hasPrefix("go\n\nRead App.swift\n\n"), partial)
+        XCTAssertTrue(partial.hasSuffix("let b"), partial)
+        XCTAssertFalse(partial.contains("\t"), partial)
+        XCTAssertFalse(partial.contains("let c"), partial)
+
+        // The drag starts inside the body: the L1 lines are not copied.
+        h.controller.setCrossBlockSelection(anchor: (1, lead + second.location), focus: (2, 4))
+        let tail = h.controller.assembleSelectedText()
+        XCTAssertFalse(tail.contains("Read App.swift"), tail)
+        XCTAssertTrue(tail.hasPrefix("let b = 2\nlet c = 3"), tail)
+        XCTAssertTrue(tail.hasSuffix("done"), tail)
+    }
+
+    func testOpenRowWithPendingPresentationCopiesSummaryOnly() {
+        let h = Harness([user(), bash("t1", "make"), output("t1", "built"), assistant()])
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.controller.hasPendingToolPresentations, "the off-main render has not landed")
+        XCTAssertEqual(h.invocation(id: 1)?.isOpen, true)
+
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (2, 4))
+        XCTAssertEqual(h.controller.assembleSelectedText(), "go\n\nRan make\n\ndone",
+                       "no body yet: the L1 lines only, and nothing is built on the main thread")
+        XCTAssertTrue(h.waitForPresentations())
+    }
 }

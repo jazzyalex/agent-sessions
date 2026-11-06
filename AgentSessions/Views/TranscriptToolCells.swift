@@ -1055,6 +1055,9 @@ struct ToolPresentation {
     var scriptShown: Bool
     var attributed: NSAttributedString
     var bodyHeight: CGFloat
+    /// `RenderedToolBody.plainCopyText` for a whole-body copy. Nil when the "Show script" pane is
+    /// open (it is not in that text); a copy then reads the shown text.
+    var plainCopyText: String?
 }
 
 /// Everything one L2 render needs, captured on the main thread.
@@ -1093,16 +1096,20 @@ enum ToolPresentationRenderer {
                        fontSize: CGFloat, width: CGFloat, increaseContrast: Bool = false) -> ToolPresentation {
         // The renderer uses dynamic colors only, so any appearance renders every appearance.
         let appearance = NSAppearance(named: .aqua) ?? NSAppearance(named: .darkAqua)!
-        var attributed = ToolDetailRenderer.render(invocation, fontSize: fontSize, width: width, folds: folds,
-                                                   appearance: appearance, scriptShown: scriptShown,
-                                                   increaseContrast: increaseContrast).attributed
+        let rendered = ToolDetailRenderer.render(invocation, fontSize: fontSize, width: width, folds: folds,
+                                                 appearance: appearance, scriptShown: scriptShown,
+                                                 increaseContrast: increaseContrast)
+        var attributed = rendered.attributed
+        var plainCopyText: String? = rendered.plainCopyText
         if scriptShown, let script = invocation.scriptSource, !script.isEmpty {
+            plainCopyText = nil
             attributed = appendingScriptPane(to: attributed, invocation: invocation, script: script, folds: folds,
                                              fontSize: fontSize, width: width, appearance: appearance,
                                              increaseContrast: increaseContrast)
         }
         return ToolPresentation(folds: folds, scriptShown: scriptShown, attributed: attributed,
-                                bodyHeight: measuredHeight(of: attributed, width: width))
+                                bodyHeight: measuredHeight(of: attributed, width: width),
+                                plainCopyText: plainCopyText)
     }
 
     /// Cache cost of a built invocation: its text in UTF-16 units (outputs, plain forms, script

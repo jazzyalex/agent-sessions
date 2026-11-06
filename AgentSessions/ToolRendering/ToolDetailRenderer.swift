@@ -6,6 +6,10 @@ extension NSAttributedString.Key {
     /// (value `true`). It is not text: `RenderedToolBody.plainCopyText` leaves it out, and the
     /// selection-copy path skips it too (Task 14).
     static let toolGutter = NSAttributedString.Key("AgentSessions.toolGutter")
+
+    /// Marks rendered text that is a control or a note, not copyable text (fold rows, "… +N chars",
+    /// links). Value `true`. The partial selection copy skips it, like `toolGutter`.
+    static let toolNoCopy = NSAttributedString.Key("AgentSessions.toolNoCopy")
 }
 
 /// A control in a rendered tool body (spec §6.5). `.link` holds its `url`,
@@ -59,6 +63,22 @@ enum ToolFoldLink: Hashable, Sendable {
     }
 
     init?(url: URL) { self.init(payload: url.absoluteString) }
+}
+
+extension ToolDetailRenderer {
+    /// The text of `range` in a rendered body as a selection copy gives it: the characters of the
+    /// range without gutter cells and without fold rows or other controls.
+    static func copyText(of attributed: NSAttributedString, in range: NSRange) -> String {
+        let clipped = NSIntersectionRange(range, NSRange(location: 0, length: attributed.length))
+        guard clipped.length > 0 else { return "" }
+        let string = attributed.string as NSString
+        var out = ""
+        attributed.enumerateAttributes(in: clipped, options: []) { attrs, runRange, _ in
+            if attrs[.toolGutter] != nil || attrs[.toolNoCopy] != nil { return }
+            out += string.substring(with: runRange)
+        }
+        return out
+    }
 }
 
 /// One invocation's L2 body: the text the cell shows, plus what Copy, Find and the fold links need.
@@ -805,7 +825,9 @@ private struct Builder {
     @discardableResult
     private mutating func append(_ text: String, _ attrs: Attrs, copy: Bool = true) -> NSRange {
         let start = out.length
-        out.append(NSAttributedString(string: text, attributes: attrs.merging(blockBase) { run, _ in run }))
+        var merged = attrs.merging(blockBase) { run, _ in run }
+        if !copy { merged[.toolNoCopy] = true }
+        out.append(NSAttributedString(string: text, attributes: merged))
         if copy {
             blockCopy += text
             blockCopyable = true

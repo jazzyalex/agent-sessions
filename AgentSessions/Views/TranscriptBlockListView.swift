@@ -1893,10 +1893,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // row) paint its portion so a scrolled-into-view cell shows selection.
         cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
         if crossBlockDragActive {
-            let len = (renderedSelectableText(for: rowModel) as NSString).length
-            let range = selection.selectionRange(blockOrdinal: ordinal, textLength: len)
-                ?? NSRange(location: 0, length: 0)
-            cell.applySelectionRange(range)
+            cell.applySelectionRange(cellSelectionRange(ordinal: ordinal))
         }
 
         // Find highlights (Task 10). Paint directly here for RENDERABLE rows only
@@ -2681,7 +2678,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func finishToolCellConfigure(_ cell: ToolCardCellView, rowModel: BlockRowModel, ordinal: Int) {
         cell.setFlashAlpha(isFlashing(rowID: rowModel.id) ? Self.flashRaisedAlpha : CardMetrics.cardTintAlpha)
         cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
-        if crossBlockDragActive { cell.applySelectionRange(NSRange(location: 0, length: 0)) }
+        if crossBlockDragActive { cell.applySelectionRange(cellSelectionRange(ordinal: ordinal)) }
     }
 
     /// One L1 line per action; the chevron and the duration sit on the first.
@@ -3922,11 +3919,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     // MARK: - Cross-block selection (Task 9)
 
     /// Rendered body text for a row — the SAME string the cell shows and the
-    /// height math measures. Meta rows and tool rows are excluded upstream so
-    /// their text never enters a cross-block copy (tool rows join selection
-    /// with their visible text in Task 14).
+    /// height math measures. Meta rows are excluded upstream so their text
+    /// never enters a cross-block copy. A tool row's string is its offset
+    /// space (see `ToolRowSelectable`); its copied text comes from
+    /// `toolCopyText(row:range:)`.
     private func renderedSelectableText(for row: BlockRowModel) -> String {
-        if row.isMeta || row.isToolRow { return "" }
+        if row.isMeta { return "" }
+        if row.isToolRow { return toolRowSelectable(for: row)?.text ?? "" }
         // Review cards (Task C2): the cell displays the cleaned summary (plain
         // text), not the raw block text or a markdown render — copy/selection
         // must match exactly, or cross-block selection ranges (computed from
@@ -3945,16 +3944,99 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return row.bodyText
     }
 
-    /// True for a row that contributes nothing to selection: a meta separator
-    /// or a tool row (group header or invocation; Task 14 lets them copy their
-    /// visible text). Shared by `excludedOrdinals()` (builds the full set) and
+    /// True for a row that contributes nothing to selection: a meta separator.
+    /// Tool rows (group header or invocation) copy their visible text. Shared
+    /// by `excludedOrdinals()` (builds the full set) and
     /// `hasCopyableSelection()` (inlines this same test over just the selection
     /// span, without building the set — see that function's perf note).
     private func isExcludedFromSelection(_ row: BlockRowModel) -> Bool {
-        row.isMeta || row.isToolRow
+        row.isMeta
     }
 
-    /// Ordinals that contribute nothing: tool rows and meta rows.
+    // MARK: Tool rows in a cross-block selection
+
+    /// A tool row in the coordinator's offset space: a lead region (the group
+    /// title, or the invocation's L1 lines), then, when the row shows an L2
+    /// body, a "\n\n" gap and the shown body text. The body's text view paints
+    /// its part (`bodyStart` shifts the offsets); the L1 lines are SwiftUI and
+    /// never paint a highlight.
+    private struct ToolRowSelectable {
+        var lead: String
+        var body: NSAttributedString?
+        /// `RenderedToolBody.plainCopyText` of the shown body, when it is the whole visible text.
+        var plainCopyText: String?
+
+        var leadLength: Int { (lead as NSString).length }
+        var bodyStart: Int { body == nil ? leadLength : leadLength + 2 }
+        var text: String { body.map { lead + "\n\n" + $0.string } ?? lead }
+    }
+
+    /// The selectable form of a tool row. Reads caches only: an open row whose
+    /// presentation has not landed has no body here (nothing is built on the
+    /// main thread).
+    private func toolRowSelectable(for row: BlockRowModel) -> ToolRowSelectable? {
+        switch row.content {
+        case .message:
+            return nil
+        case .toolGroupHeader(let header):
+            return ToolRowSelectable(lead: ToolGroupText.title(callCount: header.callCount))
+        case .toolInvocation(let model):
+            guard let ref = toolInvocationRef(id: model.invocationID) else { return ToolRowSelectable(lead: "") }
+            let lead = rowSummary(for: ref).actions.map(\.lineText).joined(separator: "\n")
+            guard model.isOpen, let shown = latestToolPresentation[model.invocationID],
+                  shown.attributed.length > 0 else { return ToolRowSelectable(lead: lead) }
+            return ToolRowSelectable(lead: lead, body: shown.attributed, plainCopyText: shown.plainCopyText)
+        }
+    }
+
+    /// Length of a tool row's lead region plus gap: where its body text starts in the offset space.
+    func toolLeadLength(atRow row: Int) -> Int {
+        guard rows.indices.contains(row), let selectable = toolRowSelectable(for: rows[row]) else { return 0 }
+        return selectable.bodyStart
+    }
+
+    /// What a tool row contributes to a copy for `range` of its offset space (never empty ranges).
+    /// The lead is whole when the range touches it; the body is `plainCopyText` when the range
+    /// covers all of it, else the selected characters without gutter cells and controls.
+    private func toolCopyText(row: BlockRowModel, range: NSRange) -> String? {
+        guard let selectable = toolRowSelectable(for: row) else { return nil }
+        let leadLength = selectable.leadLength
+        guard let body = selectable.body else {
+            let clipped = NSIntersectionRange(range, NSRange(location: 0, length: leadLength))
+            return clipped.length > 0 ? (selectable.lead as NSString).substring(with: clipped) : nil
+        }
+        var parts: [String] = []
+        if range.location < leadLength { parts.append(selectable.lead) }
+        let start = max(range.location, selectable.bodyStart)
+        if range.upperBound > start {
+            let bodyRange = NSRange(location: start - selectable.bodyStart, length: range.upperBound - start)
+            let coversAll = bodyRange.location == 0 && bodyRange.length >= body.length
+            let text = coversAll && selectable.plainCopyText != nil
+                ? selectable.plainCopyText!
+                : ToolDetailRenderer.copyText(of: body, in: bodyRange)
+            if !text.isEmpty { parts.append(text) }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    /// The range to paint in a cell's body text view for the coordinator range of its row.
+    private func cellSelectionRange(ordinal: Int) -> NSRange {
+        let row = rows[ordinal]
+        let text = renderedSelectableText(for: row) as NSString
+        guard let range = selection.selectionRange(blockOrdinal: ordinal, textLength: text.length) else {
+            return NSRange(location: 0, length: 0)
+        }
+        guard row.isToolRow else { return range }
+        guard let selectable = toolRowSelectable(for: row), let body = selectable.body else {
+            return NSRange(location: 0, length: 0)
+        }
+        let start = max(range.location, selectable.bodyStart)
+        guard range.upperBound > start else { return NSRange(location: 0, length: 0) }
+        let shifted = NSRange(location: start - selectable.bodyStart, length: range.upperBound - start)
+        return NSIntersectionRange(shifted, NSRange(location: 0, length: body.length))
+    }
+
+    /// Ordinals that contribute nothing: meta rows.
     private func excludedOrdinals() -> Set<Int> {
         var set = Set<Int>()
         for (i, row) in rows.enumerated() {
@@ -4014,7 +4096,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         if !crossBlockDragActive {
             crossBlockDragActive = true
-            selection.begin(at: .init(blockOrdinal: originOrdinal, utf16Offset: anchorOffset))
+            // A tool row's body offsets are measured after its lead region.
+            let shift = rows.indices.contains(originOrdinal) && rows[originOrdinal].isToolRow
+                ? toolLeadLength(atRow: originOrdinal) : 0
+            selection.begin(at: .init(blockOrdinal: originOrdinal, utf16Offset: anchorOffset + shift))
             // Force the active-blue appearance on every visible body for the
             // duration of the multi-row selection.
             forEachVisibleCell { cell, _ in cell.bodyText.forceActiveSelectionAppearance(true) }
@@ -4046,14 +4131,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the full length by vertical position — good enough for a focus endpoint
     /// that will be re-resolved as the row scrolls into view.
     private func characterOffset(inRow row: Int, tablePoint p: NSPoint) -> Int {
-        guard let table,
-              let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TranscriptRowCell else {
-            return 0
+        guard let table else { return 0 }
+        let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TranscriptRowCell
+        if rows.indices.contains(row), rows[row].isToolRow {
+            return toolCharacterOffset(inRow: row, cell: cell, tablePoint: p)
         }
+        guard let cell else { return 0 }
         let body = cell.bodyText
         guard !body.isHidden else { return 0 }
         let local = body.convert(p, from: table)
         return body.characterOffset(atLocalPoint: local)
+    }
+
+    /// Focus offset in a tool row's offset space. A point over the L1 lines (or a row with no
+    /// body) has no character: a drag moving down ends after the lead (the lines are covered), a
+    /// drag moving up ends at the row start (the whole row is covered). A point over the body
+    /// resolves in the body text view and is shifted by the lead.
+    private func toolCharacterOffset(inRow row: Int, cell: TranscriptRowCell?, tablePoint p: NSPoint) -> Int {
+        guard let selectable = toolRowSelectable(for: rows[row]) else { return 0 }
+        let movingDown = (selection.anchor?.blockOrdinal ?? row) <= row
+        if let cell, selectable.body != nil, !cell.bodyText.isHidden {
+            let local = cell.bodyText.convert(p, from: table)
+            if local.y >= 0 {
+                return selectable.bodyStart + cell.bodyText.characterOffset(atLocalPoint: local)
+            }
+        }
+        return movingDown ? selectable.leadLength : 0
     }
 
     /// End of a cross-block drag: keep the selection (so ⌘C works) but stop the
@@ -4090,10 +4193,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 return
             }
             cell.bodyText.forceActiveSelectionAppearance(true)
-            let len = (self.renderedSelectableText(for: self.rows[ordinal]) as NSString).length
-            let range = self.selection.selectionRange(blockOrdinal: ordinal, textLength: len)
-                ?? NSRange(location: 0, length: 0)
-            cell.applySelectionRange(range)
+            cell.applySelectionRange(self.cellSelectionRange(ordinal: ordinal))
         }
     }
 
@@ -4168,10 +4268,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Assemble the currently-selected text across loaded rows, honoring the
     /// exclusion set (collapsed tool cards / meta). Only LOADED rows are walked —
     /// never the full derived stream — so ⌘A+⌘C on a windowed monster stays cheap.
-    private func assembleSelectedText() -> String {
+    func assembleSelectedText() -> String {
         refreshExcludedOrdinals()
-        let texts = rows.map { renderedSelectableText(for: $0) }
-        return selection.selectedText(blockTexts: texts)
+        // Only rows inside the selection span need their text (lengths and substrings).
+        let span = selection.normalizedEndpoints
+        let texts = rows.enumerated().map { ordinal, row -> String in
+            guard let span, ordinal >= span.low.blockOrdinal, ordinal <= span.high.blockOrdinal else { return "" }
+            return renderedSelectableText(for: row)
+        }
+        return selection.selectedText(blockTexts: texts) { [self] ordinal, range in
+            rows.indices.contains(ordinal) && rows[ordinal].isToolRow
+                ? (toolCopyText(row: rows[ordinal], range: range) ?? "") : nil
+        }
+    }
+
+    /// The text of a row in the coordinator's offset space (test seam).
+    func selectableText(atRow row: Int) -> String {
+        rows.indices.contains(row) ? renderedSelectableText(for: rows[row]) : ""
+    }
+
+    /// Sets the cross-block selection endpoints directly (test seam for a finished drag).
+    func setCrossBlockSelection(anchor: (ordinal: Int, offset: Int), focus: (ordinal: Int, offset: Int)) {
+        refreshExcludedOrdinals()
+        selection.begin(at: .init(blockOrdinal: anchor.ordinal, utf16Offset: anchor.offset))
+        selection.extend(to: .init(blockOrdinal: focus.ordinal, utf16Offset: focus.offset))
+        crossBlockDragActive = true
+        repaintAllVisibleSelectionRanges(reset: false)
     }
 
     @objc func copy(_ sender: Any?) {
