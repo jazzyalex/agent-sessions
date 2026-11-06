@@ -386,6 +386,13 @@ enum ToolCopyKind: Equatable {
 }
 
 enum ToolCopyFormat {
+    /// A line index is a valid action index only when the L1 lines and the built actions have the
+    /// same count (Task 9 guarantees the order). Nil otherwise: the caller falls back to the whole
+    /// invocation.
+    static func alignedIndex(_ index: Int, lineCount: Int, actionCount: Int) -> Int? {
+        lineCount == actionCount && index >= 0 && index < actionCount ? index : nil
+    }
+
     /// The text to copy, or nil when there is none (no shell command, no output).
     static func text(_ kind: ToolCopyKind, invocation: ToolInvocation, actionIndex: Int?) -> String? {
         let actions: [ToolAction]
@@ -721,13 +728,33 @@ final class ToolGroupHeaderCellView: ToolCardCellView {
     }
 }
 
+/// The hosting view of an invocation's L1 lines. It answers `menu(for:)` and `rightMouseDown`
+/// itself, so the row menu opens whatever SwiftUI does with a right-click.
+final class ToolLinesHostingView: NSHostingView<ToolActionLines> {
+    var rowMenuProvider: ((NSEvent) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMenuProvider?(event) ?? super.menu(for: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if let menu = menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        } else {
+            super.rightMouseDown(with: event)
+        }
+    }
+}
+
 /// One invocation: its L1 action lines and, when open and rendered, its L2 body (one attributed
 /// string from `ToolDetailRenderer`, in a selectable TextKit 1 text view).
 final class ToolInvocationCellView: ToolCardCellView {
     static let reuseID = NSUserInterfaceItemIdentifier("ToolInvocationCellView")
 
-    private let linesHost = NSHostingView(rootView: ToolActionLines(lines: [], isOpen: false, findMatchCount: 0,
-                                                                    onToggle: { _ in }))
+    private let linesHost = ToolLinesHostingView(rootView: ToolActionLines(lines: [], isOpen: false, findMatchCount: 0,
+                                                                           onToggle: { _ in }))
+    /// The L1 lines view (tests hit-test into it).
+    var linesView: NSView { linesHost }
     private var linesTop: NSLayoutConstraint?
     private var linesHeight: NSLayoutConstraint?
     private var bodyHeight: NSLayoutConstraint?
@@ -761,6 +788,7 @@ final class ToolInvocationCellView: ToolCardCellView {
     private func buildInvocation() {
         linesHost.translatesAutoresizingMaskIntoConstraints = false
         linesHost.sizingOptions = []
+        linesHost.rowMenuProvider = { [weak self] event in self?.menu(for: event) }
         cardBackground.addSubview(linesHost)
 
         bodyText.translatesAutoresizingMaskIntoConstraints = false
@@ -938,7 +966,12 @@ enum ToolRawEvent {
     /// The events of `blocks` (the call, then its outputs), one after another with a blank line
     /// between them.
     static func text(for blocks: [SessionTranscriptBuilder.LogicalBlock]) -> String {
-        let pieces = blocks.compactMap { prettyText(of: $0.rawJSON) }
+        text(forRawEvents: blocks.map(\.rawJSON))
+    }
+
+    /// Pure and off-main safe (up to 1 MB per event is parsed).
+    static func text(forRawEvents rawEvents: [String]) -> String {
+        let pieces = rawEvents.compactMap { prettyText(of: $0) }
         return pieces.isEmpty ? ToolMenuText.rawMissing : pieces.joined(separator: "\n\n")
     }
 }

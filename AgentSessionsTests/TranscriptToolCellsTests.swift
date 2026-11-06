@@ -468,7 +468,22 @@ final class TranscriptToolCellsTests: XCTestCase {
         other.rawJSON = #"{"type":"tool_use","input":{"command":"ls"}}"#
         let h = Harness([user(), call, out, other, output("t2")])
 
-        let controller = h.controller.makeRawEventViewController(invocationID: 1)
+        // The two calls form a closed group: open it so the cells exist.
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let otherCell = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
+
+        // Parsing and pretty-printing run off the main thread; the popover opens when ready.
+        func popover(_ id: Int, _ anchor: NSView) throws -> ToolRawEventViewController {
+            var shown: NSPopover??
+            h.controller.showRawEvent(invocationID: id, relativeTo: anchor.bounds, of: anchor) { shown = .some($0) }
+            XCTAssertFalse(shown != nil, "not opened synchronously on the main thread")
+            spin { shown != nil }
+            let popover = try XCTUnwrap(try XCTUnwrap(shown))
+            XCTAssertEqual(h.controller.rawEventInvocationID, id)
+            return try XCTUnwrap(popover.contentViewController as? ToolRawEventViewController)
+        }
+        let controller = try popover(1, cell)
         let text = controller.displayedText
         XCTAssertTrue(text.contains("Large strings were shortened when the app stored this event."), text)
         XCTAssertTrue(text.contains("[OMITTED bytes=9000]"))
@@ -477,17 +492,160 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(controller.rawText.contains("\"tool_result\""), "the base64 output event is decoded")
         XCTAssertTrue(controller.rawText.contains("tool_use") && controller.rawText.contains("tool_result"))
 
-        let clean = h.controller.makeRawEventViewController(invocationID: 3)
+        let clean = try popover(3, otherCell)
         XCTAssertFalse(clean.displayedText.contains("Large strings were shortened"))
         XCTAssertTrue(clean.rawText.contains("\"ls\""))
+        h.controller.closeRawEvent()
+        XCTAssertNil(h.controller.rawEventInvocationID)
+    }
 
-        // The popover itself opens from the invocation's cell (the two calls form a closed group).
+    func testRawPopoverClosesWithItsRowAndOnSessionSwitch() throws {
+        var call = bash("t1", "make")
+        call.rawJSON = #"{"type":"tool_use"}"#
+        let blocks = [user(), call, output("t1"), bash("t2", "ls"), output("t2"), assistant()]
+        let h = Harness(blocks)
         h.controller.toggleGroup(groupID: 1, allRows: false)
         let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
-        let popover = try XCTUnwrap(h.controller.showRawEvent(invocationID: 1, relativeTo: cell.bounds, of: cell))
-        // (The test window is never ordered in, so the popover does not report `isShown`.)
-        XCTAssertEqual((popover.contentViewController as? ToolRawEventViewController)?.rawText, controller.rawText)
-        popover.close()
+
+        func open() {
+            var done = false
+            h.controller.showRawEvent(invocationID: 1, relativeTo: cell.bounds, of: cell) { _ in done = true }
+            spin { done }
+            XCTAssertEqual(h.controller.rawEventInvocationID, 1)
+        }
+        open()
+        // Another row takes over the cell (reuse): the popover of the old row closes.
+        h.controller.closeRawEventIfAnchorReassigned(cell: cell, invocationID: 1)
+        XCTAssertEqual(h.controller.rawEventInvocationID, 1, "same row: stays")
+        h.controller.closeRawEventIfAnchorReassigned(cell: cell, invocationID: 3)
+        XCTAssertNil(h.controller.rawEventInvocationID, "another row in the same cell: closed")
+
+        // The row goes away (its group closes): closed.
+        open()
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertNil(h.controller.rawEventInvocationID)
+
+        // A request still being prepared when the session switches does not open.
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        let again = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        var opened: NSPopover??
+        h.controller.showRawEvent(invocationID: 1, relativeTo: again.bounds, of: again) { opened = .some($0) }
+        let index = ToolInvocationIndex.build(blocks: h.blocks, source: h.source)
+        h.controller.apply(allBlocks: h.blocks, invocationIndex: index, failedInvocationIDs: [],
+                           totalBlockCount: h.blocks.count, fontSize: 13, source: h.source, sessionID: "other-session")
+        spin { opened != nil }
+        XCTAssertEqual(opened.map { $0 == nil }, true, "dropped after the session switch")
+        XCTAssertNil(h.controller.rawEventInvocationID)
+    }
+
+    // MARK: Task 13b fix round: real clicks and line/action alignment
+
+    private func items(_ texts: [String]) -> ToolPayloadValue {
+        .array(texts.map { .object(["type": .string("input_text"), "text": .string($0)]) })
+    }
+
+    private func chunk(_ id: String, exit: Int, output: String) -> String {
+        let escaped = output.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+        return "{\"chunk_id\":\"\(id)\",\"wall_time_seconds\":0.5,\"exit_code\":\(exit),"
+            + "\"original_token_count\":12,\"output\":\"\(escaped)\"}"
+    }
+
+    /// A Codex exec script with two `exec_command` calls: one invocation, two actions ("false" fails
+    /// with "boom", "true" has no output).
+    private var codexTwoCommands: [Block] {
+        let script = """
+        const a = await tools.exec_command({cmd: "false"});
+        const b = await tools.exec_command({cmd: "true"});
+        """
+        let texts = ["Script completed\nWall time 1.2 seconds\nOutput:\n",
+                     chunk("a", exit: 1, output: "boom\n"), chunk("b", exit: 0, output: "")]
+        var out = F.block(.toolOut, id: "t1", text: texts.joined(), toolName: "exec")
+        out.toolOutputValue = items(texts)
+        return [user(), F.block(.toolCall, id: "t1", toolName: "exec", toolInput: script), out, assistant()]
+    }
+
+    /// Right-clicks at `windowPoint` the way AppKit does: hit-test, then the first view up the
+    /// chain whose `menu(for:)` answers.
+    private func rightClickMenu(_ h: Harness, at windowPoint: NSPoint) -> NSMenu? {
+        guard let event = NSEvent.mouseEvent(with: .rightMouseDown, location: windowPoint, modifierFlags: [],
+                                             timestamp: 0, windowNumber: h.window.windowNumber, context: nil,
+                                             eventNumber: 0, clickCount: 1, pressure: 1),
+              let content = h.window.contentView, let frame = content.superview else { return nil }
+        var view = content.hitTest(frame.convert(windowPoint, from: nil))
+        while let current = view {
+            if let menu = current.menu(for: event) { return menu }
+            view = current.superview
+        }
+        return nil
+    }
+
+    private func actionIndex(of menu: NSMenu?) -> Int?? {
+        (menu?.items.first?.representedObject as? BlockTableController.ToolMenuPayload).map(\.actionIndex)
+    }
+
+    func testRightClickOpensRowMenuForTheLineUnderTheEvent() throws {
+        let h = Harness(codexTwoCommands, source: .codex)
+        XCTAssertTrue(h.waitForPresentations(), "the failed invocation opens at L2 and renders")
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertEqual(cell.lineAccessibilityLabels.count, 2, "two actions, two lines")
+
+        func lineEdge(_ fromTop: CGFloat) -> NSPoint {
+            let lines = cell.linesView
+            let y = lines.isFlipped ? fromTop : lines.bounds.height - fromTop
+            return lines.convert(NSPoint(x: 60, y: y), to: nil)
+        }
+        // Top and bottom edges of both lines (flipped-y mapping).
+        XCTAssertEqual(actionIndex(of: rightClickMenu(h, at: lineEdge(0.5))), .some(0))
+        XCTAssertEqual(actionIndex(of: rightClickMenu(h, at: lineEdge(23.5))), .some(0))
+        XCTAssertEqual(actionIndex(of: rightClickMenu(h, at: lineEdge(24.5))), .some(1))
+        XCTAssertEqual(actionIndex(of: rightClickMenu(h, at: lineEdge(47.5))), .some(1))
+
+        // The L2 body: the menu covers the whole invocation.
+        XCTAssertFalse(cell.bodyText.isHidden)
+        let body = cell.bodyText.convert(NSPoint(x: 20, y: min(10, cell.bodyText.bounds.height / 2)), to: nil)
+        let bodyMenu = rightClickMenu(h, at: body)
+        XCTAssertNotNil(bodyMenu)
+        XCTAssertEqual(actionIndex(of: bodyMenu), .some(nil), "no line: the invocation")
+        XCTAssertEqual(bodyMenu?.items.first?.title, "Copy")
+    }
+
+    func testCopyOnSecondLineTargetsSecondAction() throws {
+        let h = Harness(codexTwoCommands, source: .codex)
+        XCTAssertTrue(h.waitForPresentations())
+        let pasteboard = privatePasteboard()
+        h.controller.toolPasteboard = pasteboard
+
+        let second = h.controller.toolContextMenu(invocationID: 1, actionIndex: 1)
+        perform(menuItem(second, "Copy"), in: second)
+        spin { pasteboard.string(forType: .string) != nil }
+        let plain = try XCTUnwrap(pasteboard.string(forType: .string))
+        XCTAssertTrue(plain.hasPrefix("$ true"), plain)
+        XCTAssertFalse(plain.contains("false") || plain.contains("boom"), "only the second action: \(plain)")
+
+        pasteboard.clearContents()
+        perform(menuItem(second, "Copy Command"), in: second)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "true")
+
+        let first = h.controller.toolContextMenu(invocationID: 1, actionIndex: 0)
+        pasteboard.clearContents()
+        perform(menuItem(first, "Copy Command"), in: first)
+        spin { pasteboard.string(forType: .string) != nil }
+        XCTAssertEqual(pasteboard.string(forType: .string), "false")
+
+        // Copy Output is per targeted action: line 1 has "boom", line 2 has no output at all.
+        XCTAssertEqual(menuItem(first, "Copy Output")?.isEnabled, true)
+        XCTAssertEqual(menuItem(second, "Copy Output")?.isEnabled, false)
+        let whole = h.controller.toolContextMenu(invocationID: 1, actionIndex: nil)
+        XCTAssertEqual(menuItem(whole, "Copy Output")?.isEnabled, true)
+    }
+
+    func testLineIndexNeedsMatchingActionCount() {
+        XCTAssertEqual(ToolCopyFormat.alignedIndex(1, lineCount: 2, actionCount: 2), 1)
+        XCTAssertNil(ToolCopyFormat.alignedIndex(1, lineCount: 2, actionCount: 3), "counts differ: whole invocation")
+        XCTAssertNil(ToolCopyFormat.alignedIndex(2, lineCount: 2, actionCount: 2), "out of range")
+        XCTAssertNil(ToolCopyFormat.alignedIndex(0, lineCount: -1, actionCount: 1), "no ref")
     }
 
     func testVoiceOverLabel() throws {

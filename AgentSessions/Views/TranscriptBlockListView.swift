@@ -920,8 +920,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             NSWorkspace.shared.notificationCenter.removeObserver(contrastObserver)
             self.contrastObserver = nil
         }
-        rawEventPopover?.close()
-        rawEventPopover = nil
+        closeRawEvent()
         if let frameObserver {
             NotificationCenter.default.removeObserver(frameObserver)
             self.frameObserver = nil
@@ -2354,6 +2353,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         toolPresentationInFlight.removeAll()
         toolPresentationQueued.removeAll()
         toolPresentationGeneration &+= 1
+        closeRawEvent()
     }
 
     /// The invocation `id`, or — as `TranscriptToolRows.emit` treats it — a
@@ -2566,6 +2566,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
         rebuildFindMatchesByRowIDIfActive()
         restoreScrollAnchor(anchor)
+        closeRawEventIfRowGone()
     }
 
     struct RowEditScript: Equatable {
@@ -2630,6 +2631,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func configureInvocation(_ cell: ToolInvocationCellView, model: ToolInvocationRowModel,
                                      rowModel: BlockRowModel, ordinal: Int) {
         let invocationID = model.invocationID
+        closeRawEventIfAnchorReassigned(cell: cell, invocationID: invocationID)
         let presentation = model.isOpen ? toolPresentation(for: model) : nil
         let bodyReset = cell.configure(
             model: model, lines: toolActionLines(for: model), accent: Self.toolAccent,
@@ -2781,7 +2783,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     // MARK: Context menu, hover actions, raw event (Task 13b)
 
     /// What a menu item of an invocation row does.
-    private enum ToolMenuCommand {
+    enum ToolMenuCommand {
         case copy(ToolCopyKind)
         /// Copy the text the reader selected in the body.
         case copySelection(String)
@@ -2791,7 +2793,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         case stopSpeaking
     }
 
-    private struct ToolMenuPayload {
+    /// The `representedObject` of a menu item (tests read it).
+    struct ToolMenuPayload {
         var command: ToolMenuCommand
         var invocationID: Int
         var actionIndex: Int?
@@ -2808,18 +2811,33 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let target = actionIndex.flatMap { actions.indices.contains($0) ? [actions[$0]] : nil } ?? actions
         let group = toolGroupHeader(containing: invocationID)
 
-        func add(_ title: String, _ command: ToolMenuCommand, enabled: Bool = true) {
+        @discardableResult
+        func add(_ title: String, _ command: ToolMenuCommand, enabled: Bool = true) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: #selector(toolMenuAction(_:)), keyEquivalent: "")
             item.target = self
             item.isEnabled = enabled
             item.representedObject = ToolMenuPayload(command: command, invocationID: invocationID,
                                                      actionIndex: actionIndex)
             menu.addItem(item)
+            return item
         }
 
         add(ToolMenuText.copy, selectionText.map { .copySelection($0) } ?? .copy(.plain))
         add(ToolMenuText.copyCommand, .copy(.command), enabled: target.contains { $0.category == .shell })
-        add(ToolMenuText.copyOutput, .copy(.output), enabled: ref?.outputBlockIndices.isEmpty == false)
+        // Copy Output is enabled when the targeted action has output (or the script has): exact
+        // from a cached build; else from the output blocks now, and corrected when the off-main
+        // build lands, so the item never copies nothing.
+        let hasOutput: (ToolInvocation) -> Bool = {
+            ToolCopyFormat.text(.output, invocation: $0, actionIndex: actionIndex) != nil
+        }
+        let outputItem = add(ToolMenuText.copyOutput, .copy(.output),
+                             enabled: cachedToolInvocation(invocationID).map(hasOutput)
+                                 ?? (ref?.outputBlockIndices.isEmpty == false))
+        if cachedToolInvocation(invocationID) == nil, ref?.outputBlockIndices.isEmpty == false {
+            withToolInvocation(invocationID) { [weak outputItem] invocation in
+                outputItem?.isEnabled = hasOutput(invocation)
+            }
+        }
         add(ToolMenuText.copyAsMarkdown, .copy(.markdown))
         menu.addItem(.separator())
         add(ToolMenuText.showRawEvent, .showRaw)
@@ -2854,16 +2872,43 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Copies one of the forms of an invocation (or of one action of it) to the pasteboard.
     func copyTool(_ kind: ToolCopyKind, invocationID: Int, actionIndex: Int?) {
         withToolInvocation(invocationID) { [weak self] invocation in
-            guard let text = ToolCopyFormat.text(kind, invocation: invocation, actionIndex: actionIndex) else { return }
-            self?.writeToolText(text)
+            guard let self else { return }
+            let index = self.alignedActionIndex(actionIndex, invocationID: invocationID, invocation: invocation)
+            guard let text = ToolCopyFormat.text(kind, invocation: invocation, actionIndex: index) else {
+                NSSound.beep()  // nothing to copy: never a silent no-op
+                return
+            }
+            self.writeToolText(text)
         }
     }
 
     private func speakTool(invocationID: Int, actionIndex: Int?) {
         withToolInvocation(invocationID) { [weak self] invocation in
-            guard let text = ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: actionIndex) else { return }
-            self?.speak(text)
+            guard let self else { return }
+            let index = self.alignedActionIndex(actionIndex, invocationID: invocationID, invocation: invocation)
+            guard let text = ToolCopyFormat.text(.plain, invocation: invocation, actionIndex: index) else { return }
+            self.speak(text)
         }
+    }
+
+    /// The L1 lines (`rowSummary.actions`) and `ToolInvocation.actions` have the same count and
+    /// order (Task 9). A line index is only valid for the built invocation when the counts match;
+    /// otherwise the whole invocation is the target.
+    private func alignedActionIndex(_ actionIndex: Int?, invocationID: Int, invocation: ToolInvocation) -> Int? {
+        guard let actionIndex else { return nil }
+        let lineCount = toolInvocationRef(id: invocationID).map { rowSummary(for: $0).actions.count } ?? -1
+        guard let aligned = ToolCopyFormat.alignedIndex(actionIndex, lineCount: lineCount,
+                                                        actionCount: invocation.actions.count) else {
+            assertionFailure("tool row lines (\(lineCount)) and built actions (\(invocation.actions.count)) differ")
+            return nil
+        }
+        return aligned
+    }
+
+    /// The built invocation when it is cached (no build).
+    private func cachedToolInvocation(_ invocationID: Int) -> ToolInvocation? {
+        guard let request = toolPresentationRequest(for: invocationID) else { return nil }
+        return toolInvocationCache.object(forKey: request.invocationKey as NSString)
     }
 
     /// Opens every invocation of the group of `invocationID` (and the group).
@@ -2879,28 +2924,67 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         applyToolRowsChange()
     }
 
-    /// The pretty-printed stored events of an invocation and the notice, as the popover shows them.
-    /// Needs only the blocks' `rawJSON`: no build.
-    func makeRawEventViewController(invocationID: Int) -> ToolRawEventViewController {
+    /// Shows the raw event popover of an invocation, anchored at `rect` of `view`. Needs only the
+    /// blocks' `rawJSON` (no build); parsing and pretty-printing (up to 1 MB per block) run off the
+    /// main thread, and the popover opens when the text is ready. A session switch, a vanished
+    /// anchor or a newer request in between drops this one. `completion` gets the popover (nil when
+    /// dropped).
+    func showRawEvent(invocationID: Int, relativeTo rect: NSRect, of view: NSView,
+                      completion: ((NSPopover?) -> Void)? = nil) {
+        guard view.window != nil else { completion?(nil); return }
         let members = toolInvocationRef(id: invocationID).map(Self.memberBlocks(of:)) ?? []
-        let blocks = members.compactMap { allBlocksCache.indices.contains($0) ? allBlocksCache[$0] : nil }
-        return ToolRawEventViewController(rawText: ToolRawEvent.text(for: blocks))
+        let rawEvents = members.compactMap { allBlocksCache.indices.contains($0) ? allBlocksCache[$0].rawJSON : nil }
+        let generation = toolPresentationGeneration
+        rawEventRequest &+= 1
+        let request = rawEventRequest
+        pendingToolActions += 1
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let text = ToolRawEvent.text(forRawEvents: rawEvents)
+            await MainActor.run { [weak self, weak view] in
+                guard let self else { return }
+                self.pendingToolActions -= 1
+                guard generation == self.toolPresentationGeneration, request == self.rawEventRequest,
+                      let view, view.window != nil else { completion?(nil); return }
+                self.closeRawEvent()
+                let popover = NSPopover()
+                popover.behavior = .transient
+                popover.contentViewController = ToolRawEventViewController(rawText: text)
+                popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+                self.rawEventPopover = popover
+                self.rawEventInvocationID = invocationID
+                self.rawEventAnchor = view
+                completion?(popover)
+            }
+        }
     }
 
-    /// Shows the raw event popover of an invocation, anchored at `rect` of `view`.
-    @discardableResult
-    func showRawEvent(invocationID: Int, relativeTo rect: NSRect, of view: NSView) -> NSPopover? {
-        guard view.window != nil else { return nil }
+    /// Closes the raw event popover (and drops a request still being prepared).
+    func closeRawEvent() {
+        rawEventRequest &+= 1
         rawEventPopover?.close()
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = makeRawEventViewController(invocationID: invocationID)
-        popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
-        rawEventPopover = popover
-        return popover
+        rawEventPopover = nil
+        rawEventInvocationID = nil
+        rawEventAnchor = nil
     }
 
-    private func showRawEventFromRow(invocationID: Int) {
+    /// The invocation whose raw event popover is open (test seam).
+    private(set) var rawEventInvocationID: Int?
+    private weak var rawEventAnchor: NSView?
+    /// Bumped by every raw event request and close, so a stale preparation does not open.
+    private var rawEventRequest = 0
+
+    /// `cell` shows `invocationID` now: an open raw popover anchored in it for another row closes.
+    func closeRawEventIfAnchorReassigned(cell: NSView, invocationID: Int) {
+        guard let anchor = rawEventAnchor, anchor.isDescendant(of: cell),
+              rawEventInvocationID != invocationID else { return }
+        closeRawEvent()
+    }
+
+    private func closeRawEventIfRowGone() {
+        if let id = rawEventInvocationID, invocationRowIndex(id) == nil { closeRawEvent() }
+    }
+
+    func showRawEventFromRow(invocationID: Int) {
         guard let rowIndex = invocationRowIndex(invocationID), let table,
               let cell = table.view(atColumn: 0, row: rowIndex, makeIfNecessary: false) as? ToolInvocationCellView
         else { return }
