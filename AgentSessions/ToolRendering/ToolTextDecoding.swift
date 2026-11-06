@@ -114,6 +114,16 @@ enum ToolTextDecoding {
         let sourceLength = s.utf16.count
         if let resolved = resolveJSON(s, maxDepth: maxJSONStringDepth) {
             if resolved.value is [String: Any] || resolved.value is [Any] {
+                // Content items written as JSON text (OpenClaw keeps code-mode results so) unwrap
+                // like a content-item value (step 2), at any size.
+                if let parts = ToolJSON.contentItemParts(resolved.value)
+                    ?? (resolved.value is [String: Any] ? ToolJSON.contentItemParts([resolved.value]) : nil) {
+                    var d = decodeParts(parts)
+                    if d.shape != .image {
+                        d.sourceMap = coarseMap(renderedLength: d.text.utf16.count, sourceLength: sourceLength)
+                    }
+                    return d
+                }
                 if s.utf8.count <= prettyJSONMaxBytes,
                    let pretty = ToolJSON.string(from: resolved.value, pretty: true) {
                     let map = (resolved.direct ? alignPretty(source: s, pretty: pretty) : nil)

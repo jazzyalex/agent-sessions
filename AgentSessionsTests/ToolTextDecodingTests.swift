@@ -62,6 +62,21 @@ final class ToolTextDecodingTests: XCTestCase {
         XCTAssertEqual(decode(#""{\"a\":1}""#).shape, .json)
     }
 
+    /// Corpus check (Task 17): OpenClaw stores code-mode results as content items written as JSON
+    /// text. They unwrap like a content-item value instead of showing as pretty JSON.
+    func testContentItemsWrittenAsJSONTextUnwrap() {
+        let array = #"[{"type":"input_text","text":"Script completed\nOutput:\n"},{"type":"input_text","text":"a.txt\nb.txt"}]"#
+        let d = decode(array)
+        XCTAssertEqual(d.text, "Script completed\nOutput:\na.txt\nb.txt")
+        XCTAssertNotEqual(d.shape, .json)
+        assertMapValid(d, source: array)
+        // One item object, and items inside a JSON string literal, unwrap too.
+        XCTAssertEqual(decode(#"{"type":"text","text":"x\ny"}"#).text, "x\ny")
+        XCTAssertEqual(decode(#""[{\"type\":\"text\",\"text\":\"x\"}]""#).text, "x")
+        // An array of objects that are not content items stays JSON.
+        XCTAssertEqual(decode(#"[{"text":"Acceptance","url":"https://example.com"}]"#).shape, .json)
+    }
+
     func testBigJSONStaysPlain() {
         let big = #"{"a":""# + String(repeating: "x", count: 300 * 1024) + #""}"#
         let d = decode(big)
