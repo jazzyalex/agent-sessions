@@ -86,6 +86,7 @@ enum TranscriptToolSummary {
 
     /// First non-empty `cmd` of a Codex `exec` script, or nil when the script does not parse.
     private static func execScriptCommand(_ script: String) -> String? {
+        if let fast = ExecFirstCommandScan.firstCommand(in: script) { return fast }
         guard let parsed = CodexExecScript.parse(script, maxCalls: 1) else { return nil }
         guard let cmd = parsed.calls.first?.arguments["cmd"]?.stringValue, !cmd.isEmpty else { return nil }
         return cmd
@@ -365,5 +366,235 @@ enum TranscriptToolSummary {
     private static func cap(_ text: String, at maxLength: Int) -> String {
         guard text.count > maxLength else { return text }
         return String(text.prefix(maxLength))
+    }
+}
+
+/// UTF-8 fast path for the `cmd` of the first call in a Codex `exec` script, used only by labels and
+/// summaries. It reads the bytes of the first `tools.<name>(`, its `{` object and the first
+/// top-level `cmd` key, and decodes that one string literal. It returns nil whenever it cannot decide
+/// (no call, computed key, expression value, `${}` in a template, unbalanced input, non-ASCII where
+/// syntax is expected); the caller then falls back to `CodexExecScript.parse(_:maxCalls: 1)`.
+enum ExecFirstCommandScan {
+    static func firstCommand(in script: String) -> String? {
+        if let result = script.utf8.withContiguousStorageIfAvailable({ scan($0) }) { return result }
+        return Array(script.utf8).withUnsafeBufferPointer { scan($0) }
+    }
+
+    private static func isIdent(_ c: UInt8) -> Bool {
+        c == 0x5F || c == 0x24 || (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A)
+    }
+
+    private static func isSpace(_ c: UInt8) -> Bool { c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D }
+
+    private static func scan(_ b: UnsafeBufferPointer<UInt8>) -> String? {
+        let n = b.count
+        let needle: [UInt8] = Array("tools.".utf8)
+        var search = 0
+        while search + needle.count < n {
+            // Find "tools."
+            var hit = -1
+            var k = search
+            while k + needle.count <= n {
+                if b[k] == needle[0], b[k + 1] == needle[1], b[k + 2] == needle[2], b[k + 3] == needle[3],
+                   b[k + 4] == needle[4], b[k + 5] == needle[5] { hit = k; break }
+                k += 1
+            }
+            if hit < 0 { return nil }
+            let afterHit = hit + needle.count
+            if hit > 0 {
+                let prev = b[hit - 1]
+                if isIdent(prev) || prev == 0x2E || prev >= 0x80 { search = afterHit; continue }
+            }
+            var p = afterHit
+            while p < n, isIdent(b[p]) { p += 1 }
+            guard p > afterHit else { search = afterHit; continue }
+            if p < n, b[p] >= 0x80 { return nil }
+            while p < n, isSpace(b[p]) { p += 1 }
+            guard p < n else { return nil }
+            guard b[p] == 0x28 else { search = afterHit; continue }
+            var i = p + 1
+            return readCommand(b, &i)
+        }
+        return nil
+    }
+
+    /// Skips whitespace and comments. False when a byte the parser would treat differently shows up.
+    private static func skipTrivia(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> Bool {
+        let n = b.count
+        while i < n {
+            let c = b[i]
+            if isSpace(c) { i += 1 }
+            else if c >= 0x80 { return false }
+            else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2F {
+                while i < n, b[i] != 0x0A { i += 1 }
+            } else if c == 0x2F, i + 1 < n, b[i + 1] == 0x2A {
+                i += 2
+                var closed = false
+                while i + 1 < n {
+                    if b[i] == 0x2A, b[i + 1] == 0x2F { i += 2; closed = true; break }
+                    i += 1
+                }
+                if !closed { return false }
+            } else { return true }
+        }
+        return true
+    }
+
+    /// `i` is just after the call's `(`.
+    private static func readCommand(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> String? {
+        let n = b.count
+        guard skipTrivia(b, &i), i < n, b[i] == 0x7B else { return nil }
+        i += 1
+        while true {
+            guard skipTrivia(b, &i), i < n else { return nil }
+            let c = b[i]
+            if c == 0x7D { return nil }   // no cmd in the object
+            if c == 0x2C { i += 1; continue }
+            let key: [UInt8]
+            if c == 0x22 || c == 0x27 {
+                guard let k = readQuoted(b, &i) else { return nil }
+                key = k
+            } else if isIdent(c) {
+                let from = i
+                while i < n, isIdent(b[i]) { i += 1 }
+                if i < n, b[i] >= 0x80 { return nil }
+                key = Array(b[from..<i])
+            } else {
+                return nil
+            }
+            guard skipTrivia(b, &i), i < n else { return nil }
+            let isCmd = key == Array("cmd".utf8)
+            if b[i] == 0x3A {
+                i += 1
+                guard skipTrivia(b, &i), i < n else { return nil }
+                if isCmd {
+                    let bytes: [UInt8]?
+                    if b[i] == 0x22 || b[i] == 0x27 { bytes = readQuoted(b, &i) }
+                    else if b[i] == 0x60 { bytes = readTemplate(b, &i) }
+                    else { bytes = nil }
+                    guard let bytes, !bytes.isEmpty else { return nil }
+                    // The literal must end the value.
+                    guard skipTrivia(b, &i), i < n, b[i] == 0x2C || b[i] == 0x7D else { return nil }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                guard skipExpression(b, &i) else { return nil }
+            } else if isCmd {
+                return nil   // shorthand `{cmd}`
+            }
+            guard skipTrivia(b, &i), i < n else { return nil }
+            if b[i] == 0x2C { i += 1 } else if b[i] != 0x7D { return nil }
+        }
+    }
+
+    /// Skips a value up to a top-level `,` or an unmatched closer, as the parser's `skipExpression`.
+    private static func skipExpression(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> Bool {
+        let n = b.count
+        var depth = 0
+        while i < n {
+            let c = b[i]
+            switch c {
+            case 0x22, 0x27:
+                guard readQuoted(b, &i) != nil else { return false }
+            case 0x60:
+                guard readTemplate(b, &i) != nil else { return false }
+            case 0x28, 0x5B, 0x7B:
+                depth += 1; i += 1
+            case 0x29, 0x5D, 0x7D:
+                if depth == 0 { return true }
+                depth -= 1; i += 1
+            case 0x2C:
+                if depth == 0 { return true }
+                i += 1
+            default:
+                i += 1
+            }
+        }
+        return false
+    }
+
+    /// Reads a quoted literal at `b[i]`; moves `i` past the closing quote. Nil when unterminated.
+    private static func readQuoted(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> [UInt8]? {
+        let quote = b[i]
+        i += 1
+        var out: [UInt8] = []
+        while i < b.count {
+            let c = b[i]
+            if c == quote { i += 1; return out }
+            i += 1
+            if c == 0x5C {
+                guard i < b.count else { return nil }
+                appendEscape(b, &i, to: &out)
+            } else {
+                out.append(c)
+            }
+        }
+        return nil
+    }
+
+    /// Reads a template literal without `${}` at `b[i] == '`'`. Nil for an interpolation or no end.
+    private static func readTemplate(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int) -> [UInt8]? {
+        i += 1
+        var out: [UInt8] = []
+        while i < b.count {
+            let c = b[i]
+            if c == 0x60 { i += 1; return out }
+            if c == 0x24, i + 1 < b.count, b[i + 1] == 0x7B { return nil }
+            i += 1
+            if c == 0x5C {
+                guard i < b.count else { return nil }
+                appendEscape(b, &i, to: &out)
+            } else {
+                out.append(c)
+            }
+        }
+        return nil
+    }
+
+    /// `i` is on the byte after a backslash.
+    private static func appendEscape(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int, to out: inout [UInt8]) {
+        let e = b[i]
+        i += 1
+        switch e {
+        case UInt8(ascii: "n"): out.append(0x0A)
+        case UInt8(ascii: "t"): out.append(0x09)
+        case UInt8(ascii: "r"): out.append(0x0D)
+        case UInt8(ascii: "b"): out.append(0x08)
+        case UInt8(ascii: "f"): out.append(0x0C)
+        case UInt8(ascii: "v"): out.append(0x0B)
+        case UInt8(ascii: "0"): out.append(0x00)
+        case 0x0A: break
+        case 0x0D:
+            if i < b.count, b[i] == 0x0A { i += 1 } else { out.append(0x0D) }
+        case UInt8(ascii: "x"):
+            if let v = hex(b, &i, 2) { append(v, to: &out) }
+        case UInt8(ascii: "u"):
+            if i < b.count, b[i] == 0x7B {
+                i += 1
+                let from = i
+                while i < b.count, b[i] != 0x7D { i += 1 }
+                let text = String(decoding: b[from..<i], as: UTF8.self)
+                if i < b.count { i += 1 }
+                if let v = UInt32(text, radix: 16) { append(v, to: &out) }
+            } else if let v = hex(b, &i, 4) {
+                append(v, to: &out)
+            }
+        default:
+            out.append(e)
+        }
+    }
+
+    private static func hex(_ b: UnsafeBufferPointer<UInt8>, _ i: inout Int, _ count: Int) -> UInt32? {
+        guard i + count <= b.count else { return nil }
+        var v: UInt32 = 0
+        for k in i..<(i + count) {
+            guard let d = Character(UnicodeScalar(b[k])).hexDigitValue else { return nil }
+            v = v * 16 + UInt32(d)
+        }
+        i += count
+        return v
+    }
+
+    private static func append(_ value: UInt32, to out: inout [UInt8]) {
+        if let scalar = Unicode.Scalar(value) { out.append(contentsOf: Array(String(Character(scalar)).utf8)) }
     }
 }

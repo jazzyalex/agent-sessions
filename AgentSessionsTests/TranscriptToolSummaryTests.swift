@@ -340,6 +340,57 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "shell", toolInput: input), "ls -la")
     }
 
+    // MARK: - Exec fast path vs the full parser
+
+    private func fullParserCommand(_ script: String) -> String? {
+        guard let parsed = CodexExecScript.parse(script, maxCalls: 1),
+              let cmd = parsed.calls.first?.arguments["cmd"]?.stringValue, !cmd.isEmpty else { return nil }
+        return cmd
+    }
+
+    func testExecFastPathMatchesFullParser() {
+        let scripts: [(String, Bool)] = [   // (script, fast path decides)
+            (#"text(await tools.exec_command({cmd:"pwd; rg x", workdir:"/x"}));"#, true),
+            (#"const r = await Promise.all([tools.exec_command({cmd:"ls -la"}), tools.exec_command({cmd:"pwd"})]);"#, true),
+            (#"tools.exec_command({cmd:"echo \"hi\" && printf 'a\\n'\tbA\x42"})"#, true),
+            (#"tools.exec_command({ workdir: "/w", 'cmd': 'git log --format=\'%h\'', yield_time_ms: 1000 })"#, true),
+            (#"tools.exec_command({"cmd": "ls", "max": [1, {a: "}"}], z: f(1, 2)})"#, true),
+            ("tools.exec_command({cmd: `echo \\`x\\` line1\\nline2`})", true),
+            ("tools.exec_command({cmd: `echo ${name}`})", false),
+            ("// plan\n/* tools.fake({cmd:\"no\"}) */ const a = 1; tools.exec_command(\n  {\n    // first\n    cmd: \"make -j4\",\n  })", true),
+            ("// plan\nconst a = 1; tools.exec_command(\n  {\n    // first\n    /* b */ cmd: \"make -j4\",\n  })", true),
+            (#"x.tools.nope({cmd:"a"}); mytools.nope({cmd:"b"}); tools.exec_command({cmd:"real"})"#, true),
+            (#"tools.exec_command({cmd: "a" + b})"#, false),
+            (#"tools.exec_command({cmd})"#, false),
+            (#"tools.exec_command({...opts, cmd: "after spread"})"#, false),
+            (#"tools.exec_command({cmd: "café é 日本"})"#, true),
+            (#"tools.exec_command({cmd: "unterminated"#, false),
+            (#"no call here"#, false),
+            (#"tools.exec_command(args)"#, false),
+        ]
+        for (script, decides) in scripts {
+            let fast = ExecFirstCommandScan.firstCommand(in: script)
+            XCTAssertEqual(decides, fast != nil, script)
+            if let fast { XCTAssertEqual(fast, fullParserCommand(script), script) }
+            // Label and summary agree with the full parser whether or not the fast path decided.
+            let expected = fullParserCommand(script)
+            XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script), expected, script)
+            if let expected { XCTAssertEqual(TranscriptToolSummary.summary(toolName: "exec", toolInput: script), expected, script) }
+        }
+    }
+
+    func testExecFastPathIsFast() {
+        let cmd = "rg -n \"needle\" Sources && " + String(repeating: "echo filler; ", count: 80)
+        let script = #"text(await tools.exec_command({cmd:""# + cmd.replacingOccurrences(of: "\"", with: "\\\"")
+            + #"",workdir:"/x",yield_time_ms:1000,max_output_tokens:4000}));"#
+            + String(repeating: " ", count: max(0, 1500 - cmd.utf8.count))
+        let elapsed = seconds {
+            for _ in 0..<1000 { _ = TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script) }
+        }
+        XCTAssertEqual(TranscriptToolSummary.callLabelArgument(toolName: "exec", toolInput: script), cmd)
+        XCTAssertLessThan(elapsed, 0.05)
+    }
+
     func testLargeExecScriptLabelIsBoundedAndCorrect() {
         let cmd = String(repeating: "q", count: 150)
         let script = #"text(await tools.exec_command({cmd:""# + cmd + #"",workdir:"/x"}));"# + "\n"
