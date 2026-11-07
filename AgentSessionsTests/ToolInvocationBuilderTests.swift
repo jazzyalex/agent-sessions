@@ -270,6 +270,27 @@ final class ToolInvocationBuilderTests: XCTestCase {
         XCTAssertEqual(row.actions.map(\.status), [.success, .success, .success], "unmapped commands take the invocation's status")
     }
 
+    func testScriptMCPCallsUseShortToolNames() {
+        let script = """
+        const a = await tools.mcp__codex_apps__github_fetch({url: "https://api.github.com/repos/o/r"});
+        const b = await tools.mcp__linear__get_issue({id: "ENG-1"});
+        """
+        let s = session([
+            F.block(.user, text: "go"),
+            F.block(.toolCall, id: "t1", toolName: "exec", toolInput: script),
+            codeModeOutput(id: "t1", [scriptHeader, "{}\n"]),
+        ], source: .codex)
+        let invocation = s.invocation(at: 1)
+        XCTAssertEqual(invocation.actions.map(\.verbKey), ["github_fetch", "linear › get_issue"],
+                       "codex_apps drops its server; other MCP servers read server › tool")
+        XCTAssertEqual(invocation.actions.map(\.object), ["https://api.github.com/repos/o/r", "ENG-1"])
+        XCTAssertEqual(s.summary(at: 1).actions.map(\.verbKey), invocation.actions.map(\.verbKey),
+                       "the L1 row and group header use the same names")
+        XCTAssertEqual(ToolInvocationBuilder.displayName("mcp__codex_apps__github_search_issues", namespace: nil),
+                       "github_search_issues")
+        XCTAssertEqual(ToolInvocationBuilder.displayName("mcp__github__create_pr", namespace: nil), "github › create_pr")
+    }
+
     func testScriptParseFailureIsRanScript() {
         let script = "const x = 1;\nconsole.log(x)"
         let s = session([

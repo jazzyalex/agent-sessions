@@ -126,12 +126,16 @@ enum ToolDetailRenderer {
     /// - Parameters:
     ///   - scriptShown: the "Show script" pane is open, so its link reads "Hide script".
     ///   - increaseContrast: the system Increase Contrast setting is on; pane fills are stronger.
+    ///   - copyLinkTitle: the title of the output fold row's copy link ("Copy script" for the
+    ///     script pane, which renders as an output pane).
     static func render(_ invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat,
                        folds: [Int: FoldState], appearance: NSAppearance,
-                       scriptShown: Bool = false, increaseContrast: Bool = false) -> RenderedToolBody {
+                       scriptShown: Bool = false, increaseContrast: Bool = false,
+                       copyLinkTitle: String = ToolDetailText.copyOutput) -> RenderedToolBody {
         _ = appearance  // dynamic colors only; see the type comment
         var builder = Builder(invocation: invocation, fontSize: fontSize, width: width, folds: folds,
-                              scriptShown: scriptShown, increaseContrast: increaseContrast)
+                              scriptShown: scriptShown, increaseContrast: increaseContrast,
+                              copyLinkTitle: copyLinkTitle)
         builder.renderInvocation()
         return builder.finish()
     }
@@ -200,6 +204,10 @@ enum ToolDetailText {
 
     static var copyOutput: String {
         String(localized: "Copy output", comment: "Transcript tool output fold link: copies the whole tool output.")
+    }
+
+    static var copyScript: String {
+        String(localized: "Copy script", comment: "Transcript tool script pane fold link: copies the whole script the agent ran.")
     }
 
     static func hiddenCharacters(_ count: Int) -> String {
@@ -280,13 +288,15 @@ private struct Builder {
     private var paneFill: NSColor = MarkdownStyle.codeBlockBackground
     private let increaseContrast: Bool
     private let scriptShown: Bool
+    private let copyLinkTitle: String
 
     init(invocation: ToolInvocation, fontSize: CGFloat, width: CGFloat, folds: [Int: FoldState],
-         scriptShown: Bool, increaseContrast: Bool) {
+         scriptShown: Bool, increaseContrast: Bool, copyLinkTitle: String) {
         self.invocation = invocation
         self.folds = folds
         self.width = width
         self.scriptShown = scriptShown
+        self.copyLinkTitle = copyLinkTitle
         self.increaseContrast = increaseContrast
         paneFill = ToolDetailRenderer.paneFill(increaseContrast: increaseContrast)
         mono = NSFont.monospacedSystemFont(ofSize: max(1, fontSize - 0.5), weight: .regular)
@@ -715,7 +725,7 @@ private struct Builder {
                 link(ToolDetailText.showAll, .showAll(action: key), base: base)
             }
             append(Style.factSeparator, base, copy: false)
-            link(ToolDetailText.copyOutput, .copyOutput(action: key), base: base)
+            link(copyLinkTitle, .copyOutput(action: key), base: base)
         case .input(let action):
             if capped {
                 // `commandShowAll` already holds; there is nothing more to open in place.

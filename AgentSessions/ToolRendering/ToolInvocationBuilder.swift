@@ -203,14 +203,18 @@ enum ToolInvocationBuilder {
         return nil
     }
 
-    /// "server › tool" for a Codex namespace or a Claude-style `mcp__server__tool` name.
-    private static func displayName(_ name: String?, namespace: String?) -> String {
+    /// "server › tool" for a Codex namespace or a Claude-style `mcp__server__tool` name. Codex's
+    /// built-in apps server (`codex_apps`) shows the tool alone: its tool names already carry the
+    /// app ("github_fetch").
+    static func displayName(_ name: String?, namespace: String?) -> String {
         guard let name, !name.isEmpty else { return "" }
         if (namespace ?? "").isEmpty, name.hasPrefix("mcp__") {
             let rest = name.dropFirst("mcp__".count)
             if let separator = rest.range(of: "__"), separator.lowerBound > rest.startIndex,
                separator.upperBound < rest.endIndex {
-                return "\(rest[..<separator.lowerBound]) › \(rest[separator.upperBound...])"
+                let server = rest[..<separator.lowerBound]
+                let tool = rest[separator.upperBound...]
+                return server == "codex_apps" ? String(tool) : "\(server) › \(tool)"
             }
         }
         return TranscriptToolSummary.displayToolName(name: name, namespace: namespace) ?? name
@@ -231,7 +235,7 @@ enum ToolInvocationBuilder {
         default:
             break
         }
-        return genericDraft(.structured, toolName: call.tool, display: call.tool,
+        return genericDraft(.structured, toolName: call.tool, display: displayName(call.tool, namespace: nil),
                             arguments: Arguments(object: call.arguments, other: nil), agentLabel: nil)
     }
 

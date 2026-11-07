@@ -471,6 +471,23 @@ final class ToolDetailRendererTests: XCTestCase {
             .map { (render(invocation).attributed.string as NSString).substring(with: $0.range) }, "Show script")
     }
 
+    func testScriptPaneCopyLinkReadsCopyScript() {
+        let long = (1...200).map { "line \($0)" }.joined(separator: "\n")
+        var invocation = invocation([shell("ls", output: long)])
+        invocation.scriptSource = (1...200).map { "const v\($0) = \($0);" }.joined(separator: "\n")
+        let presentation = ToolPresentationRenderer.render(invocation, folds: [:], scriptShown: true,
+                                                           fontSize: fontSize, width: width)
+        let attributed = presentation.attributed
+        var titles: [Int: [String]] = [:]
+        attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
+            guard let url = value as? URL, case .copyOutput(let key)? = ToolFoldLink(url: url) else { return }
+            titles[key, default: []].append((attributed.string as NSString).substring(with: range))
+        }
+        XCTAssertEqual(titles[0], ["Copy output"], "the action's output pane keeps Copy output")
+        XCTAssertEqual(titles[ToolPresentationRenderer.scriptFoldKey(invocation)], ["Copy script"],
+                       "the script pane's copy link names what it copies")
+    }
+
     func testIncreaseContrastStrengthensPaneFill() {
         let source = invocation([shell("make", output: "built")])
         let normal = render(source)

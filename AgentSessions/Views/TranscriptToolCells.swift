@@ -1261,7 +1261,7 @@ enum ToolPresentationRenderer {
                                   scriptSource: nil, scriptOutput: nil, durationSeconds: nil)
         let paneBody = ToolDetailRenderer.render(
             pane, fontSize: fontSize, width: width, folds: [0: folds[key] ?? FoldState()],
-            appearance: appearance, increaseContrast: increaseContrast)
+            appearance: appearance, increaseContrast: increaseContrast, copyLinkTitle: ToolDetailText.copyScript)
         let rendered = NSMutableAttributedString(attributedString: paneBody.attributed)
         rendered.enumerateAttribute(.link, in: NSRange(location: 0, length: rendered.length)) { value, range, _ in
             guard let url = value as? URL, let link = ToolFoldLink(url: url) else { return }

@@ -330,6 +330,13 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "复制输出" } }
       }
     },
+    "Copy script": {
+      "comment": "Transcript tool script pane fold link: copies the whole script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "复制脚本" } }
+      }
+    },
     "… +%lld chars": {
       "comment": "Transcript tool pane: a long line or value stops here; this many characters follow. %lld is the count.",
       "localizations": {
