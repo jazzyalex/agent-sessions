@@ -1,7 +1,7 @@
-## 2026-11-06 · transcript-tool-rendering · P0+P1 tool view merged to local main; owner QA open
-status: in-progress
+## 2026-11-06 · transcript-tool-rendering · P0+P1 tool view shipped in 6.4
+status: done
 
-**State:** Merged to local `main` on 2026-11-07 by fast-forward (555fbfdd -> 3cf7055e, 57 commits). Nothing is pushed. All 18 tasks are done and reviewed, and the final whole-branch review's findings are fixed; every execution ruling is in `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-rulings.md` (the `.superpowers/sdd` workspace is deleted). The branch `feature/transcript-tool-rendering` and its worktree `.claude/worktrees/transcript-tool-rendering` are kept; remove them when no longer needed. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree (same tree as `main`).
+**State:** Shipped in 6.4 (build 89) on 2026-11-07: tag v6.4 at 4d8e36b9, appcast 1033076f, verify 0 errors. Test-count baseline is 4349. The price manifest did not change since 6.3, so `docs/prices-v2.released.json` needs no update. After the merge, 1e8264d8 shortened MCP names inside Codex scripts (`codex_apps` shows the tool alone) and labelled the script pane's link "Copy script". The owner will send marketing screenshots later. Earlier: merged to `main` by fast-forward (555fbfdd -> 3cf7055e, 57 commits). All 18 tasks are done and reviewed, and the final whole-branch review's findings are fixed; every execution ruling is in `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-rulings.md` (the `.superpowers/sdd` workspace is deleted). The branch `feature/transcript-tool-rendering` and its worktree `.claude/worktrees/transcript-tool-rendering` are kept; remove them when no longer needed. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree (same tree as `main`).
 
 **Verified:**
 - Full suite on merged `main`: 4248 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
