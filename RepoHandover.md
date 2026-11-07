@@ -1,24 +1,32 @@
-## 2026-11-05 · transcript-tool-rendering · P0+P1 tool view built; owner QA open
+## 2026-11-06 · transcript-tool-rendering · P0+P1 tool view built, final review fixed; owner QA open
 status: in-progress
 
-**State:** Branch `feature/transcript-tool-rendering` (worktree `.claude/worktrees/transcript-tool-rendering`), all 18 tasks done and reviewed. Nothing is pushed or merged. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree.
+**State:** Branch `feature/transcript-tool-rendering` (worktree `.claude/worktrees/transcript-tool-rendering`), all 18 tasks done and reviewed, and the final whole-branch review's findings are fixed (report: `.superpowers/sdd/2026-11-04-transcript-tool-rendering-p0-p1/final-fix-report.md`). Nothing is pushed or merged. Debug QA build: `.deriveddata-run/Build/Products/Debug/AgentSessions.app` in that worktree.
 
 **Verified:**
-- Full suite: 4236 executed, 6 skipped, 0 failures. Localization validator exits 0 (1599 keys).
+- Full suite: 4246 executed, 6 skipped, 0 failures (after the final review fixes). Localization validator exits 0 (1599 keys).
 - Corpus check (Task 17): 1,119 sessions, 30,763 invocations, 0 violations.
 - L2 open on a 2.4 MB output: main thread 0.7-1.5 ms in `toggleInvocation` (limit 50 ms); body lands ~585 ms later, off main.
-- Snapshot perf (coalescedBlocks + computeSnapshot, 5 runs, medians, `main` 555fbfdd vs 92c07346). The gate is judged on Release (`-configuration Release ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`, because the test target needs the DEBUG hooks): Codex 78 MB 614 -> 616 ms (1.00), Claude 45 MB 509 -> 529 ms (1.04). PASS. Debug, for information: Codex 666 -> 759 ms (1.14; it was 1294 ms before the label fixes), Claude 528 -> 555 ms (1.05). Debug Codex gap: coalesce +40 ms, `ToolInvocationIndex.build` +48 ms spread over many small parts (isPollCall 15, status of outputs 14, codeModeFacts 6, runningProcessID 5, status of calls 2); no single hot spot, so nothing was changed.
-- Exec label pass, measured with a throwaway timer (78 MB Codex session, 1,809 `exec` calls, 2.8 MB of script, 5 runs, medians): full parser only 375 ms Release / 606 ms Debug; `callLabelArgument` with the fast path 85 ms Release / 158 ms Debug. The fast path decides 1,360 calls; 448 calls have no `cmd` in their first call and go to the parser. The stricter fast path of the last fix round costs +4.7 ms Release over the 92c07346 one (36 vs 31 ms, fast path only). The end-to-end snapshot was not measured again; adding 4.7 ms gives an estimated 621 ms (1.01x `main`). The stricter fast path causes no extra parser fallbacks on this session.
+- Open time after the final fixes (Release, `-configuration Release ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`, `main` 555fbfdd export vs the branch, 5 runs per run, medians; two `main` runs and two branch runs interleaved, mean of the run medians). Snapshot = coalescedBlocks + computeSnapshot (the Task 18 method). End to end = snapshot + the Session view's first table pass (apply, layout, display) on main, which the old method left out; the branch used to parse L1 summaries there.
+  - Codex 78 MB: snapshot 612 -> 604 ms (0.99); first pass 88 -> 71 ms; end to end 698 -> 674 ms (0.96).
+  - Claude 45 MB: snapshot 512 -> 538 ms (1.05, at the limit); first pass 104 -> 95 ms; end to end 617 -> 633 ms (1.03).
+  - The machine was under outside load (load average 8-27); a third `main` run taken under load 27 (Codex 685 ms) is left out.
+- Main-thread work (Debug, 78 MB Codex, 400-block tail window): L1 summaries 117 ms -> 0 (built off main, beside the preamble and anchor work, so the Debug snapshot stays 234 ms); first table pass 216 -> 105 ms (`main`: 105 ms); `emit` with cached summaries 0.8 ms. Claude session with a 2 MB `Write` input: summary 7.6 ms, first pass 17 -> 9.6 ms.
+- L2 landing (Debug, 1.49 M UTF-16 Show-all body of a 2 MB output): body set + display 11 ms, one Find step 12-13 ms, clear 10 ms, worst main-thread stall during Show all 5.6 ms. A 180 K body full of paths: file-link scan 280 ms, now off main; adding ~2,000 links one edit at a time blocked main for 2.4 s, one batched edit now (stall 12 ms).
+- Memory after opening the 78 MB Codex session (Debug, `phys_footprint`, own process each): `main` 159 MB (97 MB over the test host); branch 165 MB (104 MB over), 186 MB after the Find decode pass finished (125 MB over).
+- Exec label pass (78 MB Codex, 1,809 `exec` calls): full parser only 375 ms Release; `callLabelArgument` with the fast path 85 ms Release. The fast path decides 1,360 calls; 448 calls with no `cmd` in their first call go to the parser.
 
 **Decided / don't redo:**
 - Spec: `docs/superpowers/specs/2026-11-04-transcript-tool-rendering-design.md`; plan: `docs/superpowers/plans/2026-11-04-transcript-tool-rendering-p0-p1.md`.
 - Perf fixes done: inputs above 8 KB are scanned on a 16 KB prefix, and Codex `exec` labels use a UTF-8 fast path (`ExecFirstCommandScan`). The fast path returns nil, so `CodexExecScript.parse` runs, wherever it could read the script differently: a second `cmd`, input the parser rejects, or a spot where the parser's Characters differ from the bytes. A `cmd` that runs past the 16 KB prefix keeps the part that was read. A label for an input above 8 KB with no primary argument shows the start of the raw input, whitespace collapsed, with no full parse. Measured cost: see Verified.
 - `exitCode(from: rawJSON)` over all blocks costs ~225 ms in Debug on Codex 78 MB, and it was already on `main`; it is the largest remaining coalesce cost if a later release wants more speed.
+- Final review fixes: the Session view applies a snapshot only when it is the shown session's (no stale tool state after a switch); ⌘C and the menu Copy of an L2 selection write plain text without gutter or fold text; Find under a role filter follows the invocation row's rule; tail L1 summaries are built in `computeSnapshot` (`Snapshot.rowSummaries`) and only the tail window is covered, so a scroll-up window load still builds its summaries on main (worst 400-block window 178 ms Debug); a Codex output line over 5 MB becomes the call's result "Large event (N MB) not loaded".
+- A P0-only point release cut at a503e2ad must cherry-pick 51977f24, 92c07346, 94d78f1c (call-label perf; one conflict in TranscriptToolSummary.swift around the old cardHeader) and re-run the Release open-time gate; word the changelog "Codex parallel outputs stay separate" for that release.
 - P2 deferred: Claude rejected rows, process-poll collapse, per-action jump stops, JSON value unescaping in output panes, item_completed sidecar, persisted-output Open link, markdown/image rendering.
 
 **Next:**
 1. Owner QA with the build above: P0 screenshot session (Codex rollout 2026-11-04T11-32-12, "6 tool calls", readable commands, no `\/`); Claude session with parallel Bash calls (one row per call); one OpenCode, Hermes and Cursor session; light and dark; narrow and wide; Find for a quoted string inside an output (opens the fold, Esc closes); Errors filter and ▲▼; right-click on a row header and on its open body (Copy / Copy Command / Show Raw Event); live tail of a running session.
-2. Whole-branch review via Repo MCP, then the merge decision.
+2. Merge decision (the whole-branch review is done and its findings are fixed). Decide whether the Claude 45 MB snapshot-only ratio (1.05, end to end 1.03) is acceptable.
 
 ## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
 status: in-progress
