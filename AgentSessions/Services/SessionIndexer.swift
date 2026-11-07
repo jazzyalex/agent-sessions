@@ -3411,11 +3411,17 @@ final class SessionIndexer: ObservableObject {
         let utf8Count = line.utf8.count
         if utf8Count > 5_000_000 {
             // Just return a minimal JSON stub - the line is too large to parse usefully anyway.
-            // The stub keeps `call_id`, so the omitted output still pairs with its call.
-            if let callID = rawCallID(in: line) {
-                return #"{"type":"omitted","call_id":"\#(callID)","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
+            let megabytes = utf8Count / 1_000_000
+            // A tool output keeps its type, `call_id` and time, so the call still shows a result
+            // (spec §9: "Large event (N MB) not loaded").
+            if let callID = rawCallID(in: line), let outputType = rawOutputType(in: line) {
+                let time = rawTopLevelTimestamp(in: line).map { #","timestamp":"\#($0)""# } ?? ""
+                return #"{"type":"\#(outputType)","call_id":"\#(callID)"\#(time),"output":"Large event (\#(megabytes) MB) not loaded"}"#
             }
-            return #"{"type":"omitted","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
+            if let callID = rawCallID(in: line) {
+                return #"{"type":"omitted","call_id":"\#(callID)","text":"[Large event omitted - \#(megabytes)MB]"}"#
+            }
+            return #"{"type":"omitted","text":"[Large event omitted - \#(megabytes)MB]"}"#
         }
 
         // For moderately large lines (1-5MB), use a simpler/faster approach
@@ -3466,6 +3472,31 @@ final class SessionIndexer: ObservableObject {
         let tail = utf8[key.upperBound...].prefix(257)
         guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
         let value = utf8[key.upperBound..<end]
+        guard !value.isEmpty,
+              !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
+        return String(decoding: value, as: UTF8.self)
+    }
+
+    private static let rawOutputTypes = ["function_call_output", "custom_tool_call_output"]
+
+    /// The tool-output payload type of a raw Codex line (`function_call_output` /
+    /// `custom_tool_call_output`), read from the line's first 1 KB without a JSON parse, where
+    /// Codex writes the payload's `type` before its output. Nil for any other line.
+    static func rawOutputType(in line: String) -> String? {
+        let head = String(decoding: line.utf8.prefix(1024), as: UTF8.self)
+        return rawOutputTypes.first { head.contains(#""type":"\#($0)""#) }
+    }
+
+    private static let rawTimestampPrefix = Array(#"{"timestamp":""#.utf8)
+
+    /// The top-level `timestamp` of a raw Codex line (`{"timestamp":"…",…`), without a JSON
+    /// parse. Nil when the line does not start with it or the value holds an escape.
+    static func rawTopLevelTimestamp(in line: String) -> String? {
+        let utf8 = line.utf8
+        guard utf8.starts(with: rawTimestampPrefix) else { return nil }
+        let tail = utf8.dropFirst(rawTimestampPrefix.count).prefix(65)
+        guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+        let value = tail[..<end]
         guard !value.isEmpty,
               !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
         return String(decoding: value, as: UTF8.self)
