@@ -120,10 +120,27 @@ enum WhatsNewCatalog {
         "6.0": "The Quota Meter moves into the notch, and OpenCode 2.x sessions join the list.",
         "6.1": "Running OpenCode sessions now appear in the Quota Meter.",
         "6.2": "OpenCode sessions in the Quota Meter now show their own burn rate.",
-        "6.3": "CLI sessions now resume in Ghostty, too."
+        "6.3": "CLI sessions now resume in Ghostty, too.",
+        "6.4": "Tool calls in the transcript are now one readable row each, for every agent."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.4": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "wrench.and.screwdriver",
+                title: "A readable tool view",
+                body: "Each tool call in the Session view is one row, with its command or path first. Open a row to read the decoded output, which folds when it is long. Exit codes and errors show on the row. Works for all 17 agents."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.3": [
             WhatsNewItem(
                 kind: .highlight,

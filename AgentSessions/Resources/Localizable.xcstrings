@@ -1542,6 +1542,57 @@
         }
       }
     },
+    "Tool calls in the transcript are now one readable row each, for every agent.": {
+      "comment": "One-line teaser for the Agent Sessions 6.4 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool calls in the transcript are now one readable row each, for every agent."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话记录中的每个工具调用现在都是一行清晰易读的内容，适用于所有代理。"
+          }
+        }
+      }
+    },
+    "A readable tool view": {
+      "comment": "Title for the Agent Sessions 6.4 What's New highlight about the new tool call rows in the Session transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A readable tool view"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清晰易读的工具视图"
+          }
+        }
+      }
+    },
+    "Each tool call in the Session view is one row, with its command or path first. Open a row to read the decoded output, which folds when it is long. Exit codes and errors show on the row. Works for all 17 agents.": {
+      "comment": "Body for the Agent Sessions 6.4 What's New highlight. Session view is the app's transcript pane.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each tool call in the Session view is one row, with its command or path first. Open a row to read the decoded output, which folds when it is long. Exit codes and errors show on the row. Works for all 17 agents."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图中的每个工具调用都是一行，命令或路径显示在最前面。展开一行即可阅读解码后的输出，较长的输出会自动折叠。退出码和错误直接显示在该行上。适用于全部 17 个代理。"
+          }
+        }
+      }
+    },
     "Resume in Ghostty": {
       "comment": "Title for the Agent Sessions 6.3 What's New highlight about resuming CLI sessions in the Ghostty terminal.",
       "localizations": {
