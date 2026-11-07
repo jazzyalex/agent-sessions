@@ -190,6 +190,7 @@ enum TranscriptToolRows {
             showsFailedInvocations = activeRoles.contains(.errors)
         }
 
+        /// `TranscriptToolRows.showsInvocation`, with the role flags read once.
         func shows(_ id: Int) -> Bool {
             showsAllInvocations || (showsFailedInvocations && failedInvocationIDs.contains(id))
         }
@@ -199,6 +200,15 @@ enum TranscriptToolRows {
                 invocationID: ref.id, groupID: groupID, position: position,
                 isOpen: openInvocations.contains(ref.id), contentStamp: window.contentStamp(of: ref))))
         }
+    }
+
+    /// The role filter rule of `emit` for invocation `id`: it shows when `.tools` is active (or
+    /// the set is empty), or when `.errors` is active and it failed. Find counts a match inside an
+    /// invocation by this rule, never by the kind of the block that holds it.
+    static func showsInvocation(_ id: Int, activeRoles: Set<TranscriptRoleFilter>,
+                                failedInvocationIDs: Set<Int>) -> Bool {
+        activeRoles.isEmpty || activeRoles.contains(.tools)
+            || (activeRoles.contains(.errors) && failedInvocationIDs.contains(id))
     }
 
     /// Appends the rows of `run` and empties it.

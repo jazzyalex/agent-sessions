@@ -307,6 +307,14 @@ struct TranscriptBlockListView: NSViewRepresentable {
         // updateNSView on snapshot change. Hand plain values to the controller.
         let snapshot = derivedState.snapshot
         context.coordinator.installDocumentFrameObserver(on: scroll)
+        context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
+        // A session switch publishes the new session before its snapshot lands: the snapshot
+        // still holds the previous session's blocks. Applying them under the new session id
+        // would seed the old session's failed calls (and cache its summaries and L2 bodies)
+        // under the new id, so the controller keeps the previous session until the new
+        // snapshot lands. Tokens stay unconsumed and run against that snapshot.
+        guard snapshot.key?.sessionID == session.id else { return }
         let rowsChanged = context.coordinator.apply(
             allBlocks: snapshot.blocks,
             invocationIndex: snapshot.invocationIndex,
@@ -317,7 +325,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
             fontSize: fontSize,
             source: session.source,
             sessionID: session.id,
-            configurationChanges: snapshot.key?.sessionID == session.id ? configurationChanges : [],
+            configurationChanges: configurationChanges,
             imagesByBlockIndex: inlineImagesEnabled ? imagesByBlockIndex : [:],
             inlineImagesEnabled: inlineImagesEnabled,
             reviewCardsEnabled: reviewCardsEnabled,
@@ -328,9 +336,6 @@ struct TranscriptBlockListView: NSViewRepresentable {
             ideBinaryOverridePath: ideBinaryOverridePath,
             activeRoleFilters: activeRoleFilters,
             sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache)
-
-        context.coordinator.onBottomProximityChange = onBottomProximityChange
-        context.coordinator.onTopProximityChange = onTopProximityChange
 
         let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
         if consumedScrollIntent {
@@ -3798,13 +3803,19 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Keep only matches whose block is currently visible under the active role
     /// filter, so the find total + navigation ordinals never count or jump to a
     /// block the filter has hidden (which would have no row to scroll to). Uses
-    /// `allBlocksCache`, indexed by `globalBlockIndex == array position`.
+    /// `allBlocksCache`, indexed by `globalBlockIndex == array position`. A match in
+    /// an invocation's block (call, output or paired `.error`) follows the invocation
+    /// row's rule (`TranscriptToolRows.showsInvocation`), as `emit` does.
     private func matchesUnderActiveRoleFilter(_ matches: [TranscriptDerivedState.BlockMatch]) -> [TranscriptDerivedState.BlockMatch] {
         if activeRoleFilters.isEmpty || activeRoleFilters.count == TranscriptRoleFilter.allCases.count {
             return matches
         }
         return matches.filter { m in
             guard m.globalBlockIndex >= 0, m.globalBlockIndex < allBlocksCache.count else { return false }
+            if let id = toolInvocationID(forBlock: m.globalBlockIndex) {
+                return TranscriptToolRows.showsInvocation(id, activeRoles: activeRoleFilters,
+                                                          failedInvocationIDs: failedInvocationIDs)
+            }
             guard let role = TranscriptRoleFilter.governing(allBlocksCache[m.globalBlockIndex].kind) else { return true }
             return activeRoleFilters.contains(role)
         }
@@ -5311,9 +5322,32 @@ final class SelectableBlockTextView: NSTextView {
     override func copy(_ sender: Any?) {
         if let controller = selectionController, controller.isCrossBlockSelectionActive {
             controller.copy(sender)
+        } else if isToolBody {
+            copyToolBodySelection()
         } else {
             super.copy(sender)
         }
+    }
+
+    /// True for a tool row's L2 body: a copy leaves out gutter cells and fold controls and writes
+    /// plain text only (no RTF that carries `toolfold:` links).
+    var isToolBody = false
+
+    /// The text of the selection as a tool body copy gives it (`ToolDetailRenderer.copyText`).
+    func toolBodySelectionText() -> String {
+        guard let storage = textStorage else { return "" }
+        return selectedRanges.map(\.rangeValue)
+            .filter { $0.length > 0 }
+            .map { ToolDetailRenderer.copyText(of: storage, in: $0) }
+            .joined(separator: "\n")
+    }
+
+    private func copyToolBodySelection() {
+        let text = toolBodySelectionText()
+        guard !text.isEmpty else { return }
+        let pasteboard = selectionController?.toolPasteboard ?? .general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     /// ⌘A in Rich mode ALWAYS means "select all loaded blocks" (the plan's

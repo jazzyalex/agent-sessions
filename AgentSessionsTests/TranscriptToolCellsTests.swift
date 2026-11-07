@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import AgentSessions
 
@@ -1080,5 +1081,160 @@ final class TranscriptToolCellsTests: XCTestCase {
         let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
         h.controller.setCrossBlockSelection(anchor: (2, 4), focus: (1, 0))
         XCTAssertTrue(cell.isSelectionTintVisible)
+    }
+
+    // MARK: - Final review fixes
+
+    /// A Codex session of `exec_command` calls: (call id, command, exit code) per call, each call
+    /// with its result and an assistant reply after it, so every call is a solo invocation.
+    private func codexSession(_ id: String, _ calls: [(String, String, Int)]) -> Session {
+        var events = [TranscriptTestFixtures.userEvent("\(id)-u", "go")]
+        for (callID, command, exitCode) in calls {
+            events.append(SessionEvent(id: "\(id)-c-\(callID)", timestamp: nil, kind: .tool_call, role: "assistant",
+                                       text: nil, toolName: "exec_command", toolInput: #"{"cmd":"\#(command)"}"#,
+                                       toolOutput: nil, toolNamespace: nil, toolCallID: callID,
+                                       messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}"))
+            events.append(SessionEvent(id: "\(id)-r-\(callID)", timestamp: nil, kind: .tool_result, role: "tool",
+                                       text: nil, toolName: nil, toolInput: nil,
+                                       toolOutput: "Process exited with code \(exitCode)\nOutput:\nout",
+                                       toolNamespace: nil, toolCallID: callID,
+                                       messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}"))
+            events.append(TranscriptTestFixtures.assistantDelta("\(id)-a-\(callID)", "next", messageID: "m-\(id)-\(callID)"))
+        }
+        return Session(id: id, source: .codex, startTime: nil, endTime: nil, model: "test",
+                       filePath: "/tmp/\(id).jsonl", fileSizeBytes: nil, eventCount: events.count, events: events)
+    }
+
+    func testSessionSwitchWithPendingSnapshotSeedsOnlyTheNewSession() throws {
+        // A: 0 user · 1 call (exit 2) · 2 result · 3 assistant → failed {1}.
+        // B: 0 user · 1 call (exit 0) · 2 result · 3 assistant · 4 call (exit 2) · 5 result · 6 assistant → failed {4}.
+        let a = codexSession("switch-a-\(UUID().uuidString)", [("k1", "make", 2)])
+        let b = codexSession("switch-b-\(UUID().uuidString)", [("k1", "ls", 0), ("k2", "make test", 2)])
+        let state = TranscriptDerivedState()
+        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+        func view(_ session: Session) -> TranscriptBlockListView {
+            TranscriptBlockListView(derivedState: state, session: session, fontSize: 13,
+                                    findMatchCount: .constant(0), findCurrentIndex: .constant(0),
+                                    unifiedMatchCount: .constant(0), unifiedCurrentIndex: .constant(0))
+        }
+        state.update(session: a, settings: settings)
+        spin { !state.isComputing }
+        let host = NSHostingView(rootView: view(a))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        func controller() -> BlockTableController? {
+            var stack: [NSView] = [host]
+            while let view = stack.popLast() {
+                if let table = view as? NSTableView, let owner = table.delegate as? BlockTableController { return owner }
+                stack.append(contentsOf: view.subviews)
+            }
+            return nil
+        }
+        spin { controller()?.rows.isEmpty == false }
+        let table = try XCTUnwrap(controller())
+        XCTAssertEqual(table.openInvocations, [1], "A's failed call opens by default")
+
+        // B's snapshot is still computing when the view gets B: that pass must not take A's
+        // blocks as B's.
+        state.update(session: b, settings: settings)
+        XCTAssertTrue(state.isComputing)
+        host.rootView = view(b)
+        host.layoutSubtreeIfNeeded()
+        spin { !state.isComputing }
+        spin { table.rows.count == 5 }
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(table.rows.map(\.id), [0, 1, 3, 4, 6])
+        XCTAssertEqual(table.openInvocations, [4], "only B's failed call opens; A's id 1 is B's successful call")
+        for row in table.rows {
+            if case .toolInvocation(let model) = row.content {
+                XCTAssertEqual(model.isOpen, model.invocationID == 4, "row \(model.invocationID)")
+            }
+        }
+        window.close()
+    }
+
+    func testNativeCopyAndMenuCopyLeaveOutGutterAndFoldRows() throws {
+        // Native ⌘C writes to the general pasteboard before the fix: keep the reader's text.
+        let general = NSPasteboard.general
+        let generalChange = general.changeCount
+        let generalText = general.string(forType: .string)
+        defer {
+            if general.changeCount != generalChange, let generalText {
+                general.clearContents()
+                general.setString(generalText, forType: .string)
+            }
+        }
+        let numbered = (1...300).map { String(format: "%6d→let v%d = %d", $0, $0, $0) }.joined(separator: "\n")
+        let h = Harness([user(), read("t1", "/repo/Sources/App.swift"), output("t1", numbered), assistant()])
+        let pasteboard = privatePasteboard()
+        h.controller.toolPasteboard = pasteboard
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let storage = try XCTUnwrap(cell.bodyText.textStorage)
+        let all = NSRange(location: 0, length: storage.length)
+        XCTAssertNotNil(showAllLink(in: cell), "the body has a fold row")
+        let expected = ToolDetailRenderer.copyText(of: storage, in: all)
+        XCTAssertTrue(expected.contains("let v1 = 1"))
+
+        // Native ⌘C on a body selection that covers gutter cells and the fold row.
+        cell.bodyText.setSelectedRange(all)
+        cell.bodyText.copy(nil)
+        let copied = try XCTUnwrap(pasteboard.string(forType: .string))
+        XCTAssertEqual(copied, expected)
+        XCTAssertFalse(copied.contains("Show all"))
+        for line in copied.components(separatedBy: "\n") where line.contains("let v") {
+            XCTAssertTrue(line.hasPrefix("let v"), "no gutter number: \(line.debugDescription)")
+        }
+        XCTAssertNil(pasteboard.data(forType: .rtf), "plain text only, no RTF with toolfold: links")
+        XCTAssertNil(pasteboard.data(forType: .rtfd))
+
+        // The context menu's Copy with the same selection.
+        pasteboard.clearContents()
+        let point = cell.bodyText.convert(NSPoint(x: 20, y: 5), to: nil)
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [],
+                                                     timestamp: 0, windowNumber: h.window.windowNumber, context: nil,
+                                                     eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try XCTUnwrap(cell.menu(for: event))
+        perform(menuItem(menu, "Copy"), in: menu)
+        XCTAssertEqual(pasteboard.string(forType: .string), expected)
+        XCTAssertNil(pasteboard.data(forType: .rtf))
+    }
+
+    func testFindUnderErrorsOnlyKeepsMatchesInShownFailedRows() {
+        // 0 user · 1 c1 · 2 o1 (failed) · 3 assistant · 4 c2 · 5 o2 · 6 assistant
+        let h = Harness([user(), bash("t1", "make"), output("t1", "needle failed", failed: true), assistant(),
+                         bash("t2", "ls"), output("t2", "needle ok"), assistant()])
+        h.activeRoleFilters = [.errors]
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [1], "only the failed invocation shows")
+        let matches = [
+            TranscriptDerivedState.BlockMatch(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 0),
+            TranscriptDerivedState.BlockMatch(globalBlockIndex: 5, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 1),
+        ]
+        let counts = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1,
+                                            reset: true, shouldJump: false)
+        XCTAssertEqual(counts.total, 1, "the failed row's match counts; the hidden row's does not")
+    }
+
+    func testFindWithErrorsOffKeepsMatchInPairedErrorOfShownInvocation() {
+        // 0 user · 1 c1 · 2 .error carrying t1 (paired) · 3 assistant · 4 plain .error
+        let h = Harness([user(), bash("t1", "rm x"),
+                         F.block(.error, id: "t1", text: "Error: needle denied", isError: true, disposition: .runtimeError),
+                         assistant(), F.block(.error, text: "needle plain", isError: true)])
+        h.activeRoleFilters = [.user, .assistant, .tools]
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 1, 3], "the invocation shows, the plain error does not")
+        let matches = [
+            TranscriptDerivedState.BlockMatch(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 7, length: 6), ordinal: 0),
+            TranscriptDerivedState.BlockMatch(globalBlockIndex: 4, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 1),
+        ]
+        let counts = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1,
+                                            reset: true, shouldJump: false)
+        XCTAssertEqual(counts.total, 1, "the paired error is inside a shown invocation; the plain error is hidden")
     }
 }

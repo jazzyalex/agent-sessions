@@ -826,6 +826,7 @@ final class ToolInvocationCellView: ToolCardCellView {
         cardBackground.addSubview(linesHost)
 
         bodyText.translatesAutoresizingMaskIntoConstraints = false
+        bodyText.isToolBody = true
         bodyText.isEditable = false
         bodyText.isSelectable = true
         bodyText.drawsBackground = false
@@ -1003,8 +1004,9 @@ final class ToolInvocationCellView: ToolCardCellView {
             actionIndex = min(max(Int(y / ToolRowMetrics.lineHeight), 0), lines.count - 1)
         } else if !bodyText.isHidden,
                   bodyText.bounds.contains(bodyText.convert(event.locationInWindow, from: nil)) {
-            let range = bodyText.selectedRange()
-            if range.length > 0 { selection = (bodyText.string as NSString).substring(with: range) }
+            // As ⌘C copies it: no gutter cells, no fold controls.
+            let text = bodyText.toolBodySelectionText()
+            if !text.isEmpty { selection = text }
         }
         return menuProvider(actionIndex, selection)
     }
