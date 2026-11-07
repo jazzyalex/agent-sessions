@@ -1523,8 +1523,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // Tool rows changed in place (an output arrived or grew, a group
             // gained a call) and `appendedCount` rows (maybe 0) were appended.
             // Ordinals stay valid, but reloaded rows render new text, so a live
-            // cross-block selection is cleared, like any text-changing toggle.
-            clearCrossBlockSelection()
+            // cross-block selection that covers one of them is cleared, like any
+            // text-changing toggle; a selection elsewhere stays.
+            if let ends = selection.normalizedEndpoints,
+               reloadRows.contains(where: { $0 >= ends.low.blockOrdinal && $0 <= ends.high.blockOrdinal }) {
+                clearCrossBlockSelection()
+            }
             let firstNew = rows.count
             // Same anchor rule as the appendOnly path: sticky rides the tail. A
             // scrolled-up reader keeps the viewport, which only moves when a

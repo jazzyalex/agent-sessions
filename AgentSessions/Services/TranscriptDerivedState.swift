@@ -164,9 +164,11 @@ final class TranscriptDerivedState {
             if Task.isCancelled { return }
             // A live append (same session): before the snapshot is published, the store learns the
             // new invocation keys (an invocation whose output grew stops returning its old text)
-            // and decodes the few that changed, so the one Find scan at landing is final.
+            // and decodes the few that changed, so the one Find scan at landing is final. Only
+            // while the Session view decodes: otherwise nothing reads the store, and the pass that
+            // starts when it shows again installs the maps (the store is not complete then).
             let decodedAll: Bool
-            if sameSession, let snapKey = snap.key {
+            if sameSession, decodeLimit > 0, let snapKey = snap.key {
                 decodedAll = store.refresh(blocks: snap.blocks, index: snap.invocationIndex, source: snap.source,
                                            sessionID: snapKey.sessionID,
                                            viewportBlock: viewport ?? max(0, snap.blocks.count - 1),

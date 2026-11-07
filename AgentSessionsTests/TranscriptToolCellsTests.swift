@@ -1210,6 +1210,24 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertNil(pasteboard.data(forType: .rtf))
     }
 
+    func testGrowingOutputKeepsASelectionElsewhere() {
+        // 0 user · 1 assistant · 2 c1 · 3 o1: rows [0, 1, 2].
+        let h = Harness([user("first prompt"), assistant("an answer"), bash("t1", "make"), output("t1", "step 1")])
+        XCTAssertEqual(h.rowIDs, [0, 1, 2])
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (1, 4))
+        XCTAssertTrue(h.controller.isCrossBlockSelectionActive)
+
+        // The output grows (row 2 reloads in place): the selection over rows 0–1 stays.
+        h.replace([user("first prompt"), assistant("an answer"), bash("t1", "make"), output("t1", "step 1\nstep 2")])
+        XCTAssertTrue(h.controller.isCrossBlockSelectionActive, "the reloaded row is outside the selection")
+        XCTAssertEqual(h.controller.assembleSelectedText(), "first prompt\n\nan a")
+
+        // A selection that reaches the reloaded row is cleared.
+        h.controller.setCrossBlockSelection(anchor: (1, 0), focus: (2, 2))
+        h.replace([user("first prompt"), assistant("an answer"), bash("t1", "make"), output("t1", "step 1\nstep 2\nstep 3")])
+        XCTAssertFalse(h.controller.isCrossBlockSelectionActive)
+    }
+
     func testApplyTakesRowSummariesBuiltOffMain() throws {
         let blocks = F.sequence([user(), bash("t1", "make"), output("t1")])
         let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)

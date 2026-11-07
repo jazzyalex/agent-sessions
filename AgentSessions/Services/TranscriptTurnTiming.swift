@@ -39,12 +39,13 @@ struct ToolTiming: Equatable {
 ///   from agents that record ids pair by id.
 enum TranscriptTurnTiming {
 
-    /// Builds the pairing itself (source `.codex`). Callers that hold a
+    /// Builds the pairing itself for the session's agent. Callers that hold a
     /// snapshot's `ToolInvocationIndex` use `compute(blocks:index:)`.
     static func compute(
-        blocks: [SessionTranscriptBuilder.LogicalBlock]
+        blocks: [SessionTranscriptBuilder.LogicalBlock],
+        source: SessionSource
     ) -> (turns: [Int: TurnTiming], tools: [Int: ToolTiming]) {
-        compute(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: .codex))
+        compute(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: source))
     }
 
     /// - Parameters:

@@ -241,6 +241,29 @@ final class ToolSearchTextStoreTests: XCTestCase {
         XCTAssertNil(store.text(forBlock: 7))
     }
 
+    func testCancelledOlderRefreshNeverReplacesTheNewerMaps() async {
+        // Snapshot tasks: the newer one refreshed first; the older one, cancelled when the newer
+        // one started, reaches `refresh` later. It must not install its older maps.
+        let blocks = fourBashCalls
+        let store = ToolSearchTextStore()
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+        let older = Array(blocks.prefix(7))
+        let olderIndex = ToolInvocationIndex.build(blocks: older, source: .claude)
+        XCTAssertTrue(store.refresh(blocks: blocks, index: index, source: .claude, sessionID: "s", viewportBlock: 9,
+                                    decodeLimit: 8, decodeBudget: 1_000_000))
+        XCTAssertNotNil(store.text(forBlock: 7))
+
+        let stale = Task.detached { () -> Bool in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return store.refresh(blocks: older, index: olderIndex, source: .claude, sessionID: "s", viewportBlock: 5,
+                                 decodeLimit: 8, decodeBudget: 1_000_000)
+        }
+        let installed = await stale.value
+        XCTAssertFalse(installed)
+        XCTAssertNotNil(store.text(forBlock: 7), "the newer snapshot's maps and text stay")
+        XCTAssertTrue(store.isComplete)
+    }
+
     // MARK: - Search text
 
     func testSearchTextAddsFooterFactsNotInPlainText() {

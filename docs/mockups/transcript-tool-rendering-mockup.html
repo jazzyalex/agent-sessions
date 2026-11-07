@@ -254,7 +254,7 @@ exec text(await tools.exec_command({cmd:"pwd; rg -n 'custom_tool_call' AgentSess
     "type" : "input_text"
   },
   {
-    "text" : "Warning: truncated output (original token count: 19326)\nTotal output lines: 2\n\n{\"chunk_id\":\"55bd45\",\"wall_time_seconds\":0.081781792,\"exit_code\":0,\"original_token_count\":61,\"output\":\"\/Users\/alexm\/Repository\/Codex-History\\nAgentSessions\/Model\/SessionEvent.swift:32:            case \\\"tool_call\\\", \\\"tool-call\\\", \\\"toolcall\\\", \\\"tool_use\\\", \\\"tool-use\\\", \\\"function_call\\\", \\\"web_search_call\\\", \\\"custom_tool_call\\\": return .tool_call\\n\"}\n{\"chunk_id\":\"dc8d5f\",\"wall_time_seconds\":0.000012583,\"exit_code\":0,\"original_token_count\":19265,\"output\":\"Warning: truncated output (original token count: 19265)\\nTotal output lines: 412\\n\\n## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next\\nstatus: in-progress\\n\\n**State:** The Codex run finished the workflow changes and the full sweep; the work is committed on `main`. 6.3 (Ghostty Resume + OpenCode Esc fix) needs release copy, then deploy.\\n\\n**Verified:**\\n- Final sweep: twelve agents `supports_latest`; final weekly</div>
+    "text" : "Warning: truncated output (original token count: 19326)\nTotal output lines: 2\n\n{\"chunk_id\":\"55bd45\",\"wall_time_seconds\":0.081781792,\"exit_code\":0,\"original_token_count\":61,\"output\":\"\/Users\/dev\/src\/demo-app\\nAgentSessions\/Model\/SessionEvent.swift:32:            case \\\"tool_call\\\", \\\"tool-call\\\", \\\"toolcall\\\", \\\"tool_use\\\", \\\"tool-use\\\", \\\"function_call\\\", \\\"web_search_call\\\", \\\"custom_tool_call\\\": return .tool_call\\n\"}\n{\"chunk_id\":\"dc8d5f\",\"wall_time_seconds\":0.000012583,\"exit_code\":0,\"original_token_count\":19265,\"output\":\"Warning: truncated output (original token count: 19265)\\nTotal output lines: 412\\n\\n## 2026-10-30 · search-index · Index rebuild merged; release copy next\\nstatus: in-progress\\n\\n**State:** The index rebuild is merged on `main`. The release needs its copy, then a deploy.\\n\\n**Verified:**\\n- Full test run passes on the release build; the cache</div>
             <div class="showall">Show all 61 lines</div>
           </div>
         </div>
@@ -289,7 +289,7 @@ exec text(await tools.exec_command({cmd:"pwd; rg -n 'custom_tool_call' AgentSess
                   <div class="ctx"><span>exec script · command 1 of 2</span></div>
                   <div class="pane">
                     <div class="cmd"><span class="hang"><span class="p">$ </span>pwd; rg -n 'custom_tool_call' AgentSessions --glob '*.swift'</span></div>
-                    <div class="out" style="border-top:1px solid var(--pane-border)"><span class="dim">/Users/alexm/Repository/Codex-History</span>
+                    <div class="out" style="border-top:1px solid var(--pane-border)"><span class="dim">/Users/dev/src/demo-app</span>
 AgentSessions/Model/SessionEvent.swift:32:  case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call", "web_search_call", "custom_tool_call": return .tool_call</div>
                     <div class="foot"><span>exit 0</span><span>0.08s</span></div>
                   </div>
@@ -297,18 +297,18 @@ AgentSessions/Model/SessionEvent.swift:32:  case "tool_call", "tool-call", "tool
               </div>
 
               <div class="inv">
-                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">RepoHandover.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn" title="Codex cut this output before it reached the model">cut by Codex</span><span class="m quiet">412 lines</span><span class="m">0.01s</span></span></div>
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">HANDOVER.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn" title="Codex cut this output before it reached the model">cut by Codex</span><span class="m quiet">412 lines</span><span class="m">0.01s</span></span></div>
                 <div class="det">
                   <div class="ctx"><span>exec script · command 2 of 2</span></div>
                   <div class="pane">
-                    <div class="cmd"><span class="p">$ </span>sed -n '1,160p' RepoHandover.md</div>
-                    <div class="out" style="border-top:1px solid var(--pane-border)">## 2026-11-02 11:25 · format-check-6.2 · Format-check workflow rebuilt and 2026-11-02 sweep recorded; 6.3 prep next
+                    <div class="cmd"><span class="p">$ </span>sed -n '1,160p' HANDOVER.md</div>
+                    <div class="out" style="border-top:1px solid var(--pane-border)">## 2026-10-30 · search-index · Index rebuild merged; release copy next
 status: in-progress
 
-**State:** The Codex run finished the workflow changes and the full sweep; the work is committed on `main`. 6.3 (Ghostty Resume + OpenCode Esc fix) needs release copy, then deploy.</div>
+**State:** The index rebuild is merged on `main`. The release needs its copy, then a deploy.</div>
                     <div class="fold">⋯ 405 more lines <a href="#">Show all</a></div>
-                    <div class="out">2. Owner resumes one real agent in Ghostty from the app before release.
-3. Owner decides on the Hermes stash.</div>
+                    <div class="out">2. Run the release checklist on a clean machine.
+3. Decide whether to keep the old cache folder.</div>
                     <div class="foot"><span>exit 0</span><span class="w">Codex cut the output at 19,265 tokens · 412 lines reached the model</span></div>
                   </div>
                 </div>
@@ -325,14 +325,14 @@ status: in-progress
               </div>
 
               <div class="inv failed open">
-                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">xcodebuild test -scheme AgentSessions -only-testing:AgentSessionsTests/TranscriptToolSummaryTests</span><span class="meta"><span class="m bad">exit 65</span><span class="m">48s</span></span></div>
+                <div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">xcodebuild test -scheme DemoApp -only-testing:DemoAppTests/SummaryTests</span><span class="meta"><span class="m bad">exit 65</span><span class="m">48s</span></span></div>
                 <div class="det">
                   <div class="pane">
-                    <div class="cmd"><span class="hang"><span class="p">$ </span>xcodebuild test -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/TranscriptToolSummaryTests 2&gt;&amp;1 | tail -40</span></div>
+                    <div class="cmd"><span class="hang"><span class="p">$ </span>xcodebuild test -scheme DemoApp -destination 'platform=macOS' -only-testing:DemoAppTests/SummaryTests 2&gt;&amp;1 | tail -40</span></div>
                     <div class="fold" style="border-top:1px solid var(--pane-border)">⋯ 22 earlier lines <a href="#">Show all</a></div>
-                    <div class="out err">Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' started.
-<span class="stderr">/Users/alexm/Repository/Codex-History/AgentSessionsTests/TranscriptToolSummaryTests.swift:212: error: -[TranscriptToolSummaryTests testExecScriptSummary] : XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'custom_tool_call' AgentSessions")</span>
-Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' failed (0.004 seconds).
+                    <div class="out err">Test Case '-[DemoAppTests.SummaryTests testScriptLabel]' started.
+<span class="stderr">/Users/dev/src/demo-app/Tests/SummaryTests.swift:57: error: -[SummaryTests testScriptLabel] : XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'parse_event' Sources")</span>
+Test Case '-[DemoAppTests.SummaryTests testScriptLabel]' failed (0.004 seconds).
 Executed 18 tests, with 1 failure (0 unexpected) in 0.031 (0.034) seconds
 <span class="stderr">** TEST FAILED **</span></div>
                     <div class="foot"><span class="bad">exit 65</span><span>48s</span><span class="sp"></span><span>last 18 of 40 lines</span></div>
@@ -383,7 +383,7 @@ Executed 18 tests, with 1 failure (0 unexpected) in 0.031 (0.034) seconds
           <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><span class="gtitle">5 tool calls</span><span class="digest">Read 2 files · Searched 2…</span><span class="fail">1 failed</span><span class="grow"></span><span class="dur">14.2s</span></div>
           <div class="gbody">
             <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-search"/></svg><span class="verb">Searched</span><span class="arg">custom_tool_call</span><span class="meta"><span class="m quiet">1 match</span></span></div></div>
-            <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">RepoHandover.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn">cut by Codex</span></span></div></div>
+            <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-doc"/></svg><span class="verb">Read</span><span class="arg">HANDOVER.md <span class="dim">L1–160</span></span><span class="meta"><span class="warn">cut by Codex</span></span></div></div>
             <div class="inv"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-pencil"/></svg><span class="verb">Edited</span><span class="arg">TranscriptToolSummary.swift</span><span class="meta"><span class="m add">+14</span><span class="m del">−2</span></span></div></div>
             <div class="inv failed"><div class="row"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico"><use href="#i-term"/></svg><span class="verb">Ran</span><span class="arg">xcodebuild test -scheme AgentSessions…</span><span class="meta"><span class="m bad">exit 65</span></span></div></div>
           </div>
@@ -702,7 +702,7 @@ Falls back to order inside the turn. <a href="#">+12 lines</a></span>
       <div class="card tool open">
         <div class="ghead"><svg class="chev"><use href="#i-chev"/></svg><svg class="ico" style="width:14px;height:14px;color:var(--label2)"><use href="#i-term"/></svg><span class="gtitle" style="color:var(--label2)">Ran</span><span class="digest" style="font-family:var(--mono);color:var(--label)">cat &gt; scripts/check.sh &lt;&lt;'EOF'</span><span class="grow"></span><span class="m quiet">exit 0</span></div>
         <div class="gbody" style="padding-left:17px"><div class="pane">
-          <div class="ctx" style="padding:4px 9px 0;margin:0"><span><b>cwd</b> ~/Repository/Codex-History</span><span><b>shell</b> zsh -lc</span><span><b>timeout</b> 120s</span></div>
+          <div class="ctx" style="padding:4px 9px 0;margin:0"><span><b>cwd</b> ~/src/demo-app</span><span><b>shell</b> zsh -lc</span><span><b>timeout</b> 120s</span></div>
           <div class="cmd"><span class="p">$ </span>cat &gt; scripts/check.sh &lt;&lt;'EOF'</div>
           <div class="sect" style="border-top:1px solid var(--pane-border)">heredoc · 14 lines</div>
           <div class="gut"><div class="n">1</div><div class="c">#!/bin/zsh</div><div class="n">2</div><div class="c">set -euo pipefail</div><div class="n">3</div><div class="c">xcodebuild -scheme AgentSessions build | xcbeautify</div></div>
@@ -723,10 +723,10 @@ Falls back to order inside the turn. <a href="#">+12 lines</a></span>
   <div class="cols">
     <div>
       <div class="caption">Copy of the failed row (plain text)</div>
-      <div class="win"><pre class="plain">$ xcodebuild test -scheme AgentSessions -destination 'platform=macOS' -only-testing:AgentSessionsTests/TranscriptToolSummaryTests 2&gt;&amp;1 | tail -40
+      <div class="win"><pre class="plain">$ xcodebuild test -scheme DemoApp -destination 'platform=macOS' -only-testing:DemoAppTests/SummaryTests 2&gt;&amp;1 | tail -40
 [exit 65 · 48s]
-Test Case '-[AgentSessionsTests.TranscriptToolSummaryTests testExecScriptSummary]' started.
-…/TranscriptToolSummaryTests.swift:212: error: … XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'custom_tool_call' AgentSessions")
+Test Case '-[DemoAppTests.SummaryTests testScriptLabel]' started.
+…/SummaryTests.swift:57: error: … XCTAssertEqual failed: ("exec") is not equal to ("pwd; rg -n 'parse_event' Sources")
 ** TEST FAILED **</pre></div>
     </div>
     <div>

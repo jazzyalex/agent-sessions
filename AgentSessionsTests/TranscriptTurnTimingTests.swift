@@ -29,7 +29,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),
             .toolOut(4),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // Anchor = first .assistant block (index 1).
         XCTAssertEqual(result.turns[1], TurnTiming(durationSeconds: 4.0, toolCallCount: 1))
@@ -48,7 +48,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .user(10),       // 2
             .assistant(13),  // 3  <- turn 2 anchor
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertEqual(result.turns[1], TurnTiming(durationSeconds: 2.0, toolCallCount: 0))
         // Turn 2 duration must use turn 2's OWN user prompt (t=10), not turn 1's
@@ -67,7 +67,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),
             .toolOut(4),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         let timing = result.turns[1]
         XCTAssertNotNil(timing)
@@ -82,7 +82,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),
             .toolOut(nil),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
         XCTAssertEqual(result.turns[1]?.toolCallCount, 1)
@@ -96,7 +96,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .user(10),
             .assistant(2), // before the user prompt
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
     }
@@ -108,7 +108,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(10),
             .toolOut(2), // before its toolCall — clock skew
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.tools[3]?.durationSeconds)
     }
@@ -122,7 +122,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(1),
             .toolOut(3),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // Anchor falls back to the user block (index 0).
         let timing = result.turns[0]
@@ -140,7 +140,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .assistant(1),
             .toolOut(2), // orphaned — no toolCall precedes it
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.tools[2]?.durationSeconds)
         // Still present (not required either way, but must not crash) — accept
@@ -155,7 +155,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),
             // no matching toolOut
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // No crash, and no tools entry keyed by the toolCall's own index (2) —
         // tools are keyed by toolOut index, and there is no toolOut here.
@@ -173,7 +173,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),    // 4  call2
             .toolOut(5),     // 5  out2
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // out1 (idx 3) matches call1 (idx 2): 1 - 0 = 1.0.
         XCTAssertEqual(result.tools[3], ToolTiming(durationSeconds: 1.0))
@@ -194,7 +194,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolOut(3),     // 4  out1
             .toolOut(10),    // 5  out2
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // out1 (idx 4) pairs with call1 (idx 2): 3 - 0 = 3.0.
         XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 3.0))
@@ -214,7 +214,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             F.block(.toolOut, id: "t1", at: 4),     // 4
             F.block(.toolOut, id: "t2", at: 10),    // 5
         ])
-        let result = TranscriptTurnTiming.compute(blocks: inOrder)
+        let result = TranscriptTurnTiming.compute(blocks: inOrder, source: .codex)
         XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 4.0))
         XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 9.0))
 
@@ -243,7 +243,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(nil),
             .toolOut(nil),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
         XCTAssertNil(result.tools[3]?.durationSeconds)
@@ -251,7 +251,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
     }
 
     func testEmptyBlocksProducesEmptyMaps() {
-        let result = TranscriptTurnTiming.compute(blocks: [])
+        let result = TranscriptTurnTiming.compute(blocks: [], source: .codex)
         XCTAssertTrue(result.turns.isEmpty)
         XCTAssertTrue(result.tools.isEmpty)
     }

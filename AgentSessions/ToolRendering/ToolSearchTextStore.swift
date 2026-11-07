@@ -281,7 +281,7 @@ final class ToolSearchTextStore: @unchecked Sendable {
     /// owner went away) ends the pass at the next invocation.
     func start(blocks: [Block], index: ToolInvocationIndex, source: SessionSource, sessionID: String,
                viewportBlock: Int, onComplete: @escaping @MainActor (_ decodedAny: Bool) -> Void) {
-        let pass = beginPass()
+        guard let pass = beginPass(unlessCancelled: false) else { return }
         let build = self.build
         let cache = invocationCache
         let cacheInsertLimit = self.cacheInsertLimit
@@ -322,9 +322,12 @@ final class ToolSearchTextStore: @unchecked Sendable {
     @discardableResult
     func refresh(blocks: [Block], index: ToolInvocationIndex, source: SessionSource, sessionID: String,
                  viewportBlock: Int, decodeLimit: Int, decodeBudget: Int) -> Bool {
-        let pass = beginPass()
+        // A cancelled snapshot task is an older snapshot: a newer one started after it was
+        // cancelled. It neither starts a pass (that would stop the newer one) nor installs maps.
+        guard let pass = beginPass(unlessCancelled: true) else { return false }
         let maps = Self.maps(blocks: blocks, index: index, sessionID: sessionID)
-        guard install(pass: pass, idByBlock: maps.idByBlock, keyByID: maps.keyByID) else { return false }
+        guard install(pass: pass, idByBlock: maps.idByBlock, keyByID: maps.keyByID,
+                      unlessCancelled: true) else { return false }
         let missing = Self.viewportOutward(maps.refs, from: viewportBlock).filter { ref in
             guard let key = maps.keyByID[ref.id] else { return false }
             return !hasText(id: ref.id, key: key)
@@ -380,9 +383,13 @@ final class ToolSearchTextStore: @unchecked Sendable {
     // MARK: Pass helpers
 
     /// Cancels a running pass and opens a new generation; a stale pass can no longer write.
-    private func beginPass() -> Int {
+    /// Starts a new pass generation. `unlessCancelled`: nil, and nothing changes, when the
+    /// calling task is cancelled (read under the lock, so a newer snapshot's pass, which starts
+    /// only after the older task was cancelled, always gets the later generation).
+    private func beginPass(unlessCancelled: Bool) -> Int? {
         lock.lock()
         defer { lock.unlock() }
+        if unlessCancelled, Task.isCancelled { return nil }
         task?.cancel()
         task = nil
         generation &+= 1
@@ -447,10 +454,11 @@ final class ToolSearchTextStore: @unchecked Sendable {
 
     // MARK: Locked steps
 
-    private func install(pass: Int, idByBlock: [Int: Int], keyByID: [Int: String]) -> Bool {
+    private func install(pass: Int, idByBlock: [Int: Int], keyByID: [Int: String],
+                         unlessCancelled: Bool = false) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard pass == generation else { return false }
+        guard pass == generation, !(unlessCancelled && Task.isCancelled) else { return false }
         self.idByBlock = idByBlock
         self.keyByID = keyByID
         texts = texts.filter { keyByID[$0.key] == $0.value.key }
