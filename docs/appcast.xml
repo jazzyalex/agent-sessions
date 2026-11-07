@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.3</title>
-            <pubDate>Tue, 03 Nov 2026 20:59:52 -0800</pubDate>
+            <title>6.4</title>
+            <pubDate>Sat, 07 Nov 2026 15:14:01 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,22 +27,25 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.3</h2>
+<h2>What&#x27;s New in 6.4</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Resume in Ghostty.</strong> Choose Ghostty under Preferences → General → Terminal App for CLI Resume, including Codex. Resume opens a new window in the session folder. Requires a Ghostty build with AppleScript support; verified with Ghostty 1.4.0. Contributed by @buildfolk in #89.</li>
+<li><strong>A tool view you can actually read, for all 17 agents.</strong> Every tool call is one row with its command or path first, and parallel calls get a row each. Open one for decoded output that folds when long; exit codes and errors sit right on the row. Right-click to copy the command, the output or the raw event.</li>
+<li><strong>Find matches what you see.</strong> A match inside folded output opens the fold, and Esc closes it again. The Errors filter steps through single failed calls.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Pressing Esc in OpenCode no longer hides its rate.</strong> An OpenCode step you interrupt before any output used to blank that session&#x27;s rate in the Quota Meter for 30 minutes, and mark its Session Info token total as incomplete. It now counts as no usage, like a refused request.</li>
+<li><strong>No more escaped slashes.</strong> Paths and URLs in tool calls read <code>/</code>, not <code>\/</code>.</li>
+<li><strong>Codex output shows as text.</strong> Output stored as a list of text items now has real line breaks instead of raw JSON.</li>
+<li><strong>Parallel tool outputs stay separate.</strong> They no longer merge into one block.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.3</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.4</a></p>
 </div>
             ]]></description>
-            <sparkle:version>88</sparkle:version>
-            <sparkle:shortVersionString>6.3</sparkle:shortVersionString>
+            <sparkle:version>89</sparkle:version>
+            <sparkle:shortVersionString>6.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg" length="30202561" type="application/octet-stream" sparkle:edSignature="keIS/Gc87uZulpSauiUC3d81LFNeN25834f5mfLu8C2MSaP2f2JA922TWnRmQETozUKNv2ItFVEBsGB7bPNYBQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.4/AgentSessions-6.4.dmg" length="31341409" type="application/octet-stream" sparkle:edSignature="GTkkCYAxakuC/gRmG6vYwhFPmRxoYYxK0/PtaZE/M87GAIGilD/DDUFgtIQXhrzO5dzXmkzeB7MkTZ4kuxCWDA=="/>
         </item>
     </channel>
 </rss>
