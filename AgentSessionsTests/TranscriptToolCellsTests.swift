@@ -1162,6 +1162,50 @@ final class TranscriptToolCellsTests: XCTestCase {
         window.close()
     }
 
+    func testQuickRoundTripDropsTheOtherSessionsSnapshot() throws {
+        let a = codexSession("trip-a-\(UUID().uuidString)", [("k1", "make", 2)])
+        let b = codexSession("trip-b-\(UUID().uuidString)", [("k1", "ls", 0), ("k2", "make test", 2)])
+        let state = TranscriptDerivedState()
+        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+        final class Count { var value = 0 }
+        let found = Count()
+        func view(_ session: Session, findToken: Int = 0) -> TranscriptBlockListView {
+            TranscriptBlockListView(derivedState: state, session: session, fontSize: 13,
+                                    findQuery: findToken > 0 ? "make" : "", findToken: findToken,
+                                    findMatchCount: Binding(get: { found.value }, set: { found.value = $0 }),
+                                    findCurrentIndex: .constant(0),
+                                    unifiedMatchCount: .constant(0), unifiedCurrentIndex: .constant(0))
+        }
+        state.update(session: a, settings: settings)
+        spin { !state.isComputing }
+        let host = NSHostingView(rootView: view(a))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        // A → B (B's snapshot computing) → A again before B lands.
+        state.update(session: b, settings: settings)
+        host.rootView = view(b)
+        host.layoutSubtreeIfNeeded()
+        state.update(session: a, settings: settings)
+        host.rootView = view(a)
+        host.layoutSubtreeIfNeeded()
+        // Long enough for B's computation to land if it were still running.
+        let settle = Date().addingTimeInterval(1)
+        while Date() < settle { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertEqual(state.snapshot.key?.sessionID, a.id, "B's snapshot never publishes")
+        XCTAssertFalse(state.isComputing)
+
+        // The view shows A with A's snapshot, so a Find request is handled.
+        host.rootView = view(a, findToken: 1)
+        host.layoutSubtreeIfNeeded()
+        spin { found.value > 0 }
+        XCTAssertGreaterThan(found.value, 0, "the Find token was consumed against A")
+        window.close()
+    }
+
     func testNativeCopyAndMenuCopyLeaveOutGutterAndFoldRows() throws {
         // Native ⌘C writes to the general pasteboard before the fix: keep the reader's text.
         let general = NSPasteboard.general

@@ -89,6 +89,10 @@ final class TranscriptDerivedState {
     private(set) var snapshot = Snapshot()
     private(set) var isComputing = false
     private var computeTask: Task<Void, Never>?
+    /// The key of the computation in flight (nil when none).
+    @ObservationIgnored private var pendingKey: Key?
+    /// Bumped per started or dropped computation; a landing publishes only when it is current.
+    @ObservationIgnored private var computeGeneration = 0
 
     /// Decoded tool text for Find (spec §6.8 cost rule): one pass per snapshot, after the snapshot
     /// landed, off the main thread. Its invocation cache is shared with the Session view's L2 renderer.
@@ -142,7 +146,16 @@ final class TranscriptDerivedState {
     /// No-op if key unchanged (same dedupe discipline as shouldSkipRebuild).
     func update(session: Session, settings: DerivedSettings) {
         let key = Key(session: session, settings: settings)
-        if key == snapshot.key { return }
+        if key == snapshot.key {
+            // Back at the published snapshot while another one computes (a quick A → B → A
+            // switch): drop that computation, so it never publishes over the session shown now.
+            if isComputing { dropPendingSnapshot() }
+            return
+        }
+        // Already computing this key.
+        if key == pendingKey, isComputing { return }
+        // Cancel first: an older same-session refresh must not install maps after the drop below.
+        computeTask?.cancel()
         // A session change cancels the decode pass and drops the decoded text (block indices
         // mean another session's blocks now).
         let sameSession = key.sessionID == snapshot.key?.sessionID
@@ -150,7 +163,9 @@ final class TranscriptDerivedState {
         // A pass start the previous landing deferred must not install older maps after this
         // snapshot's refresh; the new landing schedules what is still missing.
         toolDecodeRequest &+= 1
-        computeTask?.cancel()
+        computeGeneration &+= 1
+        let generation = computeGeneration
+        pendingKey = key
         isComputing = true
         let sessionCopy = session
         let store = toolSearchStore
@@ -178,13 +193,27 @@ final class TranscriptDerivedState {
             }
             if Task.isCancelled { return }
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                // A newer update (or a return to the published snapshot) replaced this one.
+                guard let self, self.computeGeneration == generation else { return }
                 self.snapshot = snap
                 self.isComputing = false
+                self.pendingKey = nil
                 self.findMatchesCache.removeAll()   // block content changed
                 self.scheduleToolTextDecode(decodedAll: decodedAll)
             }
         }
+    }
+
+    /// Cancels the snapshot computation in flight; the published snapshot stays. When that
+    /// computation was another session's, the decoded text was dropped for it: decode again.
+    private func dropPendingSnapshot() {
+        let leftSession = pendingKey.map { $0.sessionID != snapshot.key?.sessionID } ?? false
+        computeTask?.cancel()
+        computeTask = nil
+        computeGeneration &+= 1
+        pendingKey = nil
+        isComputing = false
+        if leftSession { scheduleToolTextDecode(decodedAll: toolSearchStore.isComplete) }
     }
 
     // MARK: Decoded tool text (Task 15)

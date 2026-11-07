@@ -127,6 +127,21 @@ final class ToolEventFieldsParserTests: XCTestCase {
         XCTAssertTrue(output.text.contains("Large event (5 MB) not loaded"), output.text)
     }
 
+    func testCodexLargeLineOfAnotherPayloadTypeStaysMetaEvenWithAnOutputTypeInside() throws {
+        // The payload is not an output; an output type appears only nested inside it.
+        let dir = try makeTempDir("codex-stub-nested")
+        let url = dir.appendingPathComponent("rollout-2026-11-04T00-00-00-019b2ea4-2a8d-76e2-9cd8-58208e1f2839.jsonl")
+        let base64 = String(repeating: "A", count: 5_200_000)
+        let lines = [
+            #"{"timestamp":"2026-11-04T00:00:00.000Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2839","timestamp":"2026-11-04T00:00:00.000Z","cwd":"/tmp","originator":"codex_cli_rs","cli_version":"0.73.0"}}"#,
+            #"{"timestamp":"2026-11-04T00:00:02.000Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","call_id":"call_big","invocation":{"type":"function_call_output"},"result":{"content":[{"type":"image","data":"data:image/png;base64,\#(base64)"}]}}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
+        XCTAssertFalse(session.events.contains { $0.kind == .tool_result })
+    }
+
     func testCodexLargeNonOutputLineStubStaysMeta() throws {
         // A huge line that is not a tool output (here an event message that carries a call id)
         // must not become a second output of the call.

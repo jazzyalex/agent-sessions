@@ -3480,11 +3480,12 @@ final class SessionIndexer: ObservableObject {
     private static let rawOutputTypes = ["function_call_output", "custom_tool_call_output"]
 
     /// The tool-output payload type of a raw Codex line (`function_call_output` /
-    /// `custom_tool_call_output`), read from the line's first 1 KB without a JSON parse, where
-    /// Codex writes the payload's `type` before its output. Nil for any other line.
+    /// `custom_tool_call_output`), read from the line's first 1 KB without a JSON parse: the
+    /// payload must open with that type (`"payload":{"type":"…"`), as Codex writes it. An output
+    /// type nested anywhere else does not count. Nil for any other line.
     static func rawOutputType(in line: String) -> String? {
         let head = String(decoding: line.utf8.prefix(1024), as: UTF8.self)
-        return rawOutputTypes.first { head.contains(#""type":"\#($0)""#) }
+        return rawOutputTypes.first { head.contains(#""payload":{"type":"\#($0)""#) }
     }
 
     private static let rawTimestampPrefix = Array(#"{"timestamp":""#.utf8)
