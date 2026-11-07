@@ -47,6 +47,45 @@ final class TranscriptDerivedStateTests: XCTestCase {
                        "error-bearing fixture must actually exercise errorBlockIndices")
     }
 
+    func testTailRowSummariesMatchTheBuilderAndKeepUnchangedEntries() throws {
+        let F = TranscriptTestFixtures.self
+        var raw = [F.block(.user, text: "go")]
+        for i in 0..<300 {
+            raw.append(F.block(.toolCall, id: "t\(i)", toolName: "Bash", toolInput: #"{"command":"echo \#(i)"}"#))
+            raw.append(F.block(.toolOut, id: "t\(i)", text: "ok \(i)"))
+        }
+        let blocks = F.sequence(raw)
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+        let summaries = TranscriptDerivedState.tailRowSummaries(blocks: blocks, index: index, source: .claude)
+
+        let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count,
+                                                 blockTarget: FeatureFlags.transcriptWindowBlockTarget)
+        let expected = Set((window.lowerBlock...window.upperBlock).compactMap { index.invocationIDByBlock[$0] })
+        XCTAssertEqual(Set(summaries.keys), expected)
+        XCTAssertLessThan(summaries.count, index.invocations.count, "only the tail window is built")
+        for (id, entry) in summaries {
+            let ref = try XCTUnwrap(TranscriptToolRows.invocationRef(id: id, in: index))
+            XCTAssertEqual(entry.summary, ToolInvocationBuilder.rowSummary(ref, blocks: blocks, index: index, source: .claude))
+            XCTAssertEqual(entry.stamp, ToolSearchTextStore.contentStamp(of: ref, blocks: blocks))
+            XCTAssertEqual(entry.status, ref.status)
+        }
+
+        // A live append keeps an entry whose stamp and status did not change, and rebuilds one
+        // whose stamp did.
+        let id = try XCTUnwrap(summaries.keys.max())
+        var kept = try XCTUnwrap(summaries[id])
+        kept.summary.actions = []
+        var previous = summaries
+        previous[id] = kept
+        XCTAssertEqual(TranscriptDerivedState.tailRowSummaries(blocks: blocks, index: index, source: .claude,
+                                                               previous: previous)[id], kept)
+        var stale = kept
+        stale.stamp &+= 1
+        previous[id] = stale
+        XCTAssertEqual(TranscriptDerivedState.tailRowSummaries(blocks: blocks, index: index, source: .claude,
+                                                               previous: previous)[id], summaries[id])
+    }
+
     func testSnapshotCarriesInvocationIndexAndFailedIDs() {
         func call(_ id: String, _ callID: String, _ cmd: String) -> SessionEvent {
             SessionEvent(id: id, timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
@@ -85,6 +124,9 @@ final class TranscriptDerivedStateTests: XCTestCase {
         // Jump stops (Task 16): one per invocation; the failed one is the only error stop.
         XCTAssertEqual(snap.toolJumpIDs, [1, 3])
         XCTAssertEqual(snap.errorJumpIDs, [1])
+        // L1 summaries of the tail window, built off main (the whole stream is the tail here).
+        XCTAssertEqual(Set(snap.rowSummaries.keys), [1, 3])
+        XCTAssertEqual(snap.rowSummaries[1]?.status, .failed(exitCode: 2))
         XCTAssertTrue(TranscriptDerivedState.Snapshot().toolJumpIDs.isEmpty)
         XCTAssertTrue(TranscriptDerivedState.Snapshot().errorJumpIDs.isEmpty)
         XCTAssertTrue(TranscriptDerivedState.Snapshot().invocationIndex.invocations.isEmpty)

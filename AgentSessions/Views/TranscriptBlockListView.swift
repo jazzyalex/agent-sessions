@@ -335,7 +335,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             ideTarget: ideTarget,
             ideBinaryOverridePath: ideBinaryOverridePath,
             activeRoleFilters: activeRoleFilters,
-            sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache)
+            sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache,
+            rowSummaries: snapshot.rowSummaries)
 
         let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
         if consumedScrollIntent {
@@ -1299,7 +1300,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                ideTarget: IDEOpener.Target = .systemDefault,
                ideBinaryOverridePath: String = "",
                activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases),
-               sharedToolInvocationCache: NSCacheMemo<ToolInvocation>? = nil) -> Bool {
+               sharedToolInvocationCache: NSCacheMemo<ToolInvocation>? = nil,
+               rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:]) -> Bool {
         guard let table else { return false }
 
         if let shared = sharedToolInvocationCache, shared !== toolInvocationCache {
@@ -1431,6 +1433,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         self.failedInvocationIDs = failedInvocationIDs
         self.toolJumpIDs = toolJumpIDs
         self.errorJumpIDs = errorJumpIDs
+        // L1 summaries the snapshot built off the main thread (tail window): rows and heights
+        // read them from the cache, so the first rows of a session parse no input on main.
+        for (id, entry) in rowSummaries {
+            if let cached = rowSummaryCache[id], cached.stamp == entry.stamp, cached.status == entry.status { continue }
+            rowSummaryCache[id] = (entry.stamp, entry.status, entry.summary)
+        }
         if fontChanged {
             // L2 bodies render at the transcript font size − 0.5 pt: drop the
             // shown fallbacks so an open row re-renders (its key misses anyway).
@@ -2251,9 +2259,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the text already carries (a tool body's `toolfold:` controls).
     private func applyLinkAttributes(rowID: Int, text: String, to storage: NSTextStorage,
                                      skippingExistingLinks: Bool = false) {
-        let links = linkAttributes(for: rowID, text: text)
+        addLinks(linkAttributes(for: rowID, text: text), to: storage, skippingExistingLinks: skippingExistingLinks)
+    }
+
+    /// Adds resolved links (`computeLinkAttributes`) to `storage`, whose string they were computed on.
+    private func addLinks(_ links: [(range: NSRange, payload: String)], to storage: NSTextStorage,
+                          skippingExistingLinks: Bool) {
         guard !links.isEmpty else { return }
         let fullLen = storage.length
+        // One edit for all links: per-link edits each re-process the attached layout (an L2 body
+        // with ~2,000 links took seconds on the main thread).
+        storage.beginEditing()
+        defer { storage.endEditing() }
         for link in links {
             guard NSMaxRange(link.range) <= fullLen else { continue }
             if skippingExistingLinks {
@@ -2690,11 +2707,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // File-path links in the L2 text (Task C3 parity), around the fold
         // controls the renderer already linked — only when the body text was
         // set anew (a reconfigure with the same body keeps its links). Skipped
-        // for very large bodies (Show all): the scan would run on the main thread.
-        if bodyReset, let storage = cell.bodyText.textStorage,
+        // for very large bodies (Show all).
+        if bodyReset, let body = presentation?.attributed, let storage = cell.bodyText.textStorage,
            storage.length > 0, storage.length <= Self.toolBodyLinkifyLimit {
-            applyLinkAttributes(rowID: rowModel.id, text: cell.bodyText.string, to: storage,
-                                skippingExistingLinks: true)
+            linkifyToolBody(rowID: rowModel.id, body: body, storage: storage)
         }
         paintToolBodyFind(on: cell, rowModel: rowModel)
         finishToolCellConfigure(cell, rowModel: rowModel, ordinal: ordinal)
@@ -2729,6 +2745,50 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Rendered L2 text longer than this (UTF-16) is not scanned for file links.
     private static let toolBodyLinkifyLimit = 200_000
+    /// Up to this length (UTF-16) an L2 body is scanned for file links on the main thread when it
+    /// lands; a longer one off the main thread (each match checks the file system: a 200,000-unit
+    /// body full of paths took ~240 ms in Debug), and its links appear when the scan ends.
+    static let toolBodyInlineLinkifyLimit = 8_000
+
+    /// File-path links for the L2 body `body` that the cell of invocation row `rowID` just took
+    /// into `storage`: from the row's link cache, inline for a short body, else scanned off the
+    /// main thread and added when the cell still shows that body.
+    private func linkifyToolBody(rowID: Int, body: NSAttributedString, storage: NSTextStorage) {
+        guard linkificationEnabled else { return }
+        let text = storage.string
+        if storage.length <= Self.toolBodyInlineLinkifyLimit {
+            applyLinkAttributes(rowID: rowID, text: text, to: storage, skippingExistingLinks: true)
+            return
+        }
+        if let cached = rowLinkCache.get(rowID), cached.text == text,
+           cached.sessionCwd == sessionCwd, cached.repoRootPath == repoRootPath {
+            addLinks(cached.links, to: storage, skippingExistingLinks: true)
+            return
+        }
+        let linkGeneration = toolBodyLinkGeneration
+        let presentationGeneration = toolPresentationGeneration
+        let cwd = sessionCwd
+        let root = repoRootPath
+        pendingToolBodyLinkScans += 1
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let links = BlockTableController.computeLinkAttributes(in: text, sessionCwd: cwd, repoRootPath: root)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.pendingToolBodyLinkScans -= 1
+                // Another session, or new link inputs (a new generation re-linkifies the bodies).
+                guard linkGeneration == self.toolBodyLinkGeneration,
+                      presentationGeneration == self.toolPresentationGeneration else { return }
+                self.rowLinkCache.set(rowID, CachedRowLinks(text: text, sessionCwd: cwd, repoRootPath: root, links: links))
+                guard let table = self.table, let row = self.invocationRowIndex(rowID),
+                      let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? ToolInvocationCellView,
+                      cell.showsBody(body), let shown = cell.bodyText.textStorage else { return }
+                self.addLinks(links, to: shown, skippingExistingLinks: true)
+            }
+        }
+    }
+
+    /// Off-main L2 link scans still running (test seam).
+    private(set) var pendingToolBodyLinkScans = 0
 
     /// Flash alpha and selection wiring, as `configure(cell:…)` does for
     /// message cards. A live cross-block selection paints the body's range and

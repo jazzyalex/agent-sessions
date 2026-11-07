@@ -25,8 +25,13 @@ final class TranscriptToolCellsTests: XCTestCase {
         let source: SessionSource
         let sessionID = "tool-cells-\(UUID().uuidString)"
 
-        init(_ blocks: [Block], source: SessionSource = .claude, size: NSSize = NSSize(width: 640, height: 900)) {
+        /// L1 summaries handed to every `apply`, as the snapshot's `rowSummaries`.
+        var rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry]
+
+        init(_ blocks: [Block], source: SessionSource = .claude, size: NSSize = NSSize(width: 640, height: 900),
+             rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:]) {
             self.source = source
+            self.rowSummaries = rowSummaries
             self.blocks = F.sequence(blocks)
             controller = BlockTableController()
             let views = BlockTableController.makeScrollView(selectionOwner: controller)
@@ -63,7 +68,7 @@ final class TranscriptToolCellsTests: XCTestCase {
             controller.apply(allBlocks: blocks, invocationIndex: index, failedInvocationIDs: failed,
                              toolJumpIDs: jumps.tools, errorJumpIDs: jumps.errors,
                              totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID,
-                             activeRoleFilters: activeRoleFilters)
+                             activeRoleFilters: activeRoleFilters, rowSummaries: rowSummaries)
             layout()
         }
 
@@ -1203,6 +1208,52 @@ final class TranscriptToolCellsTests: XCTestCase {
         perform(menuItem(menu, "Copy"), in: menu)
         XCTAssertEqual(pasteboard.string(forType: .string), expected)
         XCTAssertNil(pasteboard.data(forType: .rtf))
+    }
+
+    func testApplyTakesRowSummariesBuiltOffMain() throws {
+        let blocks = F.sequence([user(), bash("t1", "make"), output("t1")])
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .claude)
+        let ref = try XCTUnwrap(TranscriptToolRows.invocationRef(id: 1, in: index))
+        var summary = ToolInvocationBuilder.rowSummary(ref, blocks: blocks, index: index, source: .claude)
+        summary.actions[0].object = "built off main"
+        let stamp = ToolSearchTextStore.contentStamp(of: ref, blocks: blocks)
+        let entry = TranscriptDerivedState.RowSummaryEntry(stamp: stamp, status: ref.status, summary: summary)
+
+        let h = Harness([user(), bash("t1", "make"), output("t1")], rowSummaries: [1: entry])
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertEqual(cell.lineAccessibilityLabels.first.map { $0.contains("built off main") }, true,
+                       "the row shows the summary it was handed, with no parse on the main thread")
+
+        // An entry built for other content (another stamp) is not used.
+        var stale = entry
+        stale.stamp &+= 1
+        let fresh = Harness([user(), bash("t1", "make"), output("t1")], rowSummaries: [1: stale])
+        let freshCell = try XCTUnwrap(fresh.view(id: 1, as: ToolInvocationCellView.self))
+        XCTAssertEqual(freshCell.lineAccessibilityLabels.first.map { $0.contains("built off main") }, false)
+        XCTAssertEqual(freshCell.lineAccessibilityLabels.first.map { $0.contains("make") }, true)
+    }
+
+    func testLongBodyGetsFileLinksFromAnOffMainScan() throws {
+        let file = NSTemporaryDirectory() + "tool-links-\(UUID().uuidString).swift"
+        XCTAssertTrue(FileManager.default.createFile(atPath: file, contents: Data("x\n".utf8)))
+        defer { try? FileManager.default.removeItem(atPath: file) }
+        let lines = ["\(file):1: warning: unused value"] + (2...300).map { "compiled step \($0) of the module with options" }
+        let h = Harness([user(), bash("t1", "make"), output("t1", lines.joined(separator: "\n"))])
+        h.controller.toggleInvocation(invocationID: 1, allInGroup: false)
+        XCTAssertTrue(h.waitForPresentations())
+        let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let link = try XCTUnwrap(showAllLink(in: cell))
+        XCTAssertTrue(h.controller.textView(cell.bodyText, clickedOnLink: link.url, at: link.location))
+        XCTAssertTrue(h.waitForPresentations())
+        spin { h.controller.pendingToolBodyLinkScans == 0 }
+
+        let shown = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
+        let storage = try XCTUnwrap(shown.bodyText.textStorage)
+        XCTAssertGreaterThan(storage.length, BlockTableController.toolBodyInlineLinkifyLimit, "the long path")
+        let path = (storage.string as NSString).range(of: file)
+        XCTAssertNotEqual(path.location, NSNotFound)
+        let payload = storage.attribute(.link, at: path.location, effectiveRange: nil) as? String
+        XCTAssertEqual(payload.map { $0.contains("tool-links-") }, true, "the file path is a link once the scan ends")
     }
 
     func testFindUnderErrorsOnlyKeepsMatchesInShownFailedRows() {

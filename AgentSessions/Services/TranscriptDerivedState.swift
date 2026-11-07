@@ -52,9 +52,21 @@ final class TranscriptDerivedState {
         /// ▲▼ stops of the Errors filter: `.error` blocks that belong to no invocation, plus failed
         /// invocation ids (a paired `.error` block is its invocation's stop, not a second one), ascending.
         var errorJumpIDs: [Int] = []
+        /// L1 summaries of the invocations in the tail window (the window the Session view opens
+        /// at), by invocation id, built off the main thread (`tailRowSummaries`). The Session
+        /// view seeds its summary cache from them, so its first rows need no input parse on main.
+        var rowSummaries: [Int: RowSummaryEntry] = [:]
         /// The session's agent (tool decoding depends on it).
         var source: SessionSource = .codex
         var key: Key?
+    }
+
+    /// One L1 summary and what it was built from: valid while the invocation's content stamp
+    /// (`ToolSearchTextStore.contentStamp`) and status are the same.
+    struct RowSummaryEntry: Equatable, Sendable {
+        var stamp: Int
+        var status: ToolStatus
+        var summary: ToolRowSummary
     }
 
     /// What a match range indexes (Task 15, spec §6.8).
@@ -144,8 +156,11 @@ final class TranscriptDerivedState {
         let store = toolSearchStore
         let decodeLimit = decodesToolText ? Self.landingDecodeLimit : 0
         let viewport = toolDecodeViewportProvider?()
+        // A live append keeps the summaries of the invocations that did not change.
+        let previousRowSummaries = sameSession ? snapshot.rowSummaries : [:]
         computeTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let snap = Self.computeSnapshot(session: sessionCopy, settings: settings)
+            let snap = Self.computeSnapshot(session: sessionCopy, settings: settings,
+                                            previousRowSummaries: previousRowSummaries)
             if Task.isCancelled { return }
             // A live append (same session): before the snapshot is published, the store learns the
             // new invocation keys (an invocation whose output grew stops returning its old text)
@@ -246,12 +261,57 @@ final class TranscriptDerivedState {
         return (tools, errors.sorted())
     }
 
+    /// L1 summaries (`ToolInvocationBuilder.rowSummary`) of every invocation with a block in the
+    /// tail window (`TranscriptWindow.lastWindow`, the window the Session view opens at), as the
+    /// Session view builds them: index invocations, and a lone invocation for a tool block the
+    /// index does not know. An entry of `previous` with the same stamp and status is kept. A Codex
+    /// `exec` summary parses the whole script (~0.3–0.7 ms each in Debug), which on the main thread
+    /// made the first rows of a large session cost ~130 ms. Serial on purpose: a parallel build
+    /// was slower (every worker retains the same index and block storage). Pure and
+    /// off-main-callable.
+    nonisolated static func tailRowSummaries(blocks: [SessionTranscriptBuilder.LogicalBlock],
+                                             index: ToolInvocationIndex, source: SessionSource,
+                                             previous: [Int: RowSummaryEntry] = [:]) -> [Int: RowSummaryEntry] {
+        let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count,
+                                                 blockTarget: FeatureFlags.transcriptWindowBlockTarget)
+        guard !window.isEmpty else { return [:] }
+        var seen = Set<Int>()
+        var result: [Int: RowSummaryEntry] = [:]
+        var pending: [(ref: ToolInvocationRef, stamp: Int)] = []
+        for position in window.lowerBlock...window.upperBlock where blocks.indices.contains(position) {
+            let block = blocks[position]
+            guard let id = index.invocationIDByBlock[position] ?? (block.kind.isTool ? position : nil),
+                  seen.insert(id).inserted else { continue }
+            let ref = TranscriptToolRows.invocationRef(id: id, in: index)
+                ?? ToolInvocationRef(id: id, callBlockIndex: block.kind == .toolCall ? id : nil,
+                                     outputBlockIndices: block.kind == .toolCall ? [] : [id], status: .unknown)
+            let stamp = ToolSearchTextStore.contentStamp(of: ref, blocks: blocks)
+            if let kept = previous[id], kept.stamp == stamp, kept.status == ref.status {
+                result[id] = kept
+            } else {
+                pending.append((ref, stamp))
+            }
+        }
+        for item in pending {
+            let summary = ToolInvocationBuilder.rowSummary(item.ref, blocks: blocks, index: index, source: source)
+            result[item.ref.id] = RowSummaryEntry(stamp: item.stamp, status: item.ref.status, summary: summary)
+        }
+        return result
+    }
+
+    /// Holds the tail summaries built beside the rest of `computeSnapshot` (written once before
+    /// the group finishes, read after `wait`).
+    private final class RowSummaryBox: @unchecked Sendable {
+        var value: [Int: RowSummaryEntry] = [:]
+    }
+
     /// Pure, off-main-callable. Relocates the block-space parts of
     /// SessionTerminalView.buildRebuildResult (see SessionTerminalView.swift,
     /// the eventIDToAnchorBlockIndex construction inside the whole-session
     /// buildRebuildResult(session:blocks:blockRange:skipAgentsPreamble:enableReviewCards:)).
     nonisolated static func computeSnapshot(session: Session,
-                                            settings: DerivedSettings) -> Snapshot {
+                                            settings: DerivedSettings,
+                                            previousRowSummaries: [Int: RowSummaryEntry] = [:]) -> Snapshot {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
         var snap = Snapshot()
         snap.blocks = blocks
@@ -284,6 +344,15 @@ final class TranscriptDerivedState {
         let jumps = jumpIDs(blocks: blocks, index: invocationIndex, failedInvocationIDs: failedInvocationIDs)
         snap.toolJumpIDs = jumps.tools
         snap.errorJumpIDs = jumps.errors
+        // The tail's L1 summaries are built on a second thread while this one derives the
+        // preamble and the anchors, so the snapshot takes about as long as without them.
+        let summaries = RowSummaryBox()
+        let summariesDone = DispatchGroup()
+        let source = session.source
+        DispatchQueue.global(qos: .userInitiated).async(group: summariesDone) {
+            summaries.value = tailRowSummaries(blocks: blocks, index: invocationIndex, source: source,
+                                               previous: previousRowSummaries)
+        }
 
         snap.preambleUserBlockIndexes = settings.skipAgentsPreamble
             ? SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: blocks)
@@ -316,6 +385,8 @@ final class TranscriptDerivedState {
             }
         }
         snap.eventIDToAnchorBlockIndex = eventIDToAnchorBlockIndex
+        summariesDone.wait()
+        snap.rowSummaries = summaries.value
         return snap
     }
 
