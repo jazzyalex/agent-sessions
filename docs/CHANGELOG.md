@@ -8,14 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Highlights
 
-- **A new tool view in the Session transcript, for all 17 agents.** Each tool call is one row with a verb and an icon, and the command or path comes first. Calls that run together form a group with one row per call. Open a row to read the decoded output. Long output folds, with "Show more" and "Show all". Exit codes and errors show on the row. Copy, Copy Command, Copy Output and Show Raw Event are in the row menu, and you can right-click a row header or its open body.
-- **Find matches what you see.** A match inside a folded output opens the fold, and Esc closes it again. The ▲▼ buttons and the Errors filter step through single calls. VoiceOver reads each row, and Increase Contrast is supported.
+- **A tool view you can actually read, for all 17 agents.** Every tool call is one row with its command or path first, and parallel calls get a row each. Open one for decoded output that folds when long; exit codes and errors sit right on the row. Right-click to copy the command, the output or the raw event.
+- **Find matches what you see.** A match inside folded output opens the fold, and Esc closes it again. The Errors filter steps through single failed calls.
 
 ### Bug Fixes
 
-- **Tool calls in the transcript are easier to read.** Paths and URLs no longer show escaped slashes (`\/`). A call is labelled by its command or path, for example `exec pwd`. A group of tool calls now counts the calls it holds. MCP calls keep their server name, and web searches show their query.
-- **Codex tool output shows as text.** Output that Codex stores as a list of text items now appears with real line breaks instead of raw JSON.
-- **Parallel tool outputs stay separate.** Outputs of different tool calls no longer merge into one block.
+- **No more escaped slashes.** Paths and URLs in tool calls read `/`, not `\/`.
+- **Codex output shows as text.** Output stored as a list of text items now has real line breaks instead of raw JSON.
+- **Parallel tool outputs stay separate.** They no longer merge into one block.
 
 ## [6.3] - 2026-11-03
 
