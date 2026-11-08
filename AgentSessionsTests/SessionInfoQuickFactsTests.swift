@@ -155,6 +155,113 @@ final class SessionInfoQuickFactsTests: XCTestCase {
             "Fix the parser")
     }
 
+    func testCodexLongPromptProducesBoundedReadableTitle() {
+        let prompt = "Investigate missing tournament dates " + String(repeating: "with evidence ", count: 7_000)
+        let title = SessionInfoMetadataSanitizer.title(prompt, source: .codex)
+
+        XCTAssertTrue(title?.hasPrefix("Investigate missing tournament dates") == true)
+        XCTAssertEqual(title?.count, 400)
+        XCTAssertTrue(title?.hasSuffix("…") == true)
+    }
+
+    func testCodexPromptJustOverOldLimitStillHasTitle() {
+        let prompt = String(repeating: "a", count: 409)
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(prompt, source: .codex),
+            String(repeating: "a", count: 399) + "…")
+    }
+
+    func testCodexRulesPreambleUsesTaskHeading() {
+        let prompt = """
+        # Rules for this run
+        - Research only. Do not edit files.
+        - Write plain English.
+
+        # Blind red-team check of a product-market-fit dossier
+        \(String(repeating: "Evidence and background. ", count: 4_000))
+        """
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(prompt, source: .codex),
+            "Blind red-team check of a product-market-fit dossier")
+    }
+
+    func testCodexInstructionAndEnvironmentWrappersLeaveActualRequest() {
+        let prompt = """
+        # AGENTS.md instructions for /tmp/project
+        <INSTRUCTIONS>Always read the runbook.</INSTRUCTIONS>
+        <environment_context><cwd>/tmp/project</cwd></environment_context>
+        Fix the session title parser.
+        """
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(prompt, source: .codex),
+            "Fix the session title parser.")
+    }
+
+    func testCodexFileAttachmentUsesMyRequestSection() {
+        let prompt = """
+        # Files mentioned by the user:
+        ## Screenshot.png: /tmp/Screenshot.png
+        Image attachment: true
+        ## My request:
+        Why are these sessions untitled?
+        """
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(prompt, source: .codex),
+            "Why are these sessions untitled?")
+    }
+
+    func testCodexRoleAndTaskWrappersUseTaskText() {
+        let prompt = """
+        <role>You are Codex. Follow the review instructions.</role>
+        <task>Review the sign-in design for missing recovery paths.</task>
+        <output>List findings by severity.</output>
+        """
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(prompt, source: .codex),
+            "Review the sign-in design for missing recovery paths.")
+    }
+
+    func testCodexTruncatedCompanionTitleRemovesRoleTag() {
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(
+                "Codex Companion Task: <role> You are Codex performing the FINAL adversarial...",
+                source: .codex),
+            "Codex Companion Task: You are Codex performing the FINAL adversarial...")
+    }
+
+    func testCodexTruncatedCompanionTitleRemovesTaskTag() {
+        XCTAssertEqual(
+            SessionInfoMetadataSanitizer.title(
+                "Codex Companion Task: <task> Independent READ-ONLY code review of the UNCOM...",
+                source: .codex),
+            "Codex Companion Task: Independent READ-ONLY code review of the UNCOM...")
+    }
+
+    func testCodexContextOnlyAndMalformedWrappersDoNotBecomeTitles() {
+        for prompt in [
+            "<system-reminder>internal instructions</system-reminder>",
+            "# AGENTS.md instructions for /tmp\n<INSTRUCTIONS>Rules only</INSTRUCTIONS>",
+            "<environment_context><cwd>/tmp</cwd></environment_context>",
+            "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>",
+            "<INSTRUCTIONS>Unclosed rules", "<unknown>raw payload</unknown>"
+        ] {
+            XCTAssertNil(SessionInfoMetadataSanitizer.title(prompt, source: .codex), prompt)
+        }
+    }
+
+    func testCodexLongTitleIsReadableInQuickFactsWithoutLoadingEvents() {
+        let session = Session(
+            id: "long-codex-title", source: .codex, startTime: nil, endTime: nil,
+            model: nil, filePath: "/tmp/session.jsonl", eventCount: 56, events: [],
+            cwd: nil, repoName: nil,
+            lightweightTitle: "Find the missing dates " + String(repeating: "details ", count: 1_000))
+
+        let facts = SessionInfoQuickFacts(session: session)
+        XCTAssertTrue(facts.title.value?.hasPrefix("Find the missing dates") == true)
+        XCTAssertEqual(facts.title.provenance, .sessionMetadata)
+        XCTAssertTrue(session.events.isEmpty)
+    }
+
     func testQuickFactsMarkUnsafeMetadataAmbiguous() {
         let session = Session(
             id: "unsafe-metadata",

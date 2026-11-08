@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of "Untitled session".
+
 ## [6.4] - 2026-11-07
 
 ### Highlights

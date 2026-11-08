@@ -4622,13 +4622,7 @@ private struct SessionTitleCell: View, Equatable {
     }
 
     private var displayTitle: String {
-        let candidates = [displayTitleOverride, session.listTitle, session.firstUserPreview]
-        if let clean = candidates
-            .compactMap({ SessionInfoMetadataSanitizer.title($0, source: session.source) })
-            .first {
-            return clean
-        }
-        return "Untitled session"
+        SessionInfoMetadataSanitizer.rowTitle(for: session, override: displayTitleOverride) ?? "Untitled session"
     }
 
     private var subagentPillHelp: String {
