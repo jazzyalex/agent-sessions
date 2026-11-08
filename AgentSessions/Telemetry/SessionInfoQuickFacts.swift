@@ -26,7 +26,10 @@ public enum SessionInfoMetadataSanitizer {
 
     public static func title(_ rawValue: String?, source: SessionSource) -> String? {
         guard let rawValue else { return nil }
-        let normalized = collapseWhitespace(rawValue)
+        // Codex's state-db title can be the entire opening prompt, including
+        // harness context. Derive a preview before applying display validation.
+        guard let candidate = source == .codex ? codexPromptTitle(rawValue) : rawValue else { return nil }
+        let normalized = collapseWhitespace(candidate)
         guard !normalized.isEmpty,
               normalized.count <= 400,
               !hasPromptMarker(normalized),
@@ -36,6 +39,95 @@ public enum SessionInfoMetadataSanitizer {
             return nil
         }
         return normalized
+    }
+
+    /// Uses already-loaded metadata and events only; never opens a transcript.
+    static func rowTitle(for session: Session, override: String? = nil) -> String? {
+        for candidate in [override, session.customTitle, session.lightweightTitle] {
+            if let clean = title(candidate, source: session.source) { return clean }
+        }
+        if session.source == .codex {
+            // Preserve raw line breaks until instruction headings are removed.
+            // listTitle has already flattened them and cannot distinguish a
+            // rules heading from the request that follows it.
+            for kind in [SessionEventKind.user, .assistant] {
+                for event in session.events where event.kind == kind {
+                    if let clean = title(event.text, source: .codex) { return clean }
+                }
+            }
+            if let tool = session.events.first(where: { $0.kind == .tool_call && $0.toolName?.isEmpty == false }) {
+                return title(tool.toolName, source: .codex)
+            }
+            return session.events.contains(where: { $0.kind == .user || $0.kind == .assistant }) ? nil : "No prompt"
+        } else {
+            return title(session.listTitle, source: session.source)
+                ?? title(session.firstUserPreview, source: session.source)
+        }
+    }
+
+    // Strip only known context blocks. Unknown or incomplete markup still
+    // reaches the normal validator and is rejected rather than shown as text.
+    private static let codexContextBlocks = try! NSRegularExpression(pattern:
+        #"(?is)<(INSTRUCTIONS|user_instructions|system-reminder|system|developer|environment_context|app-context|permissions instructions|skills_instructions|apps_instructions|plugins_instructions|recommended_plugins|collaboration_mode|role|operating_stance|attack_surface|output|external_codex_apps_[A-Za-z0-9_]+)>.*?</\1>"#)
+    private static let codexAgentsHeading = try! NSRegularExpression(pattern:
+        #"(?im)^# AGENTS\.md instructions[^\r\n]*(?:\r?\n|$)"#)
+    private static let codexRequestHeading = try! NSRegularExpression(pattern:
+        #"(?im)^#{1,6}[ \t]+My request:[ \t]*"#)
+    private static let codexRequestBlocks = try! NSRegularExpression(pattern:
+        #"(?is)<(task|request|user_query)>(.*?)</\1>"#)
+
+    private static func codexPromptTitle(_ rawValue: String) -> String? {
+        var text = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // VS Code sometimes stores an already-shortened companion label with
+        // an unclosed role/task tag. Keep its human-readable label.
+        if text.hasPrefix("Codex Companion Task:") {
+            text = text.replacingOccurrences(
+                of: #"(?i)</?(role|task|request|user_query)>"#, with: "", options: .regularExpression)
+        }
+        text = codexContextBlocks.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "\n")
+        text = codexAgentsHeading.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+        if let match = codexRequestHeading.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let range = Range(match.range, in: text) {
+            text = String(text[range.upperBound...])
+        } else {
+            let beginning = text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64).lowercased()
+            if beginning.hasPrefix("# files mentioned by the user:") || beginning.hasPrefix("# files pasted by the user:") {
+                return nil
+            }
+        }
+        text = codexRequestBlocks.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$2")
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count <= 400, !text.hasPrefix("#"), !text.contains("<") {
+            return text
+        }
+
+        var rulesLevel: Int?
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hashes = line.prefix(while: { $0 == "#" }).count
+            let level = hashes > 0 && line.dropFirst(hashes).first?.isWhitespace == true ? hashes : 0
+            let content = level > 0
+                ? String(line.dropFirst(level)).trimmingCharacters(in: .whitespacesAndNewlines)
+                : line
+            if let rulesLevel {
+                guard level > 0, level <= rulesLevel else { continue }
+            }
+            let lower = content.lowercased()
+            if level > 0, lower.hasPrefix("rules for this run") || lower.hasPrefix("operating rules")
+                || lower == "instructions" || lower == "rules" {
+                rulesLevel = level
+                continue
+            }
+            rulesLevel = nil
+            let candidate = collapseWhitespace(content)
+            guard !candidate.isEmpty else { continue }
+            guard !hasPromptMarker(candidate), !looksLikeRawMarkup(candidate) else { return nil }
+            return candidate.count > 400 ? String(candidate.prefix(399)) + "…" : candidate
+        }
+        return nil
     }
 
     private static func collapseWhitespace(_ value: String) -> String {
