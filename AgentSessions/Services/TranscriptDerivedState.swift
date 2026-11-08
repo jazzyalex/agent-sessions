@@ -14,6 +14,7 @@ final class TranscriptDerivedState {
     struct DerivedSettings: Equatable, Sendable {
         var skipAgentsPreamble: Bool
         var reviewCardsEnabled: Bool
+        var includeMessageContext: Bool = false
     }
 
     struct Key: Hashable, Sendable {
@@ -23,7 +24,16 @@ final class TranscriptDerivedState {
         var skipAgentsPreamble: Bool
         var reviewCardsEnabled: Bool
 
+        var includeMessageContext: Bool
+        var source: SessionSource
+        var parentSessionID: String?
+        var subagentType: String?
+
         init(session: Session, settings: DerivedSettings) {
+            includeMessageContext = settings.includeMessageContext
+            source = session.source
+            parentSessionID = session.parentSessionID
+            subagentType = session.subagentType
             sessionID = session.id
             eventCount = session.events.count
             fileSizeBytes = session.fileSizeBytes ?? -1
@@ -37,6 +47,8 @@ final class TranscriptDerivedState {
         var totalBlockCount: Int = 0
         var eventIDToAnchorBlockIndex: [String: Int] = [:]
         var userBlockIndices: [Int] = []
+        /// Original raw-user block ordinals mapped by event identity into this projection.
+        var imageUserBlockIndices: [Int] = []
         /// Legacy block-level lists: the ▲▼ jumps and their enabled state use `toolJumpIDs` /
         /// `errorJumpIDs`. `toolBlockIndices` still gates the tool decode pass; `errorBlockIndices`
         /// is only read by tests.
@@ -73,6 +85,7 @@ final class TranscriptDerivedState {
     enum MatchSpace: Equatable, Sendable {
         /// `blocks[i].text`: message blocks, and tool blocks whose invocation is not decoded yet.
         case raw
+        case presentation
         /// The decoded search text of the invocation whose id block is `globalBlockIndex`
         /// (`ToolSearchText.text(of:)`): its actions' plain text and footer facts.
         case decoded
@@ -140,6 +153,7 @@ final class TranscriptDerivedState {
         var snapshotKey: Key?
         var toolTextGeneration: Int
         var query: String
+        var showsContext: Bool
     }
     private let findMatchesCache = LRUCache<FindCacheKey, [BlockMatch]>(maxEntries: 4)
 
@@ -343,7 +357,7 @@ final class TranscriptDerivedState {
     nonisolated static func computeSnapshot(session: Session,
                                             settings: DerivedSettings,
                                             previousRowSummaries: [Int: RowSummaryEntry] = [:]) -> Snapshot {
-        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: settings.includeMessageContext)
         var snap = Snapshot()
         snap.blocks = blocks
         snap.totalBlockCount = blocks.count
@@ -353,13 +367,15 @@ final class TranscriptDerivedState {
         var userIdx: [Int] = [], toolIdx: [Int] = [], errIdx: [Int] = []
         for b in blocks {
             switch b.kind {
-            case .user: userIdx.append(b.globalBlockIndex)
+            case .user: if !settings.includeMessageContext || b.isTypedUserMessage { userIdx.append(b.globalBlockIndex) }
             case .toolCall, .toolOut: toolIdx.append(b.globalBlockIndex)
             case .error: errIdx.append(b.globalBlockIndex)
             case .assistant, .meta: break
             }
         }
         snap.userBlockIndices = userIdx
+        let rawUserEventIDs = Set(session.events.filter { $0.kind == .user }.map(\.id))
+        snap.imageUserBlockIndices = blocks.filter { $0.kind == .user && rawUserEventIDs.contains($0.eventID) }.map(\.globalBlockIndex)
         snap.toolBlockIndices = toolIdx
         snap.errorBlockIndices = errIdx
 
@@ -385,34 +401,49 @@ final class TranscriptDerivedState {
                                                previous: previousRowSummaries)
         }
 
-        snap.preambleUserBlockIndexes = settings.skipAgentsPreamble
-            ? SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: blocks)
-            : []
+        if settings.skipAgentsPreamble && settings.includeMessageContext {
+            // Session already classified provenance during coalescing. Rescanning raw bodies
+            // is costly and can mistake explicitly typed instructions for a preamble.
+            snap.preambleUserBlockIndexes = Set(blocks.lazy.filter {
+                $0.kind == .user && $0.presentation?.origin?.isHiddenContext == true
+            }.map(\.globalBlockIndex))
+        } else {
+            // Terminal/default snapshots retain their historical full-text heuristic.
+            snap.preambleUserBlockIndexes = settings.skipAgentsPreamble
+                ? SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: blocks)
+                : []
+        }
 
         // Same anchor derivation buildRebuildResult uses (full-session scope),
         // copied verbatim from SessionTerminalView.buildRebuildResult's
         // eventIDToAnchorBlockIndex construction so the two stay byte-identical.
         var eventIDToAnchorBlockIndex: [String: Int] = [:]
-        if !blocks.isEmpty {
-            // Re-derived here as array OFFSETS (rather than reusing
-            // snap.userBlockIndices, which stores globalBlockIndex values) —
-            // the two are provably equal for this full coalesced stream, since
-            // `blocks` is the whole session with no filtering, so a block's
-            // array position always equals its globalBlockIndex.
-            let userBlockIndices = blocks.enumerated().compactMap { $0.element.kind == .user ? $0.offset : nil }
-            let anchors = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
+        if settings.includeMessageContext {
+            let fallbackPrompts = blocks.filter {
+                $0.presentation?.origin == .parentTask || $0.presentation?.origin == .approvalRequest
+            }.map(\.globalBlockIndex)
+            let promptIndices = Set(userIdx.isEmpty ? fallbackPrompts : userIdx)
+            var precedingPrompt: Int?
+            for block in blocks {
+                let index = block.globalBlockIndex
+                if promptIndices.contains(index) { precedingPrompt = index }
+                if block.presentation?.origin == .placeholder { continue }
+                if block.kind == .user || (block.kind == .meta && block.presentation != nil) {
+                    // Message-origin deep links name their own row, even when You skips it.
+                    eventIDToAnchorBlockIndex[block.eventID] = index
+                } else if block.kind != .meta {
+                    eventIDToAnchorBlockIndex[block.eventID] = precedingPrompt ?? invocationIndex.invocationIDByBlock[index] ?? index
+                }
+            }
+        } else if !blocks.isEmpty {
+            // Preserve Terminal's historical raw-user anchoring exactly.
+            let anchors = TranscriptUserAnchors.anchors(userBlockIndices: userIdx,
                                                         preambleUserBlockIndexes: snap.preambleUserBlockIndexes,
                                                         blockCount: blocks.count)
-
             for (idx, block) in blocks.enumerated() {
-                let targetUserBlockOffset: Int? = block.kind == .user ? idx : anchors[idx]
-                guard let targetUserBlockOffset,
-                      blocks.indices.contains(targetUserBlockOffset) else { continue }
-                // firstLineForBlock (Terminal-view line-space) is keyed by
-                // globalBlockIndex too, so this lookup key stays valid even
-                // though this derived-state layer never builds lines.
-                let lookupKey = blocks[targetUserBlockOffset].globalBlockIndex
-                eventIDToAnchorBlockIndex[block.eventID] = lookupKey
+                let target = block.kind == .user ? idx : anchors[idx]
+                guard let target, blocks.indices.contains(target) else { continue }
+                eventIDToAnchorBlockIndex[block.eventID] = blocks[target].globalBlockIndex
             }
         }
         snap.eventIDToAnchorBlockIndex = eventIDToAnchorBlockIndex
@@ -421,16 +452,35 @@ final class TranscriptDerivedState {
         return snap
     }
 
-    func findMatches(query: String) -> [BlockMatch] {
+    private struct MessageGroupKey: Equatable {
+        var snapshot: Key?
+        var showsContext: Bool
+        var markers: [Int: [String]]
+        var imageBlocks: Set<Int>
+    }
+    @ObservationIgnored private var messageGroupKey: MessageGroupKey?
+    @ObservationIgnored private var cachedMessageGroups = TranscriptMessageGroupIndex()
+
+    /// One full-stream ownership index shared by the table and toolbar counts.
+    func messageGroups(showsContext: Bool, markers: [Int: [String]], imageBlocks: Set<Int>) -> TranscriptMessageGroupIndex {
+        let key = MessageGroupKey(snapshot: snapshot.key, showsContext: showsContext, markers: markers, imageBlocks: imageBlocks)
+        if key != messageGroupKey {
+            cachedMessageGroups = .build(blocks: snapshot.blocks[...], source: snapshot.source, showsContext: showsContext, markers: markers, noncollapsibleBlockIndices: imageBlocks)
+            messageGroupKey = key
+        }
+        return cachedMessageGroups
+    }
+
+    func findMatches(query: String, showsContext: Bool = false) -> [BlockMatch] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
         // Reading `toolTextGeneration` here (an observed property) makes a view that asks for
         // matches update again when a decode pass ends, so Find re-runs exactly once.
-        let cacheKey = FindCacheKey(snapshotKey: snapshot.key, toolTextGeneration: toolTextGeneration, query: q)
+        let cacheKey = FindCacheKey(snapshotKey: snapshot.key, toolTextGeneration: toolTextGeneration, query: q, showsContext: showsContext)
         if let cached = findMatchesCache.get(cacheKey) { return cached }
         findComputeCount += 1
         let store = toolSearchStore
-        let matches = Self.computeFindMatches(blocks: snapshot.blocks, query: q, toolText: store.text(forBlock:))
+        let matches = Self.computeFindMatches(blocks: snapshot.blocks, query: q, toolText: store.text(forBlock:), includeMessageContext: snapshot.key?.includeMessageContext == true, showsContext: showsContext)
         findMatchesCache.set(cacheKey, matches)
         return matches
     }
@@ -446,7 +496,8 @@ final class TranscriptDerivedState {
     nonisolated static func computeFindMatches(
         blocks: [SessionTranscriptBuilder.LogicalBlock],
         query: String,
-        toolText: ((Int) -> String?)? = nil) -> [BlockMatch] {
+        toolText: ((Int) -> String?)? = nil,
+        includeMessageContext: Bool = false, showsContext: Bool = false) -> [BlockMatch] {
         var out: [BlockMatch] = []
         var ordinal = 0
         for block in blocks {
@@ -459,9 +510,11 @@ final class TranscriptDerivedState {
                 }
                 continue
             }
-            for r in SearchTextMatcher.matchRanges(in: block.text, query: query) {
+            let presentation = includeMessageContext ? block.presentation : nil
+            if presentation?.origin == .placeholder || (!showsContext && presentation?.origin?.isHiddenContext == true) { continue }
+            for r in SearchTextMatcher.matchRanges(in: presentation?.body ?? block.text, query: query) {
                 out.append(BlockMatch(globalBlockIndex: block.globalBlockIndex,
-                                      rangeInBlockText: r, ordinal: ordinal))
+                                      rangeInBlockText: r, ordinal: ordinal, space: presentation == nil ? .raw : .presentation))
                 ordinal += 1
             }
         }

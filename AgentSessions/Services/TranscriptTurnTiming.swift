@@ -18,14 +18,15 @@ struct ToolTiming: Equatable {
 /// call from a controller's `apply`/derived-state path on every rebuild, same
 /// discipline as `TranscriptToolSummary`.
 ///
-/// Definitions (binding, from the Phase 3 plan):
-/// - A "turn" is a `.user` block plus everything up to (not including) the
-///   next `.user` block. `TurnTiming` is keyed by the turn's ANCHOR — the
-///   first `.assistant` block in the turn, or the `.user` block itself if the
-///   turn has no assistant block.
-/// - `durationSeconds` = timestamp(last block in the turn) − timestamp(the
-///   turn's user block); nil if either timestamp is nil, or if the delta is
-///   negative (clock skew — never show a bogus negative duration).
+/// Timing definitions:
+/// - A turn starts only at a typed user message. Its chip anchors on the first
+///   visible agent message, with no user-anchor fallback. The turn ends before
+///   the next typed user message or at an explicit interruption/abort notice.
+/// - `durationSeconds` measures from the typed prompt to the last visible agent
+///   reply, tool block, error, or explicit interruption/abort notice in that turn.
+///   Bare harness tails do not extend the endpoint. The duration is nil if either
+///   timestamp is missing or the delta is negative (clock skew).
+/// - Turns without a visible agent message have no chip.
 /// - `toolCallCount` = number of `.toolCall` blocks in the turn.
 /// - Tool duration comes from the call ↔ output pairing in
 ///   `ToolInvocationIndex` (spec §6.2): by call id, then FIFO inside the turn,
@@ -45,7 +46,7 @@ enum TranscriptTurnTiming {
         blocks: [SessionTranscriptBuilder.LogicalBlock],
         source: SessionSource
     ) -> (turns: [Int: TurnTiming], tools: [Int: ToolTiming]) {
-        compute(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: source))
+        compute(blocks: blocks, index: ToolInvocationIndex.build(blocks: blocks, source: source), source: source)
     }
 
     /// - Parameters:
@@ -53,7 +54,8 @@ enum TranscriptTurnTiming {
     ///   - index: the pairing built from the same `blocks`.
     static func compute(
         blocks: [SessionTranscriptBuilder.LogicalBlock],
-        index: ToolInvocationIndex
+        index: ToolInvocationIndex,
+        source: SessionSource = .claude
     ) -> (turns: [Int: TurnTiming], tools: [Int: ToolTiming]) {
         var turns: [Int: TurnTiming] = [:]
         var tools: [Int: ToolTiming] = [:]
@@ -73,31 +75,51 @@ enum TranscriptTurnTiming {
             }
         }
 
-        // MARK: Turn segmentation — user block + everything up to the next user block.
+        func isVisibleAgentMessage(_ block: SessionTranscriptBuilder.LogicalBlock) -> Bool {
+            guard block.kind == .assistant, let presentation = block.resolvedPresentation(source: source),
+                  presentation.rowStyle == .card else { return false }
+            switch presentation.origin {
+            case nil, .approvalVerdict: return true
+            default: return false
+            }
+        }
+
+        // MARK: Turn segmentation — typed prompt through the next typed prompt or interruption.
         var position = 0
         while position < blocks.count {
-            guard blocks[position].kind == .user else {
-                // Blocks before the first `.user` block belong to no turn.
+            guard blocks[position].startsTurn else {
+                // Only a typed prompt starts a turn; context and control messages do not.
                 position += 1
                 continue
             }
 
             let userBlock = blocks[position]
             var turnEnd = position + 1
-            while turnEnd < blocks.count, blocks[turnEnd].kind != .user {
+            while turnEnd < blocks.count, !blocks[turnEnd].startsTurn {
+                let closesTurn = blocks[turnEnd].isInterruptControlMessage
+                    || (blocks[turnEnd].kind == .meta && ToolInvocationIndex.isTurnAbortedNotice(blocks[turnEnd].text))
                 turnEnd += 1
+                if closesTurn { break }
             }
             let turnBlocks = blocks[position..<turnEnd]
 
-            let anchorIndex = turnBlocks.first(where: { $0.kind == .assistant })?.globalBlockIndex
-                ?? userBlock.globalBlockIndex
+            let anchorIndex = turnBlocks.first(where: {
+                isVisibleAgentMessage($0)
+            })?.globalBlockIndex
             let toolCallCount = turnBlocks.reduce(into: 0) { count, block in
                 if block.kind == .toolCall { count += 1 }
             }
-            let lastBlock = turnBlocks.last ?? userBlock
+            let lastBlock = turnBlocks.last(where: {
+                $0.kind.isTool || $0.kind == .error ||
+                (isVisibleAgentMessage($0)) ||
+                $0.isInterruptControlMessage ||
+                ($0.kind == .meta && ToolInvocationIndex.isTurnAbortedNotice($0.text))
+            }) ?? userBlock
             let durationSeconds = duration(from: userBlock.timestamp, to: lastBlock.timestamp)
 
-            turns[anchorIndex] = TurnTiming(durationSeconds: durationSeconds, toolCallCount: toolCallCount)
+            if let anchorIndex {
+                turns[anchorIndex] = TurnTiming(durationSeconds: durationSeconds, toolCallCount: toolCallCount)
+            }
 
             position = turnEnd
         }

@@ -53,6 +53,8 @@ final class TranscriptToolCellsTests: XCTestCase {
         }
 
         /// Role filters handed to every `apply`.
+        var showsContext = false
+        var images: [Int: [InlineSessionImage]] = [:]
         var activeRoleFilters = Set(TranscriptRoleFilter.allCases)
 
         /// Applies the same stream again (after a filter change).
@@ -68,7 +70,8 @@ final class TranscriptToolCellsTests: XCTestCase {
             controller.apply(allBlocks: blocks, invocationIndex: index, failedInvocationIDs: failed,
                              toolJumpIDs: jumps.tools, errorJumpIDs: jumps.errors,
                              totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID,
-                             activeRoleFilters: activeRoleFilters, rowSummaries: rowSummaries)
+                             imagesByBlockIndex: images, inlineImagesEnabled: !images.isEmpty,
+                             activeRoleFilters: activeRoleFilters, rowSummaries: rowSummaries, showsContext: showsContext)
             layout()
         }
 
@@ -123,6 +126,263 @@ final class TranscriptToolCellsTests: XCTestCase {
             while !done, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
             return TranscriptDerivedState.computeFindMatches(blocks: blocks, query: query, toolText: store.text(forBlock:))
         }
+    }
+
+    private func originBlock(_ origin: MessageOrigin, body: String, raw: String = "raw wrapper") -> Block {
+        var block = F.block(.user, text: raw)
+        block.presentation = MessagePresentation(origin: origin, body: body, summary: "Background task update")
+        return block
+    }
+
+    private var injectedReviewHistory: String {
+        "<user_action><action>review</action><results>context review</results></user_action>"
+    }
+
+    private func assertOriginBodySurvivesReviewOverride(_ block: Block, contains expected: String,
+                                                       query: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertNil(BlockTableController.reviewSummary(for: block, source: .codex, enabled: true), file: file, line: line)
+        let h = Harness([block], source: .codex)
+        let cell = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self), file: file, line: line)
+        XCTAssertTrue(cell.bodyText.string.contains(expected), file: file, line: line)
+        XCTAssertFalse(cell.bodyText.string.hasPrefix("Review\n"), file: file, line: line)
+        let rendered = try XCTUnwrap(h.controller.renderedBody(for: h.controller.rows[0]), file: file, line: line)
+        XCTAssertEqual(cell.bodyText.string, rendered.attributed.string, file: file, line: line)
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: query, includeMessageContext: true)
+        XCTAssertEqual(h.controller.applyFind(source: .local, query: query, matches: matches, token: 1, direction: 1, reset: true, shouldJump: true).total, 1, file: file, line: line)
+        let painted = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self), file: file, line: line).bodyText
+        let range = (painted.string as NSString).range(of: query)
+        XCTAssertNotEqual(range.location, NSNotFound, file: file, line: line)
+        if range.location != NSNotFound {
+            XCTAssertNotNil(painted.textStorage?.attribute(.backgroundColor, at: range.location, effectiveRange: nil), file: file, line: line)
+        }
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (0, (painted.string as NSString).length))
+        XCTAssertEqual(h.controller.assembleSelectedText(), rendered.attributed.string, file: file, line: line)
+    }
+
+    func testMixedTypedDisplayCannotRenderInjectedReviewHistory() throws {
+        var block = F.block(.user, text: injectedReviewHistory + "\ncontinue")
+        block.messageOrigin = .typed
+        block.messageDisplayText = "continue"
+        block.presentation = MessageOriginClassifier.presentation(for: block, context: .init(source: .codex, isFirstUserBlock: true))
+        XCTAssertEqual(block.presentation?.body, "continue")
+        try assertOriginBodySurvivesReviewOverride(block, contains: "continue", query: "continue")
+        XCTAssertTrue(TranscriptDerivedState.computeFindMatches(blocks: F.sequence([block]), query: "context review", includeMessageContext: true).isEmpty)
+    }
+
+    func testGuardianRequestCannotRenderReviewMarkerFromHistory() throws {
+        let request = #"{"command":["/bin/sh","-c","echo guardian-sentinel"],"cwd":"/repo","tool":"shell","justification":"inspect","sandbox_permissions":"read-only"}"#
+        var block = F.block(.user, text: injectedReviewHistory + "\n>>> APPROVAL REQUEST START\nPlanned action JSON:\n" + request + "\n>>> APPROVAL REQUEST END")
+        block.presentation = MessageOriginClassifier.presentation(for: block, context: .init(source: .codex, subagentType: "guardian", isFirstUserBlock: true))
+        XCTAssertEqual(block.presentation?.origin, .approvalRequest)
+        try assertOriginBodySurvivesReviewOverride(block, contains: "echo guardian-sentinel", query: "guardian-sentinel")
+    }
+
+    func testPeerAndOtherHarnessOriginsNeverBecomeLegacyReviewCards() throws {
+        let body = "Peer says:\n\n```\n" + injectedReviewHistory + "\n```\n\npeer-sentinel"
+        let peer = originBlock(.peer(from: "Ada"), body: body, raw: body)
+        try assertOriginBodySurvivesReviewOverride(peer, contains: "peer-sentinel", query: "peer-sentinel")
+        let excludedOrigins: [MessageOrigin] = [.parentTask, .approvalRequest, .approvalVerdict(outcome: "allow"), .context(kinds: ["history"])]
+        for origin in excludedOrigins {
+            XCTAssertNil(BlockTableController.reviewSummary(for: originBlock(origin, body: body, raw: body), source: .codex, enabled: true))
+        }
+    }
+
+    func testOrdinaryTypedAndAssistantReviewCardsKeepLegacySummaryAndCopy() throws {
+        let assistantJSON = #"{"findings":[],"overall_correctness":"correct","overall_explanation":"Looks good.","overall_confidence_score":0.92}"#
+        var typedReview = F.block(.user, text: injectedReviewHistory)
+        typedReview.messageOrigin = .typed
+        typedReview.presentation = MessageOriginClassifier.presentation(for: typedReview, context: .init(source: .codex, isFirstUserBlock: true))
+        for block in [typedReview, F.block(.assistant, text: assistantJSON)] {
+            let expected = try XCTUnwrap(BlockTableController.reviewSummary(for: block, source: .codex, enabled: true))
+            let h = Harness([block], source: .codex)
+            let cell = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self))
+            XCTAssertTrue(expected.hasPrefix("Review"))
+            XCTAssertEqual(cell.bodyText.string, expected)
+            h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (0, (expected as NSString).length))
+            XCTAssertEqual(h.controller.assembleSelectedText(), expected)
+        }
+    }
+
+    func testRepeatBadgeAndUserRowHasNoDurationChip() throws {
+        let row = BlockRowModel(id: 0, content: .message(originBlock(.typed, body: "hello")), representedBlockIndices: [0, 1])
+        let cell = BlockCardCellView()
+        cell.configure(row: row, fontSize: 13, source: .cline, turnChipText: "4.0s")
+        let header = try XCTUnwrap(cell.displayedHeader)
+        XCTAssertEqual(header.repeatCount, 2)
+        XCTAssertEqual(header.turnChipText, "")
+        XCTAssertEqual(header.roleLabel, "You")
+    }
+
+    func testEqualCaptionDifferentImagesRemainSeparateAfterAsyncMapLands() {
+        let block = originBlock(.typed, body: "same caption")
+        let h = Harness([block, block])
+        XCTAssertEqual(h.rowIDs, [0])
+        func image(_ n: Int) -> InlineSessionImage {
+            InlineSessionImage(sessionID: h.sessionID, imageEventID: "image-\(n)", userPromptIndex: n, sessionImageIndex: n, payload: .file(fileURL: URL(fileURLWithPath: "/tmp/image-\(n).png"), mediaType: "image/png", fileSizeBytes: 1))
+        }
+        h.images = [0: [image(0)], 1: [image(1)]]
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 1])
+        XCTAssertEqual(h.controller.rows.map(\.repeatCount), [1, 1])
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "caption", includeMessageContext: true)
+        XCTAssertEqual(h.controller.applyFind(source: .unified, query: "caption", matches: matches, token: 1, direction: 1, reset: true, shouldJump: false).total, 2)
+        XCTAssertEqual(h.controller.shownUserBlockIndices, [0, 1])
+    }
+
+    func testDuplicateAndHiddenContextFindOrdinalsAreDense() {
+        let h = Harness([originBlock(.typed, body: "needle"), originBlock(.typed, body: "needle"), originBlock(.context(kinds: ["environment"]), body: "needle"), originBlock(.typed, body: "later needle")])
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle", includeMessageContext: true)
+        let first = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(first.total, 2)
+        let second = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 2, direction: 1, reset: false, shouldJump: true)
+        XCTAssertEqual(second.current, 2)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 3))
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: matches).current, 2)
+    }
+
+    func testPresentationFindKeepsPlainErrorRows() {
+        let h = Harness([F.block(.error, text: "needle failure")])
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle", includeMessageContext: true)
+        XCTAssertEqual(h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1, reset: true, shouldJump: true).total, 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 0))
+    }
+
+    func testYouJumpSkipsNonTypedAndHiddenRows() {
+        let h = jumpHarness([originBlock(.typed, body: "first"), originBlock(.peer(from: "Ada"), body: "peer"), originBlock(.parentTask, body: "task"), originBlock(.typed, body: "last")])
+        scrollRowToTop(h, row: 0)
+        h.controller.handleRoleJumpIntent(token: 1, role: .user, direction: 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 3))
+        XCTAssertEqual(h.controller.shownUserBlockIndices, [0, 3])
+        h.activeRoleFilters = [.assistant]
+        h.reapply()
+        XCTAssertEqual(h.controller.shownUserBlockIndices, [])
+        h.controller.handleRoleJumpIntent(token: 2, role: .user, direction: 1)
+        XCTAssertFalse(h.controller.isFlashing(rowID: 0))
+    }
+
+    func testSessionRepresentableRejectsRawSnapshotUntilProjectionLands() throws {
+        let session = codexSession("projection-switch-\(UUID().uuidString)", [("k1", "make", 2)])
+        let state = TranscriptDerivedState()
+        state.update(session: session, settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true))
+        spin { !state.isComputing }
+        let view = TranscriptBlockListView(derivedState: state, session: session, fontSize: 13, findMatchCount: .constant(0), findCurrentIndex: .constant(0), unifiedMatchCount: .constant(0), unifiedCurrentIndex: .constant(0))
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        func controller() -> BlockTableController? {
+            var stack: [NSView] = [host]
+            while let child = stack.popLast() {
+                if let table = child as? NSTableView { return table.delegate as? BlockTableController }
+                stack.append(contentsOf: child.subviews)
+            }
+            return nil
+        }
+        spin { controller() != nil }
+        let owner = try XCTUnwrap(controller())
+        XCTAssertTrue(owner.rows.isEmpty, "raw block keys must never paint in Session")
+        state.update(session: session, settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true))
+        spin { !state.isComputing }
+        host.rootView = view
+        host.layoutSubtreeIfNeeded()
+        spin { !owner.rows.isEmpty }
+        XCTAssertEqual(owner.rows.map(\.id), [0, 1, 3])
+        XCTAssertEqual(owner.openInvocations, [1])
+    }
+
+    func testHeaderLabelsByOrigin() {
+        let cases: [(MessageOrigin, String)] = [(.typed, "You"), (.peer(from: "Ada"), "Message from Ada"), (.parentTask, "Task from parent session"), (.approvalRequest, "Approval request"), (.approvalVerdict(outcome: "allowed"), "Guardian verdict"), (.command(name: "run"), "Command")]
+        for (origin, expected) in cases {
+            let cell = BlockCardCellView()
+            cell.configure(row: BlockRowModel(id: 0, content: .message(originBlock(origin, body: "body"))), fontSize: 13, source: .codex)
+            XCTAssertEqual(cell.displayedHeader?.roleLabel, expected)
+        }
+    }
+
+    func testLineRowOpensBodyAndFindRestoresOnlyAutomaticOpening() throws {
+        let h = Harness([originBlock(.notification(kind: "task"), body: "😀 **needle**")])
+        let cell = try XCTUnwrap(h.view(id: 0, as: TranscriptOriginLineCell.self))
+        XCTAssertTrue(cell.bodyText.isHidden)
+        let closed = h.table.rect(ofRow: 0).height
+        XCTAssertEqual(closed, 22)
+        cell.disclosure.performClick(nil)
+        h.layout()
+        XCTAssertTrue(h.controller.openOriginLines.contains(0))
+        XCTAssertFalse(try XCTUnwrap(h.view(id: 0, as: TranscriptOriginLineCell.self)).bodyText.isHidden)
+        XCTAssertGreaterThan(h.table.rect(ofRow: 0).height, closed)
+        h.controller.toggleOriginLine(0)
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle", includeMessageContext: true)
+        let count = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(count.total, 1)
+        XCTAssertTrue(h.controller.openOriginLines.contains(0))
+        let foundBody = try XCTUnwrap(h.view(id: 0, as: TranscriptOriginLineCell.self)).bodyText
+        XCTAssertTrue(foundBody.string.contains("needle"))
+        let renderedMatch = (foundBody.string as NSString).range(of: "needle")
+        XCTAssertEqual(renderedMatch.location, 3)
+        XCTAssertNotNil(foundBody.textStorage?.attribute(.backgroundColor, at: renderedMatch.location, effectiveRange: nil))
+        XCTAssertNil(foundBody.textStorage?.attribute(.backgroundColor, at: 0, effectiveRange: nil))
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (0, (foundBody.string as NSString).length))
+        XCTAssertEqual(h.controller.assembleSelectedText(), foundBody.string)
+        _ = h.controller.applyFind(source: .local, query: "", matches: [], token: 2, direction: 1, reset: true, shouldJump: false)
+        XCTAssertFalse(h.controller.openOriginLines.contains(0))
+        _ = h.controller.applyFind(source: .unified, query: "needle", matches: matches, token: 3, direction: 1, reset: true, shouldJump: true)
+        h.controller.toggleOriginLine(0)
+        h.controller.toggleOriginLine(0)
+        _ = h.controller.applyFind(source: .unified, query: "", matches: [], token: 4, direction: 1, reset: true, shouldJump: false)
+        XCTAssertTrue(h.controller.openOriginLines.contains(0))
+    }
+
+    func testOriginLineToggleKeepsOtherRowsMeasured() {
+        let h = Harness([originBlock(.typed, body: "first"), originBlock(.notification(kind: "task"), body: "line body"),
+                         originBlock(.typed, body: "second"), originBlock(.typed, body: "third")])
+        for row in 0..<h.table.numberOfRows { _ = h.table.rect(ofRow: row) }
+        let measured = h.controller.messageHeightMeasureCount
+        XCTAssertGreaterThan(measured, 0)
+        let closed = h.table.rect(ofRow: 1).height
+        h.controller.toggleOriginLine(1)
+        h.layout()
+        for row in 0..<h.table.numberOfRows { _ = h.table.rect(ofRow: row) }
+        XCTAssertGreaterThan(h.table.rect(ofRow: 1).height, closed)
+        XCTAssertEqual(h.controller.messageHeightMeasureCount, measured, "the other rows keep their cached heights")
+        h.controller.toggleOriginLine(1)
+        h.layout()
+        XCTAssertEqual(h.table.rect(ofRow: 1).height, closed)
+        XCTAssertEqual(h.controller.messageHeightMeasureCount, measured)
+    }
+
+    func testFindSkipsHiddenContextUntilToggledAndLiveAppend() {
+        let context = originBlock(.context(kinds: ["environment"]), body: "needle context")
+        let h = Harness([originBlock(.typed, body: "needle"), context])
+        func matches() -> [TranscriptDerivedState.BlockMatch] {
+            TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle", includeMessageContext: true, showsContext: h.showsContext)
+        }
+        XCTAssertEqual(h.controller.applyFind(source: .local, query: "needle", matches: matches(), token: 1, direction: 1, reset: true, shouldJump: false).total, 1)
+        h.showsContext = true
+        h.reapply()
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: matches()).total, 2)
+        h.replace(h.blocks + [originBlock(.notification(kind: "task"), body: "needle appended")])
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: matches()).total, 3)
+        h.showsContext = false
+        h.reapply()
+        XCTAssertEqual(h.controller.refreshFindAfterRowsChanged(matches: matches()).total, 2)
+        XCTAssertEqual(h.controller.shownUserBlockIndices, [0])
+    }
+
+    func testDuplicateWindowMembershipFindAndCopyPresentationBody() throws {
+        let repeated = originBlock(.typed, body: "inner needle", raw: "<user_input>inner needle</user_input>")
+        let h = Harness(Array(repeating: repeated, count: 450))
+        XCTAssertEqual(h.controller.rows.count, 1)
+        XCTAssertEqual(h.controller.rows.first?.repeatCount, 450)
+        XCTAssertEqual(h.controller.rowIndex(forBlock: 0), h.controller.rowIndex(forBlock: 449))
+        XCTAssertEqual(h.controller.shownUserBlockIndices, [0])
+        let cell = try XCTUnwrap(h.view(id: 0, as: BlockCardCellView.self))
+        XCTAssertEqual(cell.bodyText.string, "inner needle")
+        h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (0, 12))
+        XCTAssertEqual(h.controller.assembleSelectedText(), "inner needle")
+        let matches = TranscriptDerivedState.computeFindMatches(blocks: h.blocks, query: "needle", includeMessageContext: true)
+        XCTAssertEqual(h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1, reset: true, shouldJump: true).total, 1)
     }
 
     private func json(_ object: [String: Any]) -> String {
@@ -439,7 +699,7 @@ final class TranscriptToolCellsTests: XCTestCase {
 
     /// A short window over a long stream so the table can scroll; filler messages keep the end reachable.
     private func jumpHarness(_ blocks: [Block]) -> Harness {
-        Harness(blocks + (0..<40).map { _ in assistant("filler") }, size: NSSize(width: 640, height: 160))
+        Harness(blocks + (0..<40).map { assistant("filler \($0)") }, size: NSSize(width: 640, height: 160))
     }
 
     /// Puts row `index` at the top of the viewport.
@@ -1116,7 +1376,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         let a = codexSession("switch-a-\(UUID().uuidString)", [("k1", "make", 2)])
         let b = codexSession("switch-b-\(UUID().uuidString)", [("k1", "ls", 0), ("k2", "make test", 2)])
         let state = TranscriptDerivedState()
-        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true)
         func view(_ session: Session) -> TranscriptBlockListView {
             TranscriptBlockListView(derivedState: state, session: session, fontSize: 13,
                                     findMatchCount: .constant(0), findCurrentIndex: .constant(0),
@@ -1148,6 +1408,9 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertTrue(state.isComputing)
         host.rootView = view(b)
         host.layoutSubtreeIfNeeded()
+        // No blank flash: A's rows stay until B's snapshot lands, still filed under A.
+        XCTAssertTrue(state.isComputing)
+        XCTAssertEqual(table.rows.map(\.id), [0, 1, 3], "A's rows stay while B computes")
         spin { !state.isComputing }
         spin { table.rows.count == 5 }
         host.layoutSubtreeIfNeeded()
@@ -1166,7 +1429,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         let a = codexSession("trip-a-\(UUID().uuidString)", [("k1", "make", 2)])
         let b = codexSession("trip-b-\(UUID().uuidString)", [("k1", "ls", 0), ("k2", "make test", 2)])
         let state = TranscriptDerivedState()
-        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+        let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true)
         final class Count { var value = 0 }
         let found = Count()
         func view(_ session: Session, findToken: Int = 0) -> TranscriptBlockListView {

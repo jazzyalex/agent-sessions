@@ -23,7 +23,7 @@ final class TranscriptToolRowsTests: XCTestCase {
                   openGroups: Set<Int> = [],
                   openInvocations: Set<Int> = [],
                   roles: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases),
-                  markers: [Int: [String]] = [:]) -> [BlockRowModel] {
+                  markers: [Int: [String]] = [:], showsContext: Bool = false) -> [BlockRowModel] {
             TranscriptToolRows.emit(blocks: window.map { blocks[$0] } ?? blocks[...],
                                     index: index,
                                     rowSummary: { summary($0) },
@@ -32,7 +32,8 @@ final class TranscriptToolRowsTests: XCTestCase {
                                     activeRoles: roles,
                                     failedInvocationIDs: failed,
                                     markers: markers,
-                                    totalBlockCount: blocks.count)
+                                    totalBlockCount: blocks.count, showsContext: showsContext, source: source,
+                                    messageGroups: TranscriptMessageGroupIndex.build(blocks: blocks[...], source: source, showsContext: showsContext, markers: markers))
         }
     }
 
@@ -81,6 +82,92 @@ final class TranscriptToolRowsTests: XCTestCase {
     }
 
     private func hid(_ group: Int) -> Int { TranscriptToolRows.groupHeaderRowID(forGroup: group) }
+
+    func testPlaceholderEmitsNoRow() {
+        XCTAssertTrue(built([assistant("(empty)")]).rows().isEmpty)
+    }
+
+    func testHiddenContextFollowsToggle() {
+        var context = user("injected")
+        context.messageOrigin = .context(kinds: ["test"])
+        let s = built([context])
+        XCTAssertTrue(s.rows().isEmpty)
+        XCTAssertEqual(s.rows(showsContext: true).map(\.id), [0])
+    }
+
+    func testAdjacentDuplicatesCollapse() {
+        let rows = built([user(), user(), user()]).rows()
+        XCTAssertEqual(rows.map(\.id), [0])
+        XCTAssertEqual(rows.first?.repeatCount, 3)
+        XCTAssertEqual(rows.first?.representedBlockIndices, [0, 1, 2])
+    }
+
+    func testDuplicateOwnershipAcrossWindowEdge() {
+        let s = built([user(), user(), user()])
+        let row = s.rows(2...2).first
+        XCTAssertEqual(row?.id, 0)
+        XCTAssertEqual(row?.repeatCount, 3)
+        XCTAssertEqual(row?.representedBlockIndices, [0, 1, 2])
+    }
+
+    func testDuplicatesAcrossToolGroupStaySeparate() {
+        let s = built([user(), bash("a", "ls"), output("a"), user()])
+        XCTAssertEqual(s.rows(roles: [.user]).map(\.id), [0, 3])
+    }
+
+    func testUserFilterHidesOnlyTypedRows() {
+        var notice = user("notice")
+        notice.messageOrigin = .notification(kind: "test")
+        XCTAssertEqual(built([user(), notice]).rows(roles: [.assistant]).map(\.id), [1])
+    }
+
+    func testLiveAppendOfInjectedBlockNeverShowsYou() {
+        var context = user("injected")
+        context.messageOrigin = .context(kinds: ["test"])
+        let s = built([user(), context], source: .codex)
+        XCTAssertEqual(s.rows().map(\.id), [0])
+        XCTAssertEqual(TranscriptRoleFilter.governing(context), nil)
+    }
+
+    func testHiddenContextAndPlaceholderDoNotSplitDuplicates() {
+        var context = user("harness")
+        context.messageOrigin = .context(kinds: ["test"])
+        let s = built([user(), context, assistant(""), user()])
+        XCTAssertEqual(s.rows().map(\.id), [0])
+        XCTAssertEqual(s.rows().first?.representedBlockIndices, [0, 3])
+        XCTAssertEqual(s.rows(showsContext: true).map(\.id), [0, 1, 3])
+    }
+
+    func testTelemetryAndImageBarriersSplitDuplicates() {
+        let s = built([user(), user(), user()])
+        XCTAssertEqual(s.rows(markers: [1: ["Model changed"]]).map(\.id), [0, -2, 1])
+        let groups = TranscriptMessageGroupIndex.build(blocks: s.blocks[...], noncollapsibleBlockIndices: [1])
+        XCTAssertEqual(groups.groupIDByBlock, [0: 0, 1: 1, 2: 2])
+    }
+
+    func testHiddenRoleDoesNotCollapseGenuineLaterTurn() {
+        let s = built([user(), assistant(), user()])
+        XCTAssertEqual(s.rows(roles: [.user]).map(\.id), [0, 2])
+        let a = built([assistant(), user(), assistant()])
+        XCTAssertEqual(a.rows(roles: [.assistant]).map(\.id), [0, 2])
+    }
+
+    func testDirectCodexFallbackHidesPreamble() {
+        let s = built([user("<environment_context>injected</environment_context>")], source: .codex)
+        XCTAssertTrue(s.rows().isEmpty)
+        XCTAssertEqual(s.rows(showsContext: true).count, 1)
+    }
+
+    func testDirectInterruptNeverShowsYouButTypedLiteralDoes() {
+        var marker = user("[Request interrupted by user for tool use]")
+        XCTAssertFalse(marker.isTypedUserMessage)
+        XCTAssertNil(TranscriptRoleFilter.governing(marker))
+        XCTAssertEqual(built([marker]).rows(roles: [.assistant]).map(\.id), [0])
+        marker.messageOrigin = .typed
+        XCTAssertTrue(marker.isTypedUserMessage)
+        XCTAssertEqual(TranscriptRoleFilter.governing(marker), .user)
+        XCTAssertTrue(built([marker]).rows(roles: [.assistant]).isEmpty)
+    }
 
     // MARK: - Runs and groups
 
@@ -369,6 +456,19 @@ final class TranscriptToolRowsTests: XCTestCase {
         XCTAssertEqual(invocation(rows[1])?.position, .solo)
         XCTAssertEqual(invocation(rows[3])?.position, .solo)
         XCTAssertTrue(rows[2].isMeta)
+    }
+
+    func testUndrawnMessagesDoNotSplitRun() {
+        // 0 user · 1 c1 · 2 o1 · 3 hidden context · 4 c2 · 5 o2 · 6 placeholder · 7 c3 · 8 o3
+        var context = user("injected")
+        context.messageOrigin = .context(kinds: ["test"])
+        let s = built([user(), bash("t1", "make"), output("t1"), context, bash("t2", "ls"), output("t2"),
+                       assistant("(empty)"), bash("t3", "pwd"), output("t3")])
+
+        XCTAssertEqual(s.rows().map(\.id), [0, hid(1)])
+        XCTAssertEqual(s.rows().compactMap(header).first?.invocationIDs, [1, 4, 7])
+        // Shown context is a drawn row, so it still ends the run.
+        XCTAssertEqual(s.rows(showsContext: true).map(\.id), [0, 1, 3, hid(4)])
     }
 
     func testInvocationAppearsOnceAcrossRuns() {

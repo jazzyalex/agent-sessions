@@ -259,6 +259,7 @@ enum SessionInlineImageMapper {
 
     static func imagesByUserBlockIndex(for session: Session,
                                        maxMatches: Int = 400,
+                                       includeMessageContext: Bool = false,
                                        shouldCancel: () -> Bool = { false }) -> [Int: [InlineSessionImage]] {
         // Image spans are byte offsets, so a compressed Codex rollout is scanned in its
         // decoded copy. Payloads keep the canonical path: the copy can be evicted, and
@@ -392,7 +393,7 @@ enum SessionInlineImageMapper {
         }()
         guard !filtered.isEmpty, !shouldCancel() else { return [:] }
 
-        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: includeMessageContext)
         let userEventIDToBlockIndex: [String: Int] = userEventIDToBlockKey(blocks: blocks)
 
         // Antigravity reaches this path, so it needs the empty-session fallback; the

@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+
+- **Only what you typed is “You.”** The Session view labels background notifications, peer messages, commands and scheduled prompts. Instructions, page snapshots and skill loads stay behind the Context toggle.
+
+### Bug Fixes
+
 - Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of "Untitled session".
+- **Injected context no longer impersonates your messages.** First-prompt navigation also respects explicitly typed instructions instead of treating their wording as a harness preamble.
+- **Message envelopes read as messages.** Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.
+- **No more empty agent rows.** Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.
+- **Your messages no longer show a duration.** The meaningless `0.0s` chip is gone from user rows.
 
 ## [6.4] - 2026-11-07
 

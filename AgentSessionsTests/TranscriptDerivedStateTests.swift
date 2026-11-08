@@ -2,6 +2,122 @@ import XCTest
 @testable import AgentSessions
 
 final class TranscriptDerivedStateTests: XCTestCase {
+    func testPresentationFindUsesUTF16AndSkipsHiddenContext() {
+        var typed = TranscriptTestFixtures.block(.user, text: "<user_input>😀 **needle**</user_input>")
+        typed.presentation = MessagePresentation(origin: .typed, body: "😀 **needle**", summary: nil)
+        var context = TranscriptTestFixtures.block(.user, text: "needle context")
+        context.presentation = MessagePresentation(origin: .context(kinds: ["environment"]), body: "needle context", summary: "Context")
+        let blocks = TranscriptTestFixtures.sequence([typed, context])
+        let hidden = TranscriptDerivedState.computeFindMatches(blocks: blocks, query: "needle", includeMessageContext: true)
+        XCTAssertEqual(hidden.count, 1)
+        XCTAssertEqual(hidden.first?.space, .presentation)
+        XCTAssertEqual(hidden.first?.rangeInBlockText, NSRange(location: 5, length: 6))
+        XCTAssertEqual(TranscriptDerivedState.computeFindMatches(blocks: blocks, query: "needle", includeMessageContext: true, showsContext: true).count, 2)
+        XCTAssertEqual(TranscriptDerivedState.computeFindMatches(blocks: blocks, query: "needle").first?.rangeInBlockText.location, 17)
+    }
+
+    func testProjectionAndParentMetadataAreSnapshotIdentity() {
+        var meta = SessionEvent(id: "context", timestamp: nil, kind: .meta, role: nil, text: "environment", toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+        meta.messageOrigin = .context(kinds: ["environment"])
+        let events = [meta, TranscriptTestFixtures.userEvent("u", "do it")]
+        func session(parent: String? = nil, source: SessionSource = .codex) -> Session {
+            Session(id: "same-id", source: source, startTime: nil, endTime: nil, model: nil, filePath: "/tmp/same.jsonl", fileSizeBytes: 200, eventCount: events.count, events: events, parentSessionID: parent, subagentType: parent == nil ? nil : "worker")
+        }
+        let rawSettings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true)
+        let richSettings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true)
+        let raw = TranscriptDerivedState.computeSnapshot(session: session(), settings: rawSettings)
+        let rich = TranscriptDerivedState.computeSnapshot(session: session(), settings: richSettings)
+        let child = TranscriptDerivedState.computeSnapshot(session: session(parent: "parent"), settings: richSettings)
+        XCTAssertEqual(raw.blocks.count, 1)
+        XCTAssertEqual(rich.blocks.count, 2)
+        XCTAssertNotEqual(raw.key, rich.key)
+        XCTAssertNotEqual(rich.key, child.key)
+        XCTAssertNotEqual(rich.key, TranscriptDerivedState.Key(session: session(source: .claude), settings: richSettings))
+        XCTAssertEqual(rich.blocks.last?.presentation?.origin, .typed)
+        XCTAssertEqual(child.blocks.last?.presentation?.origin, .parentTask)
+        XCTAssertEqual(rich.userBlockIndices, [1])
+        XCTAssertEqual(child.userBlockIndices, [])
+    }
+
+    func testCodexMixedDisplayPreservesInlineImageMarkerNormalization() {
+        var event = TranscriptTestFixtures.userEvent("u", "harness context\nlook <image name=[image #1]>")
+        event.messageOrigin = .typed
+        event.messageDisplayText = "look <image name=[image #1]>"
+        let session = Session(id: "mixed-image", source: .codex, startTime: nil, endTime: nil, model: nil, filePath: "/tmp/mixed.jsonl", eventCount: 1, events: [event])
+        let snapshot = TranscriptDerivedState.computeSnapshot(session: session, settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true))
+        XCTAssertEqual(snapshot.blocks.first?.presentation?.body, "look [Image #1]")
+        XCTAssertEqual(session.events.first?.text, event.text)
+    }
+
+    func testOriginEventJumpsOwnRowsAndChildRepliesUseParentTask() {
+        func event(_ id: String, _ origin: MessageOrigin, kind: SessionEventKind = .user) -> SessionEvent {
+            var e = SessionEvent(id: id, timestamp: nil, kind: kind, role: nil, text: id, toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+            e.messageOrigin = origin
+            return e
+        }
+        let events = [event("parent", .parentTask), event("peer", .peer(from: "Ada"), kind: .meta), event("context", .context(kinds: ["environment"]), kind: .meta), TranscriptTestFixtures.assistantDelta("reply", "done", messageID: "reply")]
+        let session = Session(id: "child-jumps", source: .codex, startTime: nil, endTime: nil, model: nil, filePath: "/tmp/child-jumps.jsonl", eventCount: events.count, events: events)
+        let snapshot = TranscriptDerivedState.computeSnapshot(session: session, settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true))
+        XCTAssertEqual(snapshot.userBlockIndices, [])
+        XCTAssertEqual(snapshot.imageUserBlockIndices, [0], "retained meta peer is not an original image-browser user ordinal")
+        XCTAssertEqual(snapshot.eventIDToAnchorBlockIndex, ["parent": 0, "peer": 1, "context": 2, "reply": 0])
+    }
+
+    @MainActor
+    func testSessionPreambleUsesCachedOriginAndKeepsExplicitTypedFirstPrompt() {
+        for source in [SessionSource.codex, .droid, .claude] {
+            func event(_ id: String, _ body: String, _ origin: MessageOrigin) -> SessionEvent {
+                var result = TranscriptTestFixtures.userEvent(id, body)
+                result.messageOrigin = origin
+                return result
+            }
+            var retainedMeta = SessionEvent(id: "meta-context", timestamp: nil, kind: .meta, role: nil,
+                text: "retained environment", toolName: nil, toolInput: nil, toolOutput: nil,
+                messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+            retainedMeta.messageOrigin = .context(kinds: ["environment"])
+            let events = [
+                event("context", "plain injected environment", .context(kinds: ["environment"])),
+                event("typed", "# AGENTS.md instructions for /literal\n<INSTRUCTIONS>These are my words.</INSTRUCTIONS>", .typed),
+                event("skill", "loaded skill body", .skill(name: "demo")),
+                event("retry", "retry body", .harnessRetry),
+                event("peer", "peer body", .peer(from: "other")),
+                event("later", "later prompt", .typed), retainedMeta
+            ]
+            let session = Session(id: "semantic-preamble-" + source.rawValue, source: source,
+                                  startTime: nil, endTime: nil, model: nil, filePath: "/tmp/preamble.jsonl",
+                                  eventCount: events.count, events: events)
+            let snapshot = TranscriptDerivedState.computeSnapshot(session: session,
+                settings: .init(skipAgentsPreamble: true, reviewCardsEnabled: true, includeMessageContext: true))
+            XCTAssertEqual(snapshot.preambleUserBlockIndexes, [0, 2, 3], source.rawValue)
+            XCTAssertEqual(snapshot.userBlockIndices, [1, 5], source.rawValue)
+            XCTAssertEqual(BlockTableController.firstPromptBlockIndex(userBlockIndices: snapshot.userBlockIndices,
+                preambleUserBlockIndexes: snapshot.preambleUserBlockIndexes), 1, source.rawValue)
+            XCTAssertEqual(snapshot.blocks[1].presentation?.body, events[1].text, source.rawValue)
+            let unfiltered = TranscriptDerivedState.computeSnapshot(session: session,
+                settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true, includeMessageContext: true))
+            XCTAssertTrue(unfiltered.preambleUserBlockIndexes.isEmpty, source.rawValue)
+        }
+    }
+
+    func testRawSnapshotPreambleRetainsLegacyHeuristicWithExplicitTypedProvenance() {
+        for source in [SessionSource.codex, .droid, .claude] {
+            var typed = TranscriptTestFixtures.userEvent("typed", "# AGENTS.md instructions for /literal\n<INSTRUCTIONS>Typed literal</INSTRUCTIONS>")
+            typed.messageOrigin = .typed
+            let events = [typed, TranscriptTestFixtures.userEvent("later", "later prompt")]
+            let session = Session(id: "raw-preamble-" + source.rawValue, source: source, startTime: nil,
+                                  endTime: nil, model: nil, filePath: "/tmp/raw-preamble.jsonl",
+                                  eventCount: events.count, events: events)
+            let snapshot = TranscriptDerivedState.computeSnapshot(session: session,
+                settings: .init(skipAgentsPreamble: true, reviewCardsEnabled: true))
+            XCTAssertEqual(snapshot.preambleUserBlockIndexes,
+                SessionTerminalView.computePreambleUserBlockIndexes(session: session, blocks: snapshot.blocks))
+            XCTAssertEqual(snapshot.preambleUserBlockIndexes, source == .claude ? [] : [0])
+            let unfiltered = TranscriptDerivedState.computeSnapshot(session: session,
+                settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true))
+            XCTAssertTrue(unfiltered.preambleUserBlockIndexes.isEmpty)
+        }
+    }
+
     override func setUp() {
         super.setUp()
         SessionTranscriptBuilder._testResetCoalesceCache()

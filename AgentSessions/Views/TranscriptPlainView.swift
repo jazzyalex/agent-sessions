@@ -616,6 +616,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.terminal.rawValue
+    @AppStorage("SessionShowContext") private var showsContext = false
     @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.blocks.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -807,7 +808,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard let id = sessionID else { return "none" }
 
         if let session = resolvedSessionForRender(id: id) {
-            return sessionBuildKey(session)
+            return "\(sessionBuildKey(session))|\(viewModeRaw)|\(session.source)|\(session.parentSessionID ?? "")|\(session.subagentType ?? "")"
         }
         return "unresolved:\(id)"
     }
@@ -861,6 +862,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         telemetry: selectedTelemetry,
                         telemetryLoadState: telemetryLoadState,
                         blocks: blocksReady ? derivedState.snapshot.blocks : [],
+                        usesMessageOrigins: viewMode == .blocks,
                         loading: telemetryLoading,
                         isSubagent: telemetrySession?.isSubagent ?? false,
                         delegatedRequestCount: selectedTelemetry.map { telemetry in
@@ -1056,7 +1058,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 derivedState.update(
                     session: resolvedSession,
                     settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(),
-                                    reviewCardsEnabled: transcriptReviewCardsEnabled))
+                                    reviewCardsEnabled: transcriptReviewCardsEnabled,
+                                    includeMessageContext: viewMode == .blocks))
                 guard viewMode != .terminal, viewMode != .blocks else { return }
                 rebuild(session: resolvedSession)
             }
@@ -1298,7 +1301,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             guard !Task.isCancelled else { return }
 
             let out = SessionInlineImageMapper.imagesByUserBlockIndex(
-                for: sessionSnapshot, shouldCancel: { Task.isCancelled })
+                for: sessionSnapshot, includeMessageContext: true, shouldCancel: { Task.isCancelled })
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
@@ -1391,10 +1394,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func roleOccurrenceCount(_ role: TranscriptRoleFilter) -> Int {
         let snap = derivedState.snapshot
         switch role {
-        case .user: return snap.userBlockIndices.count
+        case .user, .assistant:
+            guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
+            let markers = TranscriptTelemetryPresentation.markers(changes: selectedTelemetry?.configurationChanges ?? [], blocks: snap.blocks)
+            let groups = derivedState.messageGroups(showsContext: showsContext, markers: markers, imageBlocks: Set(richInlineImagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
+            return groups.groupsByID.values.filter { TranscriptRoleFilter.governing($0.block, source: snap.source) == role }.count
         case .tools: return snap.toolJumpIDs.count
         case .errors: return snap.errorJumpIDs.count
-        case .assistant: return snap.blocks.reduce(0) { $0 + ($1.kind == .assistant ? 1 : 0) }
         }
     }
 
@@ -1495,6 +1501,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func blocksTranscriptView(session: Session) -> some View {
         TranscriptBlockListView(
             derivedState: derivedState,
+            showsContext: showsContext,
             session: session,
             fontSize: CGFloat(transcriptFontSize),
             configurationChanges: selectedTelemetry?.configurationChanges ?? [],
@@ -1606,6 +1613,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
                         sessionRoleFilterChip(role, source: session.source)
                     }
+                    Toggle("Context", isOn: $showsContext)
+                        .toggleStyle(.button)
+                        .help("Show text the agent’s harness added: instructions, environment, skill files")
                 }
 
                 if isJSONMode && isBuildingJSON {
@@ -2943,7 +2953,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // ready, the block controller can resolve a unified match to a block and
         // auto-jump, mirroring Terminal's post-9456faa3 auto-jump-on-open.
         if viewMode == .blocks {
-            return derivedState.snapshot.key?.sessionID == session.id && !derivedState.isComputing
+            return derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true)) && !derivedState.isComputing
         }
         guard let key = lastBuildKey else { return false }
         return key.hasPrefix("\(session.id)|")

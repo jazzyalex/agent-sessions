@@ -49,6 +49,51 @@ struct ToolInvocationRowModel: Equatable {
     var contentStamp: Int
 }
 
+/// Full-stream ownership for duplicate message rows. Build once per block revision, source,
+/// Context toggle, telemetry markers and noncollapsible (for example inline-image) indices.
+/// Role filters do not affect ownership. Pass this index to every sliced `emit` call.
+struct TranscriptMessageGroupIndex {
+    typealias Block = SessionTranscriptBuilder.LogicalBlock
+    struct Group {
+        var block: Block
+        var representedBlockIndices: [Int]
+    }
+    var groupsByID: [Int: Group] = [:]
+    var groupIDByBlock: [Int: Int] = [:]
+
+    static func build(blocks: ArraySlice<Block>, source: SessionSource = .claude,
+                      showsContext: Bool = false, markers: [Int: [String]] = [:],
+                      noncollapsibleBlockIndices: Set<Int> = []) -> Self {
+        var result = Self()
+        var previous: MessagePresentation?
+        var owner: Int?
+        for block in blocks {
+            let id = block.globalBlockIndex
+            if markers[id]?.isEmpty == false { owner = nil; previous = nil }
+            // Structural rows remain barriers even when role filtering hides them.
+            if block.kind.isTool || block.kind == .error {
+                owner = nil; previous = nil
+                continue
+            }
+            let presentation = block.resolvedPresentation(source: source)
+            if presentation?.origin == .placeholder { continue }
+            if !showsContext && presentation?.origin?.isHiddenContext == true { continue }
+            let collapsible = presentation != nil && !noncollapsibleBlockIndices.contains(id)
+            if collapsible, let owner, let previous, let presentation,
+               previous.origin == presentation.origin, previous.body == presentation.body {
+                result.groupsByID[owner]?.representedBlockIndices.append(id)
+                result.groupIDByBlock[id] = owner
+            } else {
+                result.groupsByID[id] = Group(block: block, representedBlockIndices: [id])
+                result.groupIDByBlock[id] = id
+                owner = collapsible ? id : nil
+                previous = collapsible ? presentation : nil
+            }
+        }
+        return result
+    }
+}
+
 /// Row emission for tool blocks (spec §6.7): one table row per invocation plus a light header row
 /// per group. Pure; no UI and no main-actor state.
 enum TranscriptToolRows {
@@ -116,7 +161,13 @@ enum TranscriptToolRows {
                      activeRoles: Set<TranscriptRoleFilter>,
                      failedInvocationIDs: Set<Int>,
                      markers: [Int: [String]] = [:],
-                     totalBlockCount: Int? = nil) -> [BlockRowModel] {
+                     totalBlockCount: Int? = nil,
+                     showsContext: Bool = false,
+                     source: SessionSource = .claude,
+                     messageGroups: TranscriptMessageGroupIndex? = nil) -> [BlockRowModel] {
+        let messageGroups = messageGroups ?? TranscriptMessageGroupIndex.build(
+            blocks: blocks, source: source, showsContext: showsContext, markers: markers)
+        var placedMessages = Set<Int>()
         let context = Context(window: Window(blocks), openGroups: openGroups,
                               openInvocations: openInvocations, failedInvocationIDs: failedInvocationIDs,
                               activeRoles: activeRoles)
@@ -137,10 +188,19 @@ enum TranscriptToolRows {
                 }
                 continue
             }
+            // A message that draws no row (placeholder, hidden context) must not split a tool run.
+            let presentation = block.resolvedPresentation(source: source)
+            if presentation?.origin == .placeholder { continue }
+            if !showsContext && presentation?.origin?.isHiddenContext == true { continue }
             appendRun(&run, to: &rows, context: context, rowSummary: rowSummary)
-            let role = TranscriptRoleFilter.governing(block.kind)
+            let role = TranscriptRoleFilter.governing(block, source: source)
             if activeRoles.isEmpty || role.map({ activeRoles.contains($0) }) ?? true {
-                rows.append(BlockRowModel(id: blockIndex, content: .message(block)))
+                let owner = messageGroups.groupIDByBlock[blockIndex] ?? blockIndex
+                guard placedMessages.insert(owner).inserted else { continue }
+                let group = messageGroups.groupsByID[owner]
+                let members = group?.representedBlockIndices ?? [blockIndex]
+                rows.append(BlockRowModel(id: owner, content: .message(group?.block ?? block),
+                                          representedBlockIndices: members))
             }
         }
         appendRun(&run, to: &rows, context: context, rowSummary: rowSummary)
