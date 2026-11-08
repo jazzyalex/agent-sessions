@@ -1334,6 +1334,18 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Transcript UI
 
+### Transcript polish: code and diff highlighting, better layout
+> **open** · sev: low · urg: low · verified 2026-11-08
+
+- **What:** after 6.4 (tool view) and 55aec3c4 (message origin), transcripts are readable but plain. Code snippets and diffs in tool rows have no color, and the overall layout can improve. Owner: "we still can better", not urgent.
+- **Where:** tool row bodies in `AgentSessions/ToolRendering/` (no diff or code coloring today); the only coloring is JSON in `AgentSessions/Views/TranscriptPlainView.swift` (`jsonSyntaxHighlightRanges`, `applySyntaxColors`).
+- **Before any spec, answer two questions (owner, 2026-11-08):**
+  1. **Prior art.** How do the Codex, Claude and OpenCode desktop apps show a session? What UI, UX and formatting can we borrow: diff view, code blocks, tool rows, message layout, collapse rules? Capture screenshots of the same kinds of turns in each app.
+  2. **User need.** What do Agent Sessions users actually need from a transcript, and why? AS is a history browser, not a live chat, so what users do there (search, review, resume, copy) decides what earns the effort.
+- **Why deferred:** not urgent; the readability work just shipped and needs time in use.
+- **Risk if wrong:** a spec written before these two answers would copy chat-app styling that does not fit a history browser, or polish rows that users seldom open.
+- **To close:** both answers written up, then a spec, then the work.
+
 ### Session info does not expose known models for most agents
 > **partial** · sev: low · urg: low · verified 2026-10-15
 - **Update 2026-10-15:** the premise is stale. All 17 sources have telemetry and every descriptor declares `configuration` supported or partial (`testQuickFactsCoverEveryRegisteredSource`). Line citations below have drifted. Residue: per-provider model-history gaps marked `.partial` (Devin, Fx, Antigravity, Claude).
