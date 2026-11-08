@@ -315,9 +315,46 @@ struct SessionTranscriptBuilder {
         var toolSidecar: ToolSidecar? = nil
         /// Runtime error or user rejection, when the parser classified the result as one.
         var toolDisposition: ToolDisposition? = nil
+        var messageOrigin: MessageOrigin? = nil
+        var messageDisplayText: String? = nil
+        var messageHasEncryptedContent: Bool? = nil
+        var presentation: MessagePresentation? = nil
+
+        /// Shared semantic turn boundary. Legacy fixtures without provenance remain typed.
+        var isTypedUserMessage: Bool {
+            guard kind == .user, !isInterruptControlMessage else { return false }
+            return (presentation?.origin ?? messageOrigin ?? .typed) == .typed
+        }
+
+        /// A turn starts at a typed prompt or at a sub-session's task from its parent.
+        var startsTurn: Bool {
+            guard kind == .user, !isInterruptControlMessage else { return false }
+            let origin = presentation?.origin ?? messageOrigin ?? .typed
+            return origin == .typed || origin == .parentTask
+        }
+
+        /// Explicit typed provenance wins over a literal spelling of a control marker.
+        var isInterruptControlMessage: Bool {
+            kind == .user && (presentation?.origin ?? messageOrigin) != .typed
+                && ToolInvocationIndex.isInterruptNotice(text)
+        }
+
+        func resolvedPresentation(source: SessionSource = .claude) -> MessagePresentation? {
+            presentation ?? MessageOriginClassifier.presentation(for: self, context: .init(
+                source: source, isFirstUserBlock: false))
+        }
+
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
+        var block = rawBlock(from: e)
+        block.messageOrigin = e.messageOrigin
+        block.messageDisplayText = e.messageDisplayText
+        block.messageHasEncryptedContent = e.messageHasEncryptedContent
+        return block
+    }
+
+    private static func rawBlock(from e: SessionEvent) -> LogicalBlock {
         switch e.kind {
         case .user:
             return LogicalBlock(kind: .user,
@@ -501,14 +538,17 @@ struct SessionTranscriptBuilder {
     /// This keeps the structural grouping logic in one place while allowing
     /// new views to render the underlying data differently.
     static func coalescedBlocks(for session: Session,
-                                includeMeta: Bool) -> [LogicalBlock] {
-        let key = "\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)" as NSString
+                                includeMeta: Bool,
+                                includeMessageContext: Bool = false) -> [LogicalBlock] {
+        // JSON encoding keeps arbitrary metadata strings from colliding at separators.
+        let classifierIdentity = String(data: try! JSONEncoder().encode([session.source.rawValue, session.parentSessionID, session.subagentType]), encoding: .utf8)!
+        let key = "\(classifierIdentity)|\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)|\(includeMessageContext ? 1 : 0)" as NSString
         if let hit = coalesceCache.object(forKey: key) {
             return hit
         }
         let _span = Perf.begin("transcriptCoalesce", thresholdMs: 20, "events=\(session.events.count)")
         defer { Perf.end(_span) }
-        let blocks = coalesce(session: session, includeMeta: includeMeta)
+        let blocks = coalesce(session: session, includeMeta: includeMeta, includeMessageContext: includeMessageContext)
         coalesceCache.setObject(blocks, forKey: key)
         return blocks
     }
@@ -538,20 +578,33 @@ struct SessionTranscriptBuilder {
         }
     }
 
-    private static func coalesce(session: Session, includeMeta: Bool) -> [LogicalBlock] {
-        coalesce(events: session.events, source: session.source, includeMeta: includeMeta)
+    private static func coalesce(session: Session, includeMeta: Bool, includeMessageContext: Bool = false) -> [LogicalBlock] {
+        // Only a sub-session's first prompt is a parent task; side chats and forks keep "You".
+        let isSubagent = session.effectiveRelationshipKind == .subagent
+        return coalesce(events: session.events, source: session.source, subagentType: isSubagent ? session.subagentType : nil,
+                        parentSessionID: isSubagent ? session.parentSessionID : nil,
+                        includeMeta: includeMeta, includeMessageContext: includeMessageContext)
     }
 
-    private static func coalesce(events: [SessionEvent], source: SessionSource, includeMeta: Bool) -> [LogicalBlock] {
+    private static func coalesce(events: [SessionEvent], source: SessionSource, subagentType: String? = nil, parentSessionID: String? = nil, includeMeta: Bool, includeMessageContext: Bool = false) -> [LogicalBlock] {
         var blocks: [LogicalBlock] = []
         blocks.reserveCapacity(events.count)
         for (eventIndex, e) in events.enumerated() {
-            if e.kind == .meta && !includeMeta { continue }
-            let base = block(from: e)
+            if e.kind == .meta && !includeMeta && !(includeMessageContext && e.messageOrigin != nil) { continue }
+            var base = block(from: e)
+            if includeMessageContext && e.kind == .meta {
+                switch e.messageOrigin {
+                case .peer, .typed: base.kind = .user
+                default: break
+                }
+            }
             let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
             for var b in expanded {
                 if source == .codex {
                     b.text = normalizeCodexInlineImageMarkers(b.text)
+                    if let displayText = b.messageDisplayText {
+                        b.messageDisplayText = normalizeCodexInlineImageMarkers(displayText)
+                    }
                 }
                 // Merge in place: taking a copy of `blocks.last` and appending to it
                 // makes the accumulated text buffer multiply-referenced, so every
@@ -562,6 +615,12 @@ struct SessionTranscriptBuilder {
                 }
                 if mergeWithLast {
                     let i = blocks.count - 1
+                    if blocks[i].messageDisplayText != nil || b.messageDisplayText != nil {
+                        blocks[i].messageDisplayText = (blocks[i].messageDisplayText ?? blocks[i].text) + (b.messageDisplayText ?? b.text)
+                    }
+                    if blocks[i].messageOrigin == nil { blocks[i].messageOrigin = b.messageOrigin }
+                    if b.messageHasEncryptedContent == true { blocks[i].messageHasEncryptedContent = true }
+                    else if blocks[i].messageHasEncryptedContent == nil { blocks[i].messageHasEncryptedContent = b.messageHasEncryptedContent }
                     blocks[i].text += b.text
                     if blocks[i].timestamp == nil { blocks[i].timestamp = b.timestamp }
                     blocks[i].rawJSON = b.rawJSON
@@ -582,8 +641,21 @@ struct SessionTranscriptBuilder {
         }
         // Assign the stable global block index as the final stream offset. Done in
         // a single pass after coalescing so merges don't leave gaps.
+        var hasEligibleUserBlock = false
         for i in blocks.indices {
             blocks[i].globalBlockIndex = i
+            // Raw consumers keep their original stream; meta presentation is Session-only.
+            if blocks[i].kind != .meta || includeMessageContext {
+                blocks[i].presentation = MessageOriginClassifier.presentation(for: blocks[i], context: .init(
+                    source: source, subagentType: subagentType, isFirstUserBlock: !hasEligibleUserBlock,
+                    parentSessionID: parentSessionID))
+            }
+            if blocks[i].kind == .user {
+                switch blocks[i].presentation?.origin {
+                case .typed, .parentTask: hasEligibleUserBlock = true
+                default: break
+                }
+            }
         }
         return blocks
     }
@@ -628,16 +700,11 @@ struct SessionTranscriptBuilder {
         var found = false
         
         func makeBlock(kind: LogicalBlock.Kind, text: String) -> LogicalBlock {
-            LogicalBlock(kind: kind,
-                         text: text,
-                         timestamp: block.timestamp,
-                         messageID: block.messageID,
-                         toolName: block.toolName,
-                         isDelta: block.isDelta,
-                         toolInput: block.toolInput,
-                         isErrorOutput: block.isErrorOutput,
-                         eventID: block.eventID,
-                         rawJSON: block.rawJSON)
+            var part = block
+            part.kind = kind
+            part.text = text
+            part.presentation = nil
+            return part
         }
         
         while let openStart = remainder.range(of: "<turn_aborted", options: [.caseInsensitive]) {
@@ -681,7 +748,29 @@ struct SessionTranscriptBuilder {
             out.append(makeBlock(kind: .user, text: tail))
         }
         
-        return found ? out : [block]
+        guard found else { return [block] }
+        if let display = block.messageDisplayText {
+            var displayBlock = block
+            displayBlock.text = display
+            displayBlock.messageDisplayText = nil
+            let displayParts = splitTurnAbortedBlocks(from: displayBlock)
+            let userDisplayParts = displayParts.filter { $0.kind == .user }.map(\.text)
+            let userIndices = out.indices.filter { out[$0].kind == .user }
+            for (offset, index) in userIndices.enumerated() {
+                // Envelope decoding may have changed the notice structure. Preserve
+                // the complete display body once rather than dropping unmatched parts.
+                out[index].messageDisplayText = userIndices.count == userDisplayParts.count
+                    ? userDisplayParts[offset]
+                    : (offset == 0 ? userDisplayParts.joined(separator: "\n") : "")
+            }
+            for index in out.indices where out[index].kind == .meta {
+                out[index].messageDisplayText = nil
+            }
+            if userIndices.isEmpty, let first = out.indices.first {
+                out[first].messageDisplayText = display
+            }
+        }
+        return out
     }
     
 	    private static func turnAbortedDisplayText(from inner: String) -> String? {

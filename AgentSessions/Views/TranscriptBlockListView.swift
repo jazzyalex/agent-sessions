@@ -13,6 +13,18 @@ import AVFoundation
 enum TranscriptRoleFilter: String, CaseIterable, Hashable {
     case user, assistant, tools, errors
 
+    static func governing(_ block: SessionTranscriptBuilder.LogicalBlock,
+                          source: SessionSource = .claude) -> TranscriptRoleFilter? {
+        if block.kind.isTool { return .tools }
+        if block.kind == .error { return .errors }
+        switch block.resolvedPresentation(source: source)?.origin ?? block.messageOrigin {
+        case .typed: return .user
+        case .approvalVerdict: return .assistant
+        case nil: return governing(block.kind)
+        default: return nil
+        }
+    }
+
     /// The filter that governs a block of the given kind, or `nil` for kinds
     /// that are never filterable (`.meta` — always visible).
     static func governing(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind) -> TranscriptRoleFilter? {
@@ -49,6 +61,17 @@ struct BlockRowModel: Identifiable, Equatable {
     /// ids are unique but NOT ordered: never binary-search rows by id.
     var id: Int
     var content: Content
+    /// Complete global membership, including members outside the loaded window.
+    var representedBlockIndices: [Int]
+    var repeatCount: Int { max(1, representedBlockIndices.count) }
+
+    init(id: Int, content: Content, representedBlockIndices: [Int]? = nil) {
+        self.id = id
+        self.content = content
+        if let representedBlockIndices { self.representedBlockIndices = representedBlockIndices }
+        else if case .message(let block) = content { self.representedBlockIndices = [block.globalBlockIndex] }
+        else { self.representedBlockIndices = [] }
+    }
 
     /// The first block the row shows: a message's own block; an invocation's
     /// id (its call, or its first output with no call); a group header's group
@@ -80,7 +103,7 @@ struct BlockRowModel: Identifiable, Equatable {
     /// (`ToolInvocationCellView`), so they have none here.
     var bodyText: String {
         switch content {
-        case .message(let b): return b.text
+        case .message(let b): return b.presentation?.body ?? b.text
         case .toolGroupHeader, .toolInvocation: return ""
         }
     }
@@ -102,15 +125,17 @@ struct BlockRowModel: Identifiable, Equatable {
     /// True for a `.meta` message row — rendered as a thin separator, no card
     /// chrome.
     var isMeta: Bool {
-        if case .message(let b) = content { return b.kind == .meta }
+        if case .message(let b) = content { return b.kind == .meta && b.presentation == nil }
         return false
     }
 
     /// True for a user/assistant prose message — the ONLY rows that get markdown
     /// rendering (Task 12). Tool rows, errors, and meta rows keep their own
     /// bodies.
+    var isOriginLine: Bool { primaryBlock.presentation?.rowStyle == .line }
+
     var isMarkdownMessage: Bool {
-        if case .message(let b) = content { return b.kind == .user || b.kind == .assistant }
+        if case .message(let b) = content { return b.presentation != nil || b.kind == .user || b.kind == .assistant }
         return false
     }
 
@@ -160,6 +185,7 @@ enum CardMetrics {
 /// controller never retains `derivedState`.
 struct TranscriptBlockListView: NSViewRepresentable {
     let derivedState: TranscriptDerivedState
+    var showsContext: Bool = false
     let session: Session
     let fontSize: CGFloat
     var configurationChanges: [ConfigurationChange] = []
@@ -314,7 +340,16 @@ struct TranscriptBlockListView: NSViewRepresentable {
         // would seed the old session's failed calls (and cache its summaries and L2 bodies)
         // under the new id, so the controller keeps the previous session until the new
         // snapshot lands. Tokens stay unconsumed and run against that snapshot.
-        guard snapshot.key?.sessionID == session.id else { return }
+        // Not calling `apply` keeps the controller's own session id, so nothing of the old
+        // snapshot is ever filed under the new id, and the new snapshot's `apply` still runs
+        // the full session-switch reset.
+        guard snapshot.key?.sessionID == session.id,
+              snapshot.key?.includeMessageContext == true,
+              snapshot.key?.source == session.source,
+              snapshot.key?.parentSessionID == session.parentSessionID,
+              snapshot.key?.subagentType == session.subagentType else {
+            return
+        }
         let rowsChanged = context.coordinator.apply(
             allBlocks: snapshot.blocks,
             invocationIndex: snapshot.invocationIndex,
@@ -336,7 +371,10 @@ struct TranscriptBlockListView: NSViewRepresentable {
             ideBinaryOverridePath: ideBinaryOverridePath,
             activeRoleFilters: activeRoleFilters,
             sharedToolInvocationCache: derivedState.toolSearchStore.invocationCache,
-            rowSummaries: snapshot.rowSummaries)
+            rowSummaries: snapshot.rowSummaries, showsContext: showsContext,
+            messageGroups: derivedState.messageGroups(showsContext: showsContext,
+                markers: TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: snapshot.blocks),
+                imageBlocks: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys)))
 
         let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
         if consumedScrollIntent {
@@ -355,7 +393,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         // retry discipline).
         context.coordinator.handleFirstPromptJumpIntent(
             token: firstPromptJumpToken,
-            userBlockIndices: snapshot.userBlockIndices,
+            userBlockIndices: context.coordinator.firstPromptBlockIndices,
             preambleUserBlockIndexes: snapshot.preambleUserBlockIndexes,
             isSnapshotComputing: derivedState.isComputing)
 
@@ -372,7 +410,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.handleUserPromptIndexJumpIntent(
             token: userPromptIndexJumpToken,
             userPromptIndex: userPromptIndexJump,
-            userBlockIndices: snapshot.userBlockIndices,
+            userBlockIndices: snapshot.imageUserBlockIndices,
             isSnapshotComputing: derivedState.isComputing)
 
         context.coordinator.handleRoleJumpIntent(
@@ -391,7 +429,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
 
         if coordinator.consumeLocalFindToken(findToken) {
             let matches = findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? [] : derivedState.findMatches(query: findQuery)
+                ? [] : derivedState.findMatches(query: findQuery, showsContext: showsContext)
             let counts = coordinator.applyFind(
                 source: .local, query: findQuery, matches: matches,
                 token: findToken, direction: findDirection,
@@ -399,7 +437,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
             publishFindCounts(counts, current: $findCurrentIndex, total: $findMatchCount)
         } else if coordinator.consumeUnifiedFindToken(unifiedFindToken) {
             let matches = unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? [] : derivedState.findMatches(query: unifiedQuery)
+                ? [] : derivedState.findMatches(query: unifiedQuery, showsContext: showsContext)
             let counts = coordinator.applyFind(
                 source: .unified, query: unifiedQuery, matches: matches,
                 token: unifiedFindToken, direction: unifiedFindDirection,
@@ -411,7 +449,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
             let activeQuery = coordinator.activeFindSource == .unified ? unifiedQuery : findQuery
             let trimmed = activeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
-            let matches = derivedState.findMatches(query: trimmed)
+            let matches = derivedState.findMatches(query: trimmed, showsContext: showsContext)
             let counts = coordinator.refreshFindAfterRowsChanged(matches: matches)
             if coordinator.activeFindSource == .unified {
                 publishFindCounts(counts, current: $unifiedCurrentIndex, total: $unifiedMatchCount)
@@ -1247,12 +1285,55 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return emitRows(from: blocks)
     }
 
+    private(set) var messageGroups = TranscriptMessageGroupIndex()
+    var shownUserBlockIndices: [Int] {
+        guard activeRoleFilters.isEmpty || activeRoleFilters.contains(.user) else { return [] }
+        return messageGroups.groupsByID.values.filter { $0.block.isTypedUserMessage }.map { $0.block.globalBlockIndex }.sorted()
+    }
+    /// First-prompt targets: typed prompts, or a sub-session's task from its parent.
+    var firstPromptBlockIndices: [Int] {
+        messageGroups.groupsByID.values.filter { $0.block.startsTurn }.map { $0.block.globalBlockIndex }.sorted()
+    }
+    private var showsContext = false
+    private(set) var openOriginLines: Set<Int> = []
+    private var autoOpenedOriginLines: Set<Int> = []
+
+    func toggleOriginLine(_ id: Int) {
+        autoOpenedOriginLines.remove(id)
+        if !openOriginLines.insert(id).inserted { openOriginLines.remove(id) }
+        refreshOriginLines([id])
+    }
+
+    /// Message-row height measurements that missed `heightCache` (tests check reuse).
+    private(set) var messageHeightMeasureCount = 0
+
+    /// Redraws and re-measures only the origin-line rows whose open state changed.
+    private func refreshOriginLines(_ ids: Set<Int>) {
+        guard let table, !ids.isEmpty else { return }
+        heightCache = heightCache.filter { !ids.contains($0.key.rowID) }
+        let indexes = IndexSet(rows.indices.filter { ids.contains(rows[$0].id) })
+        guard !indexes.isEmpty else { return }
+        table.reloadData(forRowIndexes: indexes, columnIndexes: IndexSet(integer: 0))
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            table.noteHeightOfRows(withIndexesChanged: indexes)
+        }
+    }
+
     private func emitRows(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
         Self.rowsWithTelemetry(from: blocks, markers: telemetryMarkers,
                                totalBlockCount: allBlocksCache.count, activeRoles: activeRoleFilters,
                                index: invocationIndex, failedInvocationIDs: failedInvocationIDs,
                                openGroups: openGroups, openInvocations: openInvocations,
-                               rowSummary: { [unowned self] ref in self.rowSummary(for: ref) })
+                               rowSummary: { [unowned self] ref in self.rowSummary(for: ref) },
+                               showsContext: showsContext, source: source, messageGroups: messageGroups).map { row in
+            var row = row
+            if case .message(var block) = row.content, block.presentation == nil {
+                block.presentation = block.resolvedPresentation(source: source)
+                row.content = .message(block)
+            }
+            return row
+        }
     }
 
     /// Rows for a window (`TranscriptToolRows.emit`). Display-only rows (the
@@ -1269,11 +1350,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                   openInvocations: Set<Int> = [],
                                   rowSummary: (ToolInvocationRef) -> ToolRowSummary = { _ in
                                       ToolRowSummary(actions: [], chips: [])
-                                  }) -> [BlockRowModel] {
+                                  }, showsContext: Bool = false, source: SessionSource = .claude,
+                                  messageGroups: TranscriptMessageGroupIndex? = nil) -> [BlockRowModel] {
         TranscriptToolRows.emit(blocks: blocks, index: index, rowSummary: rowSummary,
                                 openGroups: openGroups, openInvocations: openInvocations,
                                 activeRoles: activeRoles, failedInvocationIDs: failedInvocationIDs,
-                                markers: markers, totalBlockCount: totalBlockCount)
+                                markers: markers, totalBlockCount: totalBlockCount,
+                                showsContext: showsContext, source: source, messageGroups: messageGroups)
     }
 
     // MARK: Apply
@@ -1301,7 +1384,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                ideBinaryOverridePath: String = "",
                activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases),
                sharedToolInvocationCache: NSCacheMemo<ToolInvocation>? = nil,
-               rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:]) -> Bool {
+               rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:],
+               showsContext: Bool = false,
+               messageGroups suppliedMessageGroups: TranscriptMessageGroupIndex? = nil) -> Bool {
         guard let table else { return false }
 
         if let shared = sharedToolInvocationCache, shared !== toolInvocationCache {
@@ -1353,6 +1438,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // A session switch invalidates the whole find state (matches index a
             // different block stream). Reset it fully — the SwiftUI layer will
             // re-drive find on the new session if a query is still active.
+            openOriginLines.removeAll()
+            autoOpenedOriginLines.removeAll()
             findQuery = ""
             findMatches = []
             findMatchesByRowID = [:]
@@ -1428,6 +1515,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
+        if let suppliedMessageGroups {
+            messageGroups = suppliedMessageGroups
+        } else if allBlocksCache != allBlocks || markersChanged || imagesChanged || sourceChanged || self.showsContext != showsContext {
+            messageGroups = .build(blocks: allBlocks[...], source: source, showsContext: showsContext, markers: telemetryMarkers, noncollapsibleBlockIndices: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
+        }
+        self.showsContext = showsContext
         allBlocksCache = allBlocks
         self.invocationIndex = invocationIndex
         self.failedInvocationIDs = failedInvocationIDs
@@ -1865,6 +1958,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             cell = Self.reusedCell(in: tableView, owner: self, id: ToolInvocationCellView.reuseID) {
                 ToolInvocationCellView()
             }
+        case .message where rows[row].isOriginLine:
+            cell = Self.reusedCell(in: tableView, owner: self, id: TranscriptOriginLineCell.reuseID) { TranscriptOriginLineCell() }
         case .message:
             cell = Self.reusedCell(in: tableView, owner: self, id: BlockCardCellView.reuseID) {
                 BlockCardCellView()
@@ -1894,6 +1989,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .toolInvocation(let invocation):
             guard let cell = view as? ToolInvocationCellView else { return }
             configureInvocation(cell, model: invocation, rowModel: rowModel, ordinal: ordinal)
+        case .message where rowModel.isOriginLine:
+            guard let cell = view as? TranscriptOriginLineCell else { return }
+            cell.configure(row: rowModel, renderedBody: renderedBody(for: rowModel), isOpen: openOriginLines.contains(rowModel.id)) { [weak self] in self?.toggleOriginLine(rowModel.id) }
+            cell.wireSelection(controller: self, ordinal: ordinal, coordinatorActive: crossBlockDragActive)
+            applyCellSelection(to: cell, ordinal: ordinal)
+            applyRenderableFindHighlights(on: cell, rowModel: rowModel)
         case .message:
             guard let cell = view as? BlockCardCellView else { return }
             configure(cell: cell, forRowModel: rowModel, ordinal: ordinal)
@@ -1962,7 +2063,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Paint in-body find highlights for a renderable row (message / single
     /// expanded tool card). Non-renderable rows are skipped — their count shows
     /// on the pill. Safe to call from `configure` (never reconfigures).
-    private func applyRenderableFindHighlights(on cell: BlockCardCellView, rowModel: BlockRowModel) {
+    private func applyRenderableFindHighlights(on cell: TranscriptRowCell, rowModel: BlockRowModel) {
         let shape = findRowShape(for: rowModel)
         if case .nonRenderable = shape { cell.clearFindHighlights(); return }
         let rowMatches = findMatchesByRowID[rowModel.id] ?? []
@@ -1980,7 +2081,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
         // Always apply (strips first) — empty ranges cleanly clear a row whose
         // highlights moved away under a re-navigation.
-        cell.applyFindHighlights(all: ranges, current: currentRange)
+        cell.bodyText.applyFindHighlights(all: ranges, current: currentRange)
     }
 
     /// The card's measured height plus the half gaps it reserves above and
@@ -1996,6 +2097,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// neighbours inside a group (`ToolCardEdges`); every other row keeps half
     /// the card gap on each side.
     static func rowGaps(for row: BlockRowModel) -> (top: CGFloat, bottom: CGFloat) {
+        if row.isOriginLine { return (0, 0) }
         let half = CardMetrics.rowGap / 2
         let edges: ToolCardEdges
         switch row.content {
@@ -2065,6 +2167,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// `ToolRowMetrics.headerCardHeight`; an invocation is 24 pt per action
     /// line plus, when open and rendered, its L2 body height.
     private func measuredHeight(for row: BlockRowModel, width: CGFloat) -> CGFloat {
+        if row.isOriginLine {
+            guard openOriginLines.contains(row.id), let body = renderedBody(for: row) else { return 22 }
+            return markdownCardHeight(body: body, width: width)
+        }
         if row.isMeta {
             if row.primaryBlock.eventID.hasPrefix("telemetry-change-") {
                 return Self.telemetryMarkerHeight(text: row.bodyText, width: width)
@@ -2086,6 +2192,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                             fontBucket: fontBucket(fontSize),
                             imageCount: imageCount)
         if let cached = heightCache[key] { return cached }
+        messageHeightMeasureCount &+= 1
 
         // Reserved space for the inline-image grid below the body (0 for every
         // non-image / non-user row — identical to the pre-image layout there).
@@ -2159,25 +2266,23 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     // MARK: Review cards (Task C2 parity)
 
-    /// Pure, deterministic detection of a review card's cleaned summary text.
-    /// Reuses the two Codex-only Terminal-mode detectors' EXACT logic:
-    /// - `.user` block: `TerminalBuilder.reviewDisplayTextIfNeeded` (private to
-    ///   that file) — a `<user_action>`/`<action>review</action>` marker with a
-    ///   `<results>` payload, replicated verbatim here since that function isn't
-    ///   accessible across files.
-    /// - `.assistant` block: `InternalPayloadFormatter.parseReviewCard(...)`,
-    ///   called directly (that one IS `static`, not private) — its
-    ///   `.summaryText` is the Terminal-mode review card's rendered text.
-    /// Returns `nil` for a non-review block, when `enabled` is false, or for a
-    /// non-Codex source (both detectors are Codex-only), so a normal user/
-    /// assistant row is completely unaffected and still markdown-renders.
+    /// Legacy review chrome is eligible only for ordinary typed/user and agent messages.
+    /// A typed Session message is detected from its presentation body so injected history
+    /// cannot replace the proven human input. Ordinary assistant review JSON deliberately
+    /// keeps its specialized legacy summary instead of the generic JSON field formatter.
+    /// Callers without a presentation retain the historical raw detector; Terminal is unchanged.
     static func reviewSummary(for block: SessionTranscriptBuilder.LogicalBlock,
                               source: SessionSource,
                               enabled: Bool) -> String? {
         guard enabled, source == .codex else { return nil }
+        switch block.presentation?.origin ?? block.messageOrigin {
+        case nil: break
+        case .typed where block.kind == .user: break
+        default: return nil
+        }
         switch block.kind {
         case .user:
-            let text = block.text
+            let text = block.presentation?.body ?? block.messageDisplayText ?? block.text
             guard text.contains("<user_action>"),
                   text.contains("<action>review</action>") else { return nil }
             guard let start = text.range(of: "<results>"),
@@ -2307,12 +2412,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let block = row.primaryBlock
         let isDark = effectiveAppearanceIsDark
         let key = RenderKey(eventID: block.eventID,
-                            textHash: block.text.hashValue,
+                            textHash: row.bodyText.hashValue,
                             fontBucket: fontBucket(fontSize),
                             isDark: isDark)
         if let cached = renderedBodyCache.get(key) { return cached }
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let body = MarkdownBodyRenderer.render(block.text, baseFont: font, isDark: isDark)
+        let body = MarkdownBodyRenderer.render(row.bodyText, baseFont: font, isDark: isDark)
         renderedBodyCache.set(key, body)
         return body
     }
@@ -3477,7 +3582,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // first-prompt retry can't fire after this newer intent settles.
         pendingFirstPromptJump = false
 
-        if isSnapshotComputing || userBlockIndices.isEmpty {
+        if isSnapshotComputing {
             pendingFirstPromptJump = true
             return
         }
@@ -3490,7 +3595,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func retryPendingFirstPromptJump(userBlockIndices: [Int],
                                              preambleUserBlockIndexes: Set<Int>,
                                              isSnapshotComputing: Bool) {
-        guard !isSnapshotComputing, !userBlockIndices.isEmpty else { return }
+        guard !isSnapshotComputing else { return }
         pendingFirstPromptJump = false
         guard let target = Self.firstPromptBlockIndex(userBlockIndices: userBlockIndices,
                                                        preambleUserBlockIndexes: preambleUserBlockIndexes) else { return }
@@ -3620,6 +3725,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard token != lastConsumedRoleJumpToken else { return }
         lastConsumedRoleJumpToken = token
         guard let role, !allBlocksCache.isEmpty else { return }
+        if (role == .user || role == .assistant), !activeRoleFilters.isEmpty, !activeRoleFilters.contains(role) { return }
 
         // Tools and Errors step per invocation (Task 16, spec §6.8); the other roles per block.
         let indices: [Int]
@@ -3628,7 +3734,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .errors: indices = errorJumpIDs
         case .user, .assistant:
             indices = allBlocksCache.enumerated().compactMap { offset, block in
-                TranscriptRoleFilter.governing(block.kind) == role ? offset : nil
+                TranscriptRoleFilter.governing(block, source: source) == role && messageGroups.groupIDByBlock[offset] == offset ? offset : nil
             }
         }
         var currentTop = firstVisibleBlockIndex()
@@ -3871,17 +3977,27 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// an invocation's block (call, output or paired `.error`) follows the invocation
     /// row's rule (`TranscriptToolRows.showsInvocation`), as `emit` does.
     private func matchesUnderActiveRoleFilter(_ matches: [TranscriptDerivedState.BlockMatch]) -> [TranscriptDerivedState.BlockMatch] {
-        if activeRoleFilters.isEmpty || activeRoleFilters.count == TranscriptRoleFilter.allCases.count {
-            return matches
-        }
-        return matches.filter { m in
-            guard m.globalBlockIndex >= 0, m.globalBlockIndex < allBlocksCache.count else { return false }
+        var seen: Set<String> = []
+        let filtered: [TranscriptDerivedState.BlockMatch] = matches.compactMap { original in
+            var m = original
+            guard allBlocksCache.indices.contains(m.globalBlockIndex) else { return nil }
             if let id = toolInvocationID(forBlock: m.globalBlockIndex) {
-                return TranscriptToolRows.showsInvocation(id, activeRoles: activeRoleFilters,
-                                                          failedInvocationIDs: failedInvocationIDs)
+                return TranscriptToolRows.showsInvocation(id, activeRoles: activeRoleFilters, failedInvocationIDs: failedInvocationIDs) ? m : nil
             }
-            guard let role = TranscriptRoleFilter.governing(allBlocksCache[m.globalBlockIndex].kind) else { return true }
-            return activeRoleFilters.contains(role)
+            let block = allBlocksCache[m.globalBlockIndex]
+            let presentation = block.resolvedPresentation(source: source)
+            if presentation?.origin == .placeholder || (!showsContext && presentation?.origin?.isHiddenContext == true) { return nil }
+            let owner = messageGroups.groupIDByBlock[m.globalBlockIndex] ?? m.globalBlockIndex
+            if let role = TranscriptRoleFilter.governing(block, source: source), !activeRoleFilters.isEmpty, !activeRoleFilters.contains(role) { return nil }
+            m.globalBlockIndex = owner
+            let key = "\(owner):\(m.rangeInBlockText.location):\(m.rangeInBlockText.length)"
+            guard seen.insert(key).inserted else { return nil }
+            return m
+        }
+        return filtered.enumerated().map { index, match in
+            var result = match
+            result.ordinal = index
+            return result
         }
     }
 
@@ -3899,8 +4015,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         var blockToRowID: [Int: Int] = [:]
         for row in rows {
             switch row.content {
-            case .message(let block):
-                blockToRowID[block.globalBlockIndex] = row.id
+            case .message:
+                for member in row.representedBlockIndices { blockToRowID[member] = row.id }
             case .toolGroupHeader(let header):
                 for id in header.invocationIDs {
                     guard let ref = toolInvocationRef(id: id) else { continue }
@@ -3950,6 +4066,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let match = findMatches[findCurrentOrdinal]
         let target = match.globalBlockIndex
         widen(toIncludeBlock: target)
+        if let ordinal = rowIndex(forBlock: target), rows[ordinal].isOriginLine, openOriginLines.insert(rows[ordinal].id).inserted {
+            autoOpenedOriginLines.insert(rows[ordinal].id)
+            refreshOriginLines([rows[ordinal].id])
+        }
         autoExpandCollapsedMatch(block: target)
         scrollToBlock(target) // widens (no-op here) if off-window, then scrolls + flashes
         lastJumpedFindMatch = match
@@ -4128,6 +4248,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// open). Called from `applyFind`'s empty-query clear branch; always
     /// empties both sets, so a stale id can never leak into the next find.
     private func recollapseAutoExpandedFindRows() {
+        if !autoOpenedOriginLines.isEmpty {
+            let closed = autoOpenedOriginLines
+            openOriginLines.subtract(closed)
+            autoOpenedOriginLines.removeAll()
+            refreshOriginLines(closed)
+        }
+
         pendingFindReveal = nil
         lastJumpedFindMatch = nil
         guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty
@@ -4184,15 +4311,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             }
             return
         }
-        guard !findQuery.isEmpty, let card = cell as? BlockCardCellView else {
+        guard !findQuery.isEmpty else {
             cell.clearFindHighlights()
             return
         }
         if case .nonRenderable = findRowShape(for: rowModel) {
-            card.clearFindHighlights()
+            cell.clearFindHighlights()
             return
         }
-        applyRenderableFindHighlights(on: card, rowModel: rowModel)
+        applyRenderableFindHighlights(on: cell, rowModel: rowModel)
     }
 
     /// Classify the row's rendered shape for find-highlight mapping. Message
@@ -4201,7 +4328,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// L2 bodies paint decoded matches through the presentation's find map
     /// (`paintToolBodyFind`, Task 15).
     private func findRowShape(for row: BlockRowModel) -> TranscriptFindNavigator.RowShape {
-        if row.isMeta || row.isToolRow { return .nonRenderable }
+        if row.isMeta || row.isToolRow || (row.isOriginLine && !openOriginLines.contains(row.id)) { return .nonRenderable }
         // Review cards (Task C2): the displayed summary is DERIVED text (≠
         // block.text) with no source map back to the raw JSON/tag payload — a
         // match range in block.text (found by the whole-session scan, which
@@ -4239,7 +4366,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     func rowIndex(forBlock globalBlockIndex: Int) -> Int? {
         guard let invocationID = toolInvocationID(forBlock: globalBlockIndex) else {
             return rows.firstIndex { row in
-                if case .message = row.content { return row.id == globalBlockIndex }
+                if case .message = row.content { return row.representedBlockIndices.contains(globalBlockIndex) }
                 return false
             }
         }
@@ -4314,7 +4441,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// `hasCopyableSelection()` (inlines this same test over just the selection
     /// span, without building the set — see that function's perf note).
     private func isExcludedFromSelection(_ row: BlockRowModel) -> Bool {
-        row.isMeta
+        row.isMeta || (row.isOriginLine && !openOriginLines.contains(row.id))
     }
 
     // MARK: Tool rows in a cross-block selection
@@ -4834,6 +4961,7 @@ extension TranscriptRowCell {
 final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
     static let reuseID = NSUserInterfaceItemIdentifier("BlockCardCellView")
 
+    var displayedHeader: BlockCardHeader? { headerHost?.rootView }
     private let cardBackground = DynamicFillView()
     private let accentBar = DynamicFillView()
     let bodyText = SelectableBlockTextView()
@@ -5011,7 +5139,7 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
         // whenever `reviewSummary(for:)` detected a review row — overrides the
         // normal kind-based accent (Terminal mode applies the same override via
         // SemanticKind.reviewSummary).
-        let accent = accentOverride ?? Self.accentColor(kind: block.kind, source: source)
+        let accent = accentOverride ?? Self.accentColor(block: block, source: source)
 
         cardBackground.isHidden = false
         metaSeparator.isHidden = true
@@ -5059,7 +5187,8 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
 
         let header = BlockCardHeader(kind: block.kind, timestamp: block.timestamp,
                                      accent: Color(nsColor: accent),
-                                     turnChipText: turnChipText)
+                                     turnChipText: block.kind == .user ? "" : turnChipText,
+                                     origin: block.presentation?.origin, repeatCount: row.repeatCount)
         headerHost?.rootView = header
 
         // Inline images below the body (user rows only; the controller passes a
@@ -5187,6 +5316,15 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
         // Intentionally NOT resetting bodyText.isHidden / bodyTopConstraint /
         // fill colors here: `configure` reassigns all of them unconditionally
         // on every path before the cell is displayed again.
+    }
+
+    static func accentColor(block: SessionTranscriptBuilder.LogicalBlock, source: SessionSource) -> NSColor {
+        switch block.presentation?.origin ?? block.messageOrigin {
+        case .typed: return TranscriptColorSystem.semanticAccent(.user)
+        case .approvalVerdict: return TranscriptColorSystem.semanticAccent(.assistant)
+        case .some: return .secondaryLabelColor
+        case .none: return accentColor(kind: block.kind, source: source)
+        }
     }
 
     static func accentColor(kind: SessionTranscriptBuilder.LogicalBlock.Kind,
@@ -5574,12 +5712,15 @@ struct BlockCardHeader: View {
     /// (the default, and what the controller passes for a non-anchor row or
     /// a nil-duration turn) renders nothing.
     var turnChipText: String = ""
+    var origin: MessageOrigin? = nil
+    var repeatCount: Int = 1
 
     var body: some View {
         HStack(spacing: 6) {
             Text(roleLabel)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(accent)
+            if repeatCount > 1 { Text("×\(repeatCount)").font(.system(size: 10)).foregroundStyle(.secondary) }
             if let timestamp {
                 Text(timestamp, format: .dateTime.hour().minute().second())
                     .font(.system(size: 10))
@@ -5600,14 +5741,22 @@ struct BlockCardHeader: View {
         .padding(.top, 6)
     }
 
-    private var roleLabel: String {
+    var roleLabel: String {
+        switch origin {
+        case .peer(let from): return String(localized: "Message from \(MessageOriginText.peerDisplayName(from))")
+        case .parentTask: return String(localized: "Task from parent session")
+        case .approvalRequest: return String(localized: "Approval request")
+        case .approvalVerdict: return String(localized: "Guardian verdict")
+        case .command: return String(localized: "Command")
+        default: break
+        }
         switch kind {
-        case .user: return "You"
-        case .assistant: return "Agent"
-        case .toolCall: return "Tool"
-        case .toolOut: return "Output"
-        case .error: return "Error"
-        case .meta: return "Meta"
+        case .user: return String(localized: "You")
+        case .assistant: return String(localized: "Agent")
+        case .toolCall: return String(localized: "Tool")
+        case .toolOut: return String(localized: "Output")
+        case .error: return String(localized: "Error")
+        case .meta: return String(localized: "Meta")
         }
     }
 }

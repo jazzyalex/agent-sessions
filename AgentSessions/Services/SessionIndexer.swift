@@ -3086,6 +3086,9 @@ final class SessionIndexer: ObservableObject {
         var messageID: String? = nil
         var parentID: String? = nil
         var isDelta: Bool = false
+        var messageOrigin: MessageOrigin?
+        var messageDisplayText: String?
+        var messageHasEncryptedContent: Bool?
 
         if let data = line.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -3145,6 +3148,56 @@ final class SessionIndexer: ObservableObject {
                     } else if let s = el as? String { pieces.append(s) }
                 }
                 if !pieces.isEmpty { text = pieces.joined() }
+            }
+
+            // Provenance is presentation data; leave the original text and role/type untouched.
+            if obj["type"] as? String == "response_item" {
+                if type == "message", role == "user" {
+                    let metadata = workingObj["internal_chat_message_metadata_passthrough"]
+                        ?? obj["internal_chat_message_metadata_passthrough"]
+                    if let metadata {
+                        let rawKinds = (metadata as? [String: Any])?["content_item_kinds"] as? [String]
+                        let kinds = rawKinds?.map { $0.components(separatedBy: " | ")[0] }
+                        if let kinds, !kinds.isEmpty, kinds.allSatisfy({ !$0.isEmpty }) {
+                            if kinds.allSatisfy({ $0 == "user.text" }) {
+                                messageOrigin = .typed
+                            } else if !kinds.contains("user.text") {
+                                var unique: [String] = []
+                                for kind in kinds where !unique.contains(kind) { unique.append(kind) }
+                                messageOrigin = .context(kinds: unique)
+                            } else if let items = workingObj["content"] as? [Any], items.count == kinds.count {
+                                messageOrigin = .typed
+                                messageDisplayText = zip(items, kinds).compactMap { item, kind -> String? in
+                                    guard kind == "user.text", let part = item as? [String: Any],
+                                          let partType = part["type"] as? String,
+                                          partType == "input_text" || partType == "text" else { return nil }
+                                    return part["text"] as? String
+                                }.joined()
+                            } else {
+                                messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
+                            }
+                        } else {
+                            messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
+                        }
+                    } else if text?.contains("<environment_context>") == true {
+                        messageOrigin = .context(kinds: ["environment_context"])
+                    }
+                } else if type == "agent_message" {
+                    let author = workingObj["author"] as? String ?? "another session"
+                    let from = author == "/root" ? "root" : (author.hasPrefix("/root/") ? String(author.dropFirst(6)) : author)
+                    messageOrigin = .peer(from: from)
+                    let items = workingObj["content"] as? [[String: Any]] ?? []
+                    messageHasEncryptedContent = items.contains { $0["type"] as? String == "encrypted_content" }
+                    var body = items.compactMap { part -> String? in
+                        guard part["type"] as? String == "input_text" else { return nil }
+                        return part["text"] as? String
+                    }.joined()
+                    if body.hasPrefix("Message Type:"), let payload = body.range(of: "\nPayload:") {
+                        body = String(body[payload.upperBound...])
+                        if body.hasPrefix("\n") { body.removeFirst() }
+                    }
+                    messageDisplayText = body
+                }
             }
 
             // Heuristic: environment_context appears as an XML-ish block often logged under 'user'.
@@ -3237,7 +3290,7 @@ final class SessionIndexer: ObservableObject {
         }
 
         let kind = SessionEventKind.from(role: role, type: type)
-        let event = SessionEvent(
+        var event = SessionEvent(
             id: eventID,
             timestamp: timestamp,
             kind: kind,
@@ -3254,6 +3307,9 @@ final class SessionIndexer: ObservableObject {
             isDelta: isDelta,
             rawJSON: line
         )
+        event.messageOrigin = messageOrigin
+        event.messageDisplayText = messageDisplayText
+        event.messageHasEncryptedContent = messageHasEncryptedContent
         return (event, model)
     }
     

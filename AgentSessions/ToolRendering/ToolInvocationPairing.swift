@@ -144,7 +144,8 @@ struct ToolInvocationIndex: Sendable {
             switch kind {
             case .user:
                 // An interrupt marker closes the turn it ends.
-                if isInterruptNotice(blocks[position].text) { noticeByTurn[turn] = position }
+                if blocks[position].isInterruptControlMessage { noticeByTurn[turn] = position }
+                guard blocks[position].startsTurn || blocks[position].isInterruptControlMessage else { continue }
                 earlierCalls.append(contentsOf: turnCalls[turnHead...])
                 turnCalls.removeAll(keepingCapacity: true)
                 turnHead = 0
@@ -303,13 +304,13 @@ struct ToolInvocationIndex: Sendable {
     /// A Codex turn_aborted notice: the `.meta` block `SessionTranscriptBuilder` splits out of a
     /// `<turn_aborted>` user message (header "Turn Aborted / Tag: turn_aborted"); the same marker
     /// `SessionTerminalView` uses for its system-notice blocks.
-    private static func isTurnAbortedNotice(_ text: String) -> Bool {
+    static func isTurnAbortedNotice(_ text: String) -> Bool {
         text.range(of: "tag: turn_aborted", options: [.caseInsensitive]) != nil
     }
 
     /// A user-interrupt marker such as Claude's "[Request interrupted by user for tool use]"
     /// (`TerminalBuilder.isUserInterruptMarker`). Markers are short, so long user text skips the check.
-    private static func isInterruptNotice(_ text: String) -> Bool {
+    static func isInterruptNotice(_ text: String) -> Bool {
         ToolStatusProbe.cheapLength(text) <= 128 && TerminalBuilder.isUserInterruptMarker(text)
     }
 }

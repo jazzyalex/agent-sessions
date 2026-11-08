@@ -511,6 +511,28 @@ final class ClaudeSessionParser {
             role = baseText?.isEmpty == false ? "assistant" : "meta"
         }
 
+        let recordMessageText = (obj["message"] as? [String: Any]).flatMap(extractContent(from:)) ?? baseText
+        func messageOrigin(for text: String?) -> MessageOrigin? {
+            guard obj["type"] as? String == "user", role == "user" else { return nil }
+            if obj["isCompactSummary"] as? Bool == true { return .compaction }
+            let origin = (obj["origin"] as? [String: Any])?["kind"] as? String
+            if origin == "task-notification" { return .notification(kind: "task") }
+            if origin == "peer" { return .peer(from: "another session") }
+            if origin == "coordinator" { return .peer(from: "coordinator") }
+            if obj["isMeta"] as? Bool == true {
+                let prefix = "Base directory for this skill:"
+                if let text, text.hasPrefix(prefix) {
+                    let firstLine = text.components(separatedBy: "\n")[0]
+                    let path = String(firstLine.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                    return .skill(name: URL(fileURLWithPath: path).lastPathComponent)
+                }
+                return .context(kinds: ["claude.meta"])
+            }
+            if origin == "human" { return .typed }
+            if let origin { return .context(kinds: ["claude.origin.\(origin)"]) }
+            return nil
+        }
+
         // If we have message.content blocks, split them into events in-order.
         if let message = obj["message"] as? [String: Any],
            let contentArray = message["content"] as? [[String: Any]] {
@@ -563,6 +585,7 @@ final class ClaudeSessionParser {
                         rawJSON: rawJSON
                     )
                 )
+                out[out.count - 1].messageOrigin = messageOrigin(for: recordMessageText ?? joined)
             }
 
             for block in contentArray {
@@ -714,8 +737,7 @@ final class ClaudeSessionParser {
         let et = eventType?.lowercased()
         let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
         let baseKind = SessionEventKind.from(role: role, type: eventType)
-        return [
-            SessionEvent(
+        var event = SessionEvent(
                 id: baseEventID,
                 timestamp: timestamp,
                 kind: isMetaEvent ? .meta : baseKind,
@@ -729,7 +751,8 @@ final class ClaudeSessionParser {
                 isDelta: false,
                 rawJSON: rawJSON
             )
-        ]
+        event.messageOrigin = messageOrigin(for: baseText)
+        return [event]
     }
 
     private static func nonEmptyString(_ value: Any?) -> String? {

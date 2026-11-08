@@ -29,6 +29,9 @@ public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     var toolSidecar: ToolSidecar? = nil
     /// Set when the parser classified the result as a runtime error or a user rejection.
     var toolDisposition: ToolDisposition? = nil
+    var messageOrigin: MessageOrigin? = nil
+    var messageDisplayText: String? = nil
+    var messageHasEncryptedContent: Bool? = nil
     // Delta/stream grouping
     public let messageID: String?
     public let parentID: String?

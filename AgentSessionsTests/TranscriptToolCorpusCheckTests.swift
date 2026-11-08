@@ -1091,3 +1091,761 @@ final class TranscriptToolCorpusCheckTests: XCTestCase {
         XCTAssertNil(Self.ciphertextLength(in: "xgAAAAA" + String(repeating: "b", count: 40)))
     }
 }
+
+// MARK: - Message readability corpus gate
+
+extension TranscriptToolCorpusCheckTests {
+    struct MessageFinding: Codable, Equatable {
+        var source: String
+        var session: String
+        var block: Int
+        var invariant: String
+    }
+    struct MessageTimeout: Codable {
+        var source: String
+        var session: String
+        var block = -1
+        var invariant: String
+        var phase_seconds: [String: Double]
+    }
+    struct MessageReport: Codable {
+        var complete = false
+        var sources: [String: SourceCounts] = [:]
+        var coverage_failures: [String] = []
+        var violations: [MessageFinding] = []
+        var violation_totals: [String: Int] = [:]
+        var provenance: [String: [String: Int]] = [:]
+        var unknown_provenance: [String: [String: Int]] = [:]
+        var timeouts: [MessageTimeout] = []
+        var rows = 0
+    }
+
+    // Independent oracle: original parser facts and source-specific harness signatures, never
+    // a second invocation of the presentation classifier. Explicit typed literals win.
+    private static func nonhuman(_ block: Block, source: SessionSource, childFirst: Bool) -> Bool {
+        if block.rawJSON.utf8.prefix(65_537).count <= 65_536, let data = block.rawJSON.data(using: .utf8),
+           let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if source == .claude, raw["type"] as? String == "user" {
+                if raw["isCompactSummary"] as? Bool == true || raw["isMeta"] as? Bool == true { return true }
+                if let kind = (raw["origin"] as? [String: Any])?["kind"] as? String, kind != "human" { return true }
+            }
+            if source == .codex {
+                let payload = raw["payload"] as? [String: Any] ?? raw
+                if payload["type"] as? String == "agent_message" { return true }
+                let kinds = originalKinds(block.rawJSON, source: source).map { $0.components(separatedBy: " | ")[0] }
+                if !kinds.isEmpty && !kinds.contains("user.text") { return true }
+                if kinds.contains("user.text"), kinds.contains(where: { $0 != "user.text" }),
+                   (payload["content"] as? [Any])?.count != kinds.count { return true }
+            }
+        }
+        if let origin = block.messageOrigin { return origin != .typed || childFirst }
+        if childFirst { return true }
+        let text = String(decoding: block.text.utf8.prefix(65_536), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if ToolInvocationIndex.isInterruptNotice(text) { return true }
+        let prefixes: [String]
+        switch source {
+        case .codex: prefixes = ["<environment_context>", "<user_instructions>", "# AGENTS.md instructions for", "<INSTRUCTIONS>", "Message Type:"]
+        case .claude: prefixes = ["<task-notification>", "[SYSTEM NOTIFICATION - NOT USER INPUT]", "<side-sessions-event>", "Another Claude session sent a message:", "The coordinator sent a message while you were working:", "<command-name>", "<local-command-caveat>", "Caveat: The messages below were generated", "<local-command-stdout>", "<bash-input>", "<bash-stdout>", "<bash-stderr>"]
+        case .hermes: prefixes = ["[SYSTEM: You are running as a scheduled cron job", "[IMPORTANT: You are running as a scheduled cron job", "You just executed tool calls but returned an empty response"]
+        case .openclaw: prefixes = ["[OpenClaw heartbeat poll]", "Read HEARTBEAT.md if exists", "[cron:", "Conversation info (untrusted metadata):"]
+        default: prefixes = []
+        }
+        if prefixes.contains(where: text.hasPrefix) { return true }
+        // A leading reminder can precede real human text. Only a complete run of
+        // reminder elements, with no outside prose, proves a harness-only record.
+        guard block.text.utf8.prefix(65_537).count <= 65_536 else { return false }
+        var remainder = text
+        var sawReminder = false
+        while remainder.hasPrefix("<system-reminder>"), let close = remainder.range(of: "</system-reminder>") {
+            sawReminder = true
+            remainder = String(remainder[close.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return sawReminder && remainder.isEmpty
+    }
+
+    private static func messageFindings(blocks: [Block], rows: [BlockRowModel], source: SessionSource,
+                                        child: Bool = false, images: Set<Int> = [],
+                                        markers: [Int: [String]] = [:]) -> [(Int, String)] {
+        var result: [(Int, String)] = []
+        var owners: [Int: Int] = [:]
+        var prior: (Int, MessagePresentation)?
+        let firstUser = blocks.first(where: { $0.kind == .user })?.globalBlockIndex
+        for row in rows {
+            guard case .message(let block) = row.content else { prior = nil; continue }
+            guard let p = block.presentation else { prior = nil; continue }
+            let id = block.globalBlockIndex
+            let members = row.representedBlockIndices
+            for member in members {
+                if owners.updateValue(id, forKey: member) != nil { result.append((id, "M5")) }
+                guard blocks.indices.contains(member) else { result.append((id, "M5")); continue }
+                let original = blocks[member]
+                if p.origin == .typed && nonhuman(original, source: source, childFirst: child && member == firstUser) { result.append((id, "M1")) }
+                if let other = original.presentation, (other.origin != p.origin || other.body != p.body) { result.append((id, "M5")) }
+            }
+            let body = p.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            func startsTag(_ tag: String) -> Bool {
+                guard body.hasPrefix("<" + tag) else { return false }
+                let boundary = body.dropFirst(tag.count + 1).first
+                return boundary == ">" || boundary == " " || boundary == "\t" || boundary == "\n" || boundary == "\r"
+            }
+            // Transport recognition is source-specific. A custom tag sharing a prefix is
+            // not a transport envelope; original explicit human provenance is authoritative.
+            var tags = ["send_user_message_question_reply"]
+            var prefixes: [String] = []
+            switch source {
+            case .cline: tags += ["user_input"]
+            case .grok: tags += ["user_query"]
+            case .cursor: tags += ["timestamp"]
+            case .claude:
+                tags += ["command-name", "local-command-stdout", "bash-input", "bash-stdout", "bash-stderr", "system-reminder"]
+                prefixes = ["Another Claude session sent a message:", "The coordinator sent a message while you were working:"]
+            case .kimi: tags += ["local-command-stdout", "bash-input", "bash-stdout", "bash-stderr"]
+            default: break
+            }
+            if case .peer = p.origin { prefixes.append("Message Type:") }
+            if block.messageOrigin != .typed, tags.contains(where: startsTag) || prefixes.contains(where: body.hasPrefix) { result.append((id, "M2")) }
+            if case .peer = p.origin, body.contains("gAAAAA") { result.append((id, "M2")) }
+            if block.kind == .assistant {
+                if body.utf8.prefix(65_537).count <= 65_536 {
+                    if let data = body.data(using: .utf8), (try? JSONSerialization.jsonObject(with: data)) is [String: Any] { result.append((id, "M3")) }
+                } else {
+                    let rawPrefix = String(decoding: (block.messageDisplayText ?? block.text).utf8.prefix(65_536), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawIsOversized = (block.messageDisplayText ?? block.text).utf8.prefix(65_537).count > 65_536
+                    if body.hasPrefix("{") || (rawIsOversized && rawPrefix.hasPrefix("{")) {
+                        let fallback = MessageOriginText.largeStructured + "\n\n```json\n"
+                        if !body.hasPrefix(fallback) || !body.hasSuffix("\n```") { result.append((id, "M3")) }
+                    }
+                }
+            }
+            switch p.rowStyle {
+            case .card: if body.isEmpty && !images.contains(id) { result.append((id, "M4")) }
+            case .line: if p.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false { result.append((id, "M4")) }
+            case .none: result.append((id, "M4"))
+            }
+            if let low = members.min(), let high = members.max(), low < high {
+                for middle in low...high where blocks.indices.contains(middle) {
+                    if blocks[middle].kind.isTool || blocks[middle].kind == .error || images.contains(middle) || (middle > low && markers[middle]?.isEmpty == false) { result.append((id, "M5")); break }
+                }
+            }
+            if let (previousID, previous) = prior, previous.origin == p.origin, previous.body == p.body,
+               !images.contains(previousID), !images.contains(id), markers[id]?.isEmpty != false {
+                let between = (previousID + 1)..<max(previousID + 1, id)
+                let barrier = between.contains { blocks.indices.contains($0) && (blocks[$0].kind.isTool || blocks[$0].kind == .error || images.contains($0) || markers[$0]?.isEmpty == false) }
+                if !barrier { result.append((id, "M5")) }
+            }
+            prior = (id, p)
+        }
+        for block in blocks where !block.kind.isTool && block.kind != .error {
+            guard let p = block.presentation, p.origin != .placeholder, p.origin?.isHiddenContext != true else { continue }
+            if owners[block.globalBlockIndex] == nil { result.append((block.globalBlockIndex, "M5")) }
+        }
+        return result
+    }
+
+    private static func originalKinds(_ raw: String, source: SessionSource) -> [String] {
+        guard let data = raw.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        if source == .claude { return ((object["origin"] as? [String: Any])?["kind"] as? String).map { [$0] } ?? [] }
+        guard source == .codex else { return [] }
+        let payload = object["payload"] as? [String: Any] ?? object
+        let meta = (payload["internal_chat_message_metadata_passthrough"] ?? object["internal_chat_message_metadata_passthrough"]) as? [String: Any]
+        return meta?["content_item_kinds"] as? [String] ?? []
+    }
+    private static func namedKind(_ raw: String, source: SessionSource) -> Bool {
+        if source == .claude { return ["human", "peer", "task-notification"].contains(raw) }
+        return raw.components(separatedBy: " | ")[0] == "user.text"
+    }
+    private static func messageCoverage(_ sources: [String: SourceCounts]) -> [String] {
+        var failures = coverageFailures(sources)
+        for source in SessionSource.allCases where sources[source.rawValue] == nil { failures.append(source.rawValue + ": missing source") }
+        if sources.values.reduce(0, { $0 + $1.sessions_checked }) == 0 { failures.append("zero checked sessions") }
+        return failures
+    }
+
+    private struct MessageImageAbsenceCache {
+        private var stamps: [String: String] = [:]
+        func contains(path: String, stamp: String?) -> Bool { stamp != nil && stamps[path] == stamp }
+        mutating func record(path: String, before: String?, after: String?, foundImage: Bool, cancelled: Bool, succeeded: Bool) {
+            guard let before, before == after, !foundImage, !cancelled, succeeded else { stamps[path] = nil; return }
+            stamps[path] = before
+        }
+        static func stamp(_ url: URL) -> String? {
+            guard let a = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let size = a[.size] as? NSNumber, let date = a[.modificationDate] as? Date,
+                  let inode = a[.systemFileNumber] as? NSNumber else { return nil }
+            return "\(inode)|\(size)|\(date.timeIntervalSince1970)"
+        }
+    }
+
+    func testMessageImageAbsenceCacheRequiresCompletedUnchangedNegativeScan() {
+        var cache = MessageImageAbsenceCache()
+        cache.record(path: "db", before: "a", after: "a", foundImage: false, cancelled: false, succeeded: true)
+        XCTAssertTrue(cache.contains(path: "db", stamp: "a"))
+        XCTAssertFalse(cache.contains(path: "db", stamp: "b"))
+        XCTAssertFalse(cache.contains(path: "other", stamp: "a"))
+        for (after, positive, cancelled, succeeded) in [("b", false, false, true), ("a", true, false, true), ("a", false, true, true), ("a", false, false, false)] {
+            cache.record(path: "db", before: "a", after: after, foundImage: positive, cancelled: cancelled, succeeded: succeeded)
+            XCTAssertFalse(cache.contains(path: "db", stamp: "a"))
+        }
+        cache.record(path: "db", before: nil, after: nil, foundImage: false, cancelled: false, succeeded: true)
+        XCTAssertFalse(cache.contains(path: "db", stamp: nil))
+    }
+
+    func testMessageCorpusReadability() throws {
+        guard ProcessInfo.processInfo.environment["AS_TOOL_CORPUS_CHECK"] == "1" else { throw XCTSkip("Set AS_TOOL_CORPUS_CHECK=1 for message corpus") }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let output = root.appendingPathComponent("scripts/probe_scan_output/message_corpus")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        var report = MessageReport()
+        func save() throws {
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(report).write(to: output.appendingPathComponent("report.json"), options: .atomic)
+        }
+        let watchdog = Process(), completion = Pipe()
+        watchdog.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        watchdog.arguments = [root.appendingPathComponent("scripts/replay_watchdog.py").path, "--seconds", String(Self.watchdogSeconds)]
+        watchdog.standardInput = completion; watchdog.standardOutput = FileHandle.nullDevice; watchdog.standardError = FileHandle.nullDevice
+        try watchdog.run()
+        defer { try? completion.fileHandleForWriting.close(); watchdog.waitUntilExit() }
+        fflush(nil)
+        let savedOut = dup(STDOUT_FILENO), savedErr = dup(STDERR_FILENO), sink = open("/dev/null", O_WRONLY)
+        guard savedOut >= 0, savedErr >= 0, sink >= 0 else { throw XCTSkip("Cannot isolate corpus output") }
+        dup2(sink, STDOUT_FILENO); dup2(sink, STDERR_FILENO)
+        defer { fflush(nil); dup2(savedOut, STDOUT_FILENO); dup2(savedErr, STDERR_FILENO); close(savedOut); close(savedErr); close(sink) }
+        try save()
+        var imageAbsence = MessageImageAbsenceCache()
+        let start = Date(), large: [SessionSource] = [.claude, .codex]
+        for source in SessionSource.allCases.filter({ !large.contains($0) }) + large {
+            let remaining = Self.budgetSeconds - Date().timeIntervalSince(start)
+            let budget = source == .codex ? remaining : (source == .claude ? remaining / 2 : min(Self.smallSourceSeconds, remaining))
+            let sourceStart = Date(), descriptor = SessionSourceRegistry.descriptor(for: source)
+            let candidates = Self.candidates(source)
+            var counts = SourceCounts(); counts.discovered = candidates.count
+            for (n, candidate) in candidates.prefix(Self.maxSessionsPerSource).enumerated() {
+                if Date().timeIntervalSince(sourceStart) >= budget { counts.not_reached += 1; continue }
+                autoreleasepool {
+                    let sessionStart = Date(), session: Session?, label: String
+                    switch candidate {
+                    case .file(let url, let bytes, _):
+                        if bytes > Self.maxFileBytes { counts.skipped_over_50mb += 1; return }
+                        label = url.path; session = descriptor.parseFullByPath?(url)
+                    case .identity(let url, let id, _): label = "id:" + id; session = descriptor.parseFullByIdentity?(url, id)
+                    }
+                    guard let session else { counts.parse_failed += 1; return }
+                    let deadline = sessionStart.addingTimeInterval(Self.perSessionSeconds)
+                    let timeoutsBefore = counts.timeouts
+                    var phase = "parse", phaseStarted = sessionStart
+                    var phaseSeconds: [String: Double] = [:]
+                    func enter(_ next: String) {
+                        phaseSeconds[phase, default: 0] += Date().timeIntervalSince(phaseStarted)
+                        phase = next; phaseStarted = Date()
+                    }
+                    defer {
+                        phaseSeconds[phase, default: 0] += Date().timeIntervalSince(phaseStarted)
+                        if counts.timeouts > timeoutsBefore, report.timeouts.count < Self.listedPerClass {
+                            report.timeouts.append(.init(source: source.rawValue, session: label, invariant: "coverage.timeout." + phase, phase_seconds: phaseSeconds))
+                        }
+                        SessionTranscriptBuilder._testResetCoalesceCache()
+                    }
+                    guard Date() < deadline else { counts.timeouts += 1; return }
+                    enter("projection")
+                    let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: true)
+                    guard Date() < deadline else { counts.timeouts += 1; return }
+                    enter("images")
+                    var imageAbsent = false
+                    if (source == .hermes || source == .openclaw), case .identity(let url, _, _) = candidate {
+                        let stamp = MessageImageAbsenceCache.stamp(url)
+                        if imageAbsence.contains(path: url.path, stamp: stamp) { imageAbsent = true }
+                        else {
+                            var cancelled = false, succeeded = false, foundImage = true
+                            let cancel: () -> Bool = { if Date() >= deadline { cancelled = true }; return cancelled }
+                            do {
+                                if source == .hermes { foundImage = try !Base64ImageDataURLScanner.scanFile(at: url, maxMatches: 1, shouldCancel: cancel).isEmpty }
+                                else { foundImage = try !OpenClawBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: 1, shouldCancel: cancel).isEmpty }
+                                succeeded = true
+                            } catch { succeeded = false }
+                            imageAbsence.record(path: url.path, before: stamp, after: MessageImageAbsenceCache.stamp(url), foundImage: foundImage, cancelled: cancelled || Date() >= deadline, succeeded: succeeded)
+                            guard succeeded && !cancelled else { counts.timeouts += 1; return }
+                            imageAbsent = imageAbsence.contains(path: url.path, stamp: stamp)
+                        }
+                    }
+                    let images: Set<Int> = imageAbsent ? [] : Set(SessionInlineImageMapper.imagesByUserBlockIndex(for: session, includeMessageContext: true, shouldCancel: { Date() >= deadline }).filter { !$0.value.isEmpty }.keys)
+                    guard Date() < deadline else { counts.timeouts += 1; return }
+                    // Read original records: parser rawJSON is deliberately truncated. This pass
+                    // also supplies the same source telemetry markers as the Session table.
+                    enter("telemetry_provenance")
+                    var provider = descriptor.makeTelemetryProvider?()
+                    var rawReadFailed = false
+                    if case .file(let url, _, _) = candidate {
+                        let reader = CodexRolloutStorage.lineReader(for: url, maximumBytes: UInt64(Self.maxFileBytes), propagatesReadErrors: true)
+                            ?? JSONLReader(url: url, maximumBytes: UInt64(Self.maxFileBytes), propagatesReadErrors: true)
+                        var lineIndex = 0
+                        do {
+                            let completed = try reader.forEachLineWhile { line in
+                                guard Date() < deadline else { return false }
+                                provider?.consume(line: line, index: lineIndex); lineIndex += 1
+                                if source == .codex || source == .claude {
+                                    for kind in Self.originalKinds(line, source: source) {
+                                        report.provenance[source.rawValue, default: [:]][kind, default: 0] += 1
+                                        if !Self.namedKind(kind, source: source) { report.unknown_provenance[source.rawValue, default: [:]][kind, default: 0] += 1 }
+                                    }
+                                }
+                                return true
+                            }
+                            if !completed { rawReadFailed = true }
+                        } catch { rawReadFailed = true }
+                    }
+                    if rawReadFailed { counts.timeouts += 1; return }
+                    let changes = provider?.finish().telemetry.configurationChanges ?? descriptor.scanTelemetry?(session)?.result.telemetry.configurationChanges ?? []
+                    let markers = TranscriptTelemetryPresentation.markers(changes: changes, blocks: blocks)
+                    guard Date() < deadline else { counts.timeouts += 1; return }
+                    enter("group_emit")
+                    let index = ToolInvocationIndex.build(blocks: blocks, source: source)
+                    let groups = TranscriptMessageGroupIndex.build(blocks: blocks[...], source: source, markers: markers, noncollapsibleBlockIndices: images)
+                    let rows = TranscriptToolRows.emit(blocks: blocks[...], index: index, rowSummary: { ToolInvocationBuilder.rowSummary($0, blocks: blocks, index: index, source: source) }, openGroups: [], openInvocations: [], activeRoles: Set(TranscriptRoleFilter.allCases), failedInvocationIDs: [], markers: markers, totalBlockCount: blocks.count, showsContext: false, source: source, messageGroups: groups)
+                    guard Date() < deadline else { counts.timeouts += 1; return }
+                    enter("oracle")
+                    counts.sessions_checked += 1; report.rows += rows.count
+                    for (block, invariant) in Self.messageFindings(blocks: blocks, rows: rows, source: source, child: session.parentSessionID != nil || session.subagentType != nil, images: images, markers: markers) {
+                        counts.violations[invariant, default: 0] += 1; report.violation_totals[invariant, default: 0] += 1
+                        if report.violations.filter({ $0.invariant == invariant }).count < Self.listedPerClass { report.violations.append(.init(source: source.rawValue, session: label, block: block, invariant: invariant)) }
+                    }
+                    if Date().timeIntervalSince(sessionStart) > Self.perSessionSeconds { counts.timeouts += 1 }
+                }
+                if n % 25 == 24 { report.sources[source.rawValue] = counts; try save() }
+            }
+            counts.seconds = Date().timeIntervalSince(sourceStart); report.sources[source.rawValue] = counts; try save()
+        }
+        report.coverage_failures = Self.messageCoverage(report.sources); report.complete = true; try save()
+        XCTAssertTrue(report.violation_totals.isEmpty, "message invariant counts: \(report.violation_totals)")
+        XCTAssertTrue(report.coverage_failures.isEmpty, "message coverage: \(report.coverage_failures)")
+        XCTAssertGreaterThan(report.rows, 0)
+    }
+
+    private func messageFixture(_ body: String, origin: MessageOrigin? = .typed, kind: Block.Kind = .user, summary: String? = nil) -> Block {
+        var block = TranscriptTestFixtures.block(kind, text: body)
+        block.presentation = MessagePresentation(origin: origin, body: body, summary: summary)
+        return block
+    }
+    private func fixtureFindings(_ input: [Block], images: Set<Int> = [], markers: [Int: [String]] = [:]) -> [String] {
+        let blocks = TranscriptTestFixtures.sequence(input)
+        let rows = blocks.map { BlockRowModel(id: $0.globalBlockIndex, content: .message($0), representedBlockIndices: [$0.globalBlockIndex]) }
+        return Self.messageFindings(blocks: blocks, rows: rows, source: .claude, images: images, markers: markers).map(\.1)
+    }
+    func testMessageM1UsesOriginalProvenanceAndHarnessFacts() {
+        var nonhuman = messageFixture("peer")
+        nonhuman.messageOrigin = .peer(from: "worker")
+        var rawFact = messageFixture("visible")
+        rawFact.rawJSON = "{\"type\":\"user\",\"origin\":{\"kind\":\"peer\"}}"
+        XCTAssertTrue(fixtureFindings([rawFact]).contains("M1"))
+        XCTAssertTrue(fixtureFindings([nonhuman]).contains("M1"))
+        XCTAssertTrue(fixtureFindings([messageFixture("Another Claude session sent a message: hello")]).contains("M1"))
+        var typed = messageFixture("[Request interrupted by user]"); typed.messageOrigin = .typed
+        XCTAssertFalse(fixtureFindings([typed]).contains("M1"))
+        XCTAssertTrue(fixtureFindings([messageFixture("<system-reminder>context</system-reminder>")]).contains("M1"))
+        XCTAssertFalse(fixtureFindings([messageFixture("<system-reminder>context</system-reminder>\nHuman request")]).contains("M1"))
+    }
+    func testMessageM2KnownEnvelopeAndTypedCustomMarkup() {
+        XCTAssertTrue(fixtureFindings([messageFixture("<command-name>/test</command-name>", origin: .command(name: "test"))]).contains("M2"))
+        var custom = messageFixture("<custom-widget>hello</custom-widget>"); custom.messageOrigin = .typed
+        XCTAssertTrue(fixtureFindings([custom]).isEmpty)
+        var prefixedCustom = messageFixture("<user_input_widget>hello</user_input_widget>")
+        prefixedCustom.messageOrigin = .typed
+        XCTAssertTrue(fixtureFindings([prefixedCustom]).isEmpty)
+        prefixedCustom.messageOrigin = nil
+        XCTAssertTrue(fixtureFindings([prefixedCustom]).isEmpty)
+        let clineCustom = TranscriptTestFixtures.sequence([prefixedCustom])
+        let customRow = BlockRowModel(id: 0, content: .message(clineCustom[0]), representedBlockIndices: [0])
+        XCTAssertFalse(Self.messageFindings(blocks: clineCustom, rows: [customRow], source: .cline).contains { $0.1 == "M2" })
+        var literal = messageFixture("<system-reminder>literal markup</system-reminder>")
+        literal.messageOrigin = .typed
+        XCTAssertTrue(fixtureFindings([literal]).isEmpty)
+        let mixedText = "<system-reminder>harness context</system-reminder>\nHuman request"
+        XCTAssertTrue(fixtureFindings([messageFixture(mixedText)]).contains("M2"))
+        var mixed = TranscriptTestFixtures.block(.user, text: mixedText)
+        mixed.presentation = MessageOriginClassifier.presentation(for: mixed, context: .init(source: .claude, isFirstUserBlock: true))
+        XCTAssertEqual(mixed.presentation?.origin, .typed)
+        XCTAssertEqual(mixed.presentation?.body, "Human request")
+        XCTAssertTrue(fixtureFindings([mixed]).isEmpty)
+        XCTAssertTrue(fixtureFindings([messageFixture("```sh\necho hi\n```", origin: .command(name: "test"))]).isEmpty)
+    }
+    func testMessageM3FinalAgentJSONBody() {
+        XCTAssertTrue(fixtureFindings([messageFixture("{\"ok\":true}", origin: nil, kind: .assistant)]).contains("M3"))
+        XCTAssertTrue(fixtureFindings([messageFixture("- **ok:** true", origin: nil, kind: .assistant)]).isEmpty)
+        XCTAssertTrue(fixtureFindings([messageFixture("```json\n{\n  \"ok\": true\n}\n```", origin: nil, kind: .assistant)]).isEmpty)
+        let compactFields = "{" + (0..<5_000).map { "\"k\($0)\":0" }.joined(separator: ",") + "}"
+        XCTAssertLessThan(compactFields.utf8.count, 65_536)
+        var expanded = TranscriptTestFixtures.block(.assistant, text: compactFields)
+        expanded.presentation = MessageOriginClassifier.presentation(for: expanded, context: .init(source: .claude, isFirstUserBlock: false))
+        XCTAssertGreaterThan(expanded.presentation?.body.utf8.count ?? 0, 65_536)
+        XCTAssertTrue(fixtureFindings([expanded]).isEmpty)
+        let large = "{\"value\":\"" + String(repeating: "x", count: 70_000) + "\"}"
+        XCTAssertTrue(fixtureFindings([messageFixture(large, origin: nil, kind: .assistant)]).contains("M3"))
+        var fallback = TranscriptTestFixtures.block(.assistant, text: large)
+        fallback.presentation = MessageOriginClassifier.presentation(for: fallback, context: .init(source: .claude, isFirstUserBlock: false))
+        XCTAssertTrue(fallback.presentation?.body.hasPrefix(MessageOriginText.largeStructured + "\n\n```json\n") == true)
+        XCTAssertTrue(fixtureFindings([fallback]).isEmpty)
+        fallback.presentation?.body = MessageOriginText.largeStructured + "\n\n" + large
+        XCTAssertTrue(fixtureFindings([fallback]).contains("M3"))
+    }
+    func testMessageM4SummaryOnlyPeerAndImageContent() {
+        XCTAssertTrue(fixtureFindings([messageFixture("  ")]).contains("M4"))
+        XCTAssertTrue(fixtureFindings([messageFixture("", origin: .peer(from: "peer"), summary: "Encrypted message")]).isEmpty)
+        XCTAssertTrue(fixtureFindings([messageFixture("", origin: .peer(from: "peer"))]).contains("M4"))
+        XCTAssertTrue(fixtureFindings([messageFixture("")], images: [0]).isEmpty)
+    }
+    func testMessageM5DuplicateAndStructuralImageBarriers() {
+        let same = messageFixture("same")
+        XCTAssertTrue(fixtureFindings([same, same]).contains("M5"))
+        XCTAssertTrue(fixtureFindings([same, same], images: [0, 1]).isEmpty)
+        XCTAssertTrue(fixtureFindings([same, same], markers: [1: ["change"]]).isEmpty)
+        let blocks = TranscriptTestFixtures.sequence([same, TranscriptTestFixtures.block(.toolCall, text: ""), same])
+        let rows = [BlockRowModel(id: 0, content: .message(blocks[0]), representedBlockIndices: [0, 2])]
+        XCTAssertTrue(Self.messageFindings(blocks: blocks, rows: rows, source: .claude).contains { $0.1 == "M5" })
+        XCTAssertTrue(Self.messageFindings(blocks: blocks, rows: [], source: .claude).contains { $0.1 == "M5" })
+    }
+    func testMessageM6PreservesOriginalKindsAndReportsUnknown() {
+        let raw = "{\"payload\":{\"internal_chat_message_metadata_passthrough\":{\"content_item_kinds\":[\"user.text | original\",\"future.kind\"]}}}"
+        XCTAssertEqual(Self.originalKinds(raw, source: .codex), ["user.text | original", "future.kind"])
+        XCTAssertTrue(Self.namedKind("user.text | original", source: .codex))
+        XCTAssertFalse(Self.namedKind("future.kind", source: .codex))
+        XCTAssertEqual(Self.originalKinds("{\"origin\":{\"kind\":\"peer\"}}", source: .claude), ["peer"])
+        XCTAssertFalse(Self.namedKind("future", source: .claude))
+    }
+    func testMessageCoverageRejectsMissingZeroAndLostSources() {
+        XCTAssertFalse(Self.messageCoverage([:]).isEmpty)
+        var sources = Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0.rawValue, SourceCounts()) })
+        XCTAssertFalse(Self.messageCoverage(sources).isEmpty)
+        var counts = SourceCounts(); counts.discovered = 200; counts.sessions_checked = 200
+        sources[SessionSource.codex.rawValue] = counts
+        XCTAssertTrue(Self.messageCoverage(sources).isEmpty)
+        counts.timeouts = 11; sources[SessionSource.codex.rawValue] = counts
+        XCTAssertFalse(Self.messageCoverage(sources).isEmpty)
+    }
+}
+
+// Append after Task8 releases corpus-file ownership. Shares that class's discovery.
+extension TranscriptToolCorpusCheckTests {
+    private struct GalleryFinding {
+        let id: String
+        let description: String
+        let sources: Set<SessionSource>
+        let matches: (Block, [Block], Session) -> Bool
+    }
+
+    private static var galleryFindings: [GalleryFinding] {
+        func f(_ id: String, _ label: String, _ sources: [SessionSource], _ match: @escaping (Block, [Block], Session) -> Bool) -> GalleryFinding {
+            .init(id: id, description: label, sources: Set(sources), matches: match)
+        }
+        func contains(_ b: Block, _ text: String) -> Bool { b.text.contains(text) }
+        func duplicate(_ b: Block, _ all: [Block]) -> Bool {
+            let i = b.globalBlockIndex
+            guard i > 0, (b.kind == .user || b.kind == .assistant), all.indices.contains(i - 1) else { return false }
+            return all[i - 1].kind == b.kind && all[i - 1].text == b.text
+        }
+        return [
+            f("01", "Claude task notification", [.claude]) { b,_,_ in contains(b,"<task-notification>") },
+            f("02", "Claude harness notice", [.claude]) { b,_,_ in contains(b,"[SYSTEM NOTIFICATION - NOT USER INPUT]") || contains(b,"<system-reminder>") && b.presentation?.origin?.isHiddenContext == true },
+            f("03", "Claude peer", [.claude]) { b,_,_ in if case .peer = b.presentation?.origin { return true }; return false },
+            f("04", "Claude compaction", [.claude]) { b,_,_ in b.presentation?.origin == .compaction },
+            f("05", "Claude skill", [.claude]) { b,_,_ in if case .skill = b.presentation?.origin { return true }; return false },
+            f("06", "Claude command", [.claude]) { b,_,_ in if case .command = b.presentation?.origin { return true }; return false },
+            f("07", "Claude empty assistant", [.claude]) { b,_,_ in b.kind == .assistant && b.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            f("08", "Codex page context", [.codex]) { b,_,_ in contains(b,"<external_codex_apps_") },
+            f("09", "Codex answer JSON", [.codex]) { b,_,_ in contains(b,"<send_user_message_question_reply>") },
+            f("10", "Codex memory citations", [.codex]) { b,_,_ in b.kind == .assistant && contains(b,"<oai-mem-citation>") },
+            f("11-request", "Guardian approval request", [.codex]) { b,_,_ in b.presentation?.origin == .approvalRequest },
+            f("11-verdict", "Guardian verdict", [.codex]) { b,_,_ in if case .approvalVerdict = b.presentation?.origin { return true }; return false },
+            f("11-history", "Guardian history context", [.codex]) { b,_,s in s.subagentType == "guardian" && b.presentation?.origin?.isHiddenContext == true },
+            f("12", "Codex agent_message", [.codex]) { b,_,_ in if case .peer = b.presentation?.origin { return true }; return false },
+            f("13", "Grok query envelope", [.grok]) { b,_,_ in contains(b,"<user_query>") },
+            f("14", "Cline input envelope", [.cline]) { b,_,_ in contains(b,"<user_input") },
+            f("15", "Cursor timestamp", [.cursor]) { b,_,_ in contains(b,"<timestamp>") },
+            f("16", "Cursor placeholder", [.cursor]) { b,_,_ in b.kind == .assistant && b.presentation?.origin == .placeholder },
+            f("16-duplicate", "Cursor duplicate", [.cursor]) { b,a,_ in duplicate(b,a) },
+            f("17-droid", "Droid reminder", [.droid]) { b,_,_ in contains(b,"<system-reminder>") },
+            f("17-kimi", "Kimi reminder", [.kimi]) { b,_,_ in contains(b,"<system-reminder>") },
+            f("18", "Kimi shell echo", [.kimi]) { b,_,_ in contains(b,"<bash-input>") || contains(b,"<bash-stdout>") },
+            f("19-empty", "Hermes placeholder", [.hermes]) { b,_,_ in b.kind == .assistant && b.presentation?.origin == .placeholder },
+            f("19-retry", "Hermes retry", [.hermes]) { b,_,_ in b.presentation?.origin == .harnessRetry },
+            f("20-hermes", "Hermes scheduled", [.hermes]) { b,_,_ in if case .scheduled = b.presentation?.origin { return true }; return false },
+            f("20-openclaw", "OpenClaw scheduled", [.openclaw]) { b,_,_ in if case .scheduled = b.presentation?.origin { return true }; return false },
+            f("21", "Antigravity empty assistant", [.antigravity]) { b,_,_ in b.kind == .assistant && b.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            f("22-opencode", "OpenCode duplicates", [.opencode]) { b,a,_ in duplicate(b,a) },
+            f("22-openclaw", "OpenClaw duplicates", [.openclaw]) { b,a,_ in duplicate(b,a) },
+            f("22-hermes", "Hermes duplicates", [.hermes]) { b,a,_ in duplicate(b,a) },
+            f("23", "Typed user has no duration", Array(SessionSource.allCases)) { b,_,_ in b.isTypedUserMessage && !b.text.isEmpty }
+        ]
+    }
+
+    @MainActor
+    func testMessageRenderGallery() throws {
+        guard ProcessInfo.processInfo.environment["AS_TOOL_CORPUS_CHECK"] == "1" else { throw XCTSkip("Opt-in real local gallery") }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let output = root.appendingPathComponent("scripts/probe_scan_output/message_gallery")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let auditURL = root.appendingPathComponent("scripts/probe_scan_output/message_audit/audit.json")
+        let audit = (try? JSONSerialization.jsonObject(with: Data(contentsOf: auditURL))) as? [String: Any]
+        let samples = audit?["samples"] as? [String: [[String: Any]]] ?? [:]
+        var seedLabels: [String: Set<String>] = [:]
+        for list in samples.values { for sample in list {
+            if let source = sample["source"] as? String, let label = sample["label"] as? String { seedLabels[source, default: []].insert(label) }
+        } }
+        let extraSeedsURL = output.appendingPathComponent("seeds.json")
+        if let data = try? Data(contentsOf: extraSeedsURL),
+           let extra = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            for (source, labels) in extra { seedLabels[source, default: []].formUnion(labels) }
+        }
+        var remaining = Self.galleryFindings
+        var index: [[String: Any]] = []
+        var visited: [String: Int] = [:]
+        var scanEvidence: [[String: Any]] = []
+        func saveIndex() throws {
+            try JSONSerialization.data(withJSONObject: ["entries": index, "parsed_sessions": visited, "candidate_evidence": scanEvidence], options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("index.json"), options: .atomic)
+            let text = index.map { entry in entry.keys.sorted().map { "\($0)=\(entry[$0]!)" }.joined(separator: " | ") }.joined(separator: "\n")
+            try (text + "\n").write(to: output.appendingPathComponent("index.txt"), atomically: true, encoding: .utf8)
+        }
+        for source in SessionSource.allCases {
+            guard remaining.contains(where: { $0.sources.contains(source) }) else { continue }
+            let descriptor = SessionSourceRegistry.descriptor(for: source)
+            let discovered = Self.candidates(source)
+            func label(_ c: Candidate) -> String {
+                switch c { case .file(let u,_,_): return u.path; case .identity(_,let id,_): return "id:" + id }
+            }
+            // Audit seeds first, each parsed once. Bounded newest fallback only for absent cases.
+            let seeds = seedLabels[source.rawValue] ?? []
+            let selected = discovered.filter { seeds.contains(label($0)) } + discovered.prefix(20).filter { !seeds.contains(label($0)) }
+            for candidate in selected {
+                guard remaining.contains(where: { $0.sources.contains(source) }) else { break }
+                try autoreleasepool {
+                    let session: Session?, location: String
+                    switch candidate {
+                    case .file(let url, let bytes, _):
+                        guard bytes <= Self.maxFileBytes else { return }
+                        session = descriptor.parseFullByPath?(url); location = url.path
+                    case .identity(let url, let id, _):
+                        session = descriptor.parseFullByIdentity?(url,id); location = url.path + "#" + id
+                    }
+                    guard let session else { return }
+                    visited[source.rawValue, default: 0] += 1
+                    defer { SessionTranscriptBuilder._testResetCoalesceCache() }
+                    let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: true)
+                    let images = SessionInlineImageMapper.imagesByUserBlockIndex(for: session, includeMessageContext: true)
+                    let changes = descriptor.scanTelemetry?(session)?.result.telemetry.configurationChanges ?? []
+                    let markers = TranscriptTelemetryPresentation.markers(changes: changes, blocks: blocks)
+                    let examinedFindings = remaining.filter { $0.sources.contains(source) }.map(\.id)
+                    let matches = remaining.compactMap { finding -> (GalleryFinding, Block)? in
+                        guard finding.sources.contains(source), let block = blocks.first(where: { block in
+                            guard finding.matches(block, blocks, session) else { return false }
+                            guard finding.id.contains("duplicate") || finding.id.hasPrefix("22-") else { return true }
+                            let i = block.globalBlockIndex
+                            return markers[i]?.isEmpty != false && images[i]?.isEmpty != false && images[i - 1]?.isEmpty != false
+                        }) else { return nil }
+                        return (finding,block)
+                    }
+                    scanEvidence.append(["source": source.rawValue, "location": location, "session": session.id,
+                                         "block_count": blocks.count, "examined_findings": examinedFindings,
+                                         "matched_findings": matches.map { $0.0.id }])
+                    for (finding, block) in matches {
+                        let captures = try galleryCapture(finding: finding, target: block, blocks: blocks, session: session, images: images, changes: changes, output: output)
+                        for capture in captures {
+                            var entry = capture
+                            entry["finding"] = finding.id; entry["description"] = finding.description
+                            entry["source"] = source.rawValue; entry["session"] = session.id
+                            entry["location"] = location; entry["original_block"] = block.globalBlockIndex
+                            index.append(entry)
+                        }
+                        remaining.removeAll { $0.id == finding.id }
+                        try saveIndex()
+                    }
+                }
+            }
+        }
+        for finding in remaining {
+            index.append(["finding": finding.id, "description": finding.description, "status": "no-local-data", "scope": "audit-seeded identities plus newest 20 discovered sessions per source; not exhaustive absence"])
+        }
+        try saveIndex()
+        XCTAssertGreaterThan(index.filter { $0["png"] != nil }.count, 0)
+    }
+
+    @MainActor
+    private func galleryCapture(finding: GalleryFinding, target: Block, blocks: [Block], session: Session, images: [Int: [InlineSessionImage]], changes: [ConfigurationChange], output: URL) throws -> [[String: Any]] {
+        var entries: [[String: Any]] = []
+        let hidden = target.presentation?.origin?.isHiddenContext == true
+        let states: [(String, Bool, Bool)] = hidden ? [("context-off",false,false),("context-on-expanded",true,true)] : [("visible",false,true)]
+        let origin: String
+        switch target.presentation?.origin {
+        case .typed: origin = "typed"
+        case .context: origin = "context"
+        case .notification: origin = "notification"
+        case .peer: origin = "peer"
+        case .compaction: origin = "compaction"
+        case .skill: origin = "skill"
+        case .command: origin = "command"
+        case .scheduled: origin = "scheduled"
+        case .harnessRetry: origin = "harness-retry"
+        case .parentTask: origin = "parent-task"
+        case .approvalRequest: origin = "approval-request"
+        case .approvalVerdict: origin = "approval-verdict"
+        case .placeholder: origin = "placeholder"
+        case nil: origin = "agent"
+        }
+        let toolIndex = ToolInvocationIndex.build(blocks: blocks, source: session.source)
+        for (appearanceName, appearance) in [("light",NSAppearance.Name.aqua),("dark",NSAppearance.Name.darkAqua)] {
+            for (state, showContext, expand) in states {
+                let controller = BlockTableController()
+                let views = BlockTableController.makeScrollView(selectionOwner: controller)
+                let frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+                let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.appearance = NSAppearance(named: appearance)
+                views.scroll.frame = frame; window.contentView = views.scroll
+                controller.attach(table: views.table, scroll: views.scroll)
+                defer { window.close() }
+                controller.apply(allBlocks: blocks, invocationIndex: toolIndex, totalBlockCount: blocks.count,
+                                 fontSize: 13, source: session.source, sessionID: session.id, configurationChanges: changes,
+                                 imagesByBlockIndex: images, inlineImagesEnabled: !images.isEmpty, showsContext: showContext)
+                controller.scrollToBlock(target.globalBlockIndex)
+                // Hidden/placeholder targets have no row: anchor to their nearest real neighbor.
+                if !controller.rows.contains(where: { $0.representedBlockIndices.contains(target.globalBlockIndex) }),
+                   let neighbor = controller.rows.min(by: { abs($0.primaryBlock.globalBlockIndex - target.globalBlockIndex) < abs($1.primaryBlock.globalBlockIndex - target.globalBlockIndex) }) {
+                    controller.scrollToBlock(neighbor.primaryBlock.globalBlockIndex)
+                }
+                if expand, let row = controller.rows.first(where: { $0.representedBlockIndices.contains(target.globalBlockIndex) }), row.isOriginLine {
+                    controller.toggleOriginLine(row.id)
+                }
+                let deadline = Date().addingTimeInterval(20)
+                repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+                while controller.hasPendingToolPresentations && Date() < deadline
+                XCTAssertFalse(controller.hasPendingToolPresentations)
+                // Pending table/SwiftUI work may restore the old scroll anchor; settle first,
+                // then synchronously position the exact target immediately before drawing.
+                controller.scrollToBlock(target.globalBlockIndex)
+                if !controller.rows.contains(where: { $0.representedBlockIndices.contains(target.globalBlockIndex) }),
+                   let neighbor = controller.rows.min(by: { abs($0.primaryBlock.globalBlockIndex - target.globalBlockIndex) < abs($1.primaryBlock.globalBlockIndex - target.globalBlockIndex) }) {
+                    controller.scrollToBlock(neighbor.primaryBlock.globalBlockIndex)
+                }
+                window.contentView?.layoutSubtreeIfNeeded(); views.table.layoutSubtreeIfNeeded()
+                window.contentView?.displayIfNeeded(); views.table.displayIfNeeded()
+                let targetRow = controller.rows.first { $0.representedBlockIndices.contains(target.globalBlockIndex) }
+                let absent = target.presentation?.rowStyle == MessageRowStyle.none || hidden && !showContext
+                if absent { XCTAssertNil(targetRow) } else { XCTAssertNotNil(targetRow) }
+                // A duplicate finding is an adjacent raw pair with no image/telemetry barrier.
+                // Placeholders may both disappear; every shown pair must share the actual row.
+                if finding.id.contains("duplicate") || finding.id.hasPrefix("22-") {
+                    XCTAssertGreaterThan(target.globalBlockIndex, 0)
+                    XCTAssertEqual(blocks[target.globalBlockIndex - 1].kind, target.kind)
+                    XCTAssertEqual(blocks[target.globalBlockIndex - 1].text, target.text)
+                    if !absent {
+                        let grouped = try XCTUnwrap(targetRow)
+                        XCTAssertGreaterThan(grouped.repeatCount, 1)
+                        XCTAssertTrue(grouped.representedBlockIndices.contains(target.globalBlockIndex - 1))
+                        XCTAssertTrue(grouped.representedBlockIndices.contains(target.globalBlockIndex))
+                    }
+                }
+                if expand, let targetRow, targetRow.isOriginLine {
+                    XCTAssertTrue(controller.openOriginLines.contains(targetRow.id))
+                }
+                let visible = views.table.rows(in: views.table.visibleRect)
+                XCTAssertGreaterThan(visible.length, 0)
+                let cells = (visible.location..<NSMaxRange(visible)).compactMap { views.table.view(atColumn: 0,row: $0,makeIfNecessary: false) }
+                XCTAssertFalse(cells.isEmpty)
+                let visibleIDs = (visible.location..<NSMaxRange(visible)).filter { controller.rows.indices.contains($0) }.map { controller.rows[$0].id }
+                if let targetRow, !visibleIDs.contains(targetRow.id) {
+                    XCTFail("Target row \(targetRow.id) must be in captured viewport for \(finding.id): \(visibleIDs)")
+                    throw NSError(domain: "GalleryViewport", code: 1)
+                }
+                if finding.id == "23" {
+                    let cell = try XCTUnwrap(cells.compactMap({ $0 as? BlockCardCellView }).first(where: { $0.displayedHeader?.roleLabel == "You" }))
+                    XCTAssertEqual(cell.displayedHeader?.turnChipText, "")
+                }
+                let bitmap = try XCTUnwrap(views.scroll.bitmapImageRepForCachingDisplay(in: views.scroll.bounds))
+                views.scroll.cacheDisplay(in: views.scroll.bounds, to: bitmap)
+                // AppKit's table is intentionally transparent. Flatten against this window's
+                // resolved background; PNG viewers otherwise expose unassociated-alpha colors.
+                let opaque = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+                    pixelsWide: bitmap.pixelsWide, pixelsHigh: bitmap.pixelsHigh,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                let graphics = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: opaque))
+                let cg = graphics.cgContext
+                let pixelRect = CGRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
+                window.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    cg.setFillColor(NSColor.windowBackgroundColor.cgColor)
+                    cg.fill(pixelRect)
+                }
+                cg.setBlendMode(.normal)
+                cg.draw(try XCTUnwrap(bitmap.cgImage), in: pixelRect)
+                let png = try XCTUnwrap(opaque.representation(using: .png, properties: [:]))
+                let name = "\(finding.id)-\(session.source.rawValue)-\(origin)-\(state)-\(appearanceName).png"
+                try png.write(to: output.appendingPathComponent(name), options: .atomic)
+                entries.append(["png": name,"appearance": appearanceName,"state": state,"target_absent": absent,"target_row_id": targetRow?.id ?? -1,"expanded": targetRow.map { controller.openOriginLines.contains($0.id) } ?? false,"visible_block_ids": (visible.location..<NSMaxRange(visible)).filter { controller.rows.indices.contains($0) }.map { controller.rows[$0].primaryBlock.globalBlockIndex },"row_count": controller.rows.count,"repeat_count": targetRow?.repeatCount ?? 0,"status": "captured"])
+            }
+        }
+        return entries
+    }
+}
+
+// Append to already-targeted TranscriptToolCorpusCheckTests.swift after approval.
+// BASELINE_ADAPT markers are transformed only in the pinned source export.
+extension TranscriptToolCorpusCheckTests {
+    @MainActor
+    func testMessageOpenPerformance() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["AS_MESSAGE_PERF_CHECK"] == "1" else { throw XCTSkip("Opt-in Release open benchmark") }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let configPath = env["AS_MESSAGE_PERF_INPUTS"] ?? root.appendingPathComponent(".superpowers/sdd/2026-11-07-transcript-message-readability/perf-inputs.json").path
+        let config = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configPath))) as! [String: String]
+        let output = URL(fileURLWithPath: try XCTUnwrap(env["AS_MESSAGE_PERF_OUTPUT"]))
+        let sources: [SessionSource] = [.codex, .claude]
+        var report: [String: Any] = ["variant": env["AS_MESSAGE_PERF_VARIANT"] ?? "current", "geometry": [900, 900], "samples_per_source": 5, "parse_timed": false, "ownership_timed": true]
+        var results: [String: Any] = [:]
+        for source in sources {
+            let path = try XCTUnwrap(config[source.rawValue])
+            let session = try XCTUnwrap(SessionSourceRegistry.descriptor(for: source).parseFullByPath?(URL(fileURLWithPath: path)))
+            var samples: [[String: Double]] = []
+            var rowCounts: [Int] = []
+            for _ in 0..<5 {
+                try autoreleasepool {
+                    SessionTranscriptBuilder._testResetCoalesceCache()
+                    let controller = BlockTableController()
+                    let views = BlockTableController.makeScrollView(selectionOwner: controller)
+                    let frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+                    let window = NSWindow(contentRect: frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+                    window.isReleasedWhenClosed = false
+                    window.appearance = NSAppearance(named: .aqua)
+                    views.scroll.frame = frame
+                    window.contentView = views.scroll
+                    controller.attach(table: views.table, scroll: views.scroll)
+                    defer { window.close() }
+                    let start = CFAbsoluteTimeGetCurrent()
+                    let settings = TranscriptDerivedState.DerivedSettings(skipAgentsPreamble: true, reviewCardsEnabled: true, includeMessageContext: true) // BASELINE_ADAPT
+                    let snapshot = TranscriptDerivedState.computeSnapshot(session: session, settings: settings)
+                    let snapshotEnd = CFAbsoluteTimeGetCurrent()
+                    // Current apply builds full message groups when no supplied groups are given.
+                    // Keep that first construction inside this timed region.
+                    controller.apply(allBlocks: snapshot.blocks, invocationIndex: snapshot.invocationIndex,
+                        failedInvocationIDs: snapshot.failedInvocationIDs, toolJumpIDs: snapshot.toolJumpIDs,
+                        errorJumpIDs: snapshot.errorJumpIDs, totalBlockCount: snapshot.totalBlockCount,
+                        fontSize: 13, source: source, sessionID: session.id,
+                        sessionCwd: session.cwd, rowSummaries: snapshot.rowSummaries)
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    views.table.layoutSubtreeIfNeeded()
+                    window.contentView?.displayIfNeeded()
+                    views.table.displayIfNeeded()
+                    let end = CFAbsoluteTimeGetCurrent()
+                    XCTAssertGreaterThan(views.table.numberOfRows, 0)
+                    XCTAssertNotNil(views.table.view(atColumn: 0, row: max(0, views.table.rows(in: views.table.visibleRect).location), makeIfNecessary: false))
+                    samples.append(["snapshot_ms": (snapshotEnd - start) * 1000,
+                                    "table_including_ownership_ms": (end - snapshotEnd) * 1000,
+                                    "end_to_end_ms": (end - start) * 1000])
+                    rowCounts.append(views.table.numberOfRows)
+                }
+            }
+            results[source.rawValue] = ["path": path, "bytes": session.fileSizeBytes ?? 0,
+                                       "events": session.events.count, "row_counts": rowCounts, "samples": samples]
+        }
+        report["sources"] = results
+        try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
+    }
+}

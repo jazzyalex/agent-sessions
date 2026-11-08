@@ -1,6 +1,912 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "*Pasted text*": {
+      "comment": "Small label above text the person pasted into a prompt. Keep the asterisks (Markdown italics).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*Pasted text*"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*粘贴的文本*"
+          }
+        }
+      }
+    },
+    "selected page": {
+      "comment": "Context kind: the part of a page the person selected.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "selected page"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选页面"
+          }
+        }
+      }
+    },
+    "environment": {
+      "comment": "Context kind: working directory, shell and date.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "environment"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "环境"
+          }
+        }
+      }
+    },
+    "instructions": {
+      "comment": "Context kind: agent instructions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "instructions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指令"
+          }
+        }
+      }
+    },
+    "open page": {
+      "comment": "Context kind: the page open in an app.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "open page"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开的页面"
+          }
+        }
+      }
+    },
+    "goal": {
+      "comment": "Context kind: the session goal.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "goal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目标"
+          }
+        }
+      }
+    },
+    "system reminder": {
+      "comment": "Context kind: a harness reminder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "system reminder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统提醒"
+          }
+        }
+      }
+    },
+    "harness note": {
+      "comment": "Context kind: a note the harness added.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "harness note"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具附注"
+          }
+        }
+      }
+    },
+    "command caveat": {
+      "comment": "Context kind: a caveat about local command output.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "command caveat"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令说明"
+          }
+        }
+      }
+    },
+    "workspace info": {
+      "comment": "Context kind: workspace details.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "workspace info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区信息"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "comment": "Context kind: conversation metadata.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "metadata"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据"
+          }
+        }
+      }
+    },
+    "review history": {
+      "comment": "Context kind: earlier approval reviews.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "review history"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审核历史"
+          }
+        }
+      }
+    },
+    "completed": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成"
+          }
+        }
+      }
+    },
+    "failed": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
+    },
+    "running": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "running"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行中"
+          }
+        }
+      }
+    },
+    "stopped": {
+      "comment": "Background task status: killed or cancelled.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "stopped"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已停止"
+          }
+        }
+      }
+    },
+    "Request interrupted": {
+      "comment": "A recorded user-interruption control notice.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request interrupted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求已中断"
+          }
+        }
+      }
+    },
+    "Empty structured message": {
+      "comment": "Transcript empty decoded content label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty structured message"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空的结构化消息"
+          }
+        }
+      }
+    },
+    "No input text": {
+      "comment": "Transcript empty decoded content label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No input text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无输入文本"
+          }
+        }
+      }
+    },
+    "Peer message preview · remaining content omitted": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peer message preview · remaining content omitted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息预览 · 其余内容已省略"
+          }
+        }
+      }
+    },
+    "Additional content encrypted in the log": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Additional content encrypted in the log"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志中的其他内容已加密"
+          }
+        }
+      }
+    },
+    "Large structured message · shown without envelope decoding": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large structured message · shown without envelope decoding"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型结构化消息 · 未进行封装解码"
+          }
+        }
+      }
+    },
+    "No answer": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No answer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未回答"
+          }
+        }
+      }
+    },
+    "**Question:** %@\n\n**Answer:** %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**Question:** %@\n\n**Answer:** %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**问题：** %@\n\n**回答：** %@"
+          }
+        }
+      }
+    },
+    "*Memory citations: %lld*": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*Memory citations: %lld*"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*记忆引用：%lld*"
+          }
+        }
+      }
+    },
+    "Context · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文 · %@"
+          }
+        }
+      }
+    },
+    "Skill loaded · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skill loaded · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载技能 · %@"
+          }
+        }
+      }
+    },
+    "Conversation compacted": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversation compacted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话已压缩"
+          }
+        }
+      }
+    },
+    "Scheduled prompt · %@ · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled prompt · %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计划提示 · %@ · %@"
+          }
+        }
+      }
+    },
+    "Harness asked the agent to continue": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Harness asked the agent to continue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行框架请求代理继续"
+          }
+        }
+      }
+    },
+    "Message from %@ · content encrypted in the log": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message from %@ · content encrypted in the log"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 %@ 的消息 · 日志中的内容已加密"
+          }
+        }
+      }
+    },
+    "Message received from %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message received from %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收到来自 %@ 的消息"
+          }
+        }
+      }
+    },
+    "Background task %@ · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background task %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台任务 %@ · %@"
+          }
+        }
+      }
+    },
+    "Background task update": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background task update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台任务更新"
+          }
+        }
+      }
+    },
+    "Large structured message · shown without field formatting": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large structured message · shown without field formatting"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型结构化消息 · 未进行字段格式化"
+          }
+        }
+      }
+    },
+    "Allowed": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已允许"
+          }
+        }
+      }
+    },
+    "Denied": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Denied"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拒绝"
+          }
+        }
+      }
+    },
+    "**Justification:** %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**Justification:** %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**理由：** %@"
+          }
+        }
+      }
+    },
+    "Sandbox: %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sandbox: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙盒：%@"
+          }
+        }
+      }
+    },
+    "**%@** · risk %@ · user authorization %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** · risk %@ · user authorization %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** · 风险 %@ · 用户授权 %@"
+          }
+        }
+      }
+    },
+    "Context": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文"
+          }
+        }
+      }
+    },
+    "Show text the agent’s harness added: instructions, environment, skill files": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show text the agent’s harness added: instructions, environment, skill files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示代理运行框架添加的文本：指令、环境、技能文件"
+          }
+        }
+      }
+    },
+    "Message from %@": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message from %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 %@ 的消息"
+          }
+        }
+      }
+    },
+    "Task from parent session": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task from parent session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自父会话的任务"
+          }
+        }
+      }
+    },
+    "Approval request": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval request"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审批请求"
+          }
+        }
+      }
+    },
+    "Guardian verdict": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardian verdict"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "守护程序裁决"
+          }
+        }
+      }
+    },
+    "Command": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令"
+          }
+        }
+      }
+    },
+    "another session": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "another session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个会话"
+          }
+        }
+      }
+    },
+    "coordinator": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "coordinator"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "协调者"
+          }
+        }
+      }
+    },
+    "You": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你"
+          }
+        }
+      }
+    },
+    "Tool": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        }
+      }
+    },
+    "Meta": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据"
+          }
+        }
+      }
+    },
+    "×%lld": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "×%lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "×%lld"
+          }
+        }
+      }
+    },
     "Missing API price component: %@": {
       "comment": "Quota Meter OpenCode row tooltip in the $ lens. %@ lists model:component pairs, e.g. gpt-5:cacheWrite5m.",
       "localizations": {
