@@ -94,6 +94,18 @@ final class SessionListToolbarLayoutTests: XCTestCase {
 
     @MainActor
     func testWorstCaseRowFitsAboveTheNarrowestListWithoutClipping() {
+        // The Archived chip reads these preferences directly, not the fixture's
+        // agent specs. Pin them on so the chip is always measured.
+        let defaults = UserDefaults.standard
+        let keys = [PreferencesKey.Agents.codexEnabled, PreferencesKey.Agents.claudeEnabled]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        keys.forEach { defaults.set(true, forKey: $0) }
+
         let available = narrowestAvailableWidth
         let host = NSHostingController(rootView: worstCaseRow(fillsWidth: true))
 
