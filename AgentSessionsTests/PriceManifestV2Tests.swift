@@ -23,6 +23,19 @@ final class PriceManifestV2Tests: XCTestCase {
         }
     }
 
+    func testCopilotMAICodeFlashHasItsPublishedRate() throws {
+        // GitHub's Copilot model table, checked 2026-11-08: $0.20 in, $0.02 cached,
+        // $1.20 out per MTok; no cache-write rate is published.
+        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        let mai = try XCTUnwrap(snapshot.resolvedPrice(forModel: "mai-code-1.1-flash")?.price)
+        XCTAssertEqual(mai.inputPerMTok, 0.20)
+        XCTAssertEqual(mai.cachedInputPerMTok, 0.02)
+        XCTAssertEqual(mai.outputPerMTok, 1.20)
+        XCTAssertNil(mai.cacheWritePerMTok)
+        XCTAssertNil(snapshot.resolvedPrice(forModel: "mai-code-1.1-pro"),
+                     "a sibling tier keeps its own price requirement")
+    }
+
     private func rate(_ input: Double) -> RunwayModelPrice {
         RunwayModelPrice(standard: RunwayRateSet(inputPerMTok: input, cachedInputPerMTok: input / 10,
                                                  outputPerMTok: input * 5, cacheWritePerMTok: nil,

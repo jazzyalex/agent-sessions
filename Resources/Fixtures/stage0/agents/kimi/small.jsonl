@@ -48,3 +48,6 @@
 {"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"synthetic-tool","turnId":"synthetic-turn","step":1,"stepUuid":"synthetic-step","toolCallId":"synthetic-tool","name":"Bash","args":{"command":"pwd"},"display":[]},"time":0,"agentId":"main"}
 {"type":"context.append_loop_event","event":{"type":"tool.result","parentUuid":"synthetic-tool","toolCallId":"synthetic-tool","result":{"output":"/tmp/synthetic-kimi","isError":false,"durationMs":1}},"time":0,"agentId":"main"}
 {"type":"changeNotifier.snapshot","agentId":"main","agentsMdHash":null,"agentsMdFiles":{"/tmp/synthetic-kimi/AGENTS.md":"[trimmed for fixture]"},"skillsHash":"[trimmed for fixture]","subagentNames":["plan","agent","coder","explore"],"modelPool":null,"time":0}
+{"type":"environment.set_binding","environmentId":"[trimmed for fixture]","agentId":"main","time":0}
+{"type":"changeNotifier.snapshot","agentId":"main","agentsMdHash":null,"agentsMdFiles":{},"skillsHash":"[trimmed for fixture]","subagentNames":["plan","agent","coder","explore"],"modelPool":null,"workspacePrimaryByWorkspace":{},"workspaceAdditionalDirs":[],"time":0}
+{"type":"tool_select.initialized","agentId":"main","tools":[{"name":"Read","description":"[trimmed for fixture]","parameters":{"type":"object","properties":{}}}],"time":0}

@@ -437,4 +437,17 @@ final class KimiSessionParserTests: XCTestCase {
             .appendingPathComponent("wire.jsonl")
         XCTAssertNil(KimiSessionParser.parseFile(at: stray))
     }
+
+    /// Kimi 2.5.2 writes `environment.set_binding` and `tool_select.initialized`
+    /// at session start. They are setup records and must not become messages.
+    func testKimi252SetupRecordsAreNotMessages() throws {
+        let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedFixture()))
+        let setup = session.events.filter {
+            let data = Data(base64Encoded: $0.rawJSON) ?? Data($0.rawJSON.utf8)
+            let raw = String(decoding: data, as: UTF8.self)
+            return raw.contains("environment.set_binding") || raw.contains("tool_select.initialized")
+        }
+        XCTAssertFalse(setup.contains { $0.kind == .user || $0.kind == .assistant })
+        XCTAssertTrue(session.events.contains { $0.kind == .user })
+    }
 }
