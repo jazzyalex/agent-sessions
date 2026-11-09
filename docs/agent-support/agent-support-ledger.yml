@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.4+unreleased"
     as_of_date_utc: "2026-11-09"
+    as_of_commit: "a648294b"
+    note: "OpenClaw follow-up: the real store was backed up and migrated with openclaw doctor --fix (schema 25 -> 27). The schema-27 columns are added to the SQLite fixture; OpenClawSqliteStoreTests pass against it."
+    report: "scripts/probe_scan_output/agent_watch/20261109-033514-919938Z-p72414/report.json"
+    verified:
+      openclaw: {sessions: {max_verified_version: "2026.11.2", evidence: ["scripts/probe_scan_output/agent_watch/20261109-033514-919938Z-p72414/report.json", "scripts/probe_scan_output/agent_watch/20261109-033411-626739Z-p72113-prebump/report.json"]}}
+  - agent_sessions_version: "6.4+unreleased"
+    as_of_date_utc: "2026-11-09"
     as_of_commit: "20a1bbbb"
     note: "Final weekly verifies twelve driver-backed installed builds after stable CLI updates; drift in Codex, Claude, Copilot and Kimi is additive and covered by redacted fixtures and tests. OpenClaw 2026.11.2 is held until its real database is migrated; DeepSeek Harness is held on a release-candidate upstream. Qwen, Devin and fx are unchanged."
     report: "scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json"

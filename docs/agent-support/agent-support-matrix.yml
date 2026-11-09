@@ -93,10 +93,9 @@ agents:
   openclaw:
     # 2026.8.1-2026.9.x were blocked by OpenClaw's own deferred doctor migrations
     # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
-    max_verified_version: "2026.10.9"
-    hold: {"version":"2026.11.2","reason":"Refuses to run until openclaw doctor --fix migrates the real agent database (schema 25 -> 27); the owner runs that migration on their own store.","since":"2026-11-08"}
+    max_verified_version: "2026.11.2"
     notes:
-      - "On a migrated copy, 2026.11.2 completed a real tool turn; schema 27 only adds columns, which the reader ignores. Ceiling stays until the real store is migrated and a prebump passes."
+      - "2026.11.2 needs openclaw doctor --fix (agent DB schema 25 -> 27, columns only). After the migration a real tool turn matches the schema-27 fixture."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"

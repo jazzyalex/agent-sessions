@@ -40,7 +40,9 @@ CREATE TABLE session_windows (
   agent_harness_id TEXT,
   parent_session_key TEXT,
   spawned_by TEXT,
-  display_name TEXT
+  display_name TEXT,
+  row_transcript_json TEXT,
+  row_transcript_updated_at INTEGER
 ) STRICT;
 CREATE TABLE "transcript_events" (
   session_id TEXT NOT NULL,
@@ -50,6 +52,13 @@ CREATE TABLE "transcript_events" (
   event_zstd BLOB,
   event_utf8_bytes INTEGER CHECK (event_utf8_bytes IS NULL OR event_utf8_bytes >= 0),
   navigation_json TEXT,
+  navigation_type TEXT,
+  navigation_custom_type TEXT,
+  navigation_display INTEGER NOT NULL DEFAULT 0,
+  message_role TEXT,
+  navigation_last_type TEXT,
+  navigation_last_custom_type TEXT,
+  navigation_valid INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (session_id, seq),
   FOREIGN KEY (session_id) REFERENCES "session_windows"(session_id) ON DELETE CASCADE,
   CHECK (
