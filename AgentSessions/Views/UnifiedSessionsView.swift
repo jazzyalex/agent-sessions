@@ -481,6 +481,10 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
+    /// macOS 26 toolbar anchoring (issue #92). Held in `@State`, not `@StateObject`,
+    /// on purpose: this view must not observe it, or every divider drag would
+    /// re-evaluate the whole window body. Only `SessionListToolbarGroup` observes it.
+    @State private var sessionListToolbarAnchor = SessionListToolbarAnchor()
     @AppStorage(PreferencesKey.Unified.collapsedHierarchyParents) private var collapsedHierarchyParentsRaw: String = ""
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -1023,6 +1027,7 @@ struct UnifiedSessionsView: View {
 	                    .padding(.trailing, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
 	                    .overlay(alignment: .trailing) { paneHairline(.vertical) }
+	                    .modifier(ListPaneDividerReporter(anchor: sessionListToolbarAnchor))
 	                transcriptPane
 	                    .frame(minWidth: 450)
 	                    .padding(.leading, Self.paneGutter)
@@ -2012,8 +2017,87 @@ struct UnifiedSessionsView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            paneAnchoredToolbarContent
+        } else {
+            classicToolbarContent
+        }
+    }
+
+    /// macOS 15 and earlier: the established layout, kept as-is. Filters sit in the
+    /// centered principal slot, search and actions trail.
+    @ToolbarContentBuilder
+    private var classicToolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
+                sessionFilterControls
+            }
+            .controlSize(.small)
+            .tint(UnifiedSessionsStyle.selectionAccent)
+        }
+        ToolbarItem(placement: .automatic) {
+            sessionSearchField
+                .frame(maxWidth: 520)
+        }
+        if unified.projectSelection != nil {
+            ToolbarItem(placement: .automatic) {
+                projectFilterBadge
+            }
+        }
+        ToolbarItemGroup(placement: .automatic) {
+            sessionActionControls
+        }
+    }
+
+    /// macOS 26 (issue #92): Tahoe draws a glass capsule around each toolbar group
+    /// and the window-centered principal slot straddled the list/transcript divider,
+    /// so nothing read as belonging to either pane. Here every control that scopes
+    /// the session list (filters, search, project badge) is one leading group whose
+    /// width ends at the divider, and the selected-session actions trail over the
+    /// transcript. Glass is hidden so both groups keep the Sequoia look.
+    @available(macOS 26.0, *)
+    @ToolbarContentBuilder
+    private var paneAnchoredToolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            SessionListToolbarGroup(anchor: sessionListToolbarAnchor) { width in
+                HStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        sessionFilterControls
+                    }
+                    .controlSize(.small)
+                    .tint(UnifiedSessionsStyle.selectionAccent)
+                    .fixedSize()
+
+                    sessionSearchField
+                        .frame(maxWidth: width == nil ? 520 : .infinity)
+
+                    if unified.projectSelection != nil {
+                        projectFilterBadge
+                            .fixedSize()
+                    }
+                }
+            }
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarSpacer(.flexible)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            sessionActionControls
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+
+    private var sessionSearchField: some View {
+        UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
+    }
+
+    private var projectFilterBadge: some View {
+        UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
+    }
+
+    @ViewBuilder
+    private var sessionFilterControls: some View {
                 ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
                     .disabled(!liveSessionsFeatureEnabled)
                     .help(
@@ -2077,24 +2161,14 @@ struct UnifiedSessionsView: View {
                 // filter menu once more than four agents are enabled (⌘ shortcuts
                 // are preserved either way).
                 agentToggleControls()
-            }
-            .controlSize(.small)
-            .tint(UnifiedSessionsStyle.selectionAccent)
-        }
-        ToolbarItem(placement: .automatic) {
-            UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
-                .frame(maxWidth: 520)
-        }
-        if unified.projectSelection != nil {
-            ToolbarItem(placement: .automatic) {
-                UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
-            }
-        }
-        // Ranked by how often a control is reached for without thinking. Three
-        // action glyphs, two view toggles, and one menu for everything that is
-        // looked for rather than reflexed at — a named menu row is more
-        // discoverable than an unlabelled glyph, not less.
-        ToolbarItemGroup(placement: .automatic) {
+    }
+
+    // Ranked by how often a control is reached for without thinking. Three
+    // action glyphs, two view toggles, and one menu for everything that is
+    // looked for rather than reflexed at — a named menu row is more
+    // discoverable than an unlabelled glyph, not less.
+    @ViewBuilder
+    private var sessionActionControls: some View {
             ToolbarIconButton(
                 help: liveSessionsFeatureEnabled
                     ? "Open the Quota Meter."
@@ -2170,7 +2244,6 @@ struct UnifiedSessionsView: View {
             // workaround the source pills already use when they collapse into
             // AgentOverflowMenu.
             overflowMenuShortcuts
-        }
     }
 
     @ViewBuilder
@@ -4790,7 +4863,8 @@ private struct UnifiedSearchFiltersView: View {
 
                 // Use an AppKit-backed text field to ensure focus works inside a toolbar
                 ToolbarSearchTextField(text: $unified.queryDraft,
-                                       placeholder: "Search",
+                                       placeholder: String(localized: "Search sessions",
+                                                           comment: "Placeholder in the main window search field; it searches every indexed session, not the open transcript."),
                                        isFirstResponder: Binding(get: { searchFocus == .field },
                                                                  set: { want in
                                                                      if want { searchFocus = .field }
@@ -5027,6 +5101,150 @@ private struct UnifiedProjectFilterBadgeView: View {
 }
 
 // MARK: - AppKit-backed text field for reliable toolbar focus
+/// Width math for the macOS 26 session-list toolbar group (issue #92). The group
+/// starts at the toolbar's leading slot and must stop just short of the
+/// list/transcript divider, so it is sized from two window-space measurements.
+enum SessionListToolbarLayout {
+    /// Breathing room between the group's trailing edge and the divider line,
+    /// matching the pane gutter used inside the split.
+    static let dividerGap: CGFloat = LayoutTokens.sm
+    /// Below this the filters and search field cannot fit without clipping; the
+    /// group stays this wide and lets the toolbar overflow handle the rest.
+    static let minimumWidth: CGFloat = 480
+
+    /// `nil` means "no side-by-side divider to align to" (stacked layout, hidden
+    /// transcript, or not yet measured): the group then uses its natural width.
+    static func groupWidth(dividerX: CGFloat?, groupMinX: CGFloat?) -> CGFloat? {
+        guard let dividerX, let groupMinX else { return nil }
+        return max(minimumWidth, (dividerX - groupMinX - dividerGap).rounded(.down))
+    }
+
+    /// Sub-point jitter must not write state, or the measure → resize → measure
+    /// cycle never settles.
+    static func hasMoved(_ old: CGFloat?, to new: CGFloat) -> Bool {
+        guard let old else { return true }
+        return abs(old - new) >= 0.5
+    }
+}
+
+/// Window-space measurements for the macOS 26 session-list toolbar group.
+final class SessionListToolbarAnchor: ObservableObject {
+    /// x of the list/transcript divider; `nil` when panes are not side by side.
+    @Published var dividerX: CGFloat?
+    /// x of the toolbar group's leading edge.
+    @Published var groupMinX: CGFloat?
+
+    var groupWidth: CGFloat? {
+        SessionListToolbarLayout.groupWidth(dividerX: dividerX, groupMinX: groupMinX)
+    }
+}
+
+/// The only view that observes the anchor, so divider drags re-render just the
+/// toolbar group.
+private struct SessionListToolbarGroup<Content: View>: View {
+    @ObservedObject var anchor: SessionListToolbarAnchor
+    @ViewBuilder var content: (CGFloat?) -> Content
+
+    var body: some View {
+        let width = anchor.groupWidth
+        content(width)
+            .frame(width: width, alignment: .leading)
+            .background(WindowFrameReader { [anchor] frame in
+                if SessionListToolbarLayout.hasMoved(anchor.groupMinX, to: frame.minX) {
+                    anchor.groupMinX = frame.minX
+                }
+            })
+    }
+}
+
+/// Reports where the list pane ends (the divider) on macOS 26. A no-op on older
+/// systems, whose toolbar does not align to the panes.
+private struct ListPaneDividerReporter: ViewModifier {
+    let anchor: SessionListToolbarAnchor
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .background(WindowFrameReader { [anchor] frame in
+                    if SessionListToolbarLayout.hasMoved(anchor.dividerX, to: frame.maxX) {
+                        anchor.dividerX = frame.maxX
+                    }
+                })
+                .onDisappear { [anchor] in anchor.dividerX = nil }
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports the hosting view's frame in window coordinates. SwiftUI's `.global`
+/// space is per hosting view, and toolbar items live in a different hosting view
+/// from the split, so the two can only be compared in AppKit window space.
+private struct WindowFrameReader: NSViewRepresentable {
+    var onChange: (CGRect) -> Void
+
+    func makeNSView(context: Context) -> FrameReportingView {
+        let view = FrameReportingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: FrameReportingView, context: Context) {
+        view.onChange = onChange
+        view.reportSoon()
+    }
+
+    final class FrameReportingView: NSView {
+        var onChange: ((CGRect) -> Void)?
+        private var resizeObserver: NSObjectProtocol?
+        private var lastReported: CGRect?
+        private var reportPending = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+            resizeObserver = nil
+            lastReported = nil
+            guard let window else { return }
+            resizeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportSoon() }
+            }
+            reportSoon()
+        }
+
+        override func layout() {
+            super.layout()
+            reportSoon()
+        }
+
+        /// Deferred one runloop turn: the callback writes SwiftUI state, which must
+        /// not happen during a view update, and coalescing keeps live resize cheap.
+        func reportSoon() {
+            guard !reportPending else { return }
+            reportPending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reportPending = false
+                guard self.window != nil else { return }
+                let frame = self.convert(self.bounds, to: nil)
+                guard frame != self.lastReported else { return }
+                self.lastReported = frame
+                self.onChange?(frame)
+            }
+        }
+
+        deinit {
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+        }
+    }
+}
+
 private struct ToolbarSearchTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String

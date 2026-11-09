@@ -20242,6 +20242,23 @@
         }
       }
     },
+    "Search sessions": {
+      "comment": "Placeholder in the main window search field; it searches every indexed session, not the open transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索会话"
+          }
+        }
+      }
+    },
     "Search sessions (⌥⌘F)": {
       "localizations": {
         "en": {
