@@ -603,6 +603,7 @@ struct UnifiedSessionsView: View {
 			rootContent
 				.preferredColorScheme(preferredColorScheme)
 				.toolbar { toolbarContent }
+				.modifier(PaneAnchoredToolbarTitle())
 				.overlay(alignment: .topTrailing) { topTrailingNotices }
 				.background(
 					WindowKeyObserver(
@@ -1023,7 +1024,7 @@ struct UnifiedSessionsView: View {
 	                // pane is inset by `paneGutter` so neither the list content nor the
 	                // transcript stripes butt against the line — equal margin both sides.
 	                listPaneWithTopSlot
-	                    .frame(minWidth: 320, maxWidth: 1200)
+	                    .frame(minWidth: SessionListToolbarLayout.sideBySideListMinWidth, maxWidth: 1200)
 	                    .padding(.trailing, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
 	                    .overlay(alignment: .trailing) { paneHairline(.vertical) }
@@ -2060,22 +2061,35 @@ struct UnifiedSessionsView: View {
     private var paneAnchoredToolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             SessionListToolbarGroup(anchor: sessionListToolbarAnchor) { width in
+                // Filters and badge are offered space first; the search field
+                // takes what is left down to its minimum. Each switches to a
+                // compact form (one Agents menu, icon-only badge and scope chips)
+                // only when the regular one does not fit before the divider.
                 HStack(spacing: 12) {
-                    HStack(spacing: 12) {
-                        sessionFilterControls
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { anchoredFilterControls(compact: false) }
+                        HStack(spacing: 12) { anchoredFilterControls(compact: true) }
                     }
                     .controlSize(.small)
                     .tint(UnifiedSessionsStyle.selectionAccent)
-                    .fixedSize()
+                    .layoutPriority(1)
 
-                    sessionSearchField
+                    UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator,
+                                             searchState: searchState, adaptive: true)
                         .frame(maxWidth: width == nil ? 520 : .infinity)
 
                     if unified.projectSelection != nil {
-                        projectFilterBadge
-                            .fixedSize()
+                        ViewThatFits(in: .horizontal) {
+                            UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
+                            UnifiedProjectFilterBadgeView(unified: unified, compact: true,
+                                                          onClear: { applyProjectSelection(nil) })
+                        }
+                        .layoutPriority(1)
                     }
                 }
+                // ViewThatFits may keep both variants alive, so no shortcut lives
+                // inside them; they are registered exactly once here.
+                .background { sessionFilterShortcuts }
             }
         }
         .sharedBackgroundVisibility(.hidden)
@@ -2094,6 +2108,94 @@ struct UnifiedSessionsView: View {
 
     private var projectFilterBadge: some View {
         UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
+    }
+
+    /// macOS 26 session-list filters. Same controls as `sessionFilterControls`,
+    /// minus every keyboard shortcut (see `sessionFilterShortcuts`). Compact folds
+    /// Codex, Claude and the other agents into a single Agents menu.
+    @ViewBuilder
+    private func anchoredFilterControls(compact: Bool) -> some View {
+        ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
+            .disabled(!liveSessionsFeatureEnabled)
+            .help(
+                liveSessionsFeatureEnabled
+                    ? "Show only live sessions in the list (Codex, Claude)"
+                    : "Enable live session detection (Beta) in Settings → Quota Meter."
+            )
+
+        Button(action: { showSubagentHierarchy.toggle() }) {
+            Image(systemName: showSubagentHierarchy ? "list.bullet.indent" : "list.bullet")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(showSubagentHierarchy ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
+
+        if isHierarchyBrowsing {
+            ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
+                ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
+            } action: {
+                collapseAllHierarchyParents()
+            }
+            .disabled(currentExpandableParentIDs.isEmpty)
+
+            ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
+                ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
+            } action: {
+                expandAllHierarchyParents()
+            }
+            .disabled(collapsedParents.isEmpty)
+        }
+
+        if compact {
+            AgentOverflowMenu(specs: allEnabledAgentSpecs)
+        } else {
+            if codexAgentEnabled {
+                AgentTabToggle(title: "Codex", color: Color.agentCodex,
+                               isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
+                    .help("Show or hide Codex sessions (⌘1)")
+            }
+            if claudeAgentEnabled {
+                AgentTabToggle(title: "Claude", color: Color.agentClaude,
+                               isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
+                    .help("Show or hide Claude sessions (⌘2)")
+            }
+            if enabledAgentCount > 4 {
+                AgentOverflowMenu(specs: enabledOtherAgentSpecs)
+            } else {
+                ForEach(enabledOtherAgentSpecs) { spec in
+                    AgentTabToggle(title: spec.title, color: spec.color,
+                                   isMonochrome: stripMonochrome, isOn: spec.isOn)
+                        .help("Show or hide \(spec.title) sessions in the list")
+                }
+            }
+        }
+    }
+
+    /// Codex and Claude first, then the other enabled agents, for the compact menu.
+    private var allEnabledAgentSpecs: [AgentToolbarSpec] {
+        var specs: [AgentToolbarSpec] = []
+        if codexAgentEnabled {
+            specs.append(AgentToolbarSpec(id: SessionSource.codex.rawValue, title: "Codex", color: .agentCodex,
+                                          isOn: $unified.includeCodex, shortcut: "1"))
+        }
+        if claudeAgentEnabled {
+            specs.append(AgentToolbarSpec(id: SessionSource.claude.rawValue, title: "Claude", color: .agentClaude,
+                                          isOn: $unified.includeClaude, shortcut: "2"))
+        }
+        return specs + enabledOtherAgentSpecs
+    }
+
+    /// The filter shortcuts for the macOS 26 group, registered once whichever
+    /// filter variant is showing: ⇧⌘H for hierarchy, ⌘1–⌘9 for agents.
+    @ViewBuilder
+    private var sessionFilterShortcuts: some View {
+        hiddenShortcut(key: "h", modifiers: [.command, .shift]) { showSubagentHierarchy.toggle() }
+        ForEach(allEnabledAgentSpecs) { spec in
+            if let shortcut = spec.shortcut {
+                hiddenShortcut(key: shortcut, modifiers: .command) { spec.isOn.wrappedValue.toggle() }
+            }
+        }
     }
 
     @ViewBuilder
@@ -4756,14 +4858,18 @@ private struct SearchScopeChip: View {
     let symbol: String
     let title: LocalizedStringResource
     let help: LocalizedStringResource
+    /// Narrow macOS 26 list pane: the symbol alone, title kept for VoiceOver.
+    var iconOnly: Bool = false
 
     var body: some View {
         Button { isOn.toggle() } label: {
             HStack(spacing: 4) {
                 Image(systemName: isOn ? "\(symbol).fill" : symbol)
                     .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
+                if !iconOnly {
+                    Text(title)
+                        .font(.system(size: 11, weight: .medium))
+                }
             }
             .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 7)
@@ -4791,6 +4897,9 @@ private struct ArchivedScopeChip: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     let codexEnabled: Bool
     let claudeEnabled: Bool
+    /// Narrow macOS 26 list pane: the box symbol alone; a filled box still shows
+    /// that a filter is on.
+    var iconOnly: Bool = false
 
     private var activeCount: Int {
         (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
@@ -4820,9 +4929,11 @@ private struct ArchivedScopeChip: View {
                 HStack(spacing: 4) {
                     Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
                         .font(.system(size: 10, weight: .semibold))
-                    Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
-                        .font(.system(size: 11, weight: .medium))
-                        .monospacedDigit()
+                    if !iconOnly {
+                        Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                    }
                 }
                 .foregroundStyle(activeCount > 0 ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 7)
@@ -4843,6 +4954,10 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
+    /// macOS 26 pane-anchored toolbar: the field may shrink further, and the ⌥⌘F
+    /// hint and scope-chip titles drop out when the list pane is narrow. Off, the
+    /// field keeps its established layout.
+    var adaptive: Bool = false
     // The pi/kimi/grok enablement flags this view used to AND into its two `search.start`
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
     // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
@@ -4853,6 +4968,28 @@ private struct UnifiedSearchFiltersView: View {
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
     private enum SearchFocusTarget: Hashable { case field, clear }
+
+    private var shortcutHint: some View {
+        Text("⌥⌘F")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func scopeChips(iconOnly: Bool) -> some View {
+        SearchScopeChip(isOn: $unified.showFavoritesOnly,
+                        symbol: "star",
+                        title: "Saved",
+                        help: "Show only saved sessions",
+                        iconOnly: iconOnly)
+
+        ArchivedScopeChip(unified: unified,
+                          codexEnabled: codexAgentEnabled,
+                          claudeEnabled: claudeAgentEnabled,
+                          iconOnly: iconOnly)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Inline search field (always visible to keep global search front-and-center)
@@ -4873,14 +5010,19 @@ private struct UnifiedSearchFiltersView: View {
                                        focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() },
                                        onEscape: { clearSearchFromField() })
-                    .frame(minWidth: 220)
+                    .frame(minWidth: adaptive ? 96 : 220)
                     .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("⌥⌘F")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                    if adaptive {
+                        ViewThatFits(in: .horizontal) {
+                            shortcutHint
+                            Color.clear.frame(width: 0, height: 0)
+                        }
+                        .layoutPriority(1)
+                    } else {
+                        shortcutHint
+                    }
                 } else {
                     Button(action: {
                         clearSearchFromField()
@@ -4899,14 +5041,15 @@ private struct UnifiedSearchFiltersView: View {
                 // field with the other scoping, not as a separate toolbar glyph.
                 Divider().frame(height: 14)
 
-                SearchScopeChip(isOn: $unified.showFavoritesOnly,
-                                symbol: "star",
-                                title: "Saved",
-                                help: "Show only saved sessions")
-
-                ArchivedScopeChip(unified: unified,
-                                  codexEnabled: codexAgentEnabled,
-                                  claudeEnabled: claudeAgentEnabled)
+                if adaptive {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { scopeChips(iconOnly: false) }
+                        HStack(spacing: 8) { scopeChips(iconOnly: true) }
+                    }
+                    .layoutPriority(1)
+                } else {
+                    scopeChips(iconOnly: false)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -5057,15 +5200,26 @@ private struct UnifiedSearchFiltersView: View {
 
 private struct UnifiedProjectFilterBadgeView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
+    /// Narrow macOS 26 list pane: folder and clear button only; the project name
+    /// moves to the tooltip and VoiceOver label.
+    var compact: Bool = false
     var onClear: () -> Void
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
         let accent = stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
+        let name = unified.projectSelection.map(Self.badgeText(for:))
         HStack(spacing: 4) {
-            Image(systemName: "folder")
-                .foregroundStyle(.secondary)
-            if let selection = unified.projectSelection {
+            if compact {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                    .help(name ?? "")
+                    .accessibilityLabel(Text(name ?? ""))
+            } else {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+            }
+            if !compact, let selection = unified.projectSelection {
                 Text(Self.badgeText(for: selection))
                     .font(.system(size: 12))
                     .lineLimit(1)
@@ -5108,15 +5262,23 @@ enum SessionListToolbarLayout {
     /// Breathing room between the group's trailing edge and the divider line,
     /// matching the pane gutter used inside the split.
     static let dividerGap: CGFloat = LayoutTokens.sm
-    /// Below this the filters and search field cannot fit without clipping; the
-    /// group stays this wide and lets the toolbar overflow handle the rest.
-    static let minimumWidth: CGFloat = 480
 
+    /// Narrowest side-by-side list pane. On macOS 26 the session-list toolbar group
+    /// must fit above it in its compact form (live, hierarchy, one Agents menu and
+    /// an icon-chip search field ≈ 350 pt after the traffic lights), so the floor
+    /// is raised there. Older systems keep 320.
+    static var sideBySideListMinWidth: CGFloat {
+        if #available(macOS 26.0, *) { return 440 }
+        return 320
+    }
+
+    /// The space between the group's leading edge and the divider, never more:
+    /// the group is clipped to this, so it cannot reach into the transcript.
     /// `nil` means "no side-by-side divider to align to" (stacked layout, hidden
     /// transcript, or not yet measured): the group then uses its natural width.
     static func groupWidth(dividerX: CGFloat?, groupMinX: CGFloat?) -> CGFloat? {
         guard let dividerX, let groupMinX else { return nil }
-        return max(minimumWidth, (dividerX - groupMinX - dividerGap).rounded(.down))
+        return max(0, (dividerX - groupMinX - dividerGap).rounded(.down))
     }
 
     /// Sub-point jitter must not write state, or the measure → resize → measure
@@ -5149,11 +5311,28 @@ private struct SessionListToolbarGroup<Content: View>: View {
         let width = anchor.groupWidth
         content(width)
             .frame(width: width, alignment: .leading)
+            // Last resort only: the compact variants are sized to fit the
+            // narrowest list pane, but nothing may ever draw past the divider.
+            .clipped()
             .background(WindowFrameReader { [anchor] frame in
                 if SessionListToolbarLayout.hasMoved(anchor.groupMinX, to: frame.minX) {
                     anchor.groupMinX = frame.minX
                 }
             })
+    }
+}
+
+/// macOS 26: the window title would take ~120 pt from the session-list group at
+/// the leading edge (or float over the transcript after it), so it is not drawn
+/// in the toolbar. The window keeps its title for the Window menu and Mission
+/// Control. Older systems are unchanged.
+private struct PaneAnchoredToolbarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }
 

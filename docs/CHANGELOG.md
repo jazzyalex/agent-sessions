@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - **Message envelopes read as messages.** Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.
 - **No more empty agent rows.** Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.
 - **Your messages no longer show a duration.** The meaningless `0.0s` chip is gone from user rows.
+- **Toolbar controls line up with their pane on macOS 26.** Session filters and search sit above the session list and stop at the divider; session actions sit above the transcript, without the extra glass capsules. Narrow lists get a compact Agents menu and icon-only chips. The search field now reads "Search sessions" (#92).
 
 ## [6.4] - 2026-11-07
 

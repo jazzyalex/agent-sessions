@@ -15,9 +15,28 @@ final class SessionListToolbarLayoutTests: XCTestCase {
         XCTAssertEqual((wide ?? 0) - (narrow ?? 0), 300)
     }
 
-    func testNarrowListKeepsAWidthTheControlsFitIn() {
-        let width = SessionListToolbarLayout.groupWidth(dividerX: 400, groupMinX: 150)
-        XCTAssertEqual(width, SessionListToolbarLayout.minimumWidth)
+    func testNarrowListNeverPushesTheGroupPastTheDivider() throws {
+        let minX: CGFloat = 150
+        let dividerX: CGFloat = 400
+        let width = try XCTUnwrap(SessionListToolbarLayout.groupWidth(dividerX: dividerX, groupMinX: minX))
+        XCTAssertLessThanOrEqual(minX + width, dividerX - SessionListToolbarLayout.dividerGap)
+    }
+
+    func testGroupStartingPastTheDividerGetsNoWidth() {
+        XCTAssertEqual(SessionListToolbarLayout.groupWidth(dividerX: 100, groupMinX: 150), 0)
+    }
+
+    func testListMinimumLeavesRoomForTheCompactGroup() {
+        // Traffic lights end near x = 78; the compact group needs about 350 pt.
+        let available = SessionListToolbarLayout.groupWidth(
+            dividerX: SessionListToolbarLayout.sideBySideListMinWidth + LayoutTokens.sm,
+            groupMinX: 86
+        ) ?? 0
+        if #available(macOS 26.0, *) {
+            XCTAssertGreaterThanOrEqual(available, 350)
+        } else {
+            XCTAssertEqual(SessionListToolbarLayout.sideBySideListMinWidth, 320, "pre-Tahoe list sizing is unchanged")
+        }
     }
 
     func testNoDividerMeansNaturalWidth() {
