@@ -13,7 +13,7 @@ config correction, not automatic fallback on an auth failure. The old openai-cod
 credential returned refresh_token_reused/401, and both failed direct reports were kept.
 Only model_unavailable permits a configured fallback model. The OpenCode DB rebuild
 helper is diagnostic-only and cannot --emit: inspect its report, then add a redacted
-normal fixture and survive-parsing test for DB drift explicitly.
+normal fixture for DB drift explicitly (add a drift-table row only if the kind matters).
 
 ## 1  Quick Start (all agents)
 

@@ -6,7 +6,7 @@ Do not maintain a second run order here.
 Before recording a ceiling, require a session written by that build, a real tool call,
 a non-zero baseline type count, passing discovery and parser checks, triaged schema drift,
 and healthy usage probes. Keep direct failed prebump reports. Read the rebuild report
-before --emit; verified drift belongs in normal fixtures with survive-parsing tests.
+before --emit; verified drift belongs in normal fixtures, plus a row in the drift-kind table test when its kind matters.
 
 Usage/parsing changes require positive and negative cases before review. Run the stable
 Xcode wrapper and read suite totals from xcresult against tools/release/test-count-baseline.txt.

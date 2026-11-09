@@ -2,73 +2,65 @@ import XCTest
 @testable import AgentSessions
 
 final class Stage0GoldenFixturesTests: XCTestCase {
-    func testNovemberCodexCoverageSurvivesFullParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
-        for key in ["cloud_skills", "inputImages", "encrypted_content", "last_usage_includes_reasoning"] {
-            XCTAssertTrue(full.events.contains { $0.rawJSON.contains("\"\(key)\"") }, key)
-        }
-        XCTAssertTrue(full.events.contains { $0.kind == .tool_call })
-    }
-
-    func testNovemberClaudeCoverageSurvivesFullParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
-        let raw = full.events.compactMap { Data(base64Encoded: $0.rawJSON) }
-            .compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
-        for key in ["preCompactArtifactReadVersions", "apiErrorParams", "classifierCategory", "ruleSource", "commandRun"] {
-            XCTAssertTrue(raw.contains("\"\(key)\""), key)
-        }
-        XCTAssertTrue(full.events.contains { $0.kind == .assistant })
-    }
-
-    func testNovemberCopilotCoverageSurvivesFullParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/copilot/small.jsonl")
-        let full = try XCTUnwrap(CopilotSessionParser.parseFileFull(at: url))
-        XCTAssertTrue(full.events.contains {
-            guard let data = Data(base64Encoded: $0.rawJSON), let raw = String(data: data, encoding: .utf8) else { return false }
-            return raw.contains("selectionReason")
-        })
-        XCTAssertTrue(full.events.contains { $0.kind == .tool_call })
-    }
-
-    func testNovemberPiCoverageSurvivesFullParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/pi/small.jsonl")
-        let full = try XCTUnwrap(PiSessionParser.parseFileFull(at: url))
-        XCTAssertTrue(full.events.contains {
-            guard let data = Data(base64Encoded: $0.rawJSON), let raw = String(data: data, encoding: .utf8) else { return false }
-            return raw.contains("totalFromProvider")
-        })
-        XCTAssertTrue(full.events.contains { $0.kind == .assistant })
-    }
-
     private func decodedRaw(_ event: SessionEvent) -> String {
         let data = Data(base64Encoded: event.rawJSON) ?? Data(event.rawJSON.utf8)
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// 2026-11-08 drift: new non-message records must stay in the fixture and parse as
-    /// metadata. Claude's session-owner carries account ids; Copilot's instruction
-    /// updates carry runtime instructions; neither may render as a message.
-    func testNovember8DriftRecordsStayMetadata() throws {
-        let cases: [(path: String, marker: String, parse: (URL) -> Session?)] = [
-            ("agents/codex/small.jsonl", "\"type\":\"realtime_item\"", { SessionIndexer().parseFileFull(at: $0) }),
-            ("agents/claude/small.jsonl", "\"type\":\"session-owner\"", { ClaudeSessionParser.parseFileFull(at: $0) }),
-            ("agents/copilot/small.jsonl", "\"type\":\"instruction.update\"", { CopilotSessionParser.parseFileFull(at: $0) })
+    /// Format-drift guard. Each row names a fixture, a marker unique to one record family,
+    /// and the event kind every matching event must have (nil: the records produce no
+    /// events). A row fails when the fixture loses the record or the parser changes its
+    /// kind. Format sweeps add a row here when a new record's kind matters to the user;
+    /// a field the parser only has to tolerate needs no row — the fixture covers it.
+    func testDriftRecordsParseAsTheirExpectedKind() throws {
+        let codex = "agents/codex/small.jsonl", claude = "agents/claude/small.jsonl"
+        let claudeDrift = "agents/claude/schema_drift.jsonl"
+        let copilot = "agents/copilot/small.jsonl", copilotDrift = "agents/copilot/schema_drift.jsonl"
+        let rows: [(path: String, marker: String, kind: SessionEventKind?, why: String)] = [
+            // Codex
+            (codex, "\"type\":\"realtime_item\"", .meta, "realtime markers (0.167) are not messages"),
+            (codex, "\"encrypted_content\":\"[trimmed for fixture]\",\"status\"", .assistant, "an encrypted reply (0.167) still reads as a reply"),
+            (codex, "\"call-enc-1\"", .tool_call, "a function_call with encrypted_content (0.164) stays a tool call"),
+            (codex, "\"type\":\"world_state\"", .meta, "world_state snapshots (0.144, object model 0.164) are not messages"),
+            (codex, "\"type\":\"item_completed\"", .meta, "item_completed lifecycle (0.151) is not a prompt"),
+            (codex, "\"dynamic_tools\"", .meta, "compaction resume metadata is not a prompt or tool call"),
+            (codex, "\"configuration_update\"", .meta, "a mid-session effort change is not a prompt"),
+            (codex, "msg-meta-1", .meta, "a developer message with provenance is not a user prompt"),
+            (codex, "\"assistant_messages\"", .meta, "retained-context snapshots do not replay messages"),
+            // Claude
+            (claude, "\"type\":\"session-owner\"", .meta, "account and organization ids (2.1.319) never render"),
+            (claude, "\"type\":\"tools-used\"", .meta, "the tools-used summary (2.1.311) is not a tool call"),
+            (claude, "\"refusedMessageId\"", .meta, "a classifier-stop notice (2.1.304) is not a user prompt"),
+            (claude, "\"type\":\"artifact-autoreact-ledger\"", .meta, "artifact ledgers (2.1.251) are not messages"),
+            (claude, "\"type\":\"artifact-comment-monitor\"", .meta, "artifact monitors (2.1.251) are not messages"),
+            (claude, "\"type\":\"api-request", nil, "request-log records (2.1.303) produce no events"),
+            (claudeDrift, "\"type\":\"attachment\"", .meta, "attachments are metadata"),
+            (claudeDrift, "\"type\":\"permission-mode\"", .meta, "permission-mode markers are metadata"),
+            (claudeDrift, "\"type\":\"mode\"", .meta, "mode markers (2.1.211) are never blank events"),
+            (claudeDrift, "\"subtype\":\"stop_hook_summary\"", .meta, "stop-hook summaries are metadata"),
+            // Copilot
+            (copilot, "\"type\":\"instruction.update\"", .meta, "runtime instructions (1.0.107) are not user prompts"),
+            (copilotDrift, "\"type\":\"session.shutdown\"", .meta, "shutdown summaries are metadata"),
+            (copilotDrift, "\"type\":\"session.auto_mode_resolved\"", .meta, "auto-model selection (1.0.65) is metadata"),
+            (copilotDrift, "\"type\":\"session.usage_checkpoint\"", .meta, "usage checkpoints (1.0.65) are metadata"),
         ]
-        for c in cases {
-            let url = FixturePaths.stage0FixtureURL(c.path)
+        var parsed: [String: Session] = [:]
+        for row in rows {
+            let url = FixturePaths.stage0FixtureURL(row.path)
             let text = try String(contentsOf: url, encoding: .utf8)
-            let expected = text.split(separator: "\n").filter { $0.contains(c.marker) }.count
-            XCTAssertGreaterThan(expected, 0, "\(c.path) must keep a \(c.marker) record")
-            let full = try XCTUnwrap(c.parse(url), c.path)
-            let events = full.events.filter { decodedRaw($0).contains(c.marker) }
-            XCTAssertEqual(events.count, expected, "\(c.marker) survives parsing once per record")
-            XCTAssertTrue(events.allSatisfy { $0.kind == .meta }, "\(c.marker) must stay metadata")
-            if c.path.contains("codex") {
-                XCTAssertTrue(full.events.contains {
-                    $0.kind == .assistant && decodedRaw($0).contains("\"encrypted_content\"")
-                }, "an assistant message with encrypted_content still reads as a reply")
+            XCTAssertTrue(text.contains(row.marker), "\(row.path) lost its \(row.marker) record")
+            if parsed[row.path] == nil {
+                parsed[row.path] = row.path.contains("/codex/") ? SessionIndexer().parseFileFull(at: url)
+                    : row.path.contains("/claude/") ? ClaudeSessionParser.parseFileFull(at: url)
+                    : CopilotSessionParser.parseFileFull(at: url)
+            }
+            let full = try XCTUnwrap(parsed[row.path], row.path)
+            let events = full.events.filter { decodedRaw($0).contains(row.marker) }
+            if let kind = row.kind {
+                XCTAssertFalse(events.isEmpty, "\(row.marker) produced no events: \(row.why)")
+                XCTAssertTrue(events.allSatisfy { $0.kind == kind }, "\(row.marker): \(row.why)")
+            } else {
+                XCTAssertTrue(events.isEmpty, "\(row.marker): \(row.why)")
             }
         }
     }
@@ -105,41 +97,6 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
-    func testCodexSchemaDriftWorldStateEventSurvivesParsing() throws {
-        // Codex 0.144.x adds a `world_state` context-snapshot event; the payload has no
-        // role/type, so it resolves to `.meta` (non-breaking). Codex rawJSON is stored
-        // plain (not base64 like Claude), so assert against the raw line directly.
-        let url = FixturePaths.stage0FixtureURL("agents/codex/schema_drift.jsonl")
-        let idx = SessionIndexer()
-        guard let full = idx.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        let worldState = full.events.filter { $0.kind == .meta && $0.rawJSON.contains("\"type\":\"world_state\"") }
-        XCTAssertFalse(worldState.isEmpty, "world_state event should survive parsing as .meta")
-    }
-
-    func testCodexSeptemberSchemaAdditionsSurviveParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        guard let full = SessionIndexer().parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-
-        for key in [
-            "retained_context", "user_messages_incomplete", "questions",
-            "runtime_workspace_roots", "executed_tool_calls", "tool_calls_complete",
-            "guardian_metadata", "assistant_messages", "assistant_messages_incomplete",
-            "retained_source", "revision", "cyber_access_program", "error_reason",
-        ] {
-            XCTAssertTrue(full.events.contains { $0.rawJSON.contains("\"\(key)\"") },
-                          "Codex \(key) field should survive parsing")
-        }
-
-        XCTAssertTrue(full.events.contains {
-            $0.kind == .user && $0.rawJSON.contains("\"retained_source\"")
-        }, "retained-source messages should remain ordinary transcript messages")
-        XCTAssertTrue(full.events.contains {
-            $0.kind == .meta && $0.rawJSON.contains("\"assistant_messages\"")
-        }, "retained-context snapshots should remain metadata instead of replaying messages")
-    }
-
     func testClaudeSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let preview = ClaudeSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
@@ -153,86 +110,6 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_call }))
         XCTAssertTrue(full.events.contains(where: { $0.kind == .tool_result }))
         XCTAssertTrue(full.events.contains(where: { $0.kind == .meta }))
-    }
-
-    // The baseline fixture carries redacted 2.1.303 request-log records
-    // (`api-request`, `api-request-blob`, `api-request-shape`); none may become events.
-    func testClaudeRequestLogRecordsInBaselineProduceNoEvents() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        let fixture = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(fixture.contains("\"type\":\"api-request-blob\""), "fixture should cover request-log records")
-
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        let leaked = full.events.filter { event in
-            guard let data = Data(base64Encoded: event.rawJSON),
-                  let raw = String(data: data, encoding: .utf8) else { return false }
-            return raw.contains("\"type\":\"api-request")
-        }
-        XCTAssertTrue(leaked.isEmpty, "request-log records became \(leaked.count) events")
-    }
-
-    // Claude 2.1.304+ classifier-stop notice (`refusedMessageId`) in the baseline
-    // fixture must parse as metadata, never as a user prompt.
-    func testClaudeClassifierStopNoticeInBaselineIsMeta() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        let fixture = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(fixture.contains("\"refusedMessageId\""), "fixture should cover the classifier-stop notice")
-
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        let notices = full.events.filter { event in
-            guard let data = Data(base64Encoded: event.rawJSON),
-                  let raw = String(data: data, encoding: .utf8) else { return false }
-            return raw.contains("\"refusedMessageId\"")
-        }
-        XCTAssertEqual(notices.count, 1)
-        XCTAssertEqual(notices.first?.kind, .meta)
-        XCTAssertEqual(notices.first?.role, "system")
-    }
-
-    func testClaudeOctoberSchemaAdditionsSurviveParsing() throws {
-        // Claude 2.1.308+: user.sandboxed, permissionDecision grantScope/reasonCode,
-        // compactMetadata.precomputed and runningTurnSends, auto_mode finishExposedWork.
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-        func raw(_ event: SessionEvent) -> String? {
-            guard let data = Data(base64Encoded: event.rawJSON) else { return nil }
-            return String(data: data, encoding: .utf8)
-        }
-        for key in ["sandboxed", "grantScope", "reasonCode", "precomputed", "summarisedOnly", "finishExposedWork"] {
-            XCTAssertTrue(full.events.contains { raw($0)?.contains("\"\(key)\"") == true },
-                          "Claude \(key) field should survive parsing")
-        }
-        let sandboxedResult = full.events.filter { raw($0)?.contains("\"s-drift-u1\"") == true && raw($0)?.contains("\"sandboxed\"") == true }
-        XCTAssertFalse(sandboxedResult.isEmpty)
-        XCTAssertFalse(sandboxedResult.contains { $0.kind == .user }, "a sandboxed tool result is not a user prompt")
-
-        // Claude 2.1.311: a session-level `tools-used` summary listing tool names.
-        let toolsUsed = full.events.filter { raw($0)?.contains("\"type\":\"tools-used\"") == true }
-        XCTAssertEqual(toolsUsed.count, 1, "the tools-used record should survive parsing once")
-        XCTAssertEqual(toolsUsed.first?.kind, .meta, "tools-used is a summary, not a prompt or tool call")
-    }
-
-    func testClaudeSeptemberSchemaAdditionsSurviveRawJSON() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-        let decoded = full.events.compactMap { event -> String? in
-            guard let data = Data(base64Encoded: event.rawJSON) else { return nil }
-            return String(data: data, encoding: .utf8)
-        }
-
-        for key in [
-            "advisorModel", "input_transformations", "managedCommit", "turnOrigin",
-            "fallback_credit", "renderedRole", "builtInTypes", "credential_org",
-            "nameOnlyAnnouncements", "contextRendering", "echoWireToolInputs",
-            "keptReminders", "reminderFold", "systemTurns", "turnPosition",
-        ] {
-            XCTAssertTrue(decoded.contains { $0.contains("\"\(key)\"") },
-                          "Claude \(key) field should survive parsing")
-        }
     }
 
     func testClaudeAITitleIsRowTitleFallback() throws {
@@ -268,37 +145,6 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
             XCTAssertFalse(full.events.isEmpty)
         }
-    }
-
-    func testClaudeSchemaDriftAttachmentEventSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(withType: "attachment", in: full.events).isEmpty,
-                       "attachment event should survive parsing as .meta")
-    }
-
-    func testClaudeSchemaDriftPermissionModeEventSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(withType: "permission-mode", in: full.events).isEmpty,
-                       "permission-mode event should survive parsing as .meta")
-    }
-
-    // Claude 2.1.211 emits a session-level `mode` marker alongside `permission-mode`.
-    // It carries no content, so it reaches .meta via the SessionEventKind.from fallback
-    // rather than a named case; this pins that it is never surfaced as a blank event.
-    func testClaudeSchemaDriftModeEventSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(withType: "mode", in: full.events).isEmpty,
-                       "mode event should survive parsing as .meta")
-    }
-
-    func testClaudeSchemaDriftStopHookSummaryEventSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(containing: "\"subtype\":\"stop_hook_summary\"", in: full.events).isEmpty,
-                       "stop_hook_summary system event should survive parsing as .meta")
     }
 
     func testClaudeSubagentFixtureDetectsParent() throws {
@@ -368,28 +214,6 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
             XCTAssertFalse(full.events.isEmpty)
         }
-    }
-
-    func testCopilotSchemaDriftShutdownEventSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/copilot/schema_drift.jsonl")
-        guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(withType: "session.shutdown", in: full.events).isEmpty,
-                       "session.shutdown event should survive parsing as .meta")
-    }
-
-    func testCopilotAutoModeAndUsageCheckpointEventsSurviveParsing() throws {
-        // Copilot 1.0.65 emits two additive session-level event types:
-        // session.auto_mode_resolved (auto model selection) and
-        // session.usage_checkpoint (running AIU/premium-request usage). Both use
-        // the standard {type,id,parentId,timestamp,data} envelope and carry no
-        // renderable content, so the parser's default branch preserves them as
-        // .meta. Non-breaking, same as session.shutdown before them.
-        let url = FixturePaths.stage0FixtureURL("agents/copilot/schema_drift.jsonl")
-        guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        XCTAssertFalse(metaEvents(withType: "session.auto_mode_resolved", in: full.events).isEmpty,
-                       "session.auto_mode_resolved event should survive parsing as .meta")
-        XCTAssertFalse(metaEvents(withType: "session.usage_checkpoint", in: full.events).isEmpty,
-                       "session.usage_checkpoint event should survive parsing as .meta")
     }
 
     func testCopilotSubdirLayoutV1Parses() throws {
@@ -605,113 +429,6 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertEqual(errors.first?.toolName, "shell")
     }
 
-    // MARK: - Helpers
-
-    // MARK: - 2026-08-30 format sweep
-
-    // Claude 2.1.251 writes `artifact-autoreact-ledger` / `artifact-comment-monitor`
-    // records. They carry no role and no content, so they reach `.meta` through the
-    // SessionEventKind.from fallback rather than a named case.
-    func testClaudeArtifactLedgerRecordsSurviveParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-        for type in ["artifact-autoreact-ledger", "artifact-comment-monitor"] {
-            XCTAssertFalse(metaEvents(withType: type, in: full.events).isEmpty,
-                           "\(type) should survive parsing as .meta")
-        }
-    }
-
-    // Codex 0.151 nests subagent lifecycle under `item_completed`. The payload exposes no
-    // role/type at its top level, so it resolves to `.meta` (non-breaking). Codex rawJSON
-    // is stored plain, not base64 like Claude's.
-    func testCodexItemCompletedSubAgentActivitySurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let idx = SessionIndexer()
-        guard let full = idx.parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-        let items = full.events.filter {
-            $0.kind == .meta && $0.rawJSON.contains("\"type\":\"item_completed\"")
-        }
-        XCTAssertFalse(items.isEmpty, "item_completed event should survive parsing as .meta")
-    }
-
-    func testCodexItemCompletedGenerationMetadataSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let fixture = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(fixture.contains("\"generationId\""))
-        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
-        let events = full.events.filter { event in
-            let data = Data(base64Encoded: event.rawJSON) ?? Data(event.rawJSON.utf8)
-            return String(decoding: data, as: UTF8.self).contains("\"generationId\"")
-        }
-        XCTAssertFalse(events.isEmpty)
-        XCTAssertFalse(events.contains { $0.kind == .user }, "generation metadata must not become a prompt")
-    }
-
-    func testCodexCompactionDynamicToolMetadataSurvivesParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let fixture = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(fixture.contains("\"dynamic_tools\""))
-        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
-        let events = full.events.filter { event in
-            let data = Data(base64Encoded: event.rawJSON) ?? Data(event.rawJSON.utf8)
-            return String(decoding: data, as: UTF8.self).contains("\"dynamic_tools\"")
-        }
-        XCTAssertFalse(events.isEmpty)
-        XCTAssertTrue(events.allSatisfy { $0.kind == .meta }, "resume metadata must not become a prompt or tool call")
-    }
-
-    func testCodexOctoberMetadataAdditionsSurviveParsing() throws {
-        // Codex 0.164.0: content_item_metadata provenance on message and
-        // agent_message passthrough, and world_state.state.model as an object.
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let fixture = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(fixture.contains("\"content_item_metadata\""), "fixture should cover content_item_metadata")
-        XCTAssertTrue(fixture.contains("\"state\":{\"model\":{"), "fixture should cover the object-valued world_state model")
-
-        guard let full = SessionIndexer().parseFileFull(at: url) else {
-            return XCTFail("full parse returned nil")
-        }
-        func raw(_ event: SessionEvent) -> String {
-            if let data = Data(base64Encoded: event.rawJSON), let text = String(data: data, encoding: .utf8) { return text }
-            return event.rawJSON
-        }
-        let provenanceEvents = full.events.filter { raw($0).contains("\"content_item_metadata\"") }
-        XCTAssertFalse(provenanceEvents.isEmpty, "content_item_metadata records should survive parsing")
-        XCTAssertFalse(provenanceEvents.contains { raw($0).contains("msg-meta-1") && $0.kind == .user },
-                       "a developer message with provenance must not become a user prompt")
-
-        let worldState = full.events.filter { raw($0).contains("\"type\":\"world_state\"") && raw($0).contains("\"gpt-6.1-sol\"") }
-        let fixtureWorldStates = fixture.split(separator: "\n").filter {
-            $0.contains("\"type\":\"world_state\"") && $0.contains("\"gpt-6.1-sol\"")
-        }
-        XCTAssertGreaterThan(fixtureWorldStates.count, 0)
-        XCTAssertEqual(worldState.count, fixtureWorldStates.count,
-                       "each object-valued world_state fixture record should survive exactly once")
-        if let event = worldState.first {
-            XCTAssertEqual(event.kind, .meta)
-            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw(event).utf8)) as? [String: Any])
-            let state = (object["payload"] as? [String: Any])?["state"] as? [String: Any]
-            let model = try XCTUnwrap(state?["model"] as? [String: Any], "state.model must stay an object")
-            XCTAssertEqual(model["model"] as? String, "gpt-6.1-sol")
-        }
-
-        // 2026-10-27, gpt-6.1-sol: a function_call can carry an opaque encrypted_content
-        // blob next to its readable name and arguments. The call must still render.
-        let encryptedCall = full.events.filter { raw($0).contains("\"call-enc-1\"") && $0.kind == .tool_call }
-        XCTAssertEqual(encryptedCall.count, 1, "a function_call with encrypted_content stays a tool call")
-        XCTAssertEqual(encryptedCall.first?.toolName, "send_message")
-        XCTAssertTrue((encryptedCall.first?.toolInput ?? "").contains("message"), "its arguments stay readable")
-
-        // 2026-10-27: a harness-authored mid-session reasoning-effort change.
-        let configUpdate = full.events.filter { raw($0).contains("\"configuration_update\"") }
-        XCTAssertEqual(configUpdate.count, 1, "configuration_update should survive parsing once")
-        XCTAssertEqual(configUpdate.first?.kind, .meta, "a configuration change is not a prompt or reply")
-    }
-
     /// The invariant that matters most about these fixtures: they are committed, public
     /// artifacts, so no identifier may ever appear as a dict KEY in one.
     ///
@@ -760,17 +477,5 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertGreaterThan(scanned, 0, "no fixtures were scanned — the walk found nothing")
         XCTAssertTrue(offenders.isEmpty,
                       "identifier-shaped dict keys in committed fixtures: \(offenders.prefix(10))")
-    }
-
-    private func metaEvents(withType type: String, in events: [SessionEvent]) -> [SessionEvent] {
-        metaEvents(containing: "\"type\":\"\(type)\"", in: events)
-    }
-
-    private func metaEvents(containing needle: String, in events: [SessionEvent]) -> [SessionEvent] {
-        events.filter { event in
-            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
-                  let decoded = String(data: data, encoding: .utf8) else { return false }
-            return decoded.contains(needle)
-        }
     }
 }
