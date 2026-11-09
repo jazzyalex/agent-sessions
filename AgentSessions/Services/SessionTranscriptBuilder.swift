@@ -687,6 +687,14 @@ struct SessionTranscriptBuilder {
     private static func expandUserEmbeddedNoticesIfNeeded(block: LogicalBlock) -> [LogicalBlock] {
         guard block.kind == .user else { return [block] }
         if !block.text.localizedCaseInsensitiveContains("<turn_aborted") { return [block] }
+        // Provenance knows which items the user typed. A notice tag only in injected items is
+        // context, not an interruption: splitting it out would hand it the typed origin.
+        // Mixed items join raw text = injected + typed, so the raw text holds the typed part; a
+        // decoded envelope's display text does not appear in the raw text and still splits.
+        if block.messageOrigin == .typed, let typed = block.messageDisplayText, !typed.isEmpty,
+           !typed.localizedCaseInsensitiveContains("<turn_aborted"), block.text.contains(typed) {
+            return [block]
+        }
         return splitTurnAbortedBlocks(from: block)
     }
     

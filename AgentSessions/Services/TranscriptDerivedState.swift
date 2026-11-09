@@ -461,23 +461,12 @@ final class TranscriptDerivedState {
         var markers: [Int: [String]]
         var imageBlocks: Set<Int>
     }
-    /// The block just before the cached index's restart point, as it was when the index was built.
-    /// A live append leaves it unchanged; anything else that touched the prefix changes it.
-    private struct PrefixStamp: Equatable {
-        var eventID: String
-        var kind: SessionTranscriptBuilder.LogicalBlock.Kind
-        var textLength: Int
-
-        init?(blocks: [SessionTranscriptBuilder.LogicalBlock], before id: Int?) {
-            guard let id, id > 0, blocks.indices.contains(id - 1) else { return nil }
-            let block = blocks[id - 1]
-            eventID = block.eventID; kind = block.kind; textLength = block.text.utf16.count
-        }
-    }
     @ObservationIgnored private var messageGroupKey: MessageGroupKey?
     @ObservationIgnored private var cachedMessageGroups = TranscriptMessageGroupIndex()
-    @ObservationIgnored private var messageGroupBlockCount = 0
-    @ObservationIgnored private var messageGroupPrefix: PrefixStamp?
+    /// The blocks the cached index was built from. An extension first proves that every block
+    /// before its restart point is unchanged. Blocks that kept their event's text storage compare
+    /// in constant time, so on a live append this costs far less than a rebuild.
+    @ObservationIgnored private var messageGroupBlocks: [SessionTranscriptBuilder.LogicalBlock] = []
     @ObservationIgnored private var messageGroupRevision = 0
 
     /// True when `new` is the same stream as `old` after a live append: every key field but the
@@ -499,9 +488,11 @@ final class TranscriptDerivedState {
         guard key != messageGroupKey else { return cachedMessageGroups }
         let blocks = snapshot.blocks
         var groups: TranscriptMessageGroupIndex
-        if let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= messageGroupBlockCount,
-           messageGroupPrefix == PrefixStamp(blocks: blocks, before: cachedMessageGroups.lastOwnerID) {
-            groups = .extending(cachedMessageGroups, previousBlockCount: messageGroupBlockCount, blocks: blocks[...],
+        let oldBlocks = messageGroupBlocks
+        if let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= oldBlocks.count,
+           let start = cachedMessageGroups.lastBarrierID, start < oldBlocks.count,
+           blocks[..<start] == oldBlocks[..<start] {
+            groups = .extending(cachedMessageGroups, previousBlockCount: oldBlocks.count, blocks: blocks[...],
                                 source: snapshot.source, showsContext: showsContext, markers: markers,
                                 noncollapsibleBlockIndices: imageBlocks)
         } else {
@@ -512,8 +503,7 @@ final class TranscriptDerivedState {
         groups.revision = messageGroupRevision
         cachedMessageGroups = groups
         messageGroupKey = key
-        messageGroupBlockCount = blocks.count
-        messageGroupPrefix = PrefixStamp(blocks: blocks, before: groups.lastOwnerID)
+        messageGroupBlocks = blocks
         return cachedMessageGroups
     }
 

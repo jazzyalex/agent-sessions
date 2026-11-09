@@ -843,7 +843,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             if events.contains(where: { $0.kind == .tool_call || $0.kind == .tool_result }) { return false }
             let meaningfulUser = events.contains { e in
                 guard e.kind == .user else { return false }
-                guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return false }
+                // A mixed message counts by its typed items, not the injected preamble around them.
+                guard let raw = (e.messageDisplayText ?? e.text)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !raw.isEmpty else { return false }
                 return !looksLikeAgentsPreamble(raw)
             }
             return !meaningfulUser

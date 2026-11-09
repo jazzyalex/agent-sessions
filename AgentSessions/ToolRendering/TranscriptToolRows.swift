@@ -65,18 +65,19 @@ struct TranscriptMessageGroupIndex {
     }
     var groupsByID: [Int: Group] = [:]
     var groupIDByBlock: [Int: Int] = [:]
-    /// The id of the last group `build` started. Every group before it is final, so `extending`
-    /// restarts there.
-    var lastOwnerID: Int?
+    /// The id of the last barrier `build` passed: a tool or error block, or a block with a telemetry
+    /// marker. A full build starts fresh at a barrier (no owner, no previous body), so `extending`
+    /// restarts there and no group crosses it.
+    var lastBarrierID: Int?
     /// Set by the cache in `TranscriptDerivedState` each time it builds or extends the index, so the
     /// table can tell a new index from the one it holds without comparing the maps. 0 = not cached.
     var revision = 0
 
     /// `build` over a stream that grew from the one `previous` was built on (a live append), redoing
-    /// only the blocks from `previous.lastOwnerID` on. A block that starts a group never joins an
-    /// earlier one, so a build that starts there with fresh state gives the same groups as a full
-    /// build. The caller guarantees that the blocks before that id, and every other input, are
-    /// unchanged. Falls back to a full build when the restart point is not in `blocks`.
+    /// only the blocks from `previous.lastBarrierID` on. A full build resets its grouping state at
+    /// that barrier, so building from it with fresh state gives the same groups. The caller
+    /// guarantees that the blocks before the barrier, and every other input, are unchanged. Falls
+    /// back to a full build when there is no barrier or it is not in `blocks`.
     static func extending(_ previous: Self, previousBlockCount: Int, blocks: ArraySlice<Block>,
                           source: SessionSource = .claude, showsContext: Bool = false,
                           markers: [Int: [String]] = [:], noncollapsibleBlockIndices: Set<Int> = []) -> Self {
@@ -84,13 +85,12 @@ struct TranscriptMessageGroupIndex {
             build(blocks: blocks, source: source, showsContext: showsContext, markers: markers,
                   noncollapsibleBlockIndices: noncollapsibleBlockIndices)
         }
-        guard let start = previous.lastOwnerID, let first = blocks.first?.globalBlockIndex else { return full() }
+        guard let start = previous.lastBarrierID, let first = blocks.first?.globalBlockIndex else { return full() }
         let position = blocks.startIndex + (start - first)
         guard blocks.indices.contains(position), blocks[position].globalBlockIndex == start,
               previousBlockCount > start else { return full() }
         let tail = build(blocks: blocks[position...], source: source, showsContext: showsContext,
                          markers: markers, noncollapsibleBlockIndices: noncollapsibleBlockIndices)
-        guard tail.lastOwnerID != nil else { return full() }
         var result = previous
         for id in start..<previousBlockCount {
             result.groupIDByBlock[id] = nil
@@ -98,7 +98,7 @@ struct TranscriptMessageGroupIndex {
         }
         result.groupsByID.merge(tail.groupsByID) { $1 }
         result.groupIDByBlock.merge(tail.groupIDByBlock) { $1 }
-        result.lastOwnerID = tail.lastOwnerID
+        result.lastBarrierID = tail.lastBarrierID ?? start
         return result
     }
 
@@ -110,10 +110,11 @@ struct TranscriptMessageGroupIndex {
         var owner: Int?
         for block in blocks {
             let id = block.globalBlockIndex
-            if markers[id]?.isEmpty == false { owner = nil; previous = nil }
+            if markers[id]?.isEmpty == false { owner = nil; previous = nil; result.lastBarrierID = id }
             // Structural rows remain barriers even when role filtering hides them.
             if block.kind.isTool || block.kind == .error {
                 owner = nil; previous = nil
+                result.lastBarrierID = id
                 continue
             }
             let presentation = block.resolvedPresentation(source: source)
@@ -127,7 +128,6 @@ struct TranscriptMessageGroupIndex {
             } else {
                 result.groupsByID[id] = Group(block: block, representedBlockIndices: [id])
                 result.groupIDByBlock[id] = id
-                result.lastOwnerID = id
                 owner = collapsible ? id : nil
                 previous = collapsible ? presentation : nil
             }

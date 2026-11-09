@@ -150,24 +150,32 @@ final class TranscriptToolRowsTests: XCTestCase {
     func testExtendingGroupIndexMatchesFullBuild() {
         var context = user("harness")
         context.messageOrigin = .context(kinds: ["test"])
-        let grown = [user(), user(), assistant(), user("x"), context]
-        let streams: [[Block]] = [
-            grown + [user("x"), assistant("b"), user(), user()],
-            grown + [assistant("b")],
-            [user(), assistant()] + [assistant(), assistant(), user()],
+        let tool = F.block(.toolCall, id: "t1", toolName: "Bash", toolInput: "{}")
+        let prefix = [user(), tool, user(), user(), assistant("hello"), context, assistant("hel")]
+        // Each case: the old stream, and the new one (a live append that may also grow the last block).
+        let cases: [(old: [Block], new: [Block])] = [
+            (prefix, prefix + [user(), assistant("b")]),
+            // Review 2026-11-09 (Codex): the growing last block now equals an earlier body across
+            // hidden context, so a full build joins them; the extension must too.
+            (prefix, Array(prefix.dropLast()) + [assistant("hello"), user("x")]),
+            (prefix, prefix + [tool, user(), user()]),
+            ([user(), user()], [user(), user(), user()]),
         ]
-        for (n, stream) in streams.enumerated() {
-            let full = F.sequence(stream)
-            let prefixCount = n == 2 ? 2 : grown.count
-            let previous = TranscriptMessageGroupIndex.build(blocks: full[..<prefixCount])
-            let extended = TranscriptMessageGroupIndex.extending(previous, previousBlockCount: prefixCount,
-                                                                 blocks: full[...])
-            let rebuilt = TranscriptMessageGroupIndex.build(blocks: full[...])
-            XCTAssertEqual(extended.groupIDByBlock, rebuilt.groupIDByBlock, "stream \(n)")
+        for (n, pair) in cases.enumerated() {
+            let old = F.sequence(pair.old), new = F.sequence(pair.new)
+            let previous = TranscriptMessageGroupIndex.build(blocks: old[...])
+            let extended = TranscriptMessageGroupIndex.extending(previous, previousBlockCount: old.count,
+                                                                 blocks: new[...])
+            let rebuilt = TranscriptMessageGroupIndex.build(blocks: new[...])
+            XCTAssertEqual(extended.groupIDByBlock, rebuilt.groupIDByBlock, "case \(n)")
             XCTAssertEqual(extended.groupsByID.mapValues(\.representedBlockIndices),
-                           rebuilt.groupsByID.mapValues(\.representedBlockIndices), "stream \(n)")
-            XCTAssertEqual(extended.lastOwnerID, rebuilt.lastOwnerID, "stream \(n)")
+                           rebuilt.groupsByID.mapValues(\.representedBlockIndices), "case \(n)")
+            XCTAssertEqual(extended.groupsByID.mapValues(\.block.text), rebuilt.groupsByID.mapValues(\.block.text),
+                           "case \(n)")
+            XCTAssertEqual(extended.lastBarrierID, rebuilt.lastBarrierID, "case \(n)")
         }
+        XCTAssertEqual(TranscriptMessageGroupIndex.build(blocks: F.sequence(cases[1].new)[...]).groupIDByBlock[6], 4,
+                       "the case exercises a group that crosses hidden context")
     }
 
     func testHiddenRoleDoesNotCollapseGenuineLaterTurn() {

@@ -52,7 +52,8 @@ public enum SessionInfoMetadataSanitizer {
             // rules heading from the request that follows it.
             for kind in [SessionEventKind.user, .assistant] {
                 for event in session.events where event.kind == kind {
-                    if let clean = title(event.text, source: .codex) { return clean }
+                    // A mixed message's typed items, not its injected ones, name the session.
+                    if let clean = title(event.messageDisplayText ?? event.text, source: .codex) { return clean }
                 }
             }
             if let tool = session.events.first(where: { $0.kind == .tool_call && $0.toolName?.isEmpty == false }) {

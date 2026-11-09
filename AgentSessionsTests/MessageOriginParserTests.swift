@@ -73,13 +73,39 @@ final class MessageOriginParserTests: XCTestCase {
                               kinds: ["environments.environment_context", "user.text"])
         XCTAssertEqual(event.kind, .user)
         XCTAssertEqual(event.messageOrigin, .typed)
-        XCTAssertEqual(event.messageDisplayText, "Fix login redirect")
+        // Review 2026-11-09 (Codex): the event is the prompt alone, so no text consumer shows the
+        // injected block as something the user typed. rawJSON keeps the original items.
+        XCTAssertEqual(event.text, "Fix login redirect")
+        XCTAssertTrue(event.rawJSON.contains("environment_context"))
         let model = session([event])
         XCTAssertEqual(SessionTranscriptBuilder.coalescedBlocks(for: model, includeMeta: false).count, 1)
         let terminal = SessionTranscriptBuilder.buildPlainTerminalTranscript(
             session: model, filters: .current(showTimestamps: false, showMeta: false))
         XCTAssertTrue(terminal.contains("Fix login redirect"))
+        XCTAssertFalse(terminal.contains("environment_context"))
         XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: model), "Fix login redirect")
+        XCTAssertFalse(Session.computeIsHousekeeping(source: .codex, events: [event]))
+    }
+    func testCodexTypedPromptThatNamesTheTagStaysUser() throws {
+        let typed = "What is <environment_context>?"
+        let event = try codex([text("<environment_context>w</environment_context>"), text(typed)],
+                              kinds: ["environments.environment_context", "user.text"])
+        XCTAssertEqual(event.kind, .user)
+        XCTAssertEqual(event.text, typed)
+    }
+    func testCodexMixedPreambleCountsByTypedItems() throws {
+        let preamble = (["# AGENTS.md instructions for /repo"] + (1...6).map { "- rule \($0)" }).joined(separator: "\n")
+        let event = try codex([text(preamble), text("Ship the fix")], kinds: ["agents_md.instructions", "user.text"])
+        XCTAssertFalse(Session.computeIsHousekeeping(source: .codex, events: [event]))
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: session([event])), "Ship the fix")
+    }
+    func testInjectedTurnAbortedTagIsNotSplitOut() throws {
+        let injected = "<turn_aborted>injected reason</turn_aborted>"
+        let event = try codex([text(injected), text("Continue")], kinds: ["agents_md.instructions", "user.text"])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session([event]), includeMeta: true,
+                                                              includeMessageContext: true)
+        XCTAssertFalse(blocks.contains { $0.kind == .meta })
+        XCTAssertEqual(blocks.first?.messageDisplayText, "Continue")
     }
     func testCodexAgentMessageIsPeer() throws {
         let header = "Message Type: MESSAGE\nSender: /root/helper\nPayload:\n"
