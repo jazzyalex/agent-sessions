@@ -1342,6 +1342,8 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 - **Before any spec, answer two questions (owner, 2026-11-08):**
   1. **Prior art.** How do the Codex, Claude and OpenCode desktop apps show a session? What UI, UX and formatting can we borrow: diff view, code blocks, tool rows, message layout, collapse rules? Capture screenshots of the same kinds of turns in each app.
   2. **User need.** What do Agent Sessions users actually need from a transcript, and why? AS is a history browser, not a live chat, so what users do there (search, review, resume, copy) decides what earns the effort.
+- **Research done 2026-11-08:** both questions answered in `docs/superpowers/specs/2026-11-08-transcript-polish-research.md`. No user asked for highlighting or layout; every peer colors diffs and code. Proposal ranked a per-turn "Worked for …" fold first, then diff coloring.
+- **Layout part done 2026-11-09:** owner rejected the "Worked for …" line (bloat) and chose hiding tool work behind the Tools chip, default off (spec `docs/superpowers/specs/2026-11-08-transcript-hide-tool-work-design.md`). Remaining: code and diff coloring in tool rows.
 - **Why deferred:** not urgent; the readability work just shipped and needs time in use.
 - **Risk if wrong:** a spec written before these two answers would copy chat-app styling that does not fit a history browser, or polish rows that users seldom open.
 - **To close:** both answers written up, then a spec, then the work.
