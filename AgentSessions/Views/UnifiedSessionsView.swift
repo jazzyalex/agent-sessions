@@ -2061,35 +2061,9 @@ struct UnifiedSessionsView: View {
     private var paneAnchoredToolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             SessionListToolbarGroup(anchor: sessionListToolbarAnchor) { width in
-                // Filters and badge are offered space first; the search field
-                // takes what is left down to its minimum. Each switches to a
-                // compact form (one Agents menu, icon-only badge and scope chips)
-                // only when the regular one does not fit before the divider.
-                HStack(spacing: 12) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) { anchoredFilterControls(compact: false) }
-                        HStack(spacing: 12) { anchoredFilterControls(compact: true) }
-                    }
-                    .controlSize(.small)
-                    .tint(UnifiedSessionsStyle.selectionAccent)
-                    .layoutPriority(1)
-
-                    UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator,
-                                             searchState: searchState, adaptive: true)
-                        .frame(maxWidth: width == nil ? 520 : .infinity)
-
-                    if unified.projectSelection != nil {
-                        ViewThatFits(in: .horizontal) {
-                            UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
-                            UnifiedProjectFilterBadgeView(unified: unified, compact: true,
-                                                          onClear: { applyProjectSelection(nil) })
-                        }
-                        .layoutPriority(1)
-                    }
-                }
-                // ViewThatFits may keep both variants alive, so no shortcut lives
-                // inside them; they are registered exactly once here.
-                .background { sessionFilterShortcuts }
+                SessionListToolbarRow(unified: unified, search: searchCoordinator, focus: focusCoordinator,
+                                      searchState: searchState, filters: sessionListFilterModel,
+                                      fillsWidth: width != nil)
             }
         }
         .sharedBackgroundVisibility(.hidden)
@@ -2110,92 +2084,31 @@ struct UnifiedSessionsView: View {
         UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
     }
 
-    /// macOS 26 session-list filters. Same controls as `sessionFilterControls`,
-    /// minus every keyboard shortcut (see `sessionFilterShortcuts`). Compact folds
-    /// Codex, Claude and the other agents into a single Agents menu.
-    @ViewBuilder
-    private func anchoredFilterControls(compact: Bool) -> some View {
-        ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
-            .disabled(!liveSessionsFeatureEnabled)
-            .help(
-                liveSessionsFeatureEnabled
-                    ? "Show only live sessions in the list (Codex, Claude)"
-                    : "Enable live session detection (Beta) in Settings → Quota Meter."
-            )
-
-        Button(action: { showSubagentHierarchy.toggle() }) {
-            Image(systemName: showSubagentHierarchy ? "list.bullet.indent" : "list.bullet")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(showSubagentHierarchy ? Color.accentColor : .secondary)
-        }
-        .buttonStyle(.plain)
-        .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
-
-        if isHierarchyBrowsing {
-            ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
-                ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
-            } action: {
-                collapseAllHierarchyParents()
-            }
-            .disabled(currentExpandableParentIDs.isEmpty)
-
-            ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
-                ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
-            } action: {
-                expandAllHierarchyParents()
-            }
-            .disabled(collapsedParents.isEmpty)
-        }
-
-        if compact {
-            AgentOverflowMenu(specs: allEnabledAgentSpecs)
-        } else {
-            if codexAgentEnabled {
-                AgentTabToggle(title: "Codex", color: Color.agentCodex,
-                               isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
-                    .help("Show or hide Codex sessions (⌘1)")
-            }
-            if claudeAgentEnabled {
-                AgentTabToggle(title: "Claude", color: Color.agentClaude,
-                               isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
-                    .help("Show or hide Claude sessions (⌘2)")
-            }
-            if enabledAgentCount > 4 {
-                AgentOverflowMenu(specs: enabledOtherAgentSpecs)
-            } else {
-                ForEach(enabledOtherAgentSpecs) { spec in
-                    AgentTabToggle(title: spec.title, color: spec.color,
-                                   isMonochrome: stripMonochrome, isOn: spec.isOn)
-                        .help("Show or hide \(spec.title) sessions in the list")
-                }
-            }
-        }
-    }
-
-    /// Codex and Claude first, then the other enabled agents, for the compact menu.
-    private var allEnabledAgentSpecs: [AgentToolbarSpec] {
-        var specs: [AgentToolbarSpec] = []
+    /// Everything the macOS 26 session-list row needs from this view's state.
+    private var sessionListFilterModel: SessionListFilterModel {
+        var pinned: [AgentToolbarSpec] = []
         if codexAgentEnabled {
-            specs.append(AgentToolbarSpec(id: SessionSource.codex.rawValue, title: "Codex", color: .agentCodex,
-                                          isOn: $unified.includeCodex, shortcut: "1"))
+            pinned.append(AgentToolbarSpec(id: SessionSource.codex.rawValue, title: "Codex", color: .agentCodex,
+                                           isOn: $unified.includeCodex, shortcut: "1"))
         }
         if claudeAgentEnabled {
-            specs.append(AgentToolbarSpec(id: SessionSource.claude.rawValue, title: "Claude", color: .agentClaude,
-                                          isOn: $unified.includeClaude, shortcut: "2"))
+            pinned.append(AgentToolbarSpec(id: SessionSource.claude.rawValue, title: "Claude", color: .agentClaude,
+                                           isOn: $unified.includeClaude, shortcut: "2"))
         }
-        return specs + enabledOtherAgentSpecs
-    }
-
-    /// The filter shortcuts for the macOS 26 group, registered once whichever
-    /// filter variant is showing: ⇧⌘H for hierarchy, ⌘1–⌘9 for agents.
-    @ViewBuilder
-    private var sessionFilterShortcuts: some View {
-        hiddenShortcut(key: "h", modifiers: [.command, .shift]) { showSubagentHierarchy.toggle() }
-        ForEach(allEnabledAgentSpecs) { spec in
-            if let shortcut = spec.shortcut {
-                hiddenShortcut(key: shortcut, modifiers: .command) { spec.isOn.wrappedValue.toggle() }
-            }
-        }
+        return SessionListFilterModel(
+            liveOnly: $showActiveSessionsOnly,
+            liveFeatureEnabled: liveSessionsFeatureEnabled,
+            hierarchy: $showSubagentHierarchy,
+            isHierarchyBrowsing: isHierarchyBrowsing,
+            canCollapseAll: isHierarchyBrowsing && !currentExpandableParentIDs.isEmpty,
+            canExpandAll: isHierarchyBrowsing && !collapsedParents.isEmpty,
+            collapseAll: { collapseAllHierarchyParents() },
+            expandAll: { expandAllHierarchyParents() },
+            pinnedAgents: pinned,
+            otherAgents: enabledOtherAgentSpecs,
+            isMonochrome: stripMonochrome,
+            clearProject: { applyProjectSelection(nil) }
+        )
     }
 
     @ViewBuilder
@@ -4293,7 +4206,7 @@ struct UnifiedSessionsView: View {
 /// Describes one non-Codex/Claude agent toggle so it can render either as a
 /// toolbar pill or as a row in the overflow filter menu without duplicating the
 /// title/color/binding/shortcut in two places.
-private struct AgentToolbarSpec: Identifiable {
+struct AgentToolbarSpec: Identifiable {
     let id: String
     let title: String
     let color: Color
@@ -5010,7 +4923,7 @@ private struct UnifiedSearchFiltersView: View {
                                        focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() },
                                        onEscape: { clearSearchFromField() })
-                    .frame(minWidth: adaptive ? 96 : 220)
+                    .frame(minWidth: adaptive ? 80 : 220)
                     .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -5200,26 +5113,48 @@ private struct UnifiedSearchFiltersView: View {
 
 private struct UnifiedProjectFilterBadgeView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
-    /// Narrow macOS 26 list pane: folder and clear button only; the project name
-    /// moves to the tooltip and VoiceOver label.
+    /// Narrow macOS 26 list pane: one tinted "remove folder filter" button; the
+    /// project name moves to its tooltip and VoiceOver value.
     var compact: Bool = false
     var onClear: () -> Void
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        let accent = stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
-        let name = unified.projectSelection.map(Self.badgeText(for:))
+        if compact {
+            compactBody
+        } else {
+            regularBody
+        }
+    }
+
+    private var accent: Color {
+        stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
+    }
+
+    private var compactBody: some View {
+        let name = unified.projectSelection.map(Self.badgeText(for:)) ?? ""
+        return Button(action: onClear) {
+            Image(systemName: "folder.badge.minus")
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(accent.opacity(0.1))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(accent.opacity(0.3)))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(Text(verbatim: name + "\n") + Text("Remove the project filter and show all sessions"))
+        .accessibilityLabel(Text("Remove the project filter and show all sessions"))
+        .accessibilityValue(Text(verbatim: name))
+        .fixedSize()
+    }
+
+    private var regularBody: some View {
         HStack(spacing: 4) {
-            if compact {
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                    .help(name ?? "")
-                    .accessibilityLabel(Text(name ?? ""))
-            } else {
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-            }
-            if !compact, let selection = unified.projectSelection {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+            if let selection = unified.projectSelection {
                 Text(Self.badgeText(for: selection))
                     .font(.system(size: 12))
                     .lineLimit(1)
@@ -5264,13 +5199,14 @@ enum SessionListToolbarLayout {
     static let dividerGap: CGFloat = LayoutTokens.sm
 
     /// Narrowest side-by-side list pane. On macOS 26 the session-list toolbar group
-    /// must fit above it in its compact form (live, hierarchy, one Agents menu and
-    /// an icon-chip search field ≈ 350 pt after the traffic lights), so the floor
-    /// is raised there. Older systems keep 320.
+    /// must fit above it in its minimal form (Filters menu, search with icon-only
+    /// chips, compact project button); `SessionListToolbarLayoutTests` measures
+    /// that row against this width. Older systems keep 320.
     static var sideBySideListMinWidth: CGFloat {
-        if #available(macOS 26.0, *) { return 440 }
+        if #available(macOS 26.0, *) { return tahoeListMinWidth }
         return 320
     }
+    static let tahoeListMinWidth: CGFloat = 470
 
     /// The space between the group's leading edge and the divider, never more:
     /// the group is clipped to this, so it cannot reach into the transcript.
@@ -5286,6 +5222,215 @@ enum SessionListToolbarLayout {
     static func hasMoved(_ old: CGFloat?, to new: CGFloat) -> Bool {
         guard let old else { return true }
         return abs(old - new) >= 0.5
+    }
+}
+
+/// The session-list filter state the macOS 26 toolbar row renders. A plain value
+/// so the row can be built (and measured) without the whole window view.
+struct SessionListFilterModel {
+    var liveOnly: Binding<Bool>
+    var liveFeatureEnabled: Bool
+    var hierarchy: Binding<Bool>
+    var isHierarchyBrowsing: Bool
+    var canCollapseAll: Bool
+    var canExpandAll: Bool
+    var collapseAll: () -> Void
+    var expandAll: () -> Void
+    /// Codex and Claude, which stay as their own pills in the regular tier.
+    var pinnedAgents: [AgentToolbarSpec]
+    var otherAgents: [AgentToolbarSpec]
+    var isMonochrome: Bool
+    var clearProject: () -> Void
+
+    var allAgents: [AgentToolbarSpec] { pinnedAgents + otherAgents }
+}
+
+/// How much of the filter cluster stays visible. The row picks the first tier
+/// that fits before the divider.
+enum SessionFilterTier: CaseIterable {
+    /// Live, hierarchy (+ collapse/expand), agent pills.
+    case regular
+    /// Same, with every agent in one Agents menu.
+    case compact
+    /// One Filters menu holding all of the above. Sized so the row still fits
+    /// above the narrowest macOS 26 list pane with a project filter active.
+    case minimal
+}
+
+/// macOS 26 session-list toolbar row (issue #92): filters, search and project
+/// badge. Filters and badge are offered space first and fall back to smaller
+/// forms; the single search field takes what is left down to its minimum, so it
+/// is never recreated and keeps focus and text while the divider moves.
+struct SessionListToolbarRow: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let search: SearchCoordinator
+    let focus: WindowFocusCoordinator
+    let searchState: UnifiedSearchState
+    let filters: SessionListFilterModel
+    /// True when sized to the divider; false lets search keep its 520 pt cap.
+    var fillsWidth: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                SessionFilterCluster(model: filters, tier: .regular)
+                SessionFilterCluster(model: filters, tier: .compact)
+                SessionFilterCluster(model: filters, tier: .minimal)
+            }
+            .controlSize(.small)
+            .tint(UnifiedSessionsStyle.selectionAccent)
+            .layoutPriority(1)
+
+            UnifiedSearchFiltersView(unified: unified, search: search, focus: focus,
+                                     searchState: searchState, adaptive: true)
+                .frame(maxWidth: fillsWidth ? .infinity : 520)
+
+            if unified.projectSelection != nil {
+                ViewThatFits(in: .horizontal) {
+                    UnifiedProjectFilterBadgeView(unified: unified, onClear: filters.clearProject)
+                    UnifiedProjectFilterBadgeView(unified: unified, compact: true, onClear: filters.clearProject)
+                }
+                .layoutPriority(1)
+            }
+        }
+        // ViewThatFits may keep every tier alive, so no shortcut lives inside a
+        // tier; they are registered exactly once here.
+        .background { shortcuts }
+    }
+
+    @ViewBuilder
+    private var shortcuts: some View {
+        HiddenShortcutButton(key: "h", modifiers: [.command, .shift]) { filters.hierarchy.wrappedValue.toggle() }
+        ForEach(filters.allAgents) { spec in
+            if let key = spec.shortcut {
+                HiddenShortcutButton(key: key, modifiers: .command) { spec.isOn.wrappedValue.toggle() }
+            }
+        }
+    }
+}
+
+private struct HiddenShortcutButton: View {
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+    let action: () -> Void
+
+    var body: some View {
+        Button("", action: action)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+    }
+}
+
+/// One tier of the macOS 26 filter cluster. Holds no keyboard shortcuts.
+private struct SessionFilterCluster: View {
+    let model: SessionListFilterModel
+    let tier: SessionFilterTier
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if tier == .minimal {
+                SessionFiltersMenu(model: model)
+            } else {
+                ActiveSessionsOnlyToggle(isOn: model.liveOnly)
+                    .disabled(!model.liveFeatureEnabled)
+                    .help(
+                        model.liveFeatureEnabled
+                            ? "Show only live sessions in the list (Codex, Claude)"
+                            : "Enable live session detection (Beta) in Settings → Quota Meter."
+                    )
+
+                Button(action: { model.hierarchy.wrappedValue.toggle() }) {
+                    Image(systemName: model.hierarchy.wrappedValue ? "list.bullet.indent" : "list.bullet")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(model.hierarchy.wrappedValue ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(model.hierarchy.wrappedValue ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
+
+                if model.isHierarchyBrowsing {
+                    ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        model.collapseAll()
+                    }
+                    .disabled(!model.canCollapseAll)
+
+                    ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        model.expandAll()
+                    }
+                    .disabled(!model.canExpandAll)
+                }
+
+                if tier == .compact {
+                    AgentOverflowMenu(specs: model.allAgents)
+                } else {
+                    ForEach(model.pinnedAgents) { spec in
+                        AgentTabToggle(title: spec.title, color: spec.color,
+                                       isMonochrome: model.isMonochrome, isOn: spec.isOn)
+                            .help(spec.id == SessionSource.claude.rawValue
+                                  ? "Show or hide Claude sessions (⌘2)"
+                                  : "Show or hide Codex sessions (⌘1)")
+                    }
+                    // Same crowding rule as the classic toolbar: past four agents
+                    // the non-pinned ones collapse into the Agents menu.
+                    if model.allAgents.count > 4 {
+                        AgentOverflowMenu(specs: model.otherAgents)
+                    } else {
+                        ForEach(model.otherAgents) { spec in
+                            AgentTabToggle(title: spec.title, color: spec.color,
+                                           isMonochrome: model.isMonochrome, isOn: spec.isOn)
+                                .help("Show or hide \(spec.title) sessions in the list")
+                        }
+                    }
+                }
+            }
+        }
+        .fixedSize()
+    }
+}
+
+/// The minimal tier: every session-list filter in one menu, styled like the
+/// agent pills. The funnel fills while the live-only filter is on.
+private struct SessionFiltersMenu: View {
+    let model: SessionListFilterModel
+
+    var body: some View {
+        Menu {
+            Toggle("Live sessions only", isOn: model.liveOnly)
+                .disabled(!model.liveFeatureEnabled)
+            Toggle("Show subagent hierarchy (⇧⌘H)", isOn: model.hierarchy)
+            if model.isHierarchyBrowsing {
+                Button("Collapse All", action: model.collapseAll)
+                    .disabled(!model.canCollapseAll)
+                Button("Expand All", action: model.expandAll)
+                    .disabled(!model.canExpandAll)
+            }
+            Divider()
+            ForEach(model.allAgents) { spec in
+                Toggle(isOn: spec.isOn) { Text(spec.title) }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.liveOnly.wrappedValue
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+                Text("Filters")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+            .agentPillSurface()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("Filters"))
+        .accessibilityLabel(Text("Filters"))
     }
 }
 

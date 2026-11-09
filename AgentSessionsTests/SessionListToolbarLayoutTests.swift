@@ -1,5 +1,12 @@
 import XCTest
+import SwiftUI
 @testable import AgentSessions
+
+private final class ToolbarTestSearchStore: SearchSessionStoring {
+    func transcriptCache(for source: SessionSource) -> TranscriptCache? { nil }
+    func updateSession(_ session: Session) {}
+    func parseFull(session: Session) async -> Session? { session }
+}
 
 /// Issue #92: on macOS 26 the session-list toolbar group ends at the
 /// list/transcript divider instead of floating over both panes.
@@ -26,17 +33,84 @@ final class SessionListToolbarLayoutTests: XCTestCase {
         XCTAssertEqual(SessionListToolbarLayout.groupWidth(dividerX: 100, groupMinX: 150), 0)
     }
 
-    func testListMinimumLeavesRoomForTheCompactGroup() {
-        // Traffic lights end near x = 78; the compact group needs about 350 pt.
-        let available = SessionListToolbarLayout.groupWidth(
-            dividerX: SessionListToolbarLayout.sideBySideListMinWidth + LayoutTokens.sm,
+    func testPreTahoeListSizingIsUnchanged() {
+        if #unavailable(macOS 26.0) {
+            XCTAssertEqual(SessionListToolbarLayout.sideBySideListMinWidth, 320)
+        } else {
+            XCTAssertEqual(SessionListToolbarLayout.sideBySideListMinWidth, SessionListToolbarLayout.tahoeListMinWidth)
+        }
+    }
+
+    // MARK: - Real control budget (review of 20a1bbbb)
+
+    /// Space for the group above the narrowest macOS 26 list pane. The list
+    /// starts at window x = 0 and the divider sits one gutter past its minimum
+    /// width. The group's leading edge is assumed at x = 86 (traffic lights end
+    /// near 78, plus the toolbar's leading inset); that is an estimate, not a
+    /// Tahoe measurement.
+    private var narrowestAvailableWidth: CGFloat {
+        SessionListToolbarLayout.groupWidth(
+            dividerX: SessionListToolbarLayout.tahoeListMinWidth + LayoutTokens.sm,
             groupMinX: 86
         ) ?? 0
-        if #available(macOS 26.0, *) {
-            XCTAssertGreaterThanOrEqual(available, 350)
-        } else {
-            XCTAssertEqual(SessionListToolbarLayout.sideBySideListMinWidth, 320, "pre-Tahoe list sizing is unchanged")
+    }
+
+    /// Hierarchy browsing (both collapse/expand buttons), every agent enabled,
+    /// an empty query (⌥⌘F hint shown) and a long disambiguated project filter.
+    @MainActor
+    private func worstCaseRow(fillsWidth: Bool) -> SessionListToolbarRow {
+        let unified = UnifiedSessionIndexer(catalog: SessionProviderCatalog())
+        unified.queryDraft = ""
+        unified.projectSelection = ProjectSelection(
+            identity: ProjectIdentity(canonicalRootPath: "/Users/t/Repository/an-unusually-long-project-name"),
+            displayName: "an-unusually-long-project-name",
+            disambiguationPath: "Repository/Clients"
+        )
+        func spec(_ title: String, _ key: KeyEquivalent?) -> AgentToolbarSpec {
+            AgentToolbarSpec(id: title, title: title, color: .gray, isOn: .constant(true), shortcut: key)
         }
+        let others = (3...17).map { spec("Agent\($0)", $0 <= 9 ? KeyEquivalent(Character("\($0)")) : nil) }
+        let model = SessionListFilterModel(
+            liveOnly: .constant(false),
+            liveFeatureEnabled: true,
+            hierarchy: .constant(true),
+            isHierarchyBrowsing: true,
+            canCollapseAll: true,
+            canExpandAll: true,
+            collapseAll: {},
+            expandAll: {},
+            pinnedAgents: [spec("Codex", "1"), spec("Claude", "2")],
+            otherAgents: others,
+            isMonochrome: false,
+            clearProject: {}
+        )
+        return SessionListToolbarRow(unified: unified,
+                                     search: SearchCoordinator(store: ToolbarTestSearchStore()),
+                                     focus: WindowFocusCoordinator(),
+                                     searchState: UnifiedSearchState(),
+                                     filters: model,
+                                     fillsWidth: fillsWidth)
+    }
+
+    @MainActor
+    func testWorstCaseRowFitsAboveTheNarrowestListWithoutClipping() {
+        let available = narrowestAvailableWidth
+        let host = NSHostingController(rootView: worstCaseRow(fillsWidth: true))
+
+        // Positive control: the regular controls genuinely do not fit, so the
+        // assertion below depends on the fallbacks, not on generous geometry.
+        let ideal = NSHostingController(rootView: worstCaseRow(fillsWidth: false))
+            .sizeThatFits(in: CGSize(width: CGFloat.infinity, height: 60)).width
+        XCTAssertGreaterThan(ideal, available, "worst case must overflow at full size")
+
+        // Proposed exactly the available width, the row must not need more:
+        // anything wider would be clipped, hiding the project clear button.
+        let fitted = host.sizeThatFits(in: CGSize(width: available, height: 60)).width
+        // Proposed nothing, the row reports the least it can take (minimal tier,
+        // icon chips, compact project button). Measured 359 pt on Sequoia 15.8.
+        let minimum = host.sizeThatFits(in: CGSize(width: 0, height: 60)).width
+        XCTAssertLessThanOrEqual(fitted, available, "ideal \(ideal), minimum \(minimum), available \(available)")
+        XCTAssertLessThanOrEqual(minimum, available, "ideal \(ideal), minimum \(minimum), available \(available)")
     }
 
     func testNoDividerMeansNaturalWidth() {
