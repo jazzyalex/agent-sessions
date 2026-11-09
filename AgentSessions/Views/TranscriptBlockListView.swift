@@ -221,6 +221,10 @@ struct TranscriptBlockListView: NSViewRepresentable {
     var scrollToBottomToken: Int = 0
     var onBottomProximityChange: (Bool) -> Void = { _ in }
     var onTopProximityChange: (Bool) -> Void = { _ in }
+    /// Number of Agent ▲▼ stops (agent rows that show), for the chip's chevrons.
+    var onAgentStopCountChange: (Int) -> Void = { _ in }
+    /// A Find jump landed on a row only Tools hides: the parent turns Tools on.
+    var onRequestToolsShown: () -> Void = {}
     /// Task 8: external jump intents, token-based so a re-render (e.g. a mode
     /// switch back to Rich) never replays a stale intent — the controller only
     /// acts when the incoming token differs from the last one it consumed.
@@ -271,6 +275,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
     var unifiedFindDirection: Int = 1
     var unifiedFindReset: Bool = true
     var unifiedFindAllowAutoScroll: Bool = true
+    /// True only for the auto-jump into a session opened from the list: its reset jump may turn Tools on.
+    var unifiedFindRevealsHidden: Bool = false
     @Binding var unifiedMatchCount: Int
     @Binding var unifiedCurrentIndex: Int
 
@@ -318,6 +324,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.seedConsumedScrollToBottomToken(scrollToBottomToken)
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.onTopProximityChange = onTopProximityChange
+        context.coordinator.onAgentStopCountChange = onAgentStopCountChange
+        context.coordinator.onRequestToolsShown = onRequestToolsShown
 
         context.coordinator.attach(table: table, scroll: scroll)
         // Find's decode pass starts at the block the reader sees (read when a pass starts). Weak:
@@ -335,6 +343,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.installDocumentFrameObserver(on: scroll)
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.onTopProximityChange = onTopProximityChange
+        context.coordinator.onAgentStopCountChange = onAgentStopCountChange
+        context.coordinator.onRequestToolsShown = onRequestToolsShown
         // A session switch publishes the new session before its snapshot lands: the snapshot
         // still holds the previous session's blocks. Applying them under the new session id
         // would seed the old session's failed calls (and cache its summaries and L2 bodies)
@@ -374,7 +384,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             rowSummaries: snapshot.rowSummaries, showsContext: showsContext,
             messageGroups: derivedState.messageGroups(showsContext: showsContext,
                 markers: TranscriptTelemetryPresentation.markers(changes: configurationChanges, blocks: snapshot.blocks),
-                imageBlocks: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys)))
+                imageBlocks: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys)),
+            turnIndex: snapshot.turnIndex)
 
         let consumedScrollIntent = context.coordinator.consumeScrollToBottomToken(scrollToBottomToken)
         if consumedScrollIntent {
@@ -441,7 +452,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             let counts = coordinator.applyFind(
                 source: .unified, query: unifiedQuery, matches: matches,
                 token: unifiedFindToken, direction: unifiedFindDirection,
-                reset: unifiedFindReset, shouldJump: unifiedFindAllowAutoScroll)
+                reset: unifiedFindReset, shouldJump: unifiedFindAllowAutoScroll,
+                revealsHidden: unifiedFindRevealsHidden)
             publishFindCounts(counts, current: $unifiedCurrentIndex, total: $unifiedMatchCount)
         } else if coordinator.isFindActive {
             // No new navigation request, but the snapshot may have changed under
@@ -609,6 +621,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// and the decode pass turns it into a decoded match of the same invocation, the re-run shows
     /// that match in L2 (fold and match scroll), without a second row scroll.
     private var lastJumpedFindMatch: TranscriptDerivedState.BlockMatch?
+    /// A Find jump that waits for Tools on (`onRequestToolsShown`): the navigated match, or the
+    /// tool block of a raw-only search hit. The next `apply` that shows its row finishes it.
+    private enum PendingToolsShownJump: Equatable {
+        case match(TranscriptDerivedState.BlockMatch)
+        case rawToolBlock(Int)
+    }
+    private var pendingToolsShownJump: PendingToolsShownJump?
+    /// A reset found only matches Tools hides and did not jump; the next forward step lands on the
+    /// current match instead of skipping it.
+    private var findCurrentNotJumped = false
 
     /// L1 summaries, keyed by invocation id; an entry is valid while its
     /// content stamp and status match (`ToolInvocationBuilder.rowSummary` is
@@ -728,6 +750,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private var proximityReportGeneration: Int = 0
     var onBottomProximityChange: ((Bool) -> Void)?
     var onTopProximityChange: ((Bool) -> Void)?
+    /// Number of Agent ▲▼ stops (visible agent rows), sent on the next main-queue turn when it changes.
+    var onAgentStopCountChange: ((Int) -> Void)?
+    /// Asks the parent to turn the Tools chip on (a Find jump landed on a row only Tools hides),
+    /// sent on the next main-queue turn. The jump finishes on the next `apply` that shows the row.
+    var onRequestToolsShown: (() -> Void)?
     /// Re-entry guard for load-older: a prepend is being applied. Blocks the
     /// bounds observer from stacking a second extension mid-flight.
     private var isPrependInFlight: Bool = false
@@ -767,11 +794,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// still triggers one compute rather than reading as "unchanged".
     private var lastTimingComputedBlockCount: Int = -1
 
-    /// Turn-chip lookup for a row id (the row's `BlockRowModel.id`, which for a
-    /// plain message row equals its block's `globalBlockIndex` — the same space
-    /// `TranscriptTurnTiming.compute`'s `turns` dict is keyed by). Returns nil
+    /// Turn segmentation from the snapshot (`Snapshot.turnIndex`), as handed to `apply`.
+    private var turnIndex: TranscriptTurnIndex = .empty
+    /// Notes hidden while Tools is off (`turnIndex.noteBlockIndices`), empty while it is on.
+    private var hiddenNoteBlocks: Set<Int> = []
+    /// Agent ▲▼ stops: row ids of agent message rows that show, ascending.
+    private var agentStopIDs: [Int] = []
+    private var lastReportedAgentStopCount: Int?
+    /// `turnTimingCache` moved to the row each turn's badge sits on
+    /// (`TranscriptTurns.chipAnchors`), keyed by row id.
+    private var turnChipAnchors: [Int: TurnTiming] = [:]
+    /// Bumped when `messageGroups` or the turn data (`turnIndex`, `turnTimingCache`) change, so
+    /// `refreshAgentRowVisibility` recomputes only when one of its inputs changed.
+    private var messageGroupsGeneration = 0
+    private var turnDataGeneration = 0
+    private struct AgentRowVisibilityInputs: Equatable {
+        var messageGroups: Int
+        var turnData: Int
+        var toolsShown: Bool
+        var agentShown: Bool
+        var source: SessionSource
+    }
+    private var agentRowVisibilityInputs: AgentRowVisibilityInputs?
+
+    /// Turn-chip lookup for a row id (the row's `BlockRowModel.id`). Returns nil
     /// for a row that isn't a turn anchor (most rows).
-    func turnTiming(forRowID rowID: Int) -> TurnTiming? { turnTimingCache[rowID] }
+    func turnTiming(forRowID rowID: Int) -> TurnTiming? { turnChipAnchors[rowID] }
 
     /// Per-tool duration lookup, keyed by the `.toolOut` block's
     /// `globalBlockIndex` (NOT the row id — see `invocationDuration(_:)`,
@@ -785,7 +833,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// looking it up for a tool row is harmless (simply misses) but never
     /// fires in practice.
     private func turnChipText(forRowID rowID: Int) -> String {
-        guard let timing = turnTimingCache[rowID] else { return "" }
+        guard let timing = turnChipAnchors[rowID] else { return "" }
         return TranscriptTurnTiming.turnChipText(durationSeconds: timing.durationSeconds,
                                                  toolCallCount: timing.toolCallCount)
     }
@@ -1326,7 +1374,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                index: invocationIndex, failedInvocationIDs: failedInvocationIDs,
                                openGroups: openGroups, openInvocations: openInvocations,
                                rowSummary: { [unowned self] ref in self.rowSummary(for: ref) },
-                               showsContext: showsContext, source: source, messageGroups: messageGroups).map { row in
+                               showsContext: showsContext, source: source, messageGroups: messageGroups,
+                               hiddenNoteBlocks: hiddenNoteBlocks).map { row in
             var row = row
             if case .message(var block) = row.content, block.presentation == nil {
                 block.presentation = block.resolvedPresentation(source: source)
@@ -1351,12 +1400,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                                   rowSummary: (ToolInvocationRef) -> ToolRowSummary = { _ in
                                       ToolRowSummary(actions: [], chips: [])
                                   }, showsContext: Bool = false, source: SessionSource = .claude,
-                                  messageGroups: TranscriptMessageGroupIndex? = nil) -> [BlockRowModel] {
+                                  messageGroups: TranscriptMessageGroupIndex? = nil,
+                                  hiddenNoteBlocks: Set<Int> = []) -> [BlockRowModel] {
         TranscriptToolRows.emit(blocks: blocks, index: index, rowSummary: rowSummary,
                                 openGroups: openGroups, openInvocations: openInvocations,
                                 activeRoles: activeRoles, failedInvocationIDs: failedInvocationIDs,
                                 markers: markers, totalBlockCount: totalBlockCount,
-                                showsContext: showsContext, source: source, messageGroups: messageGroups)
+                                showsContext: showsContext, source: source, messageGroups: messageGroups,
+                                hiddenNoteBlocks: hiddenNoteBlocks)
     }
 
     // MARK: Apply
@@ -1386,7 +1437,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                sharedToolInvocationCache: NSCacheMemo<ToolInvocation>? = nil,
                rowSummaries: [Int: TranscriptDerivedState.RowSummaryEntry] = [:],
                showsContext: Bool = false,
-               messageGroups suppliedMessageGroups: TranscriptMessageGroupIndex? = nil) -> Bool {
+               messageGroups suppliedMessageGroups: TranscriptMessageGroupIndex? = nil,
+               turnIndex: TranscriptTurnIndex = .empty) -> Bool {
         guard let table else { return false }
 
         if let shared = sharedToolInvocationCache, shared !== toolInvocationCache {
@@ -1515,9 +1567,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
+        let groupInputsChanged = allBlocksCache != allBlocks || markersChanged || imagesChanged || sourceChanged
+            || self.showsContext != showsContext
         if let suppliedMessageGroups {
+            // The derived state hands back its cached index, so this compare is a storage check.
+            if groupInputsChanged || suppliedMessageGroups.groupIDByBlock != messageGroups.groupIDByBlock {
+                messageGroupsGeneration &+= 1
+            }
             messageGroups = suppliedMessageGroups
-        } else if allBlocksCache != allBlocks || markersChanged || imagesChanged || sourceChanged || self.showsContext != showsContext {
+        } else if groupInputsChanged {
+            messageGroupsGeneration &+= 1
             messageGroups = .build(blocks: allBlocks[...], source: source, showsContext: showsContext, markers: telemetryMarkers, noncollapsibleBlockIndices: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
         }
         self.showsContext = showsContext
@@ -1545,11 +1604,26 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // `TranscriptTurnTiming.compute` is O(blocks), cheap relative to the
         // coalesce/merge work `apply` already redoes every call, but there's no
         // reason to redo it when the stream is provably unchanged.
-        if totalBlockCount != lastTimingComputedBlockCount {
+        if totalBlockCount != lastTimingComputedBlockCount || turnIndex != self.turnIndex {
+            turnDataGeneration &+= 1
             lastTimingComputedBlockCount = totalBlockCount
-            let timing = TranscriptTurnTiming.compute(blocks: allBlocks, index: self.invocationIndex)
+            let timing = TranscriptTurnTiming.compute(blocks: allBlocks, index: self.invocationIndex,
+                                                      source: source, turnIndex: turnIndex)
             turnTimingCache = timing.turns
             toolTimingCache = timing.tools
+        }
+
+        // Notes hide while Tools is off; Agent stops and the turn badges follow the rows that show.
+        self.turnIndex = turnIndex
+        let toolsShown = activeRoleFilters.isEmpty || activeRoleFilters.contains(.tools)
+        hiddenNoteBlocks = toolsShown ? [] : turnIndex.noteBlockIndices
+        let visibilityInputs = AgentRowVisibilityInputs(
+            messageGroups: messageGroupsGeneration, turnData: turnDataGeneration, toolsShown: toolsShown,
+            agentShown: activeRoleFilters.isEmpty || activeRoleFilters.contains(.assistant), source: source)
+        var chipRowsChanged = Set<Int>()
+        if visibilityInputs != agentRowVisibilityInputs {
+            agentRowVisibilityInputs = visibilityInputs
+            chipRowsChanged = refreshAgentRowVisibility()
         }
 
         // Window maintenance on total-count change (live appends) / first apply.
@@ -1590,6 +1664,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         switch diff {
         case .identical where !fontChanged && !sourceChanged && !imagesChanged && !linkInputsChanged && !markersChanged:
+            // The badge is not part of the row model: a moved badge still needs its rows redrawn.
+            reloadRows(withIDs: chipRowsChanged)
+            // Tools on can leave the loaded rows as they were (no tool rows or notes in the
+            // window); the waiting jump still has to finish here.
+            finishPendingToolsShownJump()
             return false
         case .identical:
             // Same rows, but font/source/image-map/link-inputs changed →
@@ -1658,7 +1737,58 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 restoreScrollAnchor(anchor)
             }
         }
+        if case .wholesale = diff {} else { reloadRows(withIDs: chipRowsChanged) }
+        finishPendingToolsShownJump()
         return true
+    }
+
+    /// Recomputes the Agent ▲▼ stops and the turn badge anchors from the rows that show, reports
+    /// a changed stop count, and returns the row ids whose badge changed.
+    private func refreshAgentRowVisibility() -> Set<Int> {
+        var stops: [Int] = []
+        if activeRoleFilters.isEmpty || activeRoleFilters.contains(.assistant) {
+            for (id, group) in messageGroups.groupsByID
+            where TranscriptRoleFilter.governing(group.block, source: source) == .assistant {
+                // A row hides only when every block it represents is a hidden note.
+                if !group.isHidden(by: hiddenNoteBlocks) {
+                    stops.append(id)
+                }
+            }
+            stops.sort()
+        }
+        agentStopIDs = stops
+
+        let anchors = TranscriptTurns.chipAnchors(timing: turnTimingCache, turnIndex: turnIndex,
+                                                  rowIDByBlock: messageGroups.groupIDByBlock,
+                                                  visibleRowIDs: Set(stops))
+        var changed = Set<Int>()
+        if anchors != turnChipAnchors {
+            for id in Set(anchors.keys).union(turnChipAnchors.keys) where anchors[id] != turnChipAnchors[id] {
+                changed.insert(id)
+            }
+            turnChipAnchors = anchors
+        }
+
+        if stops.count != lastReportedAgentStopCount {
+            lastReportedAgentStopCount = stops.count
+            let count = stops.count
+            // Sent after the SwiftUI update pass that called `apply`.
+            if let report = onAgentStopCountChange {
+                DispatchQueue.main.async { report(count) }
+            }
+        }
+        return changed
+    }
+
+    /// Redraws the loaded rows with these ids.
+    private func reloadRows(withIDs ids: Set<Int>) {
+        guard let table, !ids.isEmpty else { return }
+        let indexes = IndexSet(rows.indices.filter { ids.contains(rows[$0].id) })
+        guard !indexes.isEmpty else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            table.reloadData(forRowIndexes: indexes, columnIndexes: IndexSet(integer: 0))
+        }
     }
 
     // MARK: Window helpers
@@ -2512,6 +2642,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         autoChangedFoldsByFind.removeAll()
         pendingFindReveal = nil
         lastJumpedFindMatch = nil
+        pendingToolsShownJump = nil
         rowSummaryCache.removeAll()
         // Keys are session-qualified; the shared cache also holds the decode pass's work.
         if !usesSharedToolInvocationCache { toolInvocationCache.removeAll() }
@@ -2595,8 +2726,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     ///
     /// - A group id seen for the first time takes the open state of an older
     ///   group id among its invocations (a window prepend re-keyed it); with
-    ///   none (a solo row became a group) it opens when one of its invocations
-    ///   is open, so the row the user opened stays in view.
+    ///   none it opens, unless the user toggled a group holding one of its
+    ///   invocations. No invocation opens at L2 by this rule.
     /// - A failed invocation not seeded yet opens at L2, and its group opens
     ///   unless the user toggled that group (`TranscriptToolRows.seedOpenState`).
     ///   Seeding runs once per invocation id: a row the user closed stays
@@ -2643,7 +2774,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let olderKeys = header.invocationIDs.filter { $0 != header.groupID && knownGroupIDs.contains($0) }
         let open: Bool
         if olderKeys.isEmpty {
-            open = header.invocationIDs.contains(where: openInvocations.contains)
+            // A new group opens unless the user already closed a group holding its invocations.
+            open = !header.invocationIDs.contains(where: userToggledGroupMembers.contains)
         } else {
             open = olderKeys.contains(where: openGroups.contains)
             for key in olderKeys {
@@ -3717,8 +3849,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     /// Handle a role ▲▼ jump intent: compute the target block for `role` relative
-    /// to the current viewport top and scroll to it. User and Assistant stops are
-    /// derived from `allBlocksCache` (position == `globalBlockIndex`); Tools and
+    /// to the current viewport top and scroll to it. User stops are derived from
+    /// `allBlocksCache` (position == `globalBlockIndex`); Agent stops are the agent
+    /// rows that show (`agentStopIDs`, hidden notes excluded); Tools and
     /// Errors stops come from the snapshot's `toolJumpIDs` / `errorJumpIDs`
     /// (Task 16), one per invocation.
     func handleRoleJumpIntent(token: Int, role: TranscriptRoleFilter?, direction: Int) {
@@ -3731,8 +3864,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let indices: [Int]
         switch role {
         case .tools: indices = toolJumpIDs
-        case .errors: indices = errorJumpIDs
-        case .user, .assistant:
+        case .errors:
+            indices = SessionRoleFilters.shownErrorStops(errorJumpIDs, failedInvocationIDs: failedInvocationIDs,
+                                                         activeRoles: activeRoleFilters)
+        case .assistant: indices = agentStopIDs
+        case .user:
             indices = allBlocksCache.enumerated().compactMap { offset, block in
                 TranscriptRoleFilter.governing(block, source: source) == role && messageGroups.groupIDByBlock[offset] == offset ? offset : nil
             }
@@ -3781,7 +3917,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                    token: Int,
                    direction: Int,
                    reset: Bool,
-                   shouldJump: Bool) -> (current: Int, total: Int) {
+                   shouldJump: Bool,
+                   revealsHidden: Bool = false) -> (current: Int, total: Int) {
         // Only navigate/count matches the active role filter leaves visible.
         let matches = matchesUnderActiveRoleFilter(rawMatches)
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3820,6 +3957,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
 
         let queryChanged = (q != findQuery || activeFindSource != source)
+        // Only an explicit step (Enter, ⌘G, ▲▼) or the list's auto-jump may turn Tools on.
+        // A reset jump (type-ahead) lands on a match that shows.
+        let mayShowTools = !reset || revealsHidden
+        // A new request drops a jump still waiting for Tools on; a jump below sets its own.
+        pendingToolsShownJump = nil
         activeFindSource = source
         findQuery = q
         findMatches = matches
@@ -3833,24 +3975,42 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // Spec §6.8: the search index still matches raw tool text (until P3), so a jump from
             // search can find nothing in the decoded text. Then open the tool row whose raw text
             // matched to L2 and flash it.
-            if source == .unified, shouldJump, reset || queryChanged { jumpToRawOnlyToolMatch(query: q) }
+            if source == .unified, shouldJump, reset || queryChanged {
+                jumpToRawOnlyToolMatch(query: q, mayShowTools: mayShowTools)
+            }
             repaintAllVisibleFind()
             return (0, 0)
         }
 
+        var jumps = shouldJump
         if reset || queryChanged {
             // New/changed query: jump to first match at-or-after the viewport top.
             let topBlock = firstVisibleBlockIndex()
-            findCurrentOrdinal = TranscriptFindNavigator.firstOrdinalAtOrAfter(
+            let first = TranscriptFindNavigator.firstOrdinalAtOrAfter(
                 matches: matches, viewportTopBlock: topBlock) ?? 0
+            if mayShowTools {
+                findCurrentOrdinal = first
+            } else if let shown = TranscriptFindNavigator.firstShownOrdinalAtOrAfter(
+                matches: matches, viewportTopBlock: topBlock,
+                isShown: { !self.isHiddenOnlyByTools(block: $0.globalBlockIndex) }) {
+                findCurrentOrdinal = shown
+            } else {
+                // Every match is in a row Tools hides: count them, do not jump.
+                findCurrentOrdinal = first
+                jumps = false
+            }
+        } else if findCurrentNotJumped && direction > 0 {
+            // The reset did not jump (every match hidden): the first step lands on that match.
+            findCurrentOrdinal = min(max(0, findCurrentOrdinal), matches.count - 1)
         } else {
             findCurrentOrdinal = TranscriptFindNavigator.steppedOrdinal(
                 current: min(max(0, findCurrentOrdinal), matches.count - 1),
                 count: matches.count,
                 direction: direction)
         }
+        findCurrentNotJumped = (reset || queryChanged) && !jumps && shouldJump
 
-        if shouldJump { scrollToCurrentFindMatch() }
+        if jumps { scrollToCurrentFindMatch(mayShowTools: mayShowTools) }
         repaintAllVisibleFind()
         return (findCurrentOrdinal + 1, matches.count)
     }
@@ -3970,20 +4130,19 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         DispatchQueue.main.async { [weak self] in self?.isSpeaking = false }
     }
 
-    /// Keep only matches whose block is currently visible under the active role
-    /// filter, so the find total + navigation ordinals never count or jump to a
-    /// block the filter has hidden (which would have no row to scroll to). Uses
+    /// Keep only matches whose block the active role filter shows, or that Tools
+    /// alone hides, so the find total + navigation ordinals never count or jump to
+    /// a block the filter has hidden (which would have no row to scroll to). Uses
     /// `allBlocksCache`, indexed by `globalBlockIndex == array position`. A match in
-    /// an invocation's block (call, output or paired `.error`) follows the invocation
-    /// row's rule (`TranscriptToolRows.showsInvocation`), as `emit` does.
+    /// an invocation's block (call, output or paired `.error`) always counts: landing
+    /// on one while Tools hides its row turns Tools on (`scrollToCurrentFindMatch`).
+    /// A note follows the Agent chip like any agent row.
     private func matchesUnderActiveRoleFilter(_ matches: [TranscriptDerivedState.BlockMatch]) -> [TranscriptDerivedState.BlockMatch] {
         var seen: Set<String> = []
         let filtered: [TranscriptDerivedState.BlockMatch] = matches.compactMap { original in
             var m = original
             guard allBlocksCache.indices.contains(m.globalBlockIndex) else { return nil }
-            if let id = toolInvocationID(forBlock: m.globalBlockIndex) {
-                return TranscriptToolRows.showsInvocation(id, activeRoles: activeRoleFilters, failedInvocationIDs: failedInvocationIDs) ? m : nil
-            }
+            if toolInvocationID(forBlock: m.globalBlockIndex) != nil { return m }
             let block = allBlocksCache[m.globalBlockIndex]
             let presentation = block.resolvedPresentation(source: source)
             if presentation?.origin == .placeholder || (!showsContext && presentation?.origin?.isHiddenContext == true) { return nil }
@@ -4061,10 +4220,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// by the time the expand check runs; `scrollToBlock` below then either
     /// no-ops its own widen (already covered) or performs it, unaffected
     /// either way.
-    private func scrollToCurrentFindMatch() {
+    private func scrollToCurrentFindMatch(mayShowTools: Bool) {
+        pendingToolsShownJump = nil
         guard findMatches.indices.contains(findCurrentOrdinal) else { return }
         let match = findMatches[findCurrentOrdinal]
         let target = match.globalBlockIndex
+        // Only Tools hides the row: an explicit step turns Tools on and lands on it when the row
+        // shows; any other jump stays put.
+        if isHiddenOnlyByTools(block: target) {
+            pendingFindReveal = nil
+            if mayShowTools { requestToolsShown(then: .match(match)) }
+            return
+        }
         widen(toIncludeBlock: target)
         if let ordinal = rowIndex(forBlock: target), rows[ordinal].isOriginLine, openOriginLines.insert(rows[ordinal].id).inserted {
             autoOpenedOriginLines.insert(rows[ordinal].id)
@@ -4203,19 +4370,73 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Spec §6.8 unified-search jump with 0 decoded matches: the first tool block (from the
     /// viewport top, wrapping) whose RAW text matches `query` — what the search index matched —
-    /// opens to L2 and its row flashes. Nothing when the Tools filter hides tool rows or no raw
-    /// tool text matches (the search hit was elsewhere, for example in the title).
-    private func jumpToRawOnlyToolMatch(query: String) {
-        guard activeRoleFilters.isEmpty || activeRoleFilters.contains(.tools), !allBlocksCache.isEmpty else { return }
+    /// opens to L2 and its row flashes. While Tools hides that row, the list's auto-jump
+    /// (`mayShowTools`) turns Tools on first and the jump ends on the next `apply`; type-ahead
+    /// does nothing. Nothing when no raw tool text matches (the search hit was elsewhere, for
+    /// example in the title).
+    private func jumpToRawOnlyToolMatch(query: String, mayShowTools: Bool) {
+        pendingToolsShownJump = nil
+        guard !allBlocksCache.isEmpty else { return }
         let start = min(max(0, firstVisibleBlockIndex() ?? 0), allBlocksCache.count - 1)
         let order = Array(allBlocksCache.indices[start...]) + Array(allBlocksCache.indices[..<start])
         guard let block = order.first(where: { index in
             toolInvocationID(forBlock: index) != nil
                 && SearchTextMatcher.hasMatch(in: allBlocksCache[index].text, query: query)
         }) else { return }
+        if isHiddenOnlyByTools(block: block) {
+            if mayShowTools { requestToolsShown(then: .rawToolBlock(block)) }
+            return
+        }
         widen(toIncludeBlock: block)
         autoExpandCollapsedMatch(block: block)
         scrollToBlock(block)   // scrolls to the invocation row and flashes it
+    }
+
+    /// True when the row of `block` is not emitted only because Tools is off: a tool invocation
+    /// the filter hides, or a message row made only of hidden notes.
+    private func isHiddenOnlyByTools(block: Int) -> Bool {
+        if toolInvocationID(forBlock: block) != nil {
+            return !TranscriptToolRows.showsInvocations(activeRoles: activeRoleFilters)
+        }
+        guard !hiddenNoteBlocks.isEmpty else { return false }
+        let owner = messageGroups.groupIDByBlock[block] ?? block
+        guard let group = messageGroups.groupsByID[owner] else { return hiddenNoteBlocks.contains(block) }
+        return group.isHidden(by: hiddenNoteBlocks)
+    }
+
+    /// Keeps `jump` pending and asks the parent to turn Tools on (next main-queue turn: this runs
+    /// inside a SwiftUI update pass).
+    private func requestToolsShown(then jump: PendingToolsShownJump) {
+        pendingToolsShownJump = jump
+        guard let request = onRequestToolsShown else { return }
+        DispatchQueue.main.async { request() }
+    }
+
+    /// Finishes a jump that waited for Tools on, once `apply` shows its row. A match jump only
+    /// runs while that match is still the current one.
+    private func finishPendingToolsShownJump() {
+        guard let jump = pendingToolsShownJump else { return }
+        switch jump {
+        case .match(let match):
+            guard findMatches.indices.contains(findCurrentOrdinal), findMatches[findCurrentOrdinal] == match else {
+                pendingToolsShownJump = nil
+                return
+            }
+            guard !isHiddenOnlyByTools(block: match.globalBlockIndex) else { return }
+            rebuildFindMatchesByRowIDIfActive()
+            scrollToCurrentFindMatch(mayShowTools: true)
+            repaintAllVisibleFind()
+        case .rawToolBlock(let block):
+            guard allBlocksCache.indices.contains(block), toolInvocationID(forBlock: block) != nil else {
+                pendingToolsShownJump = nil
+                return
+            }
+            guard !isHiddenOnlyByTools(block: block) else { return }
+            pendingToolsShownJump = nil
+            widen(toIncludeBlock: block)
+            autoExpandCollapsedMatch(block: block)
+            scrollToBlock(block)
+        }
     }
 
     /// Open (Task 16, spec §6.8) the closed group and the closed invocation
@@ -4257,6 +4478,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         pendingFindReveal = nil
         lastJumpedFindMatch = nil
+        pendingToolsShownJump = nil
         guard !autoOpenedGroupsByFind.isEmpty || !autoOpenedInvocationsByFind.isEmpty
                 || !autoChangedFoldsByFind.isEmpty else { return }
         // Folds Find opened go back to their state before (Task 15).

@@ -6,7 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Highlights
 
-- **Only what you typed is “You.”** The Session view labels background notifications, peer messages, commands and scheduled prompts. Instructions, page snapshots and skill loads stay behind the Context toggle.
+- **Only what you typed is “You.”** The Session view labels background notifications, peer messages, commands and scheduled prompts. Instructions, page snapshots and skill loads stay hidden unless you turn on "Show harness context in Session view" in Settings.
+
+### Features
+
+- The Session view now shows each turn as your prompt and the agent's answer. Tool calls, failed ones included, and the agent's working notes sit behind the Tools chip, and Find still searches them.
 
 ### Bug Fixes
 

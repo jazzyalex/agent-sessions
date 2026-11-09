@@ -147,6 +147,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessions: Bool = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) var unifiedShowTranscriptWindow: Bool = true
     @AppStorage("InlineSessionImageThumbnailsEnabled") var inlineSessionImageThumbnailsEnabled: Bool = true
+    @AppStorage("SessionShowContext") var sessionShowContext: Bool = false
     @AppStorage(PreferencesKey.Transcript.preferredIDETarget) var transcriptPreferredIDETargetRaw: String = IDEOpener.Target.systemDefault.rawValue
     @AppStorage(PreferencesKey.Transcript.ideBinaryOverridePath) var transcriptIDEBinaryOverridePath: String = ""
     @AppStorage(PreferencesKey.Transcript.enableReviewCards) var transcriptEnableReviewCards: Bool = true

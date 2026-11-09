@@ -64,6 +64,8 @@ final class TranscriptDerivedState {
         /// ▲▼ stops of the Errors filter: `.error` blocks that belong to no invocation, plus failed
         /// invocation ids (a paired `.error` block is its invocation's stop, not a second one), ascending.
         var errorJumpIDs: [Int] = []
+        /// Turn segmentation of `blocks` (answer and note blocks per turn), built off the main thread.
+        var turnIndex: TranscriptTurnIndex = .empty
         /// L1 summaries of the invocations in the tail window (the window the Session view opens
         /// at), by invocation id, built off the main thread (`tailRowSummaries`). The Session
         /// view seeds its summary cache from them, so its first rows need no input parse on main.
@@ -391,6 +393,7 @@ final class TranscriptDerivedState {
         let jumps = jumpIDs(blocks: blocks, index: invocationIndex, failedInvocationIDs: failedInvocationIDs)
         snap.toolJumpIDs = jumps.tools
         snap.errorJumpIDs = jumps.errors
+        snap.turnIndex = TranscriptTurns.index(blocks: blocks, source: session.source)
         // The tail's L1 summaries are built on a second thread while this one derives the
         // preamble and the anchors, so the snapshot takes about as long as without them.
         let summaries = RowSummaryBox()

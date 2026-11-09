@@ -1703,7 +1703,8 @@ extension TranscriptToolCorpusCheckTests {
                 defer { window.close() }
                 controller.apply(allBlocks: blocks, invocationIndex: toolIndex, totalBlockCount: blocks.count,
                                  fontSize: 13, source: session.source, sessionID: session.id, configurationChanges: changes,
-                                 imagesByBlockIndex: images, inlineImagesEnabled: !images.isEmpty, showsContext: showContext)
+                                 imagesByBlockIndex: images, inlineImagesEnabled: !images.isEmpty, showsContext: showContext,
+                                 turnIndex: TranscriptTurns.index(blocks: blocks, source: session.source))
                 controller.scrollToBlock(target.globalBlockIndex)
                 // Hidden/placeholder targets have no row: anchor to their nearest real neighbor.
                 if !controller.rows.contains(where: { $0.representedBlockIndices.contains(target.globalBlockIndex) }),
@@ -1827,7 +1828,9 @@ extension TranscriptToolCorpusCheckTests {
                         failedInvocationIDs: snapshot.failedInvocationIDs, toolJumpIDs: snapshot.toolJumpIDs,
                         errorJumpIDs: snapshot.errorJumpIDs, totalBlockCount: snapshot.totalBlockCount,
                         fontSize: 13, source: source, sessionID: session.id,
-                        sessionCwd: session.cwd, rowSummaries: snapshot.rowSummaries)
+                        sessionCwd: session.cwd, activeRoleFilters: [.user, .assistant, .errors],
+                        rowSummaries: snapshot.rowSummaries,
+                        turnIndex: snapshot.turnIndex)
                     window.contentView?.layoutSubtreeIfNeeded()
                     views.table.layoutSubtreeIfNeeded()
                     window.contentView?.displayIfNeeded()

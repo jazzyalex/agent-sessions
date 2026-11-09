@@ -337,14 +337,9 @@ final class TranscriptToolRowsTests: XCTestCase {
         ])
         XCTAssertEqual(s.failed, [3, 13])
 
-        // Group 1 shows its header and only its failed row; group 8 has no failure and hides; the
-        // failed solo row shows; the plain error block shows as today.
-        let errorsOnly = s.rows(openGroups: [1, 8], roles: [.errors])
-        XCTAssertEqual(errorsOnly.map(\.id), [hid(1), 3, 13, 18])
-        XCTAssertEqual(invocation(errorsOnly[1])?.position, .solo)
-        XCTAssertEqual(invocation(errorsOnly[1])?.groupID, 1)
-        XCTAssertEqual(header(errorsOnly[0])?.callCount, 3, "the header still counts the whole group")
-        XCTAssertEqual(s.rows(roles: [.errors]).map(\.id), [hid(1), 13, 18])
+        // Failed calls follow Tools: errors only shows the plain error block and no tool rows.
+        XCTAssertEqual(s.rows(openGroups: [1, 8], roles: [.errors]).map(\.id), [18])
+        XCTAssertEqual(s.rows(openGroups: [1, 8], roles: [.user, .assistant, .errors]).map(\.id), [0, 7, 12, 15, 18])
 
         // Tools and errors off: no tool rows at all.
         XCTAssertEqual(s.rows(openGroups: [1, 8], roles: [.user, .assistant]).map(\.id), [0, 7, 12, 15])

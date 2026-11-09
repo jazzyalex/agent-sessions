@@ -60,6 +60,11 @@ final class TranscriptToolCellsTests: XCTestCase {
         /// Applies the same stream again (after a filter change).
         func reapply() { apply() }
 
+        /// Closes a group by hand: groups open by default, so tests of closed groups start here.
+        func closeGroup(_ groupID: Int) {
+            controller.toggleGroup(groupID: groupID, allRows: false)
+        }
+
         private func apply() {
             let index = ToolInvocationIndex.build(blocks: blocks, source: source)
             var failed = Set<Int>()
@@ -71,7 +76,8 @@ final class TranscriptToolCellsTests: XCTestCase {
                              toolJumpIDs: jumps.tools, errorJumpIDs: jumps.errors,
                              totalBlockCount: blocks.count, fontSize: 13, source: source, sessionID: sessionID,
                              imagesByBlockIndex: images, inlineImagesEnabled: !images.isEmpty,
-                             activeRoleFilters: activeRoleFilters, rowSummaries: rowSummaries, showsContext: showsContext)
+                             activeRoleFilters: activeRoleFilters, rowSummaries: rowSummaries, showsContext: showsContext,
+                             turnIndex: TranscriptTurns.index(blocks: blocks, source: source))
             layout()
         }
 
@@ -414,6 +420,7 @@ final class TranscriptToolCellsTests: XCTestCase {
 
     func testToggleGroupInsertsRows() {
         let h = Harness(twoCallGroup)
+        h.closeGroup(1)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
         XCTAssertEqual(h.table.numberOfRows, 3)
 
@@ -432,6 +439,7 @@ final class TranscriptToolCellsTests: XCTestCase {
     func testRowIndexForOutputBlockFindsInvocationRow() {
         // ... plus 6 c3 · 7 o3: a solo invocation after the assistant message.
         let h = Harness(twoCallGroup + [bash("t3", "ls"), output("t3")])
+        h.closeGroup(1)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5, 6])
 
         // Output block 7 → its solo invocation row (id 6).
@@ -449,6 +457,7 @@ final class TranscriptToolCellsTests: XCTestCase {
 
     func testOptionToggleOpensAllInvocations() {
         let h = Harness(twoCallGroup)
+        h.closeGroup(1)
 
         h.controller.toggleGroup(groupID: 1, allRows: true)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
@@ -542,6 +551,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant · 6 S call · 7 S output
         let h = Harness([user(), bash("t1", "make"), output("t1", lines), bash("t2", "make test"), output("t2", lines),
                          assistant(), bash("t3", "seq 1 200"), output("t3", lines)])
+        h.closeGroup(1)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5, 6])
         h.controller.toggleInvocation(invocationID: 6, allInGroup: false)
         XCTAssertTrue(h.waitForPresentations())
@@ -586,6 +596,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant: a closed group of invocations 1 and 3.
         let h = Harness([user(), bash("t1", "make"), output("t1"), bash("t2", "seq 1 200"),
                          output("t2", lines.joined(separator: "\n")), assistant()])
+        h.closeGroup(1)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
         let matches = h.decodedMatches("needle")
         XCTAssertEqual(matches.map(\.space), [.decoded])
@@ -683,6 +694,7 @@ final class TranscriptToolCellsTests: XCTestCase {
     func testJumpIntoClosedGroupOpensIt() {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 assistant: one closed group of two invocations (1, 3).
         let h = Harness(twoCallGroup)
+        h.closeGroup(1)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
         XCTAssertFalse(h.controller.openGroups.contains(1))
 
@@ -754,12 +766,29 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(h.controller.openGroups, [1])
     }
 
+    func testErrorsJumpSkipsFailedCallWhileToolsIsOff() {
+        // 0 user · 1 c o ✗ · 3 c o (group 1) · 5 assistant · 6 plain .error · 7–46 filler.
+        // Tools off: 5 and fillers 7–45 are notes (hidden); 46 is the turn's answer.
+        let h = jumpHarness([user(), bash("t1", "make"), output("t1", "boom", failed: true),
+                             bash("t2", "ls"), output("t2"), assistant(),
+                             F.block(.error, text: "plain error", isError: true)])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 6, 46], "no tool rows, failed or not")
+        scrollRowToTop(h, row: 0)
+
+        h.controller.handleRoleJumpIntent(token: 1, role: .errors, direction: 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 6), "the failed call is not a stop while Tools is off")
+        XCTAssertFalse(h.activeRoleFilters.contains(.tools))
+    }
+
     // MARK: - Card chrome
 
     func testCardPositionsDrawContinuousBar() throws {
         // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 c3 · 6 o3 · 7 assistant
         let h = Harness([user(), bash("t1", "make"), output("t1"), bash("t2", "make test"), output("t2"),
                          bash("t3", "make lint"), output("t3"), assistant()])
+        h.closeGroup(1)
         h.controller.toggleGroup(groupID: 1, allRows: false)
         h.layout()
         XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5, 7])
@@ -825,6 +854,38 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
         h.replace(blocks + [user("again")])
         XCTAssertEqual(h.rowIDs, [0, hid(1), 5, 6], "the closed group stays closed")
+    }
+
+    func testFirstToolsOnOpensEveryUntouchedGroupAtL1() {
+        // 0 user · 1 t1 · 3 t2 · 5 note · 6 t3 · 8 t4 · 10 answer; t4 fails.
+        let blocks = [user(), bash("t1", "make"), output("t1"), read("t2", "/repo/a.swift"), output("t2"),
+                      assistant("next"), bash("t3", "ls"), output("t3"), bash("t4", "make test"),
+                      output("t4", "FAILED", failed: true), assistant()]
+        let h = Harness([user()])
+        h.activeRoleFilters = Self.toolsOff
+        h.replace(blocks)
+        XCTAssertFalse(h.rowIDs.contains(hid(1)), "Tools off hides the groups, so none was seen yet")
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        for id in [1, 3, 6, 8] {
+            XCTAssertTrue(h.rowIDs.contains(id), "invocation \(id) shows with its group open")
+        }
+        XCTAssertEqual(h.controller.openInvocations, [8], "only the failed call opens at L2")
+        XCTAssertEqual(h.invocation(id: 1)?.isOpen, false)
+    }
+
+    func testGroupClosedByHandStaysClosedAcrossToolsCycle() {
+        let h = Harness(twoCallGroup)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5], "a fresh group opens")
+        h.controller.toggleGroup(groupID: 1, allRows: false)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
+
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5], "the hand-closed group stays closed")
     }
 
     // MARK: - Task 13b: copy, raw event, VoiceOver, Increase Contrast
@@ -931,7 +992,8 @@ final class TranscriptToolCellsTests: XCTestCase {
         other.rawJSON = #"{"type":"tool_use","input":{"command":"ls"}}"#
         let h = Harness([user(), call, out, other, output("t2")])
 
-        // The two calls form a closed group: open it so the cells exist.
+        // The two calls form a group that opens by default: close, then reopen it so the cells exist.
+        h.closeGroup(1)
         h.controller.toggleGroup(groupID: 1, allRows: false)
         let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
         let otherCell = try XCTUnwrap(h.view(id: 3, as: ToolInvocationCellView.self))
@@ -967,7 +1029,6 @@ final class TranscriptToolCellsTests: XCTestCase {
         call.rawJSON = #"{"type":"tool_use"}"#
         let blocks = [user(), call, output("t1"), bash("t2", "ls"), output("t2"), assistant()]
         let h = Harness(blocks)
-        h.controller.toggleGroup(groupID: 1, allRows: false)
         let cell = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
 
         func open() {
@@ -995,7 +1056,8 @@ final class TranscriptToolCellsTests: XCTestCase {
         h.controller.showRawEvent(invocationID: 1, relativeTo: again.bounds, of: again) { opened = .some($0) }
         let index = ToolInvocationIndex.build(blocks: h.blocks, source: h.source)
         h.controller.apply(allBlocks: h.blocks, invocationIndex: index, failedInvocationIDs: [],
-                           totalBlockCount: h.blocks.count, fontSize: 13, source: h.source, sessionID: "other-session")
+                           totalBlockCount: h.blocks.count, fontSize: 13, source: h.source, sessionID: "other-session",
+                           turnIndex: TranscriptTurns.index(blocks: h.blocks, source: h.source))
         spin { opened != nil }
         XCTAssertEqual(opened.map { $0 == nil }, true, "dropped after the session switch")
         XCTAssertNil(h.controller.rawEventInvocationID)
@@ -1179,8 +1241,9 @@ final class TranscriptToolCellsTests: XCTestCase {
         let total = FeatureFlags.transcriptWindowBlockTarget + 4
         while blocks.count < total { blocks.append(blocks.count.isMultiple(of: 2) ? user("u") : assistant("a")) }
         let h = Harness(blocks)
-        XCTAssertEqual(Array(h.rowIDs.prefix(2)), [hid(3), 7])
+        XCTAssertEqual(Array(h.rowIDs.prefix(4)), [hid(3), 3, 5, 7], "a fresh group opens")
 
+        h.closeGroup(3)
         h.controller.toggleGroup(groupID: 3, allRows: false)
         XCTAssertEqual(Array(h.rowIDs.prefix(4)), [hid(3), 3, 5, 7])
 
@@ -1197,7 +1260,6 @@ final class TranscriptToolCellsTests: XCTestCase {
     func testDragAcrossClosedRowsCopiesSummaries() {
         // Rows: 0 user, group header, inv 1, inv 3, 5 assistant (group open, L2 closed).
         let h = Harness(twoCallGroup)
-        h.controller.toggleGroup(groupID: 1, allRows: false)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
 
         h.controller.setCrossBlockSelection(anchor: (0, 0), focus: (4, 4))
@@ -1266,7 +1328,6 @@ final class TranscriptToolCellsTests: XCTestCase {
 
     func testCrossBlockSelectionTintsCoveredToolRows() throws {
         let h = Harness(twoCallGroup)
-        h.controller.toggleGroup(groupID: 1, allRows: false)
         XCTAssertEqual(h.rowIDs, [0, hid(1), 1, 3, 5])
         let header = try XCTUnwrap(h.view(id: hid(1), as: ToolGroupHeaderCellView.self))
         let first = try XCTUnwrap(h.view(id: 1, as: ToolInvocationCellView.self))
@@ -1581,20 +1642,20 @@ final class TranscriptToolCellsTests: XCTestCase {
         XCTAssertEqual(payload.map { $0.contains("tool-links-") }, true, "the file path is a link once the scan ends")
     }
 
-    func testFindUnderErrorsOnlyKeepsMatchesInShownFailedRows() {
+    func testFindUnderErrorsOnlyCountsMatchesInHiddenFailedRows() {
         // 0 user · 1 c1 · 2 o1 (failed) · 3 assistant · 4 c2 · 5 o2 · 6 assistant
         let h = Harness([user(), bash("t1", "make"), output("t1", "needle failed", failed: true), assistant(),
                          bash("t2", "ls"), output("t2", "needle ok"), assistant()])
         h.activeRoleFilters = [.errors]
         h.reapply()
-        XCTAssertEqual(h.rowIDs, [1], "only the failed invocation shows")
+        XCTAssertEqual(h.rowIDs, [], "a failed call follows the Tools chip, not Errors")
         let matches = [
             TranscriptDerivedState.BlockMatch(globalBlockIndex: 2, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 0),
             TranscriptDerivedState.BlockMatch(globalBlockIndex: 5, rangeInBlockText: NSRange(location: 0, length: 6), ordinal: 1),
         ]
         let counts = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1,
                                             reset: true, shouldJump: false)
-        XCTAssertEqual(counts.total, 1, "the failed row's match counts; the hidden row's does not")
+        XCTAssertEqual(counts.total, 2, "tool matches count even in rows Tools hides; landing on one turns Tools on")
     }
 
     func testFindWithErrorsOffKeepsMatchInPairedErrorOfShownInvocation() {
@@ -1612,5 +1673,278 @@ final class TranscriptToolCellsTests: XCTestCase {
         let counts = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1, direction: 1,
                                             reset: true, shouldJump: false)
         XCTAssertEqual(counts.total, 1, "the paired error is inside a shown invocation; the plain error is hidden")
+    }
+
+    // MARK: - Hide tool work (notes follow the Tools chip)
+
+    private static let toolsOff: Set<TranscriptRoleFilter> = [.user, .assistant, .errors]
+
+    func testToolsOffHidesNotesAndToolRows() {
+        // 0 user · 1 note · 2 call · 3 answer
+        let h = Harness([user(), assistant("looking"), bash("t1", "ls"), assistant()])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 3])
+    }
+
+    func testToolsOnShowsNotes() {
+        // 0 user · 1 note · 2 call · 3 answer
+        let h = Harness([user(), assistant("looking"), bash("t1", "ls"), assistant()])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertFalse(h.rowIDs.contains(1), "the note hides with Tools off")
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 1, 2, 3], "and shows with Tools on")
+    }
+
+    func testAgentOffHidesAnswersRegardlessOfTools() {
+        let h = Harness([user(), assistant("looking"), bash("t1", "ls"), assistant()])
+        h.activeRoleFilters = [.user, .tools]
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 2])
+    }
+
+    func testMergedRowWithAnswerMemberStaysVisible() {
+        // 1 and 2 collapse into one row (same body); 1 is a note, 2 the answer.
+        let h = Harness([user(), assistant("same"), assistant("same")])
+        XCTAssertEqual(h.rowIDs, [0, 1])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 1])
+        XCTAssertEqual(h.controller.rows.last?.representedBlockIndices, [1, 2])
+    }
+
+    func testToolsOffHidesFailedInvocationEvenWithErrorsOn() {
+        // 0 user · 1 note · 2 call · 3 failed output · 4 answer. Failed calls follow Tools, not Errors.
+        let h = Harness([user(), assistant("trying"), bash("t1", "make"), output("t1", "boom", failed: true), assistant()])
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertTrue(h.activeRoleFilters.contains(.errors))
+        XCTAssertEqual(h.rowIDs, [0, 4])
+    }
+
+    func testAgentJumpSkipsHiddenNotes() {
+        let h = Harness([user(), assistant("looking"), bash("t1", "ls"), assistant()])
+        var counts: [Int] = []
+        h.controller.onAgentStopCountChange = { counts.append($0) }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        scrollRowToTop(h, row: 0)
+        h.controller.handleRoleJumpIntent(token: 1, role: .assistant, direction: 1)
+        XCTAssertTrue(h.controller.isFlashing(rowID: 3))
+        XCTAssertFalse(h.controller.isFlashing(rowID: 1))
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(counts, [1, 2])
+    }
+
+    func testTurnChipSitsOnAnswerWithToolsOffAndReturnsWithToolsOn() throws {
+        // 0 user · 1 note · 2 call · 3 output · 4 answer; the turn takes 4 s with one call.
+        let h = Harness([F.block(.user, text: "go", at: 0), F.block(.assistant, text: "looking", at: 1),
+                         F.block(.toolCall, id: "t1", toolName: "Bash", toolInput: json(["command": "ls"]), at: 2),
+                         F.block(.toolOut, id: "t1", text: "ok", at: 3), F.block(.assistant, text: "done", at: 4)])
+        func chip(_ id: Int) -> String? {
+            h.layout()
+            return h.view(id: id, as: BlockCardCellView.self)?.displayedHeader?.turnChipText
+        }
+        XCTAssertEqual(chip(1), "4.0s · 1 call")
+        XCTAssertEqual(chip(4), "")
+
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 4])
+        XCTAssertEqual(chip(4), "4.0s · 1 call")
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertEqual(chip(1), "4.0s · 1 call")
+        XCTAssertEqual(chip(4), "")
+    }
+
+    // MARK: - Find with Tools off (Find turns Tools on)
+
+    private func needleMatch(block: Int, at location: Int = 0) -> TranscriptDerivedState.BlockMatch {
+        TranscriptDerivedState.BlockMatch(globalBlockIndex: block, rangeInBlockText: NSRange(location: location, length: 6),
+                                          ordinal: 0)
+    }
+
+    func testFindCountsHiddenToolMatchAndRequestsToolsOn() {
+        // 0 user · 1 call · 2 output · 3 answer
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), assistant()])
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 3])
+
+        // Typing: the only match is hidden, so there is no jump and no request.
+        let counts = h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 2)], token: 1,
+                                            direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(counts.total, 1, "the hidden tool output's match counts")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 0, "type-ahead never turns Tools on")
+        XCTAssertFalse(h.controller.isFlashing(rowID: 0))
+        XCTAssertFalse(h.controller.isFlashing(rowID: 3))
+
+        // Enter: explicit navigation onto the hidden match asks for Tools on.
+        h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 2)], token: 2,
+                               direction: 1, reset: false, shouldJump: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1, "landing on it asks for Tools on")
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.rowIDs.contains(1), "the invocation row shows")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1), "and the jump lands on it")
+        XCTAssertTrue(h.controller.openInvocations.contains(1))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testFindOnHiddenNoteRequestsToolsOn() {
+        // 0 user · 1 note · 2 call · 3 output · 4 answer
+        let h = Harness([user(), assistant("needle looking"), bash("t1", "ls"), output("t1"), assistant()])
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 4])
+
+        let counts = h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 1)], token: 1,
+                                            direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(counts.total, 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 0, "type-ahead never turns Tools on")
+        // ⇧⌘G: explicit navigation.
+        h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 1)], token: 2,
+                               direction: -1, reset: false, shouldJump: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.rowIDs.contains(1), "the note shows")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testNoteMatchNotCountedWhenAgentOff() {
+        // 0 user · 1 note · 2 call · 3 output · 4 answer
+        let h = Harness([user(), assistant("needle looking"), bash("t1", "ls"), output("t1", "needle"), assistant()])
+        h.activeRoleFilters = [.user, .errors]
+        h.reapply()
+        let counts = h.controller.applyFind(source: .local, query: "needle",
+                                            matches: [needleMatch(block: 1), needleMatch(block: 3)], token: 1,
+                                            direction: 1, reset: true, shouldJump: false)
+        XCTAssertEqual(counts.total, 1, "the tool output counts; the note follows the Agent chip")
+    }
+
+    func testUnifiedRawOnlyHitTurnsToolsOnAndOpensCall() {
+        let header = "Chunk ID: a1\nWall time: 0.1 seconds\nProcess exited with code 0\nOriginal token count: 3\nOutput:\nclean\n"
+        // 0 user · 1 c1 · 2 o1 · 3 c2 · 4 o2 · 5 answer: one group of two invocations (1, 3).
+        let h = Harness([user(), F.block(.toolCall, id: "t1", toolName: "exec_command", toolInput: json(["cmd": "git status"])),
+                         F.block(.toolOut, id: "t1", text: header, toolName: "exec_command"),
+                         F.block(.toolCall, id: "t2", toolName: "exec_command", toolInput: json(["cmd": "ls"])),
+                         F.block(.toolOut, id: "t2", text: "clean", toolName: "exec_command"), assistant()],
+                        source: .codex)
+        h.closeGroup(1)
+        XCTAssertEqual(h.rowIDs, [0, hid(1), 5])
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 5])
+
+        // A query change on the open transcript (type-ahead) does not turn Tools on.
+        let counts = h.controller.applyFind(source: .unified, query: "chunk", matches: [], token: 1, direction: 1,
+                                            reset: true, shouldJump: true)
+        XCTAssertEqual(counts.total, 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 0, "a type-ahead raw hit leaves Tools off")
+
+        // The auto-jump into a session opened from the list does.
+        h.controller.applyFind(source: .unified, query: "chunk", matches: [], token: 2, direction: 1,
+                               reset: true, shouldJump: true, revealsHidden: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1, "the raw hit asks for Tools on")
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.rowIDs.contains(1), "the call shows in its reopened group")
+        XCTAssertTrue(h.controller.openGroups.contains(1))
+        XCTAssertTrue(h.controller.openInvocations.contains(1), "and opens at L2")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testTypingLandsOnFirstVisibleMatchAndLeavesToolsOff() {
+        // 0 user · 1 call · 2 output · 3 answer; the first match is in the hidden output.
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), assistant("needle done")])
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertEqual(h.rowIDs, [0, 3])
+
+        let counts = h.controller.applyFind(source: .local, query: "needle",
+                                            matches: [needleMatch(block: 2), needleMatch(block: 3)], token: 1,
+                                            direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(counts.total, 2, "the hidden match still counts")
+        XCTAssertEqual(counts.current, 2, "the jump lands on the first visible match")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 3))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 0)
+
+        // ⌘G wraps onto the hidden match: explicit navigation asks for Tools on.
+        h.controller.applyFind(source: .local, query: "needle",
+                               matches: [needleMatch(block: 2), needleMatch(block: 3)], token: 2,
+                               direction: 1, reset: false, shouldJump: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testToolsOnFinishesJumpWhenTailRowsAreIdentical() {
+        // 0 user · 1 call · 2 output · 3 answer, then plain turns past the tail window: the window
+        // holds no tool rows or notes, so Tools on leaves its rows identical.
+        let filler = (0..<FeatureFlags.transcriptWindowBlockTarget).flatMap { i in
+            [user("question \(i)"), assistant("answer \(i)")]
+        }
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), assistant()] + filler)
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        XCTAssertFalse(h.rowIDs.contains(0), "the start is outside the loaded window")
+
+        h.controller.applyFind(source: .local, query: "needle", matches: [needleMatch(block: 2)], token: 1,
+                               direction: 1, reset: false, shouldJump: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
+
+        h.activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+        h.reapply()
+        XCTAssertTrue(h.rowIDs.contains(1), "the jump widens to the invocation row")
+        XCTAssertTrue(h.controller.isFlashing(rowID: 1))
+    }
+
+    func testEnterAfterAllHiddenTypingLandsOnTheFirstMatch() {
+        // 0 user · 1 call · 2 output · 3 call · 4 output · 5 answer; both matches are hidden.
+        let h = Harness([user(), bash("t1", "ls"), output("t1", "needle"), bash("t2", "pwd"), output("t2", "needle"),
+                         assistant()])
+        var requests = 0
+        h.controller.onRequestToolsShown = { requests += 1 }
+        h.activeRoleFilters = Self.toolsOff
+        h.reapply()
+        let matches = [needleMatch(block: 2), needleMatch(block: 4)]
+        let typed = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 1,
+                                           direction: 1, reset: true, shouldJump: true)
+        XCTAssertEqual(typed.current, 1)
+        let entered = h.controller.applyFind(source: .local, query: "needle", matches: matches, token: 2,
+                                             direction: 1, reset: false, shouldJump: true)
+        XCTAssertEqual(entered.current, 1, "the first Enter lands on the match typing could not show")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(requests, 1)
     }
 }

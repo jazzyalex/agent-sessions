@@ -395,6 +395,9 @@ extension PreferencesView {
                 Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
                     .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
 
+                Toggle("Show harness context in Session view", isOn: $sessionShowContext)
+                    .help("Show text the agent’s harness added: instructions, environment, skill files")
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height

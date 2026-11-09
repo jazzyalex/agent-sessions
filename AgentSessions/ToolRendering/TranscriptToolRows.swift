@@ -57,6 +57,11 @@ struct TranscriptMessageGroupIndex {
     struct Group {
         var block: Block
         var representedBlockIndices: [Int]
+
+        /// True when every block this row represents is a hidden agent note.
+        func isHidden(by hiddenNotes: Set<Int>) -> Bool {
+            !hiddenNotes.isEmpty && representedBlockIndices.allSatisfy(hiddenNotes.contains)
+        }
     }
     var groupsByID: [Int: Group] = [:]
     var groupIDByBlock: [Int: Int] = [:]
@@ -140,11 +145,10 @@ enum TranscriptToolRows {
     ///   call is before the window therefore sits at its first output; its row id is still the
     ///   invocation id, and `rowSummary` reads the call from the full block array.
     /// - A run with one invocation: one `.solo` row and no header. Two or more: a header (group
-    ///   id = the first invocation's id) and, when the group is open, one row per shown
-    ///   invocation, `first` / `middle` / `last` over the shown rows (`solo` when one shows).
-    /// - Role filter: an invocation shows when `.tools` is active, or when `.errors` is active
-    ///   and it failed. A header shows when any of its invocations shows; its counts cover the
-    ///   whole group. An empty set shows everything, as in `rowsWithTelemetry`.
+    ///   id = the first invocation's id) and, when the group is open, one row per invocation,
+    ///   `first` / `middle` / `last`.
+    /// - Role filter: invocations show only when `.tools` is active (`showsInvocations`); failed
+    ///   ones too. An empty set shows everything, as in `rowsWithTelemetry`.
     /// - Every other block, and the telemetry markers, come out exactly as
     ///   `BlockTableController.rowsWithTelemetry` gives them.
     ///
@@ -153,6 +157,8 @@ enum TranscriptToolRows {
     ///     a cached closure). Called only for the invocations of each header that shows.
     ///   - markers: telemetry change lines by anchor block (`rowsWithTelemetry`'s `markers`).
     ///   - totalBlockCount: the full stream's length, for the trailing marker; nil skips it.
+    ///   - hiddenNoteBlocks: agent notes hidden while Tools is off. A message row is skipped when
+    ///     every block it represents is in this set.
     static func emit(blocks: ArraySlice<Block>,
                      index: ToolInvocationIndex,
                      rowSummary: (ToolInvocationRef) -> ToolRowSummary,
@@ -164,7 +170,8 @@ enum TranscriptToolRows {
                      totalBlockCount: Int? = nil,
                      showsContext: Bool = false,
                      source: SessionSource = .claude,
-                     messageGroups: TranscriptMessageGroupIndex? = nil) -> [BlockRowModel] {
+                     messageGroups: TranscriptMessageGroupIndex? = nil,
+                     hiddenNoteBlocks: Set<Int> = []) -> [BlockRowModel] {
         let messageGroups = messageGroups ?? TranscriptMessageGroupIndex.build(
             blocks: blocks, source: source, showsContext: showsContext, markers: markers)
         var placedMessages = Set<Int>()
@@ -199,6 +206,8 @@ enum TranscriptToolRows {
                 guard placedMessages.insert(owner).inserted else { continue }
                 let group = messageGroups.groupsByID[owner]
                 let members = group?.representedBlockIndices ?? [blockIndex]
+                let owned = group ?? TranscriptMessageGroupIndex.Group(block: block, representedBlockIndices: members)
+                if owned.isHidden(by: hiddenNoteBlocks) { continue }
                 rows.append(BlockRowModel(id: owner, content: .message(group?.block ?? block),
                                           representedBlockIndices: members))
             }
@@ -212,8 +221,9 @@ enum TranscriptToolRows {
         return rows
     }
 
-    /// Default open state for groups the controller has not seen yet (spec §6.1): a group with a
-    /// failed invocation starts open, and its failed invocations start open at L2. The controller
+    /// Failed-invocation seed for groups the controller has not seen yet (spec §6.1): a group with a
+    /// failed invocation starts open, and its failed invocations start open at L2. Every other new
+    /// group opens at L1 by the controller's default (`carryOpenState`), so this seed adds only L2. The controller
     /// calls this once per new group id and never reseeds after a user toggle.
     /// Group membership comes from `ToolGroupHeaderModel.invocationIDs`; `index` is not read.
     static func seedOpenState(newGroups: [ToolGroupHeaderModel], index _: ToolInvocationIndex,
@@ -237,8 +247,7 @@ enum TranscriptToolRows {
         let openGroups: Set<Int>
         let openInvocations: Set<Int>
         let failedInvocationIDs: Set<Int>
-        let showsAllInvocations: Bool
-        let showsFailedInvocations: Bool
+        let showsInvocations: Bool
 
         init(window: Window, openGroups: Set<Int>, openInvocations: Set<Int>,
              failedInvocationIDs: Set<Int>, activeRoles: Set<TranscriptRoleFilter>) {
@@ -246,13 +255,7 @@ enum TranscriptToolRows {
             self.openGroups = openGroups
             self.openInvocations = openInvocations
             self.failedInvocationIDs = failedInvocationIDs
-            showsAllInvocations = activeRoles.isEmpty || activeRoles.contains(.tools)
-            showsFailedInvocations = activeRoles.contains(.errors)
-        }
-
-        /// `TranscriptToolRows.showsInvocation`, with the role flags read once.
-        func shows(_ id: Int) -> Bool {
-            showsAllInvocations || (showsFailedInvocations && failedInvocationIDs.contains(id))
+            showsInvocations = TranscriptToolRows.showsInvocations(activeRoles: activeRoles)
         }
 
         func row(_ ref: ToolInvocationRef, groupID: Int?, position: CardPosition) -> BlockRowModel {
@@ -262,30 +265,28 @@ enum TranscriptToolRows {
         }
     }
 
-    /// The role filter rule of `emit` for invocation `id`: it shows when `.tools` is active (or
-    /// the set is empty), or when `.errors` is active and it failed. Find counts a match inside an
+    /// The role filter rule of `emit` for invocations: they show when `.tools` is active (or the
+    /// set is empty). Failed calls follow Tools too, so Tools off never leaves tool rows behind;
+    /// Errors governs only the `.error` blocks outside invocations. Find counts a match inside an
     /// invocation by this rule, never by the kind of the block that holds it.
-    static func showsInvocation(_ id: Int, activeRoles: Set<TranscriptRoleFilter>,
-                                failedInvocationIDs: Set<Int>) -> Bool {
+    static func showsInvocations(activeRoles: Set<TranscriptRoleFilter>) -> Bool {
         activeRoles.isEmpty || activeRoles.contains(.tools)
-            || (activeRoles.contains(.errors) && failedInvocationIDs.contains(id))
     }
 
     /// Appends the rows of `run` and empties it.
     private static func appendRun(_ run: inout [ToolInvocationRef], to rows: inout [BlockRowModel],
                                   context: Context, rowSummary: (ToolInvocationRef) -> ToolRowSummary) {
         defer { run.removeAll(keepingCapacity: true) }
+        guard context.showsInvocations, !run.isEmpty else { return }
         if run.count == 1 {
-            if context.shows(run[0].id) { rows.append(context.row(run[0], groupID: nil, position: .solo)) }
+            rows.append(context.row(run[0], groupID: nil, position: .solo))
             return
         }
-        let shown = run.filter { context.shows($0.id) }
-        guard !shown.isEmpty else { return }
         let header = groupHeader(run, context: context, rowSummary: rowSummary)
         rows.append(BlockRowModel(id: groupHeaderRowID(forGroup: header.groupID), content: .toolGroupHeader(header)))
         guard header.isOpen else { return }
-        for (offset, ref) in shown.enumerated() {
-            rows.append(context.row(ref, groupID: header.groupID, position: position(at: offset, of: shown.count)))
+        for (offset, ref) in run.enumerated() {
+            rows.append(context.row(ref, groupID: header.groupID, position: position(at: offset, of: run.count)))
         }
     }
 

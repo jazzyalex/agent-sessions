@@ -48,6 +48,18 @@ enum TranscriptFindNavigator {
         return 0
     }
 
+    /// Like `firstOrdinalAtOrAfter`, but only a match `isShown` accepts qualifies: the first shown
+    /// match at-or-after the viewport top, wrapping to the start. Nil when no match is shown.
+    static func firstShownOrdinalAtOrAfter(matches: [Match], viewportTopBlock: Int?,
+                                           isShown: (Match) -> Bool) -> Int? {
+        guard let start = firstOrdinalAtOrAfter(matches: matches, viewportTopBlock: viewportTopBlock) else { return nil }
+        for offset in 0..<matches.count {
+            let match = matches[(start + offset) % matches.count]
+            if isShown(match) { return match.ordinal }
+        }
+        return nil
+    }
+
     // MARK: Stable-current reconciliation across a snapshot change
 
     /// After a live-append (or any snapshot recompute) the match list may change.

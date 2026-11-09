@@ -686,19 +686,19 @@
         }
       }
     },
-    "Context": {
-      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+    "Show harness context in Session view": {
+      "comment": "Settings toggle: show text the agent's harness added to the session (instructions, environment, skill files).",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Context"
+            "value": "Show harness context in Session view"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上下文"
+            "value": "在会话视图中显示运行框架上下文"
           }
         }
       }
@@ -21827,6 +21827,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新显示所有区块"
+          }
+        }
+      }
+    },
+    "Show tool calls and the agent's working notes": {
+      "comment": "Tooltip for the Tools chip while tool calls are hidden.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show tool calls and the agent's working notes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示工具调用和智能体的工作笔记"
+          }
+        }
+      }
+    },
+    "Hide tool calls and the agent's working notes": {
+      "comment": "Tooltip for the Tools chip while tool calls are shown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide tool calls and the agent's working notes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏工具调用和智能体的工作笔记"
           }
         }
       }
