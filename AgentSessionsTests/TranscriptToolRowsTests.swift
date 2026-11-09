@@ -145,6 +145,31 @@ final class TranscriptToolRowsTests: XCTestCase {
         XCTAssertEqual(groups.groupIDByBlock, [0: 0, 1: 1, 2: 2])
     }
 
+    /// Integrated review 2026-11-09: a live append extends the group index from its last group.
+    /// The result must equal a full build, including a group that a hidden block does not split.
+    func testExtendingGroupIndexMatchesFullBuild() {
+        var context = user("harness")
+        context.messageOrigin = .context(kinds: ["test"])
+        let grown = [user(), user(), assistant(), user("x"), context]
+        let streams: [[Block]] = [
+            grown + [user("x"), assistant("b"), user(), user()],
+            grown + [assistant("b")],
+            [user(), assistant()] + [assistant(), assistant(), user()],
+        ]
+        for (n, stream) in streams.enumerated() {
+            let full = F.sequence(stream)
+            let prefixCount = n == 2 ? 2 : grown.count
+            let previous = TranscriptMessageGroupIndex.build(blocks: full[..<prefixCount])
+            let extended = TranscriptMessageGroupIndex.extending(previous, previousBlockCount: prefixCount,
+                                                                 blocks: full[...])
+            let rebuilt = TranscriptMessageGroupIndex.build(blocks: full[...])
+            XCTAssertEqual(extended.groupIDByBlock, rebuilt.groupIDByBlock, "stream \(n)")
+            XCTAssertEqual(extended.groupsByID.mapValues(\.representedBlockIndices),
+                           rebuilt.groupsByID.mapValues(\.representedBlockIndices), "stream \(n)")
+            XCTAssertEqual(extended.lastOwnerID, rebuilt.lastOwnerID, "stream \(n)")
+        }
+    }
+
     func testHiddenRoleDoesNotCollapseGenuineLaterTurn() {
         let s = built([user(), assistant(), user()])
         XCTAssertEqual(s.rows(roles: [.user]).map(\.id), [0, 2])

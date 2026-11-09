@@ -65,6 +65,42 @@ struct TranscriptMessageGroupIndex {
     }
     var groupsByID: [Int: Group] = [:]
     var groupIDByBlock: [Int: Int] = [:]
+    /// The id of the last group `build` started. Every group before it is final, so `extending`
+    /// restarts there.
+    var lastOwnerID: Int?
+    /// Set by the cache in `TranscriptDerivedState` each time it builds or extends the index, so the
+    /// table can tell a new index from the one it holds without comparing the maps. 0 = not cached.
+    var revision = 0
+
+    /// `build` over a stream that grew from the one `previous` was built on (a live append), redoing
+    /// only the blocks from `previous.lastOwnerID` on. A block that starts a group never joins an
+    /// earlier one, so a build that starts there with fresh state gives the same groups as a full
+    /// build. The caller guarantees that the blocks before that id, and every other input, are
+    /// unchanged. Falls back to a full build when the restart point is not in `blocks`.
+    static func extending(_ previous: Self, previousBlockCount: Int, blocks: ArraySlice<Block>,
+                          source: SessionSource = .claude, showsContext: Bool = false,
+                          markers: [Int: [String]] = [:], noncollapsibleBlockIndices: Set<Int> = []) -> Self {
+        func full() -> Self {
+            build(blocks: blocks, source: source, showsContext: showsContext, markers: markers,
+                  noncollapsibleBlockIndices: noncollapsibleBlockIndices)
+        }
+        guard let start = previous.lastOwnerID, let first = blocks.first?.globalBlockIndex else { return full() }
+        let position = blocks.startIndex + (start - first)
+        guard blocks.indices.contains(position), blocks[position].globalBlockIndex == start,
+              previousBlockCount > start else { return full() }
+        let tail = build(blocks: blocks[position...], source: source, showsContext: showsContext,
+                         markers: markers, noncollapsibleBlockIndices: noncollapsibleBlockIndices)
+        guard tail.lastOwnerID != nil else { return full() }
+        var result = previous
+        for id in start..<previousBlockCount {
+            result.groupIDByBlock[id] = nil
+            result.groupsByID[id] = nil
+        }
+        result.groupsByID.merge(tail.groupsByID) { $1 }
+        result.groupIDByBlock.merge(tail.groupIDByBlock) { $1 }
+        result.lastOwnerID = tail.lastOwnerID
+        return result
+    }
 
     static func build(blocks: ArraySlice<Block>, source: SessionSource = .claude,
                       showsContext: Bool = false, markers: [Int: [String]] = [:],
@@ -91,6 +127,7 @@ struct TranscriptMessageGroupIndex {
             } else {
                 result.groupsByID[id] = Group(block: block, representedBlockIndices: [id])
                 result.groupIDByBlock[id] = id
+                result.lastOwnerID = id
                 owner = collapsible ? id : nil
                 previous = collapsible ? presentation : nil
             }

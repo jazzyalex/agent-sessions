@@ -65,6 +65,22 @@ final class MessageOriginParserTests: XCTestCase {
             XCTAssertEqual(SessionTranscriptBuilder.coalescedBlocks(for: model, includeMeta: false, includeMessageContext: true).count, 1)
         }
     }
+    // Integrated review 2026-11-09: environment context plus a typed prompt in one message must
+    // stay a user event, so Terminal and the Codex title fallback still see the prompt.
+    func testCodexMixedEnvironmentAndPromptStaysUser() throws {
+        let context = "<environment_context>workspace</environment_context>"
+        let event = try codex([text(context), text("Fix login redirect")],
+                              kinds: ["environments.environment_context", "user.text"])
+        XCTAssertEqual(event.kind, .user)
+        XCTAssertEqual(event.messageOrigin, .typed)
+        XCTAssertEqual(event.messageDisplayText, "Fix login redirect")
+        let model = session([event])
+        XCTAssertEqual(SessionTranscriptBuilder.coalescedBlocks(for: model, includeMeta: false).count, 1)
+        let terminal = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+            session: model, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(terminal.contains("Fix login redirect"))
+        XCTAssertEqual(SessionInfoMetadataSanitizer.rowTitle(for: model), "Fix login redirect")
+    }
     func testCodexAgentMessageIsPeer() throws {
         let header = "Message Type: MESSAGE\nSender: /root/helper\nPayload:\n"
         let event = try codex([text(header), ["type": "encrypted_content", "encrypted_content": "gAAAAA"]], type: "agent_message")

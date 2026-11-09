@@ -3201,8 +3201,16 @@ final class SessionIndexer: ObservableObject {
             }
 
             // Heuristic: environment_context appears as an XML-ish block often logged under 'user'.
-            // Treat any event whose text contains this block as meta regardless of role/type.
-            if let t = text, t.contains("<environment_context>") { type = "environment_context" }
+            // Treat any event whose text contains this block as meta regardless of role/type,
+            // unless provenance found a typed prompt in it (mixed context + prompt): demoting
+            // that hides the prompt from Terminal and the title fallback.
+            var hasTypedPrompt = false
+            if case .typed = messageOrigin, let typed = messageDisplayText,
+               !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !typed.contains("<environment_context>") {
+                hasTypedPrompt = true
+            }
+            if let t = text, t.contains("<environment_context>"), !hasTypedPrompt { type = "environment_context" }
 
             if text == nil, let t = type?.lowercased(), t == "thread_rolled_back" {
                 var numTurns: Int? = nil

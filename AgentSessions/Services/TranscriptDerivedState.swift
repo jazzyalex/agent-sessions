@@ -461,16 +461,59 @@ final class TranscriptDerivedState {
         var markers: [Int: [String]]
         var imageBlocks: Set<Int>
     }
+    /// The block just before the cached index's restart point, as it was when the index was built.
+    /// A live append leaves it unchanged; anything else that touched the prefix changes it.
+    private struct PrefixStamp: Equatable {
+        var eventID: String
+        var kind: SessionTranscriptBuilder.LogicalBlock.Kind
+        var textLength: Int
+
+        init?(blocks: [SessionTranscriptBuilder.LogicalBlock], before id: Int?) {
+            guard let id, id > 0, blocks.indices.contains(id - 1) else { return nil }
+            let block = blocks[id - 1]
+            eventID = block.eventID; kind = block.kind; textLength = block.text.utf16.count
+        }
+    }
     @ObservationIgnored private var messageGroupKey: MessageGroupKey?
     @ObservationIgnored private var cachedMessageGroups = TranscriptMessageGroupIndex()
+    @ObservationIgnored private var messageGroupBlockCount = 0
+    @ObservationIgnored private var messageGroupPrefix: PrefixStamp?
+    @ObservationIgnored private var messageGroupRevision = 0
 
-    /// One full-stream ownership index shared by the table and toolbar counts.
+    /// True when `new` is the same stream as `old` after a live append: every key field but the
+    /// event count and file size, and every non-snapshot input, are equal.
+    private static func isAppend(_ old: MessageGroupKey, _ new: MessageGroupKey) -> Bool {
+        guard var oldSnapshot = old.snapshot, let newSnapshot = new.snapshot,
+              old.showsContext == new.showsContext, old.markers == new.markers,
+              old.imageBlocks == new.imageBlocks else { return false }
+        oldSnapshot.eventCount = newSnapshot.eventCount
+        oldSnapshot.fileSizeBytes = newSnapshot.fileSizeBytes
+        return oldSnapshot == newSnapshot
+    }
+
+    /// One full-stream ownership index shared by the table and toolbar counts. A live append
+    /// extends the cached index from its last group instead of rebuilding the whole stream on the
+    /// main actor (integrated review 2026-11-09).
     func messageGroups(showsContext: Bool, markers: [Int: [String]], imageBlocks: Set<Int>) -> TranscriptMessageGroupIndex {
         let key = MessageGroupKey(snapshot: snapshot.key, showsContext: showsContext, markers: markers, imageBlocks: imageBlocks)
-        if key != messageGroupKey {
-            cachedMessageGroups = .build(blocks: snapshot.blocks[...], source: snapshot.source, showsContext: showsContext, markers: markers, noncollapsibleBlockIndices: imageBlocks)
-            messageGroupKey = key
+        guard key != messageGroupKey else { return cachedMessageGroups }
+        let blocks = snapshot.blocks
+        var groups: TranscriptMessageGroupIndex
+        if let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= messageGroupBlockCount,
+           messageGroupPrefix == PrefixStamp(blocks: blocks, before: cachedMessageGroups.lastOwnerID) {
+            groups = .extending(cachedMessageGroups, previousBlockCount: messageGroupBlockCount, blocks: blocks[...],
+                                source: snapshot.source, showsContext: showsContext, markers: markers,
+                                noncollapsibleBlockIndices: imageBlocks)
+        } else {
+            groups = .build(blocks: blocks[...], source: snapshot.source, showsContext: showsContext, markers: markers,
+                            noncollapsibleBlockIndices: imageBlocks)
         }
+        messageGroupRevision &+= 1
+        groups.revision = messageGroupRevision
+        cachedMessageGroups = groups
+        messageGroupKey = key
+        messageGroupBlockCount = blocks.count
+        messageGroupPrefix = PrefixStamp(blocks: blocks, before: groups.lastOwnerID)
         return cachedMessageGroups
     }
 

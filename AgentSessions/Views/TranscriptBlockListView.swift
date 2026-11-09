@@ -1567,15 +1567,21 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
-        let groupInputsChanged = allBlocksCache != allBlocks || markersChanged || imagesChanged || sourceChanged
-            || self.showsContext != showsContext
-        if let suppliedMessageGroups {
-            // The derived state hands back its cached index, so this compare is a storage check.
-            if groupInputsChanged || suppliedMessageGroups.groupIDByBlock != messageGroups.groupIDByBlock {
+        let settingsChanged = markersChanged || imagesChanged || sourceChanged || self.showsContext != showsContext
+        if let suppliedMessageGroups, suppliedMessageGroups.revision != 0 {
+            // The derived state's cached index carries a revision that changes whenever the blocks
+            // or the group inputs do, so no whole-stream compare runs on each update.
+            if settingsChanged || suppliedMessageGroups.revision != messageGroups.revision {
                 messageGroupsGeneration &+= 1
             }
             messageGroups = suppliedMessageGroups
-        } else if groupInputsChanged {
+        } else if let suppliedMessageGroups {
+            if settingsChanged || allBlocksCache != allBlocks
+                || suppliedMessageGroups.groupIDByBlock != messageGroups.groupIDByBlock {
+                messageGroupsGeneration &+= 1
+            }
+            messageGroups = suppliedMessageGroups
+        } else if settingsChanged || allBlocksCache != allBlocks {
             messageGroupsGeneration &+= 1
             messageGroups = .build(blocks: allBlocks[...], source: source, showsContext: showsContext, markers: telemetryMarkers, noncollapsibleBlockIndices: Set(imagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
         }
