@@ -18,6 +18,10 @@ Update this file when:
 
 ## Upstream Version Check Log
 
+### 2026-11-08 — installed-CLI sweep
+
+Codex 0.167.0 adds guardian metadata on response items, `encrypted_content` on assistant messages and `realtime_item` session markers. Claude 2.1.319 adds a `session-owner` record with account and organization ids, plus new assistant and attachment keys. Copilot 1.0.107 adds `instruction.update` records and `responseModel`/`inferenceGateway` in usage records. Kimi 2.5.2 adds two setup records. All of it is additive: redacted fixtures and tests show none of these records becomes a message, so no parser changed. OpenClaw 2026.11.2 migrates its agent database to schema 27, which only adds columns; it stays held until the real store is migrated. Antigravity 1.5.3, Hermes 0.23.0, OpenCode 2.2.6, Cursor 2026.11.5 and Grok 1.0.77 match the baseline.
+
 ### 2026-11-02 — workflow update and full installed-CLI sweep
 
 Codex 0.166.0, Claude 2.1.316, Copilot 1.0.105, OpenCode 2.2.5 and Pi 1.5.0 add 79 field keys and 9 fingerprint buckets to normal redacted fixtures; none is called handled without a read path. The value pass records 19 noise, 56 watch and 13 candidate findings, with candidate quota/image provenance in the backlog. The checker now accepts the app's existing empty-aborted OpenCode rule; app parsing is unchanged, while verified GPT-4o mini, Solar Mini 4 and Kimi K3 prices advance manifest sequence 2026110201. Antigravity 1.4.8→1.4.12 and Hermes 0.22.5→0.22.6 were updated; the installed OpenClaw 2026.10.9 clears its hold, and existing DSH 0.2.1-rc.5 is verified without installing a beta. Kimi remains held on HTTP 429; Qwen, Devin and fx stay in their scoped exception/steward lanes. Final evidence: scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json; audited HEAD df9c05e7; replay covers Codex/Claude/OpenCode only, with one unexplained Codex nil-telemetry finding recorded separately from the schema value pass.

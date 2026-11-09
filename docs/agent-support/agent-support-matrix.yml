@@ -1,24 +1,24 @@
-agent_sessions_version: "6.2+unreleased"
-as_of_commit: "df9c05e7"
-as_of_date: 2026-11-02
+agent_sessions_version: "6.4+unreleased"
+as_of_commit: "20a1bbbb"
+as_of_date: 2026-11-08
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
-  - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261102-223640-106544Z-p108/report.json; historical detail remains in the append-only ledger and tracker."
+  - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json; historical detail remains in the append-only ledger and tracker."
 
 agents:
   codex_cli:
-    max_verified_version: "0.166.0"
+    max_verified_version: "0.167.0"
     notes:
-      - "Native tool/schema support verified; one unexplained nil-telemetry replay finding remains in the backlog."
+      - "Native tool/schema support verified at 0.167.0; guardian metadata, encrypted_content and realtime_item records are in the fixture. Replay: two unsent Codex Desktop drafts emit no usage, as expected."
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.316"
+    max_verified_version: "2.1.319"
     notes:
-      - "Format, replay and final usage probe pass; interim TUI exit-16 failures remain documented."
+      - "2.1.319 verified after re-sign-in; new session-owner record (account/org ids) stays hidden, with a test. The TUI usage probe failed with exit 16 again in the initial weekly."
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -27,7 +27,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl"
   antigravity:
-    max_verified_version: "1.4.12"
+    max_verified_version: "1.5.3"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "not_logged"
@@ -37,7 +37,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/desktop_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.105"
+    max_verified_version: "1.0.107"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "data.copilotVersion"
@@ -47,7 +47,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "2.2.5"
+    max_verified_version: "2.2.6"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "session.version"
@@ -82,7 +82,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/model-switched.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/assistant-failed.json"
   hermes:
-    max_verified_version: "0.22.6"
+    max_verified_version: "0.23.0"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "not_logged"
@@ -94,8 +94,9 @@ agents:
     # 2026.8.1-2026.9.x were blocked by OpenClaw's own deferred doctor migrations
     # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
     max_verified_version: "2026.10.9"
+    hold: {"version":"2026.11.2","reason":"Refuses to run until openclaw doctor --fix migrates the real agent database (schema 25 -> 27); the owner runs that migration on their own store.","since":"2026-11-08"}
     notes:
-      - "2026.10.9 completed a real tool turn and clears the earlier 2026.10.7 hold."
+      - "On a migrated copy, 2026.11.2 completed a real tool turn; schema 27 only adds columns, which the reader ignores. Ceiling stays until the real store is migrated and a prebump passes."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
@@ -106,7 +107,7 @@ agents:
       - "AgentSessionsTests/OpenClawSqliteStoreTests.swift"
       - "scripts/tests/test_openclaw_sqlite_monitoring.py"
   cursor:
-    max_verified_version: "2026.10.22"
+    max_verified_version: "2026.11.5"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "not_logged"
@@ -143,10 +144,9 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "2.3.3"
-    hold: {"version":"2.4.1","reason":"Fresh driver received account-level HTTP 429; wait for allowance/reset or an owner-side account change.","since":"2026-11-02"}
+    max_verified_version: "2.5.2"
     notes:
-      - "HTTP 429 blocks a fresh turn; ceiling remains 2.3.3."
+      - "2.5.2 completed a fresh tool turn, clearing the 2026-11-02 HTTP 429 hold; setup records environment.set_binding and tool_select.initialized are in the fixture."
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -170,7 +170,7 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.70"
+    max_verified_version: "1.0.77"
     notes:
       - "Native tool session and final weekly verified; see the ledger for evidence."
     version_field: "not_logged"
@@ -292,8 +292,9 @@ agents:
       - "scripts/tests/test_cline_monitoring.py"
   deepseek_harness:
     max_verified_version: "0.2.1-rc.5"
+    hold: {"version":"0.2.2-rc.1","reason":"Upstream is a release candidate; the sweep does not install pre-releases without owner approval.","since":"2026-11-08"}
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "0.2.1-rc.5 re-verified with a fresh tool session on 2026-11-08."
     version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887, 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2) and 687f282e8625c6b8d11ff58211a90524be2e4317 (tag dsh-v0.2.1-rc.2)"
     support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v4 plain or independently framed Zstandard histories"
     unsupported_surfaces:

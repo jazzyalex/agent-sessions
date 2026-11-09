@@ -9,6 +9,45 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "6.4+unreleased"
+    as_of_date_utc: "2026-11-09"
+    as_of_commit: "20a1bbbb"
+    note: "Final weekly verifies twelve driver-backed installed builds after stable CLI updates; drift in Codex, Claude, Copilot and Kimi is additive and covered by redacted fixtures and tests. OpenClaw 2026.11.2 is held until its real database is migrated; DeepSeek Harness is held on a release-candidate upstream. Qwen, Devin and fx are unchanged."
+    report: "scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json"
+    value_pass:
+      findings: 12
+      noise: 5
+      watch: 6
+      handled: 1
+      evidence: "docs/agent-support/agent-format-tracker.jsonl"
+    replay:
+      evidence: "scripts/probe_scan_output/replay/counts.json"
+      scope: "newest 20 Codex, Claude and OpenCode sessions; remaining agents not semantically replayed"
+      note: "No parse failures. Unavailable usage is explained: two unsent Codex Desktop drafts, one Claude metadata-only probe, sixteen OpenCode refusal-only sessions."
+    tests:
+      python_passed: 638
+      xcode_passed: 4519
+      xcode_skipped: 9
+      xcode_failed: 0
+      evidence: ".deriveddata-tests/Logs/Test/Run-AgentSessions-2026.11.08_19-13-58--0800.xcresult"
+    prices:
+      sequence: 2026110801
+      added: ["mai-code-1.1-flash"]
+      note: "44 rows match official pages; Claude 3.x and MiniMax M2.x rows have no live page. Free/stealth routes and the Cline Fable alias stay unpriced."
+    verified:
+      antigravity: {sessions: {max_verified_version: "1.5.3", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      claude: {sessions: {max_verified_version: "2.1.319", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-031055-422105Z-p62714-prebump/report.json"]}}
+      cline: {sessions: {max_verified_version: "3.0.74", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      codex: {sessions: {max_verified_version: "0.167.0", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      copilot: {sessions: {max_verified_version: "1.0.107", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-031055-422105Z-p62714-prebump/report.json"]}}
+      cursor: {sessions: {max_verified_version: "2026.11.5", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      deepseek_harness: {sessions: {max_verified_version: "0.2.1-rc.5", hold: "0.2.2-rc.1 release candidate not installed", evidence: ["scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      grok: {sessions: {max_verified_version: "1.0.77", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      hermes: {sessions: {max_verified_version: "0.23.0", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      kimi: {sessions: {max_verified_version: "2.5.2", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-031055-422105Z-p62714-prebump/report.json"]}}
+      openclaw: {sessions: {max_verified_version: "2026.10.9", hold: "2026.11.2 needs openclaw doctor --fix on the real store", evidence: ["scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json", "scripts/probe_scan_output/agent_watch/20261109-025228-365486Z-p55213/report.json"]}}
+      opencode: {sessions: {max_verified_version: "2.2.6", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
+      pi: {sessions: {max_verified_version: "1.5.0", evidence: ["scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json", "scripts/probe_scan_output/agent_watch/20261109-024526-939390Z-p51632-prebump/report.json"]}}
   - agent_sessions_version: "6.2+unreleased"
     as_of_date_utc: "2026-11-02"
     as_of_commit: "df9c05e7"
