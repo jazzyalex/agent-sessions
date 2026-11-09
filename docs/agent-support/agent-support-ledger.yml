@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.4+unreleased"
     as_of_date_utc: "2026-11-09"
+    as_of_commit: "9e9dd7cd"
+    note: "DeepSeek Harness follow-up: the owner approved the 0.2.2-rc.1 release candidate. A fresh tool session matches the baseline with no schema drift."
+    report: "scripts/probe_scan_output/agent_watch/20261109-033804-731949Z-p74480/report.json"
+    verified:
+      deepseek_harness: {sessions: {max_verified_version: "0.2.2-rc.1", evidence: ["scripts/probe_scan_output/agent_watch/20261109-033804-731949Z-p74480/report.json", "scripts/probe_scan_output/agent_watch/20261109-033750-812367Z-p74410-prebump/report.json"]}}
+  - agent_sessions_version: "6.4+unreleased"
+    as_of_date_utc: "2026-11-09"
     as_of_commit: "a648294b"
     note: "OpenClaw follow-up: the real store was backed up and migrated with openclaw doctor --fix (schema 25 -> 27). The schema-27 columns are added to the SQLite fixture; OpenClawSqliteStoreTests pass against it."
     report: "scripts/probe_scan_output/agent_watch/20261109-033514-919938Z-p72414/report.json"

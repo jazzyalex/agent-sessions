@@ -290,10 +290,9 @@ agents:
       - "AgentSessionsTests/ClineIntegrationTests.swift"
       - "scripts/tests/test_cline_monitoring.py"
   deepseek_harness:
-    max_verified_version: "0.2.1-rc.5"
-    hold: {"version":"0.2.2-rc.1","reason":"Upstream is a release candidate; the sweep does not install pre-releases without owner approval.","since":"2026-11-08"}
+    max_verified_version: "0.2.2-rc.1"
     notes:
-      - "0.2.1-rc.5 re-verified with a fresh tool session on 2026-11-08."
+      - "0.2.2-rc.1 installed with owner approval on 2026-11-08; a fresh tool session matches the baseline with no drift."
     version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887, 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2) and 687f282e8625c6b8d11ff58211a90524be2e4317 (tag dsh-v0.2.1-rc.2)"
     support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v4 plain or independently framed Zstandard histories"
     unsupported_surfaces:
