@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of "Untitled session".
+- **Copilot sessions on MAI-Code 1.1 Flash show a cost.** They had no estimated cost because the model had no price.
 - **Injected context no longer impersonates your messages.** First-prompt navigation also respects explicitly typed instructions instead of treating their wording as a harness preamble.
 - **Message envelopes read as messages.** Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.
 - **No more empty agent rows.** Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.

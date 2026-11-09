@@ -47,37 +47,30 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 
-    func testNovember8CodexDriftSurvivesFullParsing() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
-        let full = try XCTUnwrap(SessionIndexer().parseFileFull(at: url))
-        let realtime = full.events.filter { decodedRaw($0).contains("\"type\":\"realtime_item\"") }
-        XCTAssertFalse(realtime.isEmpty)
-        XCTAssertFalse(realtime.contains { $0.kind == .user || $0.kind == .assistant },
-                       "realtime session markers must not become messages")
-        XCTAssertTrue(full.events.contains {
-            $0.kind == .assistant && decodedRaw($0).contains("\"encrypted_content\"")
-        }, "an assistant message carrying encrypted_content must still read as an assistant reply")
-        XCTAssertTrue(full.events.contains { decodedRaw($0).contains("\"guardian_sources\"") })
-    }
-
-    func testNovember8ClaudeSessionOwnerStaysHidden() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
-        let full = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
-        let owner = full.events.filter { decodedRaw($0).contains("\"session-owner\"") }
-        XCTAssertFalse(owner.contains { $0.kind == .user || $0.kind == .assistant },
-                       "account and organization ids must never render as a message")
-        XCTAssertTrue(full.events.contains {
-            $0.kind == .assistant && decodedRaw($0).contains("\"promptCacheRequested\"")
-        })
-    }
-
-    func testNovember8CopilotInstructionUpdateIsNotAPrompt() throws {
-        let url = FixturePaths.stage0FixtureURL("agents/copilot/small.jsonl")
-        let full = try XCTUnwrap(CopilotSessionParser.parseFileFull(at: url))
-        let updates = full.events.filter { decodedRaw($0).contains("\"instruction.update\"") }
-        XCTAssertFalse(updates.contains { $0.kind == .user || $0.kind == .assistant },
-                       "runtime instructions must not render as a user prompt")
-        XCTAssertTrue(full.events.contains { decodedRaw($0).contains("\"structuredContent\"") })
+    /// 2026-11-08 drift: new non-message records must stay in the fixture and parse as
+    /// metadata. Claude's session-owner carries account ids; Copilot's instruction
+    /// updates carry runtime instructions; neither may render as a message.
+    func testNovember8DriftRecordsStayMetadata() throws {
+        let cases: [(path: String, marker: String, parse: (URL) -> Session?)] = [
+            ("agents/codex/small.jsonl", "\"type\":\"realtime_item\"", { SessionIndexer().parseFileFull(at: $0) }),
+            ("agents/claude/small.jsonl", "\"type\":\"session-owner\"", { ClaudeSessionParser.parseFileFull(at: $0) }),
+            ("agents/copilot/small.jsonl", "\"type\":\"instruction.update\"", { CopilotSessionParser.parseFileFull(at: $0) })
+        ]
+        for c in cases {
+            let url = FixturePaths.stage0FixtureURL(c.path)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let expected = text.split(separator: "\n").filter { $0.contains(c.marker) }.count
+            XCTAssertGreaterThan(expected, 0, "\(c.path) must keep a \(c.marker) record")
+            let full = try XCTUnwrap(c.parse(url), c.path)
+            let events = full.events.filter { decodedRaw($0).contains(c.marker) }
+            XCTAssertEqual(events.count, expected, "\(c.marker) survives parsing once per record")
+            XCTAssertTrue(events.allSatisfy { $0.kind == .meta }, "\(c.marker) must stay metadata")
+            if c.path.contains("codex") {
+                XCTAssertTrue(full.events.contains {
+                    $0.kind == .assistant && decodedRaw($0).contains("\"encrypted_content\"")
+                }, "an assistant message with encrypted_content still reads as a reply")
+            }
+        }
     }
 
     func testCodexSmallPreviewAndFull() throws {

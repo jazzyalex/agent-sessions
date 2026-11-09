@@ -18,22 +18,15 @@ final class PriceManifestV2Tests: XCTestCase {
         XCTAssertEqual(kimi.outputPerMTok, 15)
         XCTAssertEqual(kimi.cacheWritePerMTok, 3)
         XCTAssertEqual(kimi.cacheWrite1hPerMTok, 6)
-        for slug in ["gpt-4o-mini-preview", "solar-mini4-pro", "kimi-k3-preview"] {
-            XCTAssertNil(snapshot.resolvedPrice(forModel: slug), "Unverified variants keep their own price requirement")
-        }
-    }
-
-    func testCopilotMAICodeFlashHasItsPublishedRate() throws {
-        // GitHub's Copilot model table, checked 2026-11-08: $0.20 in, $0.02 cached,
-        // $1.20 out per MTok; no cache-write rate is published.
-        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        // GitHub's Copilot model table, checked 2026-11-08; no cache-write rate is published.
         let mai = try XCTUnwrap(snapshot.resolvedPrice(forModel: "mai-code-1.1-flash")?.price)
         XCTAssertEqual(mai.inputPerMTok, 0.20)
         XCTAssertEqual(mai.cachedInputPerMTok, 0.02)
         XCTAssertEqual(mai.outputPerMTok, 1.20)
         XCTAssertNil(mai.cacheWritePerMTok)
-        XCTAssertNil(snapshot.resolvedPrice(forModel: "mai-code-1.1-pro"),
-                     "a sibling tier keeps its own price requirement")
+        for slug in ["gpt-4o-mini-preview", "solar-mini4-pro", "kimi-k3-preview", "mai-code-1.1-pro"] {
+            XCTAssertNil(snapshot.resolvedPrice(forModel: slug), "Unverified variants keep their own price requirement")
+        }
     }
 
     private func rate(_ input: Double) -> RunwayModelPrice {

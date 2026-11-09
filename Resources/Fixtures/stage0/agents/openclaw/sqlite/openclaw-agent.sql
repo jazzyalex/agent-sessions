@@ -125,7 +125,7 @@ CREATE TABLE session_transcript_cold_archives (
   CHECK (length(archive_name) > 0 AND archive_name NOT IN ('.', '..') AND archive_name NOT LIKE '%/%' AND archive_name NOT LIKE '%\%'),
   CHECK ((storage = 'file' AND archive_blob IS NULL) OR (storage = 'sqlite' AND archive_blob IS NOT NULL))
 ) STRICT;
-INSERT INTO schema_meta VALUES ('primary', 'agent', 25, 'main', '2026.10.5', 1792486800000, 1792486800000);
+INSERT INTO schema_meta VALUES ('primary', 'agent', 27, 'main', '2026.11.2', 1792486800000, 1794194885500);
 INSERT INTO session_windows (session_id, session_key, created_at, updated_at, reason, started_at, ended_at, status, model, model_provider, agent_harness_id, display_name) VALUES ('openclaw-fixture-migrated', 'agent:main:recovered:openclaw-fixture-migrated', 1792486800000, 1792486804000, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 INSERT INTO transcript_events (session_id, seq, event_json, created_at, event_zstd, event_utf8_bytes, navigation_json) VALUES ('openclaw-fixture-migrated', 1, '{"type":"session","version":3,"id":"openclaw-fixture-migrated","timestamp":"2026-10-20T09:00:00.000Z","cwd":"/tmp/repo"}', 1792486800000, NULL, 120, NULL);
 INSERT INTO transcript_event_identities (session_id, event_id, seq, event_type, parent_id, message_idempotency_key, created_at) VALUES ('openclaw-fixture-migrated', 'openclaw-fixture-migrated', 1, 'session', NULL, NULL, 1792486800000);
@@ -158,3 +158,10 @@ INSERT INTO session_transcript_active_events (session_id, active_position, event
 INSERT INTO transcript_events (session_id, seq, event_json, created_at, event_zstd, event_utf8_bytes, navigation_json) VALUES ('openclaw-fixture-native', 5, '{"type":"message","id":"native-assistant-2","parentId":"native-tool-1","timestamp":"2026-10-20T10:00:04.000Z","message":{"role":"assistant","api":"openai-responses","provider":"openai","model":"fixture-model","stopReason":"stop","timestamp":1792490404000,"idempotencyKey":"fixture-assistant-4","content":[{"type":"text","text":"Hello from /tmp/repo."}],"openclawDelivery":{"mediaUrls":[]},"usage":{"input":110,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":118,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}}', 1792490404000, NULL, 539, NULL);
 INSERT INTO transcript_event_identities (session_id, event_id, seq, event_type, parent_id, message_idempotency_key, created_at) VALUES ('openclaw-fixture-native', 'native-assistant-2', 5, 'message', 'native-tool-1', 'fixture-assistant-4', 1792490404000);
 INSERT INTO session_transcript_active_events (session_id, active_position, event_seq, message_position, context_eligible) VALUES ('openclaw-fixture-native', 4, 5, 3, 1);
+-- Schema 27 (OpenClaw 2026.11.2) navigation and row-preview columns, seeded with the
+-- value shapes observed in a migrated store on 2026-11-08.
+UPDATE transcript_events SET navigation_type = 'session', navigation_last_type = 'session', navigation_display = 0, navigation_valid = 1 WHERE seq = 1;
+UPDATE transcript_events SET navigation_type = 'message', navigation_last_type = 'message', navigation_display = 0, navigation_valid = 1, message_role = 'user' WHERE seq = 2;
+UPDATE transcript_events SET navigation_type = 'message', navigation_last_type = 'message', navigation_display = 0, navigation_valid = 1, message_role = 'assistant' WHERE seq IN (3, 5);
+UPDATE transcript_events SET navigation_type = 'message', navigation_last_type = 'message', navigation_display = 0, navigation_valid = 1, message_role = 'toolResult' WHERE seq = 4;
+UPDATE session_windows SET row_transcript_json = '{"lastMessagePreview":"[trimmed for fixture]","terminalModel":"fixture-model","indexedSeq":5}', row_transcript_updated_at = 1792490404000 WHERE session_id = 'openclaw-fixture-native';
