@@ -8,11 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Highlights
 
-- **Only what the user typed is “User.”** The label was “You”; it now reads “User”, because the session may be someone else's. The Session view labels background notifications, peer messages, commands and scheduled prompts. Instructions, page snapshots and skill loads stay hidden unless you turn on "Show harness context in Session view" in Settings.
-
-### Features
-
-- The Session view now shows each turn as your prompt and the agent's answer. Tool calls, failed ones included, and the agent's working notes sit behind the Tools chip, and Find still searches them.
+- **Prompts and answers first.** Each turn in the Session view shows the prompt and the agent's answer. Tool calls and working notes now sit behind the Tools chip, off by default; Find still searches them.
+- **Only typed text is “User.”** The label was “You”, since you may be reading someone else's sessions. Notifications, peer messages, commands and scheduled prompts get their own labels; injected instructions and skill files stay hidden unless you turn on "Show harness context in Session view" in Settings.
 
 ### Bug Fixes
 
