@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.4</title>
-            <pubDate>Sat, 07 Nov 2026 15:14:01 -0800</pubDate>
+            <title>6.5</title>
+            <pubDate>Mon, 09 Nov 2026 18:31:37 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,25 +27,28 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.4</h2>
+<h2>What&#x27;s New in 6.5</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>A tool view you can actually read, for all 17 agents.</strong> Every tool call is one row with its command or path first, and parallel calls get a row each. Open one for decoded output that folds when long; exit codes and errors sit right on the row. Right-click to copy the command, the output or the raw event.</li>
-<li><strong>Find matches what you see.</strong> A match inside folded output opens the fold, and Esc closes it again. The Errors filter steps through single failed calls.</li>
+<li><strong>Prompts and answers first.</strong> Each turn in the Session view shows the prompt and the agent&#x27;s answer. Tool calls and working notes now sit behind the Tools chip, off by default; Find still searches them.</li>
+<li><strong>Only typed text is “User.”</strong> The label was “You”, since you may be reading someone else&#x27;s sessions. Notifications, peer messages, commands and scheduled prompts get their own labels; injected instructions and skill files stay hidden unless you turn on &quot;Show harness context in Session view&quot; in Settings.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>No more escaped slashes.</strong> Paths and URLs in tool calls read <code>/</code>, not <code>\/</code>.</li>
-<li><strong>Codex output shows as text.</strong> Output stored as a list of text items now has real line breaks instead of raw JSON.</li>
-<li><strong>Parallel tool outputs stay separate.</strong> They no longer merge into one block.</li>
+<li>Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of &quot;Untitled session&quot;.</li>
+<li><strong>Codex prompts logged with environment context show again.</strong> When Codex wrote the environment block and the prompt as one message, the prompt was hidden from the Text view, export and the session title.</li>
+<li><strong>Copilot sessions on MAI-Code 1.1 Flash show a cost.</strong> They had no estimated cost because the model had no price.</li>
+<li><strong>Injected context no longer impersonates your messages.</strong> First-prompt navigation also respects explicitly typed instructions instead of treating their wording as a harness preamble.</li>
+<li><strong>Message envelopes read as messages.</strong> Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.</li>
+<li><strong>No more empty agent rows.</strong> Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.4</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5</a></p>
 </div>
             ]]></description>
-            <sparkle:version>89</sparkle:version>
-            <sparkle:shortVersionString>6.4</sparkle:shortVersionString>
+            <sparkle:version>90</sparkle:version>
+            <sparkle:shortVersionString>6.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.4/AgentSessions-6.4.dmg" length="31341409" type="application/octet-stream" sparkle:edSignature="GTkkCYAxakuC/gRmG6vYwhFPmRxoYYxK0/PtaZE/M87GAIGilD/DDUFgtIQXhrzO5dzXmkzeB7MkTZ4kuxCWDA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.5/AgentSessions-6.5.dmg" length="31945522" type="application/octet-stream" sparkle:edSignature="F8ji0ch1NiQBK7BUWgKrftSfkXwE763A1NhW5wJLrrc3sj0TOtTqtGhH4jaSqk/V6CMqlbUY3R2zVX8PqxM8BA=="/>
         </item>
     </channel>
 </rss>
