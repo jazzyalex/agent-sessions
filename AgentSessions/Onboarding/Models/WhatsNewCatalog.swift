@@ -121,10 +121,33 @@ enum WhatsNewCatalog {
         "6.1": "Running OpenCode sessions now appear in the Quota Meter.",
         "6.2": "OpenCode sessions in the Quota Meter now show their own burn rate.",
         "6.3": "CLI sessions now resume in Ghostty, too.",
-        "6.4": "Tool calls in the transcript are now one readable row each, for every agent."
+        "6.4": "Tool calls in the transcript are now one readable row each, for every agent.",
+        "6.5": "The Session view now reads as prompt and answer, with tool work one click away."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "6.5": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "text.bubble",
+                title: "Prompts and answers first",
+                body: "Each turn in the Session view shows the prompt and the agent's answer. Tool calls and the agent's working notes sit behind the Tools chip, which is off by default. Turn it on to see them. Find still searches them."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "person.text.rectangle",
+                title: "Only typed text is “User”",
+                body: "Injected instructions, page snapshots and skill files no longer look like messages the user typed. To see them, turn on Settings → General → Show harness context in Session view."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "6.4": [
             WhatsNewItem(
                 kind: .highlight,

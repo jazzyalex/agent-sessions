@@ -2465,6 +2465,91 @@
         }
       }
     },
+    "The Session view now reads as prompt and answer, with tool work one click away.": {
+      "comment": "One-line teaser for the Agent Sessions 6.5 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Session view now reads as prompt and answer, with tool work one click away."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图现在以提问和回答为主，工具调用一键即可查看。"
+          }
+        }
+      }
+    },
+    "Prompts and answers first": {
+      "comment": "Title for the Agent Sessions 6.5 What's New highlight: the Session view shows prompts and answers, with tool calls hidden behind the Tools chip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompts and answers first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提问和回答优先"
+          }
+        }
+      }
+    },
+    "Each turn in the Session view shows the prompt and the agent's answer. Tool calls and the agent's working notes sit behind the Tools chip, which is off by default. Turn it on to see them. Find still searches them.": {
+      "comment": "Body for the Agent Sessions 6.5 What's New highlight. Session view is the app's transcript pane; Tools is the name of a filter chip in its toolbar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each turn in the Session view shows the prompt and the agent's answer. Tool calls and the agent's working notes sit behind the Tools chip, which is off by default. Turn it on to see them. Find still searches them."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图中的每一轮都显示提问和代理的回答。工具调用和代理的工作笔记收在“Tools”按钮后面，默认关闭。打开它即可查看。查找仍会搜索这些内容。"
+          }
+        }
+      }
+    },
+    "Only typed text is “User”": {
+      "comment": "Title for the Agent Sessions 6.5 What's New highlight: only text the session's user typed is labeled User.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only typed text is “User”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有输入的文字才标为“用户”"
+          }
+        }
+      }
+    },
+    "Injected instructions, page snapshots and skill files no longer look like messages the user typed. To see them, turn on Settings → General → Show harness context in Session view.": {
+      "comment": "Body for the Agent Sessions 6.5 What's New highlight. Keep the Settings path matching the Settings labels.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Injected instructions, page snapshots and skill files no longer look like messages the user typed. To see them, turn on Settings → General → Show harness context in Session view."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注入的指令、页面快照和技能文件不再显示为用户输入的消息。如需查看，请打开“设置 → 通用 → 在会话视图中显示运行框架上下文”。"
+          }
+        }
+      }
+    },
     "A readable tool view": {
       "comment": "Title for the Agent Sessions 6.4 What's New highlight about the new tool call rows in the Session transcript.",
       "localizations": {
