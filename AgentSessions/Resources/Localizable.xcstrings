@@ -839,19 +839,19 @@
         }
       }
     },
-    "You": {
-      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+    "User": {
+      "comment": "Session transcript label for text the session's user typed (the viewer may not be that user). Preserve the placeholder and multiplication sign where present.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "You"
+            "value": "User"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你"
+            "value": "用户"
           }
         }
       }

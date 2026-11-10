@@ -1334,6 +1334,13 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Transcript UI
 
+### Switching to Text or JSON view beachballs
+> **open** · sev: low · urg: low · verified 2026-11-09
+
+- **What:** switching the Session view to Text or JSON is very slow and shows the spinning cursor (owner QA, 2026-11-09, build 8c53f7bf). Blocks view is fine.
+- **Why low:** owner: almost nobody uses Text or JSON; Blocks is the default.
+- **To close:** profile the switch on a large session (PerfBench + `sample`), move the full-transcript build off the main thread.
+
 ### Mixed Codex messages: known edge cases after the 2026-11-09 review loop
 > **open** · sev: low · urg: low · verified 2026-11-09
 

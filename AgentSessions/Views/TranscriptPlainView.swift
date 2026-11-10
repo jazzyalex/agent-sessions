@@ -1389,7 +1389,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func roleFilterLabel(_ role: TranscriptRoleFilter) -> String {
         switch role {
-        case .user: return "You"
+        case .user: return "User"
         case .assistant: return "Agent"
         case .tools: return "Tools"
         case .errors: return "Errors"

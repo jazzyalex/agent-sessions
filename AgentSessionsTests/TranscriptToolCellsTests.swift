@@ -216,7 +216,7 @@ final class TranscriptToolCellsTests: XCTestCase {
         let header = try XCTUnwrap(cell.displayedHeader)
         XCTAssertEqual(header.repeatCount, 2)
         XCTAssertEqual(header.turnChipText, "")
-        XCTAssertEqual(header.roleLabel, "You")
+        XCTAssertEqual(header.roleLabel, "User")
     }
 
     func testEqualCaptionDifferentImagesRemainSeparateAfterAsyncMapLands() {
@@ -299,7 +299,7 @@ final class TranscriptToolCellsTests: XCTestCase {
     }
 
     func testHeaderLabelsByOrigin() {
-        let cases: [(MessageOrigin, String)] = [(.typed, "You"), (.peer(from: "Ada"), "Message from Ada"), (.parentTask, "Task from parent session"), (.approvalRequest, "Approval request"), (.approvalVerdict(outcome: "allowed"), "Guardian verdict"), (.command(name: "run"), "Command")]
+        let cases: [(MessageOrigin, String)] = [(.typed, "User"), (.peer(from: "Ada"), "Message from Ada"), (.parentTask, "Task from parent session"), (.approvalRequest, "Approval request"), (.approvalVerdict(outcome: "allowed"), "Guardian verdict"), (.command(name: "run"), "Command")]
         for (origin, expected) in cases {
             let cell = BlockCardCellView()
             cell.configure(row: BlockRowModel(id: 0, content: .message(originBlock(origin, body: "body"))), fontSize: 13, source: .codex)

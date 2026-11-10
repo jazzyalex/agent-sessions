@@ -1756,7 +1756,7 @@ extension TranscriptToolCorpusCheckTests {
                     throw NSError(domain: "GalleryViewport", code: 1)
                 }
                 if finding.id == "23" {
-                    let cell = try XCTUnwrap(cells.compactMap({ $0 as? BlockCardCellView }).first(where: { $0.displayedHeader?.roleLabel == "You" }))
+                    let cell = try XCTUnwrap(cells.compactMap({ $0 as? BlockCardCellView }).first(where: { $0.displayedHeader?.roleLabel == "User" }))
                     XCTAssertEqual(cell.displayedHeader?.turnChipText, "")
                 }
                 let bitmap = try XCTUnwrap(views.scroll.bitmapImageRepForCachingDisplay(in: views.scroll.bounds))

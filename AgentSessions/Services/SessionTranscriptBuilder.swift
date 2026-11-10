@@ -601,7 +601,7 @@ struct SessionTranscriptBuilder {
     }
 
     private static func coalesce(session: Session, includeMeta: Bool, includeMessageContext: Bool = false) -> [LogicalBlock] {
-        // Only a sub-session's first prompt is a parent task; side chats and forks keep "You".
+        // Only a sub-session's first prompt is a parent task; side chats and forks keep "User".
         let isSubagent = session.effectiveRelationshipKind == .subagent
         return coalesce(events: session.events, source: session.source, subagentType: isSubagent ? session.subagentType : nil,
                         parentSessionID: isSubagent ? session.parentSessionID : nil,

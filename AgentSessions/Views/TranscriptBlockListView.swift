@@ -5979,7 +5979,7 @@ struct BlockCardHeader: View {
         default: break
         }
         switch kind {
-        case .user: return String(localized: "You")
+        case .user: return String(localized: "User")
         case .assistant: return String(localized: "Agent")
         case .toolCall: return String(localized: "Tool")
         case .toolOut: return String(localized: "Output")
