@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.5] - 2026-11-09
+
 ### Highlights
 
 - **Only what the user typed is “User.”** The label was “You”; it now reads “User”, because the session may be someone else's. The Session view labels background notifications, peer messages, commands and scheduled prompts. Instructions, page snapshots and skill loads stay hidden unless you turn on "Show harness context in Session view" in Settings.
