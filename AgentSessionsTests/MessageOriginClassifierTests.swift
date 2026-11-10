@@ -36,8 +36,9 @@ final class MessageOriginClassifierTests: XCTestCase {
         XCTAssertEqual(b.presentation?.body, "hi")
     }
     func testSplitPreservesDisplayBodyWhenNoticeShapesDiffer() {
+        // A decoded envelope (peer) carries display text too; typed display text means mixed items.
         var e = event("before<turn_aborted>x</turn_aborted>after")
-        e.messageOrigin = .typed
+        e.messageOrigin = .peer(from: "another session")
         e.messageDisplayText = "decoded body"
         let userBlocks = blocks([e]).filter { $0.kind == .user }
         XCTAssertEqual(userBlocks.map { $0.presentation?.body ?? "" }.joined(), "decoded body")
@@ -95,17 +96,21 @@ final class MessageOriginClassifierTests: XCTestCase {
         XCTAssertEqual(s.events[0].kind, .meta)
         XCTAssertEqual(s.events[0].text, "raw peer")
     }
-    func testRawTerminalOutputIsUnaffectedByPresentationMetadata() {
+    // Reviews 2026-11-09: Terminal shows a mixed message's typed items, never its injected ones.
+    // Other presentation metadata (encrypted flag, non-typed origins) leaves Terminal unchanged.
+    func testTerminalShowsTypedItemsOfAMixedMessage() {
         let raw = event("literal <environment_context>quoted</environment_context>")
         var enriched = raw
         enriched.messageOrigin = .typed
         enriched.messageDisplayText = "a different display body"
-        enriched.messageHasEncryptedContent = true
         let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-        let before = SessionTranscriptBuilder.buildPlainTerminalTranscript(events: [raw], source: .codex, filters: filters)
         let after = SessionTranscriptBuilder.buildPlainTerminalTranscript(events: [enriched], source: .codex, filters: filters)
-        XCTAssertEqual(after, before)
-        XCTAssertTrue(after.contains("quoted"))
+        XCTAssertTrue(after.contains("a different display body"))
+        XCTAssertFalse(after.contains("quoted"))
+        var flagged = raw
+        flagged.messageHasEncryptedContent = true
+        XCTAssertEqual(SessionTranscriptBuilder.buildPlainTerminalTranscript(events: [flagged], source: .codex, filters: filters),
+                       SessionTranscriptBuilder.buildPlainTerminalTranscript(events: [raw], source: .codex, filters: filters))
     }
     func testCodableFieldsAreOptionalAndRoundTrip() throws {
         var enriched = event("raw")

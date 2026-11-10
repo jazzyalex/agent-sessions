@@ -32,6 +32,21 @@ public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     var messageOrigin: MessageOrigin? = nil
     var messageDisplayText: String? = nil
     var messageHasEncryptedContent: Bool? = nil
+
+    /// What the user typed: a mixed message's typed items when provenance found them, else `text`.
+    /// User-facing paths (Terminal, titles, housekeeping) read this; search and cwd detection keep
+    /// the raw `text`, which still holds the injected items.
+    var typedText: String? {
+        if messageOrigin?.isUnresolvedMixed == true { return nil }
+        if case .typed = messageOrigin, let display = messageDisplayText { return display }
+        return text
+    }
+
+    /// Provenance says the user typed `typedText`, so preamble heuristics must not reject it.
+    var isProvenTyped: Bool {
+        if case .typed = messageOrigin { return true }
+        return false
+    }
     // Delta/stream grouping
     public let messageID: String?
     public let parentID: String?

@@ -65,40 +65,52 @@ struct TranscriptMessageGroupIndex {
     }
     var groupsByID: [Int: Group] = [:]
     var groupIDByBlock: [Int: Int] = [:]
-    /// The id of the last barrier `build` passed: a tool or error block, or a block with a telemetry
-    /// marker. A full build starts fresh at a barrier (no owner, no previous body), so `extending`
-    /// restarts there and no group crosses it.
-    var lastBarrierID: Int?
+    /// The grouping state `build` holds before it reads a block: the open group and its body.
+    struct BuildState: Equatable {
+        var owner: Int?
+        var previous: MessagePresentation?
+    }
+    /// The state `build` held before each of the last `restartPointLimit` blocks it read, ascending
+    /// by block id. That state depends only on the blocks before the id (and the other inputs), so
+    /// `extending` can resume at any of these ids once the caller proves those blocks unchanged;
+    /// the block at the id itself may have changed (a growing live message).
+    var restartPoints: [(id: Int, state: BuildState)] = []
+    static let restartPointLimit = 8
     /// Set by the cache in `TranscriptDerivedState` each time it builds or extends the index, so the
     /// table can tell a new index from the one it holds without comparing the maps. 0 = not cached.
     var revision = 0
 
-    /// `build` over a stream that grew from the one `previous` was built on (a live append), redoing
-    /// only the blocks from `previous.lastBarrierID` on. A full build resets its grouping state at
-    /// that barrier, so building from it with fresh state gives the same groups. The caller
-    /// guarantees that the blocks before the barrier, and every other input, are unchanged. Falls
-    /// back to a full build when there is no barrier or it is not in `blocks`.
-    static func extending(_ previous: Self, previousBlockCount: Int, blocks: ArraySlice<Block>,
+    /// `build` over a stream that changed only from block `start` on, redoing only those blocks.
+    /// `start` must be a restart point of `previous` below `previousBlockCount`, and the caller
+    /// guarantees that every block before `start`, and every other input, is unchanged. Then a full
+    /// build reaches `start` in the saved state, so resuming there gives the same groups. Falls back
+    /// to a full build when `start` breaks those rules or is not in `blocks`.
+    static func extending(_ previous: Self, from start: Int, previousBlockCount: Int, blocks: ArraySlice<Block>,
                           source: SessionSource = .claude, showsContext: Bool = false,
                           markers: [Int: [String]] = [:], noncollapsibleBlockIndices: Set<Int> = []) -> Self {
         func full() -> Self {
             build(blocks: blocks, source: source, showsContext: showsContext, markers: markers,
                   noncollapsibleBlockIndices: noncollapsibleBlockIndices)
         }
-        guard let start = previous.lastBarrierID, let first = blocks.first?.globalBlockIndex else { return full() }
+        guard let saved = previous.restartPoints.first(where: { $0.id == start })?.state,
+              start < previousBlockCount, let first = blocks.first?.globalBlockIndex else { return full() }
         let position = blocks.startIndex + (start - first)
-        guard blocks.indices.contains(position), blocks[position].globalBlockIndex == start,
-              previousBlockCount > start else { return full() }
-        let tail = build(blocks: blocks[position...], source: source, showsContext: showsContext,
-                         markers: markers, noncollapsibleBlockIndices: noncollapsibleBlockIndices)
+        guard blocks.indices.contains(position), blocks[position].globalBlockIndex == start else { return full() }
         var result = previous
+        // Forget everything from `start` on, including later members of a group opened before it.
         for id in start..<previousBlockCount {
             result.groupIDByBlock[id] = nil
             result.groupsByID[id] = nil
         }
-        result.groupsByID.merge(tail.groupsByID) { $1 }
-        result.groupIDByBlock.merge(tail.groupIDByBlock) { $1 }
-        result.lastBarrierID = tail.lastBarrierID ?? start
+        if let owner = saved.owner {
+            // Members are ascending: trim from the end, in time proportional to what is removed.
+            while let last = result.groupsByID[owner]?.representedBlockIndices.last, last >= start {
+                result.groupsByID[owner]?.representedBlockIndices.removeLast()
+            }
+        }
+        result.restartPoints.removeAll { $0.id >= start }
+        result.run(blocks: blocks[position...], source: source, showsContext: showsContext, markers: markers,
+                   noncollapsibleBlockIndices: noncollapsibleBlockIndices, state: saved)
         return result
     }
 
@@ -106,15 +118,23 @@ struct TranscriptMessageGroupIndex {
                       showsContext: Bool = false, markers: [Int: [String]] = [:],
                       noncollapsibleBlockIndices: Set<Int> = []) -> Self {
         var result = Self()
-        var previous: MessagePresentation?
-        var owner: Int?
+        result.run(blocks: blocks, source: source, showsContext: showsContext, markers: markers,
+                   noncollapsibleBlockIndices: noncollapsibleBlockIndices, state: BuildState())
+        return result
+    }
+
+    private mutating func run(blocks: ArraySlice<Block>, source: SessionSource, showsContext: Bool,
+                              markers: [Int: [String]], noncollapsibleBlockIndices: Set<Int>, state: BuildState) {
+        var previous = state.previous
+        var owner = state.owner
         for block in blocks {
             let id = block.globalBlockIndex
-            if markers[id]?.isEmpty == false { owner = nil; previous = nil; result.lastBarrierID = id }
+            restartPoints.append((id, BuildState(owner: owner, previous: previous)))
+            if restartPoints.count > Self.restartPointLimit { restartPoints.removeFirst() }
+            if markers[id]?.isEmpty == false { owner = nil; previous = nil }
             // Structural rows remain barriers even when role filtering hides them.
             if block.kind.isTool || block.kind == .error {
                 owner = nil; previous = nil
-                result.lastBarrierID = id
                 continue
             }
             let presentation = block.resolvedPresentation(source: source)
@@ -123,16 +143,15 @@ struct TranscriptMessageGroupIndex {
             let collapsible = presentation != nil && !noncollapsibleBlockIndices.contains(id)
             if collapsible, let owner, let previous, let presentation,
                previous.origin == presentation.origin, previous.body == presentation.body {
-                result.groupsByID[owner]?.representedBlockIndices.append(id)
-                result.groupIDByBlock[id] = owner
+                groupsByID[owner]?.representedBlockIndices.append(id)
+                groupIDByBlock[id] = owner
             } else {
-                result.groupsByID[id] = Group(block: block, representedBlockIndices: [id])
-                result.groupIDByBlock[id] = id
+                groupsByID[id] = Group(block: block, representedBlockIndices: [id])
+                groupIDByBlock[id] = id
                 owner = collapsible ? id : nil
                 previous = collapsible ? presentation : nil
             }
         }
-        return result
     }
 }
 

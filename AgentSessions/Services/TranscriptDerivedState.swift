@@ -44,6 +44,10 @@ final class TranscriptDerivedState {
 
     struct Snapshot: Sendable {
         var blocks: [SessionTranscriptBuilder.LogicalBlock] = []
+        /// `blockDigests[i]` digests every field of blocks 0...i (built off the main thread). Equal
+        /// digests mean equal prefixes up to a 64-bit hash collision, so the message-group cache can
+        /// check an unchanged prefix in constant time on the main actor. Process-local (Hasher is seeded).
+        var blockDigests: [Int] = []
         var totalBlockCount: Int = 0
         var eventIDToAnchorBlockIndex: [String: Int] = [:]
         var userBlockIndices: [Int] = []
@@ -352,6 +356,43 @@ final class TranscriptDerivedState {
         var value: [Int: RowSummaryEntry] = [:]
     }
 
+    /// Running digests of everything message grouping reads from each block (see `Snapshot.blockDigests`).
+    nonisolated static func blockDigests(_ blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [Int] {
+        var digests: [Int] = []
+        digests.reserveCapacity(blocks.count)
+        var running = 0
+        for block in blocks {
+            var hasher = Hasher()
+            hasher.combine(running)
+            // Every field a cached group keeps (its whole representative block), not only the ones
+            // grouping reads: a replaced file can change a timestamp and nothing else.
+            hasher.combine(block.globalBlockIndex)
+            hasher.combine(block.firstEventIndex)
+            hasher.combine(block.kind)
+            hasher.combine(block.eventID)
+            hasher.combine(block.text)
+            hasher.combine(block.rawJSON)
+            hasher.combine(block.timestamp)
+            hasher.combine(block.messageID)
+            hasher.combine(block.isDelta)
+            hasher.combine(block.isErrorOutput)
+            hasher.combine(block.toolName)
+            hasher.combine(block.toolInput)
+            hasher.combine(block.toolNamespace)
+            hasher.combine(block.toolCallID)
+            hasher.combine(block.messageDisplayText)
+            hasher.combine(block.messageHasEncryptedContent)
+            hasher.combine(block.messageOrigin.map { String(describing: $0) })
+            hasher.combine(block.presentation.map { String(describing: $0) })
+            hasher.combine(block.toolOutputValue.map { String(describing: $0) })
+            hasher.combine(block.toolSidecar.map { String(describing: $0) })
+            hasher.combine(block.toolDisposition.map { String(describing: $0) })
+            running = hasher.finalize()
+            digests.append(running)
+        }
+        return digests
+    }
+
     /// Pure, off-main-callable. Relocates the block-space parts of
     /// SessionTerminalView.buildRebuildResult (see SessionTerminalView.swift,
     /// the eventIDToAnchorBlockIndex construction inside the whole-session
@@ -362,6 +403,7 @@ final class TranscriptDerivedState {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: settings.includeMessageContext)
         var snap = Snapshot()
         snap.blocks = blocks
+        snap.blockDigests = blockDigests(blocks)
         snap.totalBlockCount = blocks.count
         snap.source = session.source
         snap.key = Key(session: session, settings: settings)
@@ -463,10 +505,10 @@ final class TranscriptDerivedState {
     }
     @ObservationIgnored private var messageGroupKey: MessageGroupKey?
     @ObservationIgnored private var cachedMessageGroups = TranscriptMessageGroupIndex()
-    /// The blocks the cached index was built from. An extension first proves that every block
-    /// before its restart point is unchanged. Blocks that kept their event's text storage compare
-    /// in constant time, so on a live append this costs far less than a rebuild.
+    /// The blocks and running digests the cached index was built from. An extension proves its
+    /// prefix unchanged by digest (constant time on the main actor), not by comparing blocks.
     @ObservationIgnored private var messageGroupBlocks: [SessionTranscriptBuilder.LogicalBlock] = []
+    @ObservationIgnored private var messageGroupDigests: [Int] = []
     @ObservationIgnored private var messageGroupRevision = 0
 
     /// True when `new` is the same stream as `old` after a live append: every key field but the
@@ -487,14 +529,25 @@ final class TranscriptDerivedState {
         let key = MessageGroupKey(snapshot: snapshot.key, showsContext: showsContext, markers: markers, imageBlocks: imageBlocks)
         guard key != messageGroupKey else { return cachedMessageGroups }
         let blocks = snapshot.blocks
+        let digests = snapshot.blockDigests
         var groups: TranscriptMessageGroupIndex
-        let oldBlocks = messageGroupBlocks
-        if let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= oldBlocks.count,
-           let start = cachedMessageGroups.lastBarrierID, start < oldBlocks.count,
-           blocks[..<start] == oldBlocks[..<start] {
-            groups = .extending(cachedMessageGroups, previousBlockCount: oldBlocks.count, blocks: blocks[...],
-                                source: snapshot.source, showsContext: showsContext, markers: markers,
-                                noncollapsibleBlockIndices: imageBlocks)
+        let oldBlocks = messageGroupBlocks, oldDigests = messageGroupDigests
+        // The latest restart point whose prefix (the blocks before it) is unchanged: equal running
+        // digests over every block field (built off main), confirmed by comparing the last prefix
+        // block. Live appends restart at the last few blocks, so this costs O(1) plus the tail.
+        let restart: Int? = {
+            guard let old = messageGroupKey, Self.isAppend(old, key), blocks.count >= oldBlocks.count,
+                  digests.count == blocks.count, oldDigests.count == oldBlocks.count else { return nil }
+            return cachedMessageGroups.restartPoints.reversed().map(\.id).first { point in
+                guard point < oldBlocks.count else { return false }
+                guard point > 0 else { return true }
+                return digests[point - 1] == oldDigests[point - 1] && blocks[point - 1] == oldBlocks[point - 1]
+            }
+        }()
+        if let restart {
+            groups = .extending(cachedMessageGroups, from: restart, previousBlockCount: oldBlocks.count,
+                                blocks: blocks[...], source: snapshot.source, showsContext: showsContext,
+                                markers: markers, noncollapsibleBlockIndices: imageBlocks)
         } else {
             groups = .build(blocks: blocks[...], source: snapshot.source, showsContext: showsContext, markers: markers,
                             noncollapsibleBlockIndices: imageBlocks)
@@ -504,6 +557,7 @@ final class TranscriptDerivedState {
         cachedMessageGroups = groups
         messageGroupKey = key
         messageGroupBlocks = blocks
+        messageGroupDigests = digests
         return cachedMessageGroups
     }
 

@@ -617,7 +617,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var firstUserPreview: String? {
-        events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A user event with no typed text (unresolved injected context) is not the first prompt.
+        events.first(where: { $0.kind == .user && $0.typedText != nil })?.typedText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // Lightweight title for high-frequency list rendering/sorting paths.
@@ -635,9 +637,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         for index in events.indices {
             switch events[index].kind {
             case .user:
-                guard !sawFirstUser else { continue }
+                // Unresolved injected context (no typed text) does not count as the first prompt.
+                guard !sawFirstUser, events[index].typedText != nil else { continue }
                 sawFirstUser = true
-                if let user = events[index].text?.collapsedWhitespace(), !user.isEmpty {
+                if let user = events[index].typedText?.collapsedWhitespace(), !user.isEmpty {
                     return user
                 }
             case .assistant:
@@ -702,7 +705,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
         // 2) Fallback: first non-empty user line, skipping preamble if pref enabled (default ON)
         for e in events where e.kind == .user {
-            guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            guard let raw = e.typedText?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
             var candidate = raw
 
             // Claude: the first user event can include a long "Caveat + local command transcript" block.
@@ -717,7 +720,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 continue
             }
 
-            if skipPreamble && Self.looksLikeAgentsPreamble(candidate) { continue }
+            if skipPreamble && !e.isProvenTyped && Self.looksLikeAgentsPreamble(candidate) { continue }
 
             let collapsed = candidate.collapsedWhitespace()
             if !collapsed.isEmpty { return collapsed }
@@ -751,8 +754,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
         // Find first meaningful user message, filtering out IDE scaffolding
         for event in head where event.kind == .user {
-            guard let raw = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
-            if skipPreamble && Self.looksLikeAgentsPreamble(raw) { continue }
+            guard let raw = event.typedText?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            if skipPreamble && !event.isProvenTyped && Self.looksLikeAgentsPreamble(raw) { continue }
             // Skip if it's very long (likely instructions dump)
             if raw.count > 400 { continue }
             return raw.collapsedWhitespace()
@@ -834,6 +837,29 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         looksLikeAgentsPreamble(text)
     }
 
+    /// The working directory one Codex event's text names. A `<cwd>` inside an
+    /// `<environment_context>` block wins, scanning each block only to its own closing tag; a bare
+    /// `<cwd>` (which a mixed message may carry in text the user typed) is the fallback.
+    static func codexCwd(in text: String) -> String? {
+        guard text.contains("<cwd>") else { return nil }
+        func cwd(in slice: Substring) -> String? {
+            guard let start = slice.range(of: "<cwd>"),
+                  let end = slice.range(of: "</cwd>", range: start.upperBound..<slice.endIndex) else { return nil }
+            let value = slice[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        }
+        var rest = text[...]
+        while let open = rest.range(of: "<environment_context>") {
+            let body = rest[open.upperBound...]
+            let close = body.range(of: "</environment_context>")
+            let block = close.map { body[..<$0.lowerBound] } ?? body
+            if let found = cwd(in: block) { return found }
+            guard let close else { break }
+            rest = body[close.upperBound...]
+        }
+        return cwd(in: text[...])
+    }
+
     /// Option B: stable classification for "housekeeping-only" session files.
     /// This should be forward-compatible and independent from user preferences like "Skip preambles".
     static func computeIsHousekeeping(source: SessionSource, events: [SessionEvent]) -> Bool {
@@ -843,10 +869,11 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             if events.contains(where: { $0.kind == .tool_call || $0.kind == .tool_result }) { return false }
             let meaningfulUser = events.contains { e in
                 guard e.kind == .user else { return false }
-                // A mixed message counts by its typed items, not the injected preamble around them.
-                guard let raw = (e.messageDisplayText ?? e.text)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                // A mixed message counts by its typed items, not the injected preamble around them,
+                // and typed provenance outranks the preamble heuristic.
+                guard let raw = e.typedText?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !raw.isEmpty else { return false }
-                return !looksLikeAgentsPreamble(raw)
+                return e.isProvenTyped || !looksLikeAgentsPreamble(raw)
             }
             return !meaningfulUser
         case .claude:
@@ -1006,20 +1033,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             return lightCwd
         }
 
-        // 2) Look for XML-ish environment_context blocks in text (Codex only)
-        let pattern = #"<cwd>(.*?)</cwd>"#
-        if let re = try? NSRegularExpression(pattern: pattern) {
-            for e in events {
-                if let t = e.text {
-                    let ns = t as NSString
-                    let range = NSRange(location: 0, length: ns.length)
-                    if let m = re.firstMatch(in: t, range: range), m.numberOfRanges >= 2 {
-                        let r = m.range(at: 1)
-                        let str = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !str.isEmpty { return str }
-                    }
-                }
-            }
+        // 2) Look for XML-ish environment_context blocks in text (Codex only), event by event in order.
+        for e in events {
+            if let t = e.text, let found = Self.codexCwd(in: t) { return found }
         }
         // 3) Look for JSON field "cwd" in raw JSON (Codex only)
         for e in events {

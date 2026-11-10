@@ -280,6 +280,11 @@ enum SessionSearchTextBuilder {
                 return
             }
 
+            // A mixed message's typed items go in first and whole: long injected context in the
+            // raw text must not push the user's own words out of the sample.
+            if ev.isProvenTyped, let typed = ev.messageDisplayText, !typed.isEmpty, typed != ev.text {
+                appendSampledLargeText(typed, maxOut: perFieldLimit, into: &out, remaining: &remaining)
+            }
             if let t = ev.text, !t.isEmpty {
                 appendSampledLargeText(t, maxOut: perFieldLimit, into: &out, remaining: &remaining)
             }

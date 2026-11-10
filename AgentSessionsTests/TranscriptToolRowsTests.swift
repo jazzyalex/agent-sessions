@@ -160,19 +160,34 @@ final class TranscriptToolRowsTests: XCTestCase {
             (prefix, Array(prefix.dropLast()) + [assistant("hello"), user("x")]),
             (prefix, prefix + [tool, user(), user()]),
             ([user(), user()], [user(), user(), user()]),
+            // Review 2026-11-09 (Codex): a replacement removes the old barrier at block 1.
+            ([user(), tool, user()], [user(), user(), user(), user("B")]),
+            // A chat-only stream (no barrier): the growing last group restarts at an earlier owner.
+            ([user("a"), assistant("x"), user("b"), assistant("y")],
+             [user("a"), assistant("x"), user("b"), assistant("yz"), user("c")]),
+            // Review round 2 (Codex): a long run of one repeated message, its last block growing.
+            (Array(repeating: user(), count: 12) + [user("g")],
+             Array(repeating: user(), count: 12) + [user("go"), user()]),
         ]
         for (n, pair) in cases.enumerated() {
             let old = F.sequence(pair.old), new = F.sequence(pair.new)
             let previous = TranscriptMessageGroupIndex.build(blocks: old[...])
-            let extended = TranscriptMessageGroupIndex.extending(previous, previousBlockCount: old.count,
-                                                                 blocks: new[...])
+            // The cache's rule: the latest restart point whose prefix (the blocks before it) is unchanged.
+            let start = previous.restartPoints.reversed().map(\.id).first { point in
+                point < old.count && old[..<point] == new[..<point]
+            }
             let rebuilt = TranscriptMessageGroupIndex.build(blocks: new[...])
+            guard let start else { XCTFail("case \(n): no restart point"); continue }
+            if n == cases.count - 1 { XCTAssertEqual(start, old.count - 1, "a long duplicate run restarts at its tail") }
+            let extended = TranscriptMessageGroupIndex.extending(previous, from: start, previousBlockCount: old.count,
+                                                                 blocks: new[...])
             XCTAssertEqual(extended.groupIDByBlock, rebuilt.groupIDByBlock, "case \(n)")
             XCTAssertEqual(extended.groupsByID.mapValues(\.representedBlockIndices),
                            rebuilt.groupsByID.mapValues(\.representedBlockIndices), "case \(n)")
             XCTAssertEqual(extended.groupsByID.mapValues(\.block.text), rebuilt.groupsByID.mapValues(\.block.text),
                            "case \(n)")
-            XCTAssertEqual(extended.lastBarrierID, rebuilt.lastBarrierID, "case \(n)")
+            XCTAssertEqual(extended.restartPoints.map(\.id), rebuilt.restartPoints.map(\.id), "case \(n)")
+            XCTAssertEqual(extended.restartPoints.map(\.state), rebuilt.restartPoints.map(\.state), "case \(n)")
         }
         XCTAssertEqual(TranscriptMessageGroupIndex.build(blocks: F.sequence(cases[1].new)[...]).groupIDByBlock[6], 4,
                        "the case exercises a group that crosses hidden context")

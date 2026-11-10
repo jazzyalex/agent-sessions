@@ -94,6 +94,8 @@ enum TranscriptMarkdownExporter {
             }
             switch block.kind {
             case .user:
+                // Injected context is not the user's text: export leaves it out (meta is not exported).
+                if block.messageOrigin?.isUnresolvedMixed == true { continue }
                 let userPart = renderUser(block, showTimestamps: showTimestamps)
                 if !images.isEmpty {
                     parts.append(userPart + "\n\n" + renderImages(images, imageReferenceBuilder: imageReferenceBuilder))
@@ -148,7 +150,8 @@ enum TranscriptMarkdownExporter {
 
     private static func renderUser(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
         let heading = headingLine("User", timestamp: block.timestamp, showTimestamps: showTimestamps)
-        let text = normalizedBody(block.text)
+        // A mixed message exports its typed items only; injected context is not the user's text.
+        let text = normalizedBody(block.typedText)
         guard !text.isEmpty else { return heading }
         if shouldBlockquoteUserText(text) {
             return heading + "\n\n" + blockquote(text)
@@ -3359,7 +3362,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
         let r: NSRange?
         if session.source == .codex {
-            r = conversationStartRangeForJump(text: transcript)
+            // A mixed first message shows its typed items only, so the preamble marker may be gone;
+            // then the first prompt is the first user line.
+            r = conversationStartRangeForJump(text: transcript) ?? firstUserLineRange(session: session)
         } else if session.source == .claude {
             r = claudeConversationStartRangeForJump(text: transcript, session: session)
         } else if session.source == .droid {
@@ -3572,6 +3577,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
 
         return text
+    }
+
+    /// The Text view line of the session's first user message, by its typed text.
+    private func firstUserLineRange(session: Session) -> NSRange? {
+        // The Text view writes a user block as prefix + typed text verbatim, so look for that run
+        // as is (leading spaces and newlines included).
+        guard let typed = session.events.first(where: { $0.kind == .user && $0.typedText?.isEmpty == false })?.typedText
+        else { return nil }
+        let needle = SessionTranscriptBuilder.userPrefix + String(typed.prefix(80))
+        guard let range = transcript.range(of: needle) else { return nil }
+        return NSRange(range.lowerBound..<transcript.index(after: range.lowerBound), in: transcript)
     }
 
     private func conversationStartRangeForJump(text: String) -> NSRange? {

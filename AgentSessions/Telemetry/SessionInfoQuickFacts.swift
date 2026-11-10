@@ -53,7 +53,10 @@ public enum SessionInfoMetadataSanitizer {
             for kind in [SessionEventKind.user, .assistant] {
                 for event in session.events where event.kind == kind {
                     // A mixed message's typed items, not its injected ones, name the session.
-                    if let clean = title(event.messageDisplayText ?? event.text, source: .codex) { return clean }
+                    if let clean = title(event.typedText, source: .codex) { return clean }
+                    // Provenance proves the user typed it, so markup in it (a prompt that names a
+                    // tag) is the user's text, not harness context.
+                    if event.isProvenTyped, let clean = provenTypedTitle(event.typedText) { return clean }
                 }
             }
             if let tool = session.events.first(where: { $0.kind == .tool_call && $0.toolName?.isEmpty == false }) {
@@ -158,6 +161,15 @@ public enum SessionInfoMetadataSanitizer {
             "you are an ai", "you are a helpful assistant"
         ]
         return markers.contains(where: { lowercased.contains($0) })
+    }
+
+    /// A title from text provenance marks as typed: whitespace collapsed and long text cut, with
+    /// no markup or prompt-marker checks.
+    private static func provenTypedTitle(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = collapseWhitespace(value)
+        guard !normalized.isEmpty else { return nil }
+        return normalized.count <= 400 ? normalized : String(normalized.prefix(400))
     }
 
     private static func looksLikeRawMarkup(_ value: String) -> Bool {

@@ -41,7 +41,8 @@ struct SessionTranscriptBuilder {
                                              filters: TranscriptFilters,
                                              mode: TranscriptRenderMode = .normal) -> String {
         let opts = options(from: filters, mode: mode, source: source)
-        let blocks = coalesce(events: events, source: source, includeMeta: opts.showMeta)
+        let blocks = injectedUserAsMeta(coalesce(events: events, source: source, includeMeta: opts.showMeta),
+                                        showMeta: opts.showMeta)
         var out = ""
         // Intentionally omit session header and divider for a cleaner transcript view.
         for b in blocks {
@@ -49,6 +50,21 @@ struct SessionTranscriptBuilder {
             out += "\n"
         }
         return out
+    }
+
+    /// Text renderings (Text view, Copy, export) show a user block that provenance marks as injected
+    /// context as metadata, never under the user prefix: kept only when meta is shown.
+    static func injectedUserAsMeta(_ blocks: [LogicalBlock], showMeta: Bool) -> [LogicalBlock] {
+        guard blocks.contains(where: { $0.kind == .user && $0.messageOrigin?.isUnresolvedMixed == true }) else {
+            return blocks
+        }
+        return blocks.compactMap { block in
+            guard block.kind == .user, block.messageOrigin?.isUnresolvedMixed == true else { return block }
+            guard showMeta else { return nil }
+            var meta = block
+            meta.kind = .meta
+            return meta
+        }
     }
 
     /// Returns true when rendering a tail slice independently will preserve output shape.
@@ -64,7 +80,7 @@ struct SessionTranscriptBuilder {
     /// Terminal mode helper that also returns NSRanges for command lines and user text to enable styling in the UI.
     static func buildTerminalPlainWithRanges(session: Session, filters: TranscriptFilters) -> (String, [NSRange], [NSRange]) {
         let opts = options(from: filters, mode: .terminal, source: session.source)
-        let blocks = coalesce(session: session, includeMeta: opts.showMeta)
+        let blocks = injectedUserAsMeta(coalesce(session: session, includeMeta: opts.showMeta), showMeta: opts.showMeta)
         var out = ""
         var commandRanges: [NSRange] = []
         var userRanges: [NSRange] = []
@@ -87,7 +103,7 @@ struct SessionTranscriptBuilder {
                 let head = timestampPrefix(b.timestamp, options: opts)
                 let prefix = userPrefix
                 out += head + prefix
-                markRange(b.text, into: &userRanges)
+                markRange(b.typedText, into: &userRanges)
             default:
                 out += render(block: b, options: opts)
             }
@@ -319,6 +335,12 @@ struct SessionTranscriptBuilder {
         var messageDisplayText: String? = nil
         var messageHasEncryptedContent: Bool? = nil
         var presentation: MessagePresentation? = nil
+
+        /// What the user typed: a mixed message's typed items, else `text` (`SessionEvent.typedText`).
+        var typedText: String {
+            if case .typed = messageOrigin, let display = messageDisplayText { return display }
+            return text
+        }
 
         /// Shared semantic turn boundary. Legacy fixtures without provenance remain typed.
         var isTypedUserMessage: Bool {
@@ -687,13 +709,15 @@ struct SessionTranscriptBuilder {
     private static func expandUserEmbeddedNoticesIfNeeded(block: LogicalBlock) -> [LogicalBlock] {
         guard block.kind == .user else { return [block] }
         if !block.text.localizedCaseInsensitiveContains("<turn_aborted") { return [block] }
-        // Provenance knows which items the user typed. A notice tag only in injected items is
-        // context, not an interruption: splitting it out would hand it the typed origin.
-        // Mixed items join raw text = injected + typed, so the raw text holds the typed part; a
-        // decoded envelope's display text does not appear in the raw text and still splits.
-        if block.messageOrigin == .typed, let typed = block.messageDisplayText, !typed.isEmpty,
-           !typed.localizedCaseInsensitiveContains("<turn_aborted"), block.text.contains(typed) {
-            return [block]
+        // Provenance knows which items the user typed (only mixed messages carry typed display
+        // text). A notice tag in injected items is context, not an interruption, so split the
+        // typed items alone; splitting the raw text would hand an injected notice the typed origin.
+        if block.messageOrigin == .typed, let typed = block.messageDisplayText {
+            guard typed.localizedCaseInsensitiveContains("<turn_aborted") else { return [block] }
+            var typedBlock = block
+            typedBlock.text = typed
+            typedBlock.messageDisplayText = nil
+            return splitTurnAbortedBlocks(from: typedBlock)
         }
         return splitTurnAbortedBlocks(from: block)
     }
@@ -816,12 +840,13 @@ struct SessionTranscriptBuilder {
         switch b.kind {
         case .user:
             let head = timestampPrefix(b.timestamp, options: options)
-            if let nl = b.text.firstIndex(of: "\n") {
-                let first = String(b.text[..<nl])
-                let rest = String(b.text[nl...])
+            let typed = b.typedText
+            if let nl = typed.firstIndex(of: "\n") {
+                let first = String(typed[..<nl])
+                let rest = String(typed[nl...])
                 return head + userPrefix + first + rest
             } else {
-                return head + userPrefix + b.text
+                return head + userPrefix + typed
             }
         case .assistant:
             let head = timestampPrefix(b.timestamp, options: options)

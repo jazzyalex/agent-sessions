@@ -107,7 +107,8 @@ struct TerminalBuilder {
                 }
             }()
 
-            var rawText = block.text
+            // A mixed user message shows its typed items only, never the injected ones.
+            var rawText = block.kind == .user ? block.typedText : block.text
             if block.kind == .toolCall || block.kind == .toolOut {
                 if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: source) {
                     rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
@@ -248,7 +249,8 @@ struct TerminalBuilder {
                 }
             }()
 
-            var rawText = block.text
+            // A mixed user message shows its typed items only, never the injected ones.
+            var rawText = block.kind == .user ? block.typedText : block.text
             if block.kind == .toolCall || block.kind == .toolOut {
                 if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: source) {
                     rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
@@ -596,7 +598,8 @@ struct TerminalBuilder {
     private static func reviewDisplayTextIfNeeded(block: SessionTranscriptBuilder.LogicalBlock,
                                                   source: SessionSource) -> String? {
         guard source == .codex, block.kind == .user else { return nil }
-        let text = block.text
+        // Injected review markup in a mixed message must not replace what the user typed.
+        let text = block.typedText
         guard text.contains("<user_action>"),
               text.contains("<action>review</action>") else { return nil }
         let results = extractTag("results", from: text) ?? ""

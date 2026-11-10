@@ -1334,6 +1334,21 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Transcript UI
 
+### Mixed Codex messages: known edge cases after the 2026-11-09 review loop
+> **open** · sev: low · urg: low · verified 2026-11-09
+
+- **What:** a Codex user message can mix injected items (environment, AGENTS.md) with typed ones (`content_item_kinds`). User-facing paths now read the typed items (`SessionEvent.typedText`); raw text stays for search and cwd. Four Codex review rounds left these cases, all built by hand, none seen in real logs:
+  - Items that are all labeled `user.text`: a whole `<environment_context>` item is dropped as context, so a typed literal example of that block is dropped too; two such items with no prompt stay a user message.
+  - A whole environment block inside an aligned mixed message (other kinds + `user.text`) is shown as typed.
+  - A typed quote of an environment block with `<cwd>`, placed before the real one, wins `cwd` detection (`Session.codexCwd(in:)`).
+  - An unresolved mixed message containing `<turn_aborted>` still produces a meta notice.
+  - Search indexes typed and raw text from one budget; many long mixed messages can push a later prompt out of the Instant sample.
+  - Extending the message-group index copies the cached dictionaries (copy-on-write) on the main actor; not measured.
+  - First-prompt jump misses a prompt whose image marker coalescing rewrote.
+  - Stored index rows keep old titles and search text until their file changes (no forced reindex).
+- **Why deferred:** each fix moved a heuristic and the next round found the opposite case; log labels cannot tell these shapes apart.
+- **To close:** find a real log with one of these shapes, then fix that shape with a fixture.
+
 ### Transcript polish: code and diff highlighting, better layout
 > **open** · sev: low · urg: low · verified 2026-11-08
 

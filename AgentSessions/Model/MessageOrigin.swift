@@ -16,6 +16,13 @@ enum MessageOrigin: Codable, Equatable, Sendable {
     case approvalVerdict(outcome: String)
     case placeholder
 
+    /// A Codex message mixing typed and injected items that the parser could not align: its raw
+    /// text holds injected context, and no typed projection exists.
+    var isUnresolvedMixed: Bool {
+        if case .context(let kinds) = self { return kinds == ["codex.mixed.unresolved"] }
+        return false
+    }
+
     var isHiddenContext: Bool {
         switch self {
         case .context, .skill, .harnessRetry: return true

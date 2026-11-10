@@ -2930,10 +2930,8 @@ final class SessionIndexer: ObservableObject {
                 // Extract cwd from session_meta or environment_context
                 if cwd == nil {
                     if let text = ev.text, text.contains("<cwd>") {
-                        if let start = text.range(of: "<cwd>"),
-                           let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
-                            cwd = String(text[start.upperBound..<end.lowerBound])
-                        }
+                        // Same rule as `Session.cwd` (`Session.codexCwd(in:)`).
+                        if let found = Session.codexCwd(in: text) { cwd = found }
                     } else if let payload {
                         if let cwdValue = payload["cwd"] as? String, !cwdValue.isEmpty { cwd = cwdValue }
                     } else if let cwdValue = obj["cwd"] as? String, !cwdValue.isEmpty {
@@ -3054,7 +3052,9 @@ final class SessionIndexer: ObservableObject {
                               cwd: cwd,
                               repoName: nil,  // Will be computed from cwd
                               lightweightTitle: title,
-                              isHousekeeping: tempIsHousekeeping || title == "No prompt",
+                              // A typed prompt is never housekeeping, even one whose text is "No prompt".
+                              isHousekeeping: tempIsHousekeeping
+                                  || (title == "No prompt" && !sampleEvents.contains { $0.isProvenTyped }),
                               codexInternalSessionIDHint: internalSessionIDHint,
                               parentSessionID: parentSessionID,
                               subagentType: subagentType,
@@ -3071,6 +3071,15 @@ final class SessionIndexer: ObservableObject {
     }
 
     // swiftlint:disable:next cyclomatic_complexity function_body_length
+    /// True when `text`, trimmed, is exactly one `<environment_context>…</environment_context>` block
+    /// (one opening tag, at the start, closed at the end) and not a prompt that quotes such blocks.
+    static func isWholeEnvironmentBlock(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let open = "<environment_context>", close = "</environment_context>"
+        guard trimmed.hasPrefix(open), trimmed.hasSuffix(close) else { return false }
+        return trimmed.components(separatedBy: open).count == 2 && trimmed.components(separatedBy: close).count == 2
+    }
+
     static func parseLine(_ line: String, eventID: String) -> (SessionEvent, String?) {
         var timestamp: Date? = nil
         var role: String? = nil
@@ -3159,8 +3168,24 @@ final class SessionIndexer: ObservableObject {
                         let rawKinds = (metadata as? [String: Any])?["content_item_kinds"] as? [String]
                         let kinds = rawKinds?.map { $0.components(separatedBy: " | ")[0] }
                         if let kinds, !kinds.isEmpty, kinds.allSatisfy({ !$0.isEmpty }) {
+                            // An item's text, read like the raw text join above (images excepted).
+                            func itemText(_ item: Any) -> String? {
+                                if let string = item as? String { return string }
+                                guard let part = item as? [String: Any] else { return nil }
+                                if let partType = part["type"] as? String, partType.contains("image") { return nil }
+                                return part["text"] as? String ?? part["value"] as? String ?? part["data"] as? String
+                            }
                             if kinds.allSatisfy({ $0 == "user.text" }) {
                                 messageOrigin = .typed
+                                // Codex has labeled a whole environment block user.text. Next to a
+                                // real prompt, that block is still context: keep the prompt only.
+                                if let items = workingObj["content"] as? [Any] {
+                                    let texts = items.compactMap(itemText)
+                                    let typed = texts.filter { !Self.isWholeEnvironmentBlock($0) }
+                                    if typed.count < texts.count, !typed.isEmpty {
+                                        messageDisplayText = typed.joined()
+                                    }
+                                }
                             } else if !kinds.contains("user.text") {
                                 var unique: [String] = []
                                 for kind in kinds where !unique.contains(kind) { unique.append(kind) }
@@ -3168,10 +3193,7 @@ final class SessionIndexer: ObservableObject {
                             } else if let items = workingObj["content"] as? [Any], items.count == kinds.count {
                                 messageOrigin = .typed
                                 messageDisplayText = zip(items, kinds).compactMap { item, kind -> String? in
-                                    guard kind == "user.text", let part = item as? [String: Any],
-                                          let partType = part["type"] as? String,
-                                          partType == "input_text" || partType == "text" else { return nil }
-                                    return part["text"] as? String
+                                    kind == "user.text" ? itemText(item) : nil
                                 }.joined()
                             } else {
                                 messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
@@ -3202,17 +3224,16 @@ final class SessionIndexer: ObservableObject {
 
             // Heuristic: environment_context appears as an XML-ish block often logged under 'user'.
             // Treat any event whose text contains this block as meta regardless of role/type,
-            // unless provenance marked a typed prompt in it (mixed context + prompt items). That
-            // event becomes the prompt alone: every text consumer (Terminal, titles, housekeeping,
-            // search) sees what the user typed, and rawJSON keeps the injected items.
+            // unless provenance marked typed items in it (mixed context + prompt). That event stays a
+            // user event with its raw text intact (search and cwd detection read every item); user-
+            // facing paths show `messageDisplayText`, the typed items alone (`SessionEvent.typedText`).
+            // A typed prompt that only names the tag stays too; typed items that are themselves one
+            // whole context block (Codex has logged those as user.text) are still context.
             if let t = text, t.contains("<environment_context>") {
-                if case .typed = messageOrigin, let typed = messageDisplayText,
-                   !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    text = typed
-                    messageDisplayText = nil
-                } else {
-                    type = "environment_context"
-                }
+                var typedPrompt: String?
+                if case .typed = messageOrigin { typedPrompt = messageDisplayText ?? t }
+                let trimmed = typedPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if trimmed.isEmpty || Self.isWholeEnvironmentBlock(trimmed) { type = "environment_context" }
             }
 
             if text == nil, let t = type?.lowercased(), t == "thread_rolled_back" {
