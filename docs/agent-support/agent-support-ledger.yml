@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.5+unreleased"
     as_of_date_utc: "2026-11-17"
+    as_of_commit: "99f4f26a"
+    note: "OpenClaw Doctor migrated the retired heartbeat to an editable automation. Config validation passed, and a fresh native SQLite session completed two tool calls and two tool results. The weekly scan matched the existing schema baseline and the discovery contract."
+    report: "scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json"
+    verified:
+      openclaw: {sessions: {max_verified_version: "2026.11.5", evidence: ["scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json", "scripts/probe_scan_output/agent_watch/20261117-223408-404205Z-p89183-prebump/report.json"]}}
+  - agent_sessions_version: "6.5+unreleased"
+    as_of_date_utc: "2026-11-17"
     as_of_commit: "042d2aef"
     note: "10 agents have latest native-session evidence. Four reported drift findings replayed through production parsers, Antigravity response-model attribution is fixed, and Kimi now explains missing cache-read counts. OpenClaw and Pi remain held, DeepSeek Harness stays on the previously installed candidate, and the steward ceilings are unchanged."
     report: "scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json"

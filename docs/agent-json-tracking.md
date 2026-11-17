@@ -18,6 +18,10 @@ Update this file when:
 
 ## Upstream Version Check Log
 
+### 2026-11-17 — OpenClaw heartbeat follow-up
+
+OpenClaw 2026.11.5 moved its retired heartbeat configuration to the `heartbeat-main` automation. The native SQLite probe captured two tool calls and two tool results across eight records, with no unknown schema keys or types. The weekly capture and discovery contract passed, clearing the configuration hold. Evidence `scripts/probe_scan_output/agent_watch/20261117-223408-404205Z-p89183-prebump/report.json` and `scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json`.
+
 ### 2026-11-17 — stable CLI and format sweep
 
 The initial scan found additive Codex item counts and response metadata, Claude assistant provenance, saved-copy framing and tool-result remediation metadata, Copilot task-submission flags, and Kimi content timing and protocol fields. Redacted fixtures cover the observed shapes and the four affected parsers replayed the exact retained samples. Antigravity 1.5.10 writes the response model directly and estimates now use it; missing Kimi cache reads stay unknown with a specific reason. Manifest 2026111701 adds seven documented model prices and the observed Antigravity model alias. Final weekly `scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json` and Claude follow-up `scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json` verify 10 latest builds; OpenClaw 2026.11.5 requires config migration and Pi 1.5.2 requires sign-in. The installed DeepSeek Harness rc.1 passes; upstream rc.4, Qwen, Devin and fx retain their recorded limits. Replay evidence `scripts/probe_scan_output/replay/20261117-broad-counts.json`; audited HEAD `042d2aef`.

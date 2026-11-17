@@ -1,9 +1,10 @@
 agent_sessions_version: "6.5+unreleased"
-as_of_commit: "042d2aef"
+as_of_commit: "99f4f26a"
 as_of_date: 2026-11-17
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json and Claude follow-up scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json; historical detail remains in the append-only ledger and tracker."
+  - "OpenClaw follow-up verified against scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json."
 
 agents:
   codex_cli:
@@ -93,10 +94,9 @@ agents:
   openclaw:
     # 2026.8.1-2026.9.x were blocked by OpenClaw's own deferred doctor migrations
     # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
-    max_verified_version: "2026.11.2"
-    hold: {"version":"2026.11.5","reason":"Config rejects the retired agents.defaults.heartbeat setting. Migrate configuration and rerun a fresh tool turn.","since":"2026-11-17"}
+    max_verified_version: "2026.11.5"
     notes:
-      - "Existing storage discovery passes. A 2026.11.5 tool turn is blocked by configuration validation."
+      - "Doctor migrated the retired heartbeat into an automation. A fresh SQLite session completed two tool calls and results, and weekly discovery and schema checks passed."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
