@@ -556,6 +556,29 @@ def test_stable_wrapper_forwards_replay_opt_in_to_xctest_host():
     assert 'TEST_RUNNER_AS_REAL_SESSION_REPLAY="${AS_REAL_SESSION_REPLAY:-0}"' in script
 
 
+@pytest.mark.parametrize("manifest_name", ["selected sessions.json", None])
+def test_stable_wrapper_forwards_optional_replay_manifest(tmp_path, monkeypatch, manifest_name):
+    import os
+
+    xcodebuild = tmp_path / "xcodebuild"
+    xcodebuild.write_text(
+        '#!/bin/sh\nprintf "%s" "${TEST_RUNNER_AS_REAL_SESSION_REPLAY_MANIFEST-unset}"\n'
+    )
+    xcodebuild.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.delenv("TEST_RUNNER_AS_REAL_SESSION_REPLAY_MANIFEST", raising=False)
+    monkeypatch.delenv("AS_REAL_SESSION_REPLAY_MANIFEST", raising=False)
+    expected = "unset"
+    if manifest_name is not None:
+        expected = str(tmp_path / manifest_name)
+        monkeypatch.setenv("AS_REAL_SESSION_REPLAY_MANIFEST", expected)
+
+    result = subprocess.run(
+        [str(REPO / "scripts/xcode_test_stable.sh")], capture_output=True, text=True, check=True
+    )
+    assert result.stdout == expected
+
+
 def test_hermes_weekly_unions_five_real_sessions(tmp_path):
     from scripts.tests.test_prebump_session_exclusion import _hermes_db
     import sqlite3
