@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.5+unreleased"
     as_of_date_utc: "2026-11-17"
+    as_of_commit: "579521c9"
+    note: "DeepSeek Harness 0.2.2-rc.4 wrote a fresh compressed v4 session with 31 events and all five required evidence buckets. The scoped weekly check returned supports_latest with zero schema drift, and production replay verified discovery, the transcript, the tool call and result, and recorded usage."
+    report: "scripts/probe_scan_output/agent_watch/20261117-233423-785083Z-p10734/report.json"
+    verified:
+      deepseek_harness: {sessions: {max_verified_version: "0.2.2-rc.4", scope: "native compressed v4 session on the approved prerelease", evidence: ["scripts/probe_scan_output/agent_watch/20261117-233423-785083Z-p10734/report.json", "scripts/probe_scan_output/agent_watch/20261117-233403-170456Z-p10678-prebump/report.json", "scripts/probe_scan_output/replay/20261117-deepseek-harness-rc4-xcresult.json"]}}
+  - agent_sessions_version: "6.5+unreleased"
+    as_of_date_utc: "2026-11-17"
     as_of_commit: "3b1bb54d"
     note: "Pi 1.5.2 passed after renewed OpenAI sign-in using a temporary openai/gpt-6.1-sol chat-model override. The fresh JSONL session recorded one tool call and one result across eight records with zero parse errors or schema drift. Weekly discovery passed and the installed and upstream versions matched."
     report: "scripts/probe_scan_output/agent_watch/20261117-230720-698461Z-p2388/report.json"

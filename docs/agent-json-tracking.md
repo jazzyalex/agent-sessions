@@ -18,6 +18,10 @@ Update this file when:
 
 ## Upstream Version Check Log
 
+### 2026-11-17 — DeepSeek Harness prerelease follow-up
+
+DeepSeek Harness advanced from `0.2.2-rc.1` to `0.2.2-rc.4`. The fresh compressed v4 session contained 31 events, including one tool call and one result, and matched the existing baseline with zero parse errors. Production replay verified discovery, transcript rendering data, and recorded usage. The scoped weekly check matched the installed and upstream versions and cleared the prerelease hold. Evidence `scripts/probe_scan_output/agent_watch/20261117-233403-170456Z-p10678-prebump/report.json` and `scripts/probe_scan_output/agent_watch/20261117-233423-785083Z-p10734/report.json`.
+
 ### 2026-11-17 — Pi auth follow-up
 
 Pi 1.5.2 passed after renewed OpenAI sign-in. A one-run `openai/gpt-6.1-sol` chat-model override produced a fresh JSONL session with one tool call and one result. All eight records parsed and matched the existing baseline. The scoped weekly check returned `supports_latest`, clearing the auth hold. Evidence `scripts/probe_scan_output/agent_watch/20261117-230708-133880Z-p2313-prebump/report.json` and `scripts/probe_scan_output/agent_watch/20261117-230720-698461Z-p2388/report.json`.
