@@ -5,6 +5,20 @@ description: Verify agent session format compatibility for Agent Sessions. Use w
 
 # Agent Session Format Check
 
+## OpenClaw checks use the local CLI only
+
+- Read existing session data offline. For a fresh tool session, run
+  `./scripts/agent_watch.py --mode prebump --agent openclaw --allow-real-home --keep-sandbox`.
+  The driver uses a one-shot `openclaw agent --local` invocation in its temporary
+  working directory and records the session in the native store.
+- Never start, restart, install, or enable the OpenClaw Gateway for a format
+  check. Never create, schedule, or trigger heartbeat jobs or send a delivery
+  test. These checks require no Telegram access. If an update or repair requires
+  the Gateway or would create a scheduled job, report the blocker.
+- Track the processes started for the check. On success, failure, or timeout,
+  close any remaining OpenClaw processes and children started by the check.
+  Verify they exited. Leave pre-existing processes alone.
+
 ## Runbook: update format check
 
 An explicit "update format check" authorizes stable CLI updates, real-home prebumps,
