@@ -222,6 +222,10 @@ Run the stable test wrapper:
 
 Found a session you thought you had lost? [Star Agent Sessions](https://github.com/jazzyalex/agent-sessions) to help other developers find it.
 
+## Also by me
+
+[Living Wall](https://livingwallapp.com/gh) — a little living world on your Mac desktop. Waves roll in, a dog trots across the yard, fish drift by on the reef.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
