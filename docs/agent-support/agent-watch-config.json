@@ -545,8 +545,7 @@
       },
       "prebump": {
         "driver": "pi_prompt",
-        "fallback_models": ["openai/gpt-6.1-sol"],
-        "model": "openai/gpt-6-luna",
+        "model": "openai/gpt-6.1-sol",
         "sandbox": {"mode": "home_override", "subdir": "pi_sandbox"},
         "prompt": "Call the ls tool now with path '.'. Do not answer before making that tool call. List filenames only; do not open, read, or modify files.",
         "timeout_seconds": 180,

@@ -508,9 +508,9 @@ def test_sampling_summary_names_store_size():
     assert flow.sampling_summary({"sampled_sessions": 5, "store_sessions": 162}) == " sampled 5 of 162"
 
 
-def test_pi_uses_the_provider_refreshed_by_the_owner():
+def test_pi_prebump_uses_the_tool_capable_openai_chat_model():
     cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
-    assert cfg["agents"]["pi"]["prebump"]["model"] == "openai/gpt-6-luna"
+    assert cfg["agents"]["pi"]["prebump"]["model"] == "openai/gpt-6.1-sol"
 
 
 def test_failure_classifier_sees_oauth_refresh_error_at_end(tmp_path):
