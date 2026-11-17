@@ -10,6 +10,18 @@ import Foundation
 struct KimiTelemetryAccumulator {
     private static let speed = "standard-normalized"
 
+    private enum UsageIssue {
+        case missingCacheRead
+        case malformed
+
+        var message: String {
+            switch self {
+            case .missingCacheRead: "Kimi did not record cache-read token counts for every usage record."
+            case .malformed: "Kimi usage.record components are incomplete or malformed."
+            }
+        }
+    }
+
     static func accumulate<S: Sequence<String>>(lines: S) -> SessionTelemetry {
         var accumulator = KimiTelemetryAccumulator()
         for (index, line) in lines.enumerated() {
@@ -26,8 +38,8 @@ struct KimiTelemetryAccumulator {
     private var sawAnyRecord = false
     private var sawTurnUsage = false
     private var sawSessionUsage = false
-    private var invalidTurnUsage = false
-    private var invalidSessionUsage = false
+    private var turnIssue: UsageIssue?
+    private var sessionIssue: UsageIssue?
     private var invalidUnscopedUsage = false
 
     mutating func consume(line: String, index: Int) {
@@ -76,20 +88,21 @@ struct KimiTelemetryAccumulator {
             }
 
             guard let usage = object["usage"] as? [String: Any] else {
-                if isSessionScope {
-                    invalidSessionUsage = true
-                } else {
-                    invalidTurnUsage = true
-                }
+                recordUsageIssue(.malformed, isSessionScope: isSessionScope)
                 return
             }
 
+            // An omitted read count means the provider did not report it. A
+            // reported zero is valid, while null or invalid numbers are malformed.
+            if usage["inputCacheRead"] == nil,
+               Self.count(usage["inputOther"]) != nil,
+               Self.count(usage["inputCacheCreation"]) != nil,
+               Self.count(usage["output"]) != nil {
+                recordUsageIssue(.missingCacheRead, isSessionScope: isSessionScope)
+                return
+            }
             guard let components = Self.components(in: usage) else {
-                if isSessionScope {
-                    invalidSessionUsage = true
-                } else {
-                    invalidTurnUsage = true
-                }
+                recordUsageIssue(.malformed, isSessionScope: isSessionScope)
                 return
             }
 
@@ -149,11 +162,19 @@ struct KimiTelemetryAccumulator {
         }
     }
 
+    private mutating func recordUsageIssue(_ issue: UsageIssue, isSessionScope: Bool) {
+        if isSessionScope {
+            if sessionIssue == nil || issue == .malformed { sessionIssue = issue }
+        } else if turnIssue == nil || issue == .malformed {
+            turnIssue = issue
+        }
+    }
+
     func finish() -> SessionTelemetry {
         let useTurns = sawTurnUsage
-        let invalidSelectedFamily = useTurns
-            ? (invalidTurnUsage || invalidUnscopedUsage)
-            : (invalidSessionUsage || invalidUnscopedUsage || (!sawSessionUsage && invalidTurnUsage))
+        let selectedIssue = invalidUnscopedUsage ? .malformed
+            : (useTurns ? turnIssue : sessionIssue ?? (sawSessionUsage ? nil : turnIssue))
+        let invalidSelectedFamily = selectedIssue != nil
         let slices = invalidSelectedFamily
             ? []
             : (useTurns ? turnSlices.ordered : sessionSlices.ordered)
@@ -171,9 +192,8 @@ struct KimiTelemetryAccumulator {
                 recordedTotalTokens: nil,
                 usageFamilies: hasUsage || invalidSelectedFamily ? [family] : [],
                 usageFamilyConflict: false,
-                unavailableReason: invalidSelectedFamily
-                    ? "Kimi usage.record components are incomplete or malformed."
-                    : (hasUsage ? nil : "Kimi did not record usable usage components."),
+                unavailableReason: selectedIssue?.message
+                    ?? (hasUsage ? nil : "Kimi did not record usable usage components."),
                 costUnavailableReason: (!useTurns && hasUsage && !invalidSelectedFamily)
                     ? "Kimi recorded only a whole-session usage summary, which cannot be attributed to one model or request."
                     : nil)

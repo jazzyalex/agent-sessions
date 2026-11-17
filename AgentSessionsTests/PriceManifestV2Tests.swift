@@ -2,6 +2,68 @@ import XCTest
 @testable import AgentSessions
 
 final class PriceManifestV2Tests: XCTestCase {
+    func testNovember62And52StandardFastAndContextRates() throws {
+        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        for (slug, input, read, output, shortWrite, longWrite, threshold) in [
+            ("gpt-6.2-astra", 8.0, 0.40, 40.0, 10.0, 20.0, 272_000),
+            ("gpt-6.2-sol", 2.0, 0.10, 10.0, 2.5, 5.0, 272_000),
+            ("claude-fable-5-2", 8.0, 0.20, 40.0, 10.0, 16.0, 0),
+            ("claude-mythos-5-2", 8.0, 0.20, 40.0, 10.0, 16.0, 0)
+        ] {
+            let price = try XCTUnwrap(snapshot.resolvedPrice(forModel: slug)?.price)
+            let base = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))
+            XCTAssertEqual(base.inputPerMTok, input, slug)
+            XCTAssertEqual(base.cachedInputPerMTok, read, slug)
+            XCTAssertEqual(base.outputPerMTok, output, slug)
+            XCTAssertEqual(base.cacheWritePerMTok, shortWrite, slug)
+            XCTAssertEqual(base.cacheWrite1hPerMTok, longWrite, slug)
+            let fastLong = try XCTUnwrap(price.rates(for: .fast, contextInputTokens: 272_001))
+            let inputMultiplier = threshold == 0 ? 2.0 : 4.0
+            XCTAssertEqual(fastLong.inputPerMTok, input * inputMultiplier, slug)
+            XCTAssertEqual(fastLong.cachedInputPerMTok, read * inputMultiplier, slug)
+            XCTAssertEqual(fastLong.outputPerMTok, output * (threshold == 0 ? 2 : 3), slug)
+            XCTAssertEqual(fastLong.cacheWritePerMTok, shortWrite * inputMultiplier, slug)
+            XCTAssertEqual(fastLong.cacheWrite1hPerMTok, longWrite * inputMultiplier, slug)
+            XCTAssertEqual(price.inferenceGeoUSMultiplier, threshold == 0 ? 1.1 : nil, slug)
+            XCTAssertNil(snapshot.resolvedPrice(forModel: slug + "-preview"), slug)
+        }
+    }
+
+    func testPublishedRouteEstimatesAndAmbiguousModels() throws {
+        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        for slug in ["cline-free/deepseek-v4.1-flash", "deepseek-v4.1-flash-free"] {
+            let resolved = try XCTUnwrap(snapshot.resolvedPrice(forModel: slug))
+            XCTAssertTrue(resolved.viaFreeRoute)
+            XCTAssertEqual(resolved.price.inputPerMTok, 0.30)
+            XCTAssertEqual(resolved.price.cachedInputPerMTok, 0.006)
+            XCTAssertEqual(resolved.price.outputPerMTok, 1.20)
+            XCTAssertNil(resolved.price.cacheWritePerMTok)
+        }
+        let nemotron = try XCTUnwrap(snapshot.resolvedPrice(forModel: "cline-free/nemotron-3.5-super-vl"))
+        XCTAssertTrue(nemotron.viaFreeRoute)
+        XCTAssertEqual(nemotron.price.inputPerMTok, 0.06)
+        XCTAssertEqual(nemotron.price.cachedInputPerMTok, 0.01)
+        XCTAssertEqual(nemotron.price.outputPerMTok, 0.35)
+        for slug in ["~anthropic/claude-fable-latest", "deepseek-flash", "big-pickle"] {
+            XCTAssertNil(snapshot.resolvedPrice(forModel: slug), slug)
+        }
+    }
+
+    func testMAICode2FlashRateChangesOnThePublishedDate() throws {
+        let snapshot = RunwayPriceTable.makeForTesting().snapshot()
+        let price = try XCTUnwrap(snapshot.resolvedPrice(forModel: "mai-code-2-flash")?.price)
+        let launch = price.effective(at: utc("2027-05-16T23:59:59Z"))
+        XCTAssertEqual(launch.inputPerMTok, 0.05)
+        XCTAssertEqual(launch.cachedInputPerMTok, 0.005)
+        XCTAssertEqual(launch.outputPerMTok, 0.25)
+        let regular = price.effective(at: utc("2027-05-17T00:00:00Z"))
+        XCTAssertEqual(regular.inputPerMTok, 0.10)
+        XCTAssertEqual(regular.cachedInputPerMTok, 0.01)
+        XCTAssertEqual(regular.outputPerMTok, 0.50)
+        XCTAssertNil(regular.cacheWritePerMTok)
+        XCTAssertNil(snapshot.resolvedPrice(forModel: "mai-code-2-flash-preview"))
+    }
+
     func testNovemberObservedModelsHaveVerifiedRatesWithoutPricingVariants() throws {
         let snapshot = RunwayPriceTable.makeForTesting().snapshot()
         let mini = try XCTUnwrap(snapshot.resolvedPrice(forModel: "openai/gpt-4o-mini")?.price)
@@ -487,7 +549,7 @@ final class PriceManifestV2Tests: XCTestCase {
                        s.price(forModel: "gemini-3.6-flash"))
         for raw in ["big-pickle", "x-preview-f-free", "gateway-injected", "coder-model",
                     "qwen3.5-9b", "kimi-k2.7-code-v2",
-                    "Gemini 3.5 Flash (Medium)", "cline-free/deepseek-v4.1-flash"] {
+                    "Gemini 3.5 Flash (Medium)"] {
             XCTAssertNil(s.resolvedPrice(forModel: raw), raw)
         }
     }

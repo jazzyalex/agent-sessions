@@ -519,6 +519,25 @@ def test_failure_classifier_sees_oauth_refresh_error_at_end(tmp_path):
     assert watch._classify_prebump_failure({"error": "pi_tool_turn_missing", "stdout_file": str(out)}) == "auth_failed"
 
 
+def test_failure_classifier_distinguishes_pi_oauth_from_a_missing_tool_turn(tmp_path):
+    out = tmp_path / "stdout.jsonl"
+    entry = {"error": "pi_tool_turn_missing", "stdout_file": str(out)}
+    out.write_text(json.dumps({"message": {"stopReason": "error",
+        "errorMessage": 'OAuth refresh failed for openai: OAuth token request failed (400): {"error":"invalid_grant"}'}}))
+    assert watch._classify_prebump_failure(entry) == "auth_failed"
+    out.write_text(json.dumps({"message": {"stopReason": "stop", "content": "No tool was called"}}))
+    assert watch._classify_prebump_failure(entry) == "driver_failed"
+
+
+def test_failure_classifier_recognizes_openclaw_config_error(tmp_path):
+    out = tmp_path / "stdout.json"
+    entry = {"error": "openclaw_local_agent_failed rc=1", "stdout_file": str(out)}
+    out.write_text(json.dumps({"message": "OpenClaw config is invalid: ~/.openclaw/openclaw.json"}))
+    assert watch._classify_prebump_failure(entry) == "config_error"
+    out.write_text(json.dumps({"message": "OpenClaw session failed"}))
+    assert watch._classify_prebump_failure(entry) == "driver_failed"
+
+
 def test_opencode_version_helper_uses_sandbox_cwd(tmp_path, monkeypatch):
     def run(argv, **kwargs):
         assert kwargs.get("cwd") == str(tmp_path)

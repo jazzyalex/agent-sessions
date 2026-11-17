@@ -39,6 +39,13 @@ final class RealSessionReplayTests: XCTestCase {
         }
         let quota = WeeklyQuotaCalibrationStore.makeForTesting()
         let engine = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: quota)
+        let focusedFiles: [String: [String]]
+        if let manifest = ProcessInfo.processInfo.environment["AS_REAL_SESSION_REPLAY_MANIFEST"] {
+            focusedFiles = try JSONDecoder().decode([String: [String]].self,
+                from: Data(contentsOf: URL(fileURLWithPath: manifest)))
+        } else {
+            focusedFiles = [:]
+        }
         var report: [String: Counts] = [:]
         func saveCounts() throws {
             let encoder = JSONEncoder()
@@ -64,23 +71,43 @@ final class RealSessionReplayTests: XCTestCase {
             close(savedErr)
             close(sink)
         }
-        // Core agents first. Further sources can be added once their discovery seam
-        // reaches the full parser without creating an index or starting a monitor.
-        for (source, discovery) in [(SessionSource.codex, CodexSessionDiscovery() as any SessionDiscovery),
-                                    (.claude, ClaudeSessionDiscovery() as any SessionDiscovery)] {
+        let discoveries: [(SessionSource, any SessionDiscovery)] = [
+            (.codex, CodexSessionDiscovery()),
+            (.claude, ClaudeSessionDiscovery()),
+            (.copilot, CopilotSessionDiscovery()),
+            (.kimi, KimiSessionDiscovery()),
+            (.antigravity, AntigravitySessionDiscovery())
+        ]
+        for (source, discovery) in discoveries {
+            if source == .antigravity && focusedFiles[source.rawValue] == nil { continue }
             var counts = Counts()
-            let files = discovery.discoverSessionFiles().sorted {
-                (SessionFileStat.from($0)?.mtime ?? 0) > (SessionFileStat.from($1)?.mtime ?? 0)
-            }.prefix(20)
+            let focused = focusedFiles[source.rawValue]?.map { URL(fileURLWithPath: $0) }
+            let files: [URL]
+            if let focused {
+                // Probe sessions can live outside discovery roots. Use only the
+                // selected files for this source when replaying a finding.
+                files = focused
+            } else {
+                let limit = source == .codex || source == .claude ? 20 : 5
+                files = Array(discovery.discoverSessionFiles().sorted {
+                    (SessionFileStat.from($0)?.mtime ?? 0) > (SessionFileStat.from($1)?.mtime ?? 0)
+                }.prefix(limit))
+            }
+            if files.isEmpty && (source == .copilot || source == .kimi) { continue }
             let descriptor = SessionSourceRegistry.descriptor(for: source)
             for file in files {
                 if Date() > deadline { break }
                 counts.sessions_read += 1
                 guard let session = descriptor.parseFullByPath?(file) else {
                     counts.parse_failed += 1
+                    report[source.rawValue] = counts
+                    try saveCounts()
                     continue
                 }
-                if session.events.isEmpty { counts.zero_events += 1 }
+                if session.events.isEmpty {
+                    counts.zero_events += 1
+                    if focused != nil { XCTFail("Focused \(source.rawValue) replay had no events") }
+                }
                 let result = await engine.telemetryReadResult(for: session)
                 Self.recordUsage(result.telemetry, nilReason: result.unavailableReason, into: &counts)
                 report[source.rawValue] = counts
@@ -113,6 +140,10 @@ final class RealSessionReplayTests: XCTestCase {
         // reason, not treated as a generic test failure or silently called complete.
         XCTAssertEqual(report.values.reduce(0) { $0 + $1.parse_failed }, 0)
         XCTAssertTrue(report.values.allSatisfy { $0.sessions_read > 0 })
+        for (source, paths) in focusedFiles {
+            XCTAssertEqual(report[source]?.sessions_read ?? 0, paths.count,
+                "Focused \(source) replay did not finish")
+        }
     }
 
     private static func recordOpenCodeUsage(_ telemetry: SessionTelemetry?,
@@ -141,6 +172,8 @@ final class RealSessionReplayTests: XCTestCase {
             // Only controlled reason categories escape. Never serialize free text.
             let category: String
             if reason.contains("malformed") { category = "malformed_usage" }
+            else if reason.contains("did not record cache-read token counts") { category = "missing_cache_read" }
+            else if reason.contains("did not record usable usage") { category = "usage_not_emitted" }
             else if reason.contains("fork") { category = "fork_attribution" }
             else if reason.contains("no usable") { category = "no_usable_usage" }
             else if reason.contains("range") { category = "token_range" }

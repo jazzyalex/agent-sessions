@@ -261,14 +261,19 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Risk if wrong:** treating internal metadata as display authority could duplicate messages or misstate account limits.
 - **To close:** prove a user-visible read path with positive and negative fixtures, or document why a field is noise.
 
-### Recent model prices: unidentified routes and time-dependent DeepSeek rates
-> **open** · sev: med · urg: low · verified 2026-11-02
+### Codex item token counts and Kimi content timings
+> **open** · sev: low · urg: low · verified 2026-11-17
 
-- **What:** recent usage names `cline-free/nemotron-3.5-super-vl`, `mai-code-1.1-flash`, `big-pickle` and `~anthropic/claude-fable-latest`; no first-party per-token rate or exact version mapping was established. DeepSeek `deepseek-flash` / `deepseek-v4.1-flash-free` / `cline-free/deepseek-v4.1-flash` has peak $0.30/$0.006/$1.20 and offpeak $0.15/$0.003/$0.60 input/cache/output per MTok. The current date-based price periods cannot encode its daily hours and holiday calendar. OpenClaw `delivery-mirror` is an internal unpriced label; establish zero-token eligibility before adding an exemption.
-- **Where:** official-source evidence `scripts/probe_scan_output/official-provider-prices-2026-11-02.md`; [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/), [NVIDIA model](https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b), [OpenCode model identities](https://opencode.ai/v2/docs/console/models/).
-- **Why deferred:** a free promotion is not a published API-equivalent base rate, and a family guess or static DeepSeek peak rate would present an unsupported estimate as exact.
-- **Risk if wrong:** inaccurate dollar estimates or silently omitted contributing usage.
-- **To close:** verify route identity and published rates, or implement time-aware tariffs with positive and negative boundary cases.
+- Codex 0.169.0 emits `item_completed.content_token_count`; seven records in the initial weekly sample carried a count and a stable tool session reproduced it. Check whether it measures rendered item content before exposing it on an item row or adding it to telemetry.
+- Kimi 2.6.3 emits `startedAt` and `durationMs` on `content.part` records. The focused tool session recorded three parts with start times. Determine whether these measure cumulative stream time or individual content blocks before using them for transcript timing.
+- **To close:** verify units and coverage, then test attribution across repeated item IDs and streaming chunks.
+
+### Recent model prices still missing a reliable historical rate
+> **open** · sev: med · urg: low · verified 2026-11-17
+
+- **What:** `big-pickle` is a free OpenCode stealth model with no disclosed API-equivalent rate. OpenRouter's `~anthropic/claude-fable-latest` can point to different generations, so alias-only logs cannot recover the billed model. Direct DeepSeek `deepseek-flash` has daily peak and off-peak rates that the manifest's date-based periods cannot express.
+- **Covered:** OpenCode's V4.1 Flash route has a published fixed rate and the Nemotron 3.5 Super VL model has a published OpenRouter list rate. Manifest 2026111701 uses those rates for the corresponding free routes, with the free-route label preserved.
+- **To close:** recover concrete response model IDs for moving aliases, or add tariff support with provider timezone and calendar boundary tests. Keep stealth models without a published estimate unavailable. [OpenRouter alias](https://openrouter.ai/~anthropic/claude-fable-latest/) · [OpenCode rates](https://opencode.ai/docs/console/models) · [DeepSeek rates](https://api-docs.deepseek.com/quick_start/pricing/)
 
 ### Explain nil telemetry in the real-session replay
 > **partial** · sev: low · urg: low · verified 2026-11-02
@@ -280,13 +285,11 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 - **Risk if wrong:** calling this an expected race could hide a real backend failure. Keep the unexplained count visible; never turn it into zero usage or claim a clean semantic replay.
 - **To close:** the diagnostic gap is fixed; if nil recurs, use its controlled reason to establish whether a real defect exists. The original historical event cannot be attributed from its counts-only artifact; do not call the live-file hypothesis proved.
 
-### Extend semantic replay beyond the three core agents
-> **open** · sev: low · urg: low · verified 2026-11-02
+### Extend semantic replay to additional stores
+> **partial** · sev: low · urg: low · verified 2026-11-17
 
-- **What:** `AgentSessionsTests/RealSessionReplayTests.swift` replays Codex, Claude and OpenCode only. Other agents have schema/fixture checks but no real-store semantic replay in this initial bounded implementation.
-- **Why deferred:** shared-store discovery and unavailable telemetry need source-specific reason categories; a generic nil result must not be presented as a parser regression.
-- **Risk if wrong:** known-key behavioral regressions in other readers remain outside the replay channel.
-- **To close:** add each production discovery/full-parser/usage path, keep SQLite read-only and output counts-only, and explain unavailable reasons. Do not install absent steward agents.
+- Real-session replay now covers Codex, Claude, OpenCode, Copilot and Kimi. A focused manifest can replay retained probe sessions through their production parsers, including Antigravity.
+- **To close:** add the remaining production discovery and usage paths, keep SQLite read-only, and continue emitting counts only.
 
 ### Check the DeepSeek Harness reader against the v3→v4 notes from the DSH discussion
 > **open** · sev: med · urg: low · verified —

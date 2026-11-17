@@ -4721,8 +4721,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
         XCTAssertEqual(t.price(forModel: "claude-fable-5-1")?.cachedInputPerMTok, 0.25)
         XCTAssertEqual(t.price(forModel: "claude-mythos-5-1")?.cachedInputPerMTok, 0.25)
-        XCTAssertNil(t.price(forModel: "claude-fable-5-2"), "future Fable minors must fail closed")
-        XCTAssertNil(t.price(forModel: "claude-mythos-5-2"), "future Mythos minors must fail closed")
+        XCTAssertNil(t.price(forModel: "claude-fable-5-3"), "unverified Fable minors must fail closed")
+        XCTAssertNil(t.price(forModel: "claude-mythos-5-3"), "unverified Mythos minors must fail closed")
         XCTAssertNil(t.price(forModel: "claude-sonnet-6"), "future Claude generations must not inherit generic family rates")
         XCTAssertNil(t.price(forModel: "claude-sonnet-5-preview"), "unrecognized Claude suffixes must fail closed")
         XCTAssertNil(t.price(forModel: "claude-opus-50"), "a version-like suffix is not an approved alias")
@@ -4745,7 +4745,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(table.price(forModel: "gpt-6.1-sol-2026-09-29"), price)
         XCTAssertEqual(table.price(forModel: "gpt-6.1-sol-20260929"), price)
         XCTAssertNil(table.price(forModel: "gpt-6.1-sol-preview"))
-        XCTAssertNil(table.price(forModel: "gpt-6.2-sol"))
+        XCTAssertNil(table.price(forModel: "gpt-6.3-sol"))
         XCTAssertEqual(table.price(forModel: "gpt-6-sol")?.cachedInputPerMTok, 0.2)
 
         let standard = try XCTUnwrap(price.rates(for: .standard, contextInputTokens: 272_000))

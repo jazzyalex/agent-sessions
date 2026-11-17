@@ -9,6 +9,48 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "6.5+unreleased"
+    as_of_date_utc: "2026-11-17"
+    as_of_commit: "042d2aef"
+    note: "10 agents have latest native-session evidence. Four reported drift findings replayed through production parsers, Antigravity response-model attribution is fixed, and Kimi now explains missing cache-read counts. OpenClaw and Pi remain held, DeepSeek Harness stays on the previously installed candidate, and the steward ceilings are unchanged."
+    report: "scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json"
+    claude_follow_up: "scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json"
+    value_pass:
+      findings: 23
+      candidate: 3
+      handled: 2
+      noise: 10
+      watch: 8
+      evidence: "docs/agent-support/agent-format-tracker.jsonl"
+    replay:
+      evidence: "scripts/probe_scan_output/replay/20261117-broad-counts.json"
+      focused_evidence: "scripts/probe_scan_output/replay/20261117-focused-counts.json"
+      scope: "91 production-parser sessions across Codex, Claude, Copilot, Kimi, Antigravity and OpenCode. Includes focused native drift and tool-session evidence. The final focused rerun read 37 sessions with no parse failures or empty transcripts."
+    tests:
+      python_passed: 640
+      xcode_passed: 4560
+      xcode_skipped: 8
+      xcode_failed: 0
+      evidence: "scripts/probe_scan_output/format-check-2026-11-17-xcresult-summary.json"
+    prices:
+      sequence: 2026111701
+      added: ["gpt-6.2-astra", "gpt-6.2-sol", "claude-fable-5-2", "claude-mythos-5-2", "deepseek-v4.1-flash", "nemotron-3.5-super-vl", "mai-code-2-flash"]
+      note: "A moving Fable alias, OpenCode Big Pickle and direct DeepSeek peak/off-peak still lack reliable historical estimates."
+    verified:
+      antigravity: {"sessions": {"max_verified_version": "1.5.10", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-220333-131093Z-p69235-prebump/report.json"]}}
+      claude: {"sessions": {"max_verified_version": "2.1.326", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-538734Z-p65700-prebump/report.json"]}, "usage_limits": {"max_verified_version": "2.1.326", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json"]}}
+      cline: {"sessions": {"max_verified_version": "3.0.74", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-571113Z-p65712-prebump/report.json"]}}
+      codex: {"sessions": {"max_verified_version": "0.169.0", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-571656Z-p65691-prebump/report.json"]}, "usage_limits": {"max_verified_version": "0.169.0", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json"]}}
+      copilot: {"sessions": {"max_verified_version": "1.0.113", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-539275Z-p65706-prebump/report.json"]}}
+      cursor: {"sessions": {"max_verified_version": "2026.11.13", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-571500Z-p65710-prebump/report.json"]}}
+      deepseek_harness: {"sessions": {"max_verified_version": "0.2.2-rc.1", "hold": {"version": "0.2.2-rc.4", "reason": "Upstream is a release candidate. The installed rc.1 still passes native validation.", "since": "2026-11-17"}, "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-594329Z-p65714-prebump/report.json"]}}
+      grok: {"sessions": {"max_verified_version": "1.0.88", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-600436Z-p65698-prebump/report.json"]}}
+      hermes: {"sessions": {"max_verified_version": "0.23.2", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-537712Z-p65703-prebump/report.json"]}}
+      kimi: {"sessions": {"max_verified_version": "2.6.3", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-598247Z-p65696-prebump/report.json"]}}
+      openclaw: {"sessions": {"max_verified_version": "2026.11.2", "hold": {"version": "2026.11.5", "reason": "Config rejects the retired agents.defaults.heartbeat setting. Migrate configuration and rerun a fresh tool turn.", "since": "2026-11-17"}, "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-615760Z-p65709-prebump/report.json"]}}
+      opencode: {"sessions": {"max_verified_version": "2.3.0", "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-577827Z-p65693-prebump/report.json"]}}
+      pi: {"sessions": {"max_verified_version": "1.5.0", "hold": {"version": "1.5.2", "reason": "OpenAI OAuth refresh returned invalid_grant. Reauthenticate Pi and rerun a fresh tool turn.", "since": "2026-11-17"}, "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json", "scripts/probe_scan_output/agent_watch/20261117-215925-551435Z-p65694-prebump/report.json"]}}
+      qwen: {"sessions": {"max_verified_version": "0.14.3", "hold": {"version": "0.28.0", "reason": "No active local provider or fresh-session driver. The recorded 0.14.3 ceiling remains based on retained sessions.", "since": "2026-11-17"}, "evidence": ["scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json"]}}
   - agent_sessions_version: "6.4+unreleased"
     as_of_date_utc: "2026-11-09"
     as_of_commit: "9e9dd7cd"

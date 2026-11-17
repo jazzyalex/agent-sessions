@@ -18,6 +18,10 @@ Update this file when:
 
 ## Upstream Version Check Log
 
+### 2026-11-17 — stable CLI and format sweep
+
+The initial scan found additive Codex item counts and response metadata, Claude assistant provenance, saved-copy framing and tool-result remediation metadata, Copilot task-submission flags, and Kimi content timing and protocol fields. Redacted fixtures cover the observed shapes and the four affected parsers replayed the exact retained samples. Antigravity 1.5.10 writes the response model directly and estimates now use it; missing Kimi cache reads stay unknown with a specific reason. Manifest 2026111701 adds seven documented model prices and the observed Antigravity model alias. Final weekly `scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json` and Claude follow-up `scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json` verify 10 latest builds; OpenClaw 2026.11.5 requires config migration and Pi 1.5.2 requires sign-in. The installed DeepSeek Harness rc.1 passes; upstream rc.4, Qwen, Devin and fx retain their recorded limits. Replay evidence `scripts/probe_scan_output/replay/20261117-broad-counts.json`; audited HEAD `042d2aef`.
+
 ### 2026-11-08 — installed-CLI sweep
 
 Codex 0.167.0 adds guardian metadata on response items, `encrypted_content` on assistant messages and `realtime_item` session markers. Claude 2.1.319 adds a `session-owner` record with account and organization ids, plus new assistant and attachment keys. Copilot 1.0.107 adds `instruction.update` records and `responseModel`/`inferenceGateway` in usage records. Kimi 2.5.2 adds two setup records. All of it is additive: redacted fixtures and tests show none of these records becomes a message, so no parser changed. OpenClaw 2026.11.2 migrates its agent database to schema 27, which only adds columns; it stays held until the real store is migrated. Antigravity 1.5.3, Hermes 0.23.0, OpenCode 2.2.6, Cursor 2026.11.5 and Grok 1.0.77 match the baseline.

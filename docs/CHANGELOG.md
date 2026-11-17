@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Session Info estimates costs for GPT-6.2 Astra and Sol, Claude Fable and Mythos 5.2, MAI Code 2 Flash, and two verified free routes. Antigravity estimates use the model recorded on each response when available.
+- Kimi explains when a session has incomplete cache-read usage instead of describing the record as malformed.
+
 ## [6.5] - 2026-11-09
 
 ### Highlights

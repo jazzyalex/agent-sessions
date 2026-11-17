@@ -3,12 +3,9 @@ import Foundation
 /// Builds token telemetry from Antigravity CLI planner responses.
 ///
 /// Antigravity's CLI transcript records per-step `input_tokens`,
-/// `cache_read_tokens`, and `output_tokens` on `PLANNER_RESPONSE`. The model
-/// identifier is not present on those rows; it arrives as a `Model Selection`
-/// settings change embedded in a `USER_INPUT` record. Each planner event is
-/// stamped with the model in force at that point in the file. Configuration
-/// remains explicitly partial, and the already-loaded Session row remains the
-/// current-model source.
+/// `cache_read_tokens`, and `output_tokens` on `PLANNER_RESPONSE`. Newer
+/// responses also identify the actual model. Older responses use the most
+/// recent `Model Selection` change embedded in a `USER_INPUT` record.
 struct AntigravityTelemetryAccumulator {
     private static let speed = "standard-normalized"
 
@@ -62,12 +59,14 @@ struct AntigravityTelemetryAccumulator {
         let fresh = components.fresh
         let cacheRead = components.cacheRead
         let output = components.output
+        let reportedModel = (object["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = reportedModel.flatMap { $0.isEmpty ? nil : $0 } ?? activeModel
         slices.addComponents(fresh: fresh,
                              cacheRead: cacheRead,
                              write5m: 0,
                              write1h: 0,
                              output: output,
-                             model: activeModel,
+                             model: model,
                              effort: nil,
                              speed: Self.speed)
         guard (components.topLine ?? 0) > 0 else { return }
@@ -78,7 +77,7 @@ struct AntigravityTelemetryAccumulator {
             anchorLine: index,
             usageFamily: "PLANNER_RESPONSE",
             ownership: .session,
-            model: activeModel,
+            model: model,
             reasoningEffort: nil,
             speed: Self.speed,
             freshInputTokens: fresh,

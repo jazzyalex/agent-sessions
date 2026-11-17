@@ -1815,6 +1815,42 @@ final class ExpandedTelemetryProviderTests: XCTestCase {
         }
     }
 
+    func testKimiDistinguishesMissingCacheReadsFromZeroAndMalformedValues() {
+        let row = #"{"type":"usage.record","usageScope":"turn","usage":{"inputOther":2,"inputCacheCreation":4,"output":5}}"#
+        let missing = KimiTelemetryAccumulator.accumulate(lines: [row])
+        XCTAssertEqual(missing.usageSummary?.unavailableReason,
+                       "Kimi did not record cache-read token counts for every usage record.")
+        XCTAssertTrue(missing.usageEvents.isEmpty)
+
+        let knownZero = row.replacingOccurrences(of: "\"inputOther\":2", with: "\"inputOther\":2,\"inputCacheRead\":0")
+        let complete = KimiTelemetryAccumulator.accumulate(lines: [knownZero])
+        XCTAssertNil(complete.usageSummary?.unavailableReason)
+        XCTAssertEqual(complete.usageSummary?.topLineTokens, 11)
+        XCTAssertEqual(complete.usageEvents.first?.cacheReadTokens, 0)
+
+        let invalid = knownZero.replacingOccurrences(of: "\"inputCacheRead\":0", with: "\"inputCacheRead\":null")
+        let mixed = KimiTelemetryAccumulator.accumulate(lines: [row, invalid])
+        XCTAssertEqual(mixed.usageSummary?.unavailableReason,
+                       "Kimi usage.record components are incomplete or malformed.")
+    }
+
+    func testAntigravityPlannerModelPricesTheActualResponseAndKeepsLegacyFallback() async throws {
+        let actual = #"{"type":"PLANNER_RESPONSE","model":"gemini-3.8-flash-medium","created_at":"2026-11-17T20:00:00Z","input_tokens":1000000,"cache_read_tokens":0,"output_tokens":0}"#
+        let priced = try await priceThroughEngine(source: .antigravity, lines: [actual])
+        XCTAssertEqual(priced.usageEvents.first?.model, "gemini-3.8-flash-medium")
+        XCTAssertEqual(priced.costEstimate?.apiEquivalentUSD, 0.75)
+
+        let selected = antigravityInput(1, from: "None", to: "Gemini 3.6 Flash (Medium)")
+        let legacy = antigravityPlanner(2, input: 10)
+        let mixed = AntigravityTelemetryAccumulator.accumulate(lines: [selected, actual, legacy])
+        XCTAssertEqual(mixed.usageEvents.map(\.model), ["gemini-3.8-flash-medium", "Gemini 3.6 Flash (Medium)"])
+
+        let unknown = actual.replacingOccurrences(of: "gemini-3.8-flash-medium", with: "gemini-3.8-flash-preview")
+        let unpriced = try await priceThroughEngine(source: .antigravity, lines: [selected, unknown])
+        XCTAssertNil(unpriced.costEstimate?.apiEquivalentUSD)
+        XCTAssertEqual(unpriced.costEstimate?.unpricedModels, ["gemini-3.8-flash-preview"])
+    }
+
     func testAntigravityFailsClosedWhenAnyPlannerTokenRowIsMalformed() {
         let lines = [
             #"{"type":"PLANNER_RESPONSE","created_at":"2026-10-04T20:21:34Z","input_tokens":6073,"cache_read_tokens":9651,"output_tokens":240}"#,

@@ -34,6 +34,7 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             (claude, "\"type\":\"artifact-autoreact-ledger\"", .meta, "artifact ledgers (2.1.251) are not messages"),
             (claude, "\"type\":\"artifact-comment-monitor\"", .meta, "artifact monitors (2.1.251) are not messages"),
             (claude, "\"type\":\"api-request", nil, "request-log records (2.1.303) produce no events"),
+            (claude, "\"savedCopyFraming\"", .meta, "saved file framing remains attachment metadata"),
             (claudeDrift, "\"type\":\"attachment\"", .meta, "attachments are metadata"),
             (claudeDrift, "\"type\":\"permission-mode\"", .meta, "permission-mode markers are metadata"),
             (claudeDrift, "\"type\":\"mode\"", .meta, "mode markers (2.1.211) are never blank events"),

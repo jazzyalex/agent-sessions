@@ -1,24 +1,24 @@
-agent_sessions_version: "6.4+unreleased"
-as_of_commit: "20a1bbbb"
-as_of_date: 2026-11-08
+agent_sessions_version: "6.5+unreleased"
+as_of_commit: "042d2aef"
+as_of_date: 2026-11-17
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
-  - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261109-031213-556965Z-p64446/report.json; historical detail remains in the append-only ledger and tracker."
+  - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json and Claude follow-up scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json; historical detail remains in the append-only ledger and tracker."
 
 agents:
   codex_cli:
-    max_verified_version: "0.167.0"
+    max_verified_version: "0.169.0"
     notes:
-      - "Native tool/schema support verified at 0.167.0; guardian metadata, encrypted_content and realtime_item records are in the fixture. Replay: two unsent Codex Desktop drafts emit no usage, as expected."
+      - "Stable 0.169.0 tool replay, refreshed schema and quota probe verified. Desktop alpha fields have fixture coverage."
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.319"
+    max_verified_version: "2.1.326"
     notes:
-      - "2.1.319 verified after re-sign-in; new session-owner record (account/org ids) stays hidden, with a test. The TUI usage probe failed with exit 16 again in the initial weekly."
+      - "2.1.326 tool session, refreshed schema and usage probes verified. Saved-file framing remains metadata."
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -27,9 +27,9 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl"
   antigravity:
-    max_verified_version: "1.5.3"
+    max_verified_version: "1.5.10"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "1.5.10 tool session matches the fixture. Explicit planner response models now drive usage pricing."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
@@ -37,9 +37,9 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/desktop_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.107"
+    max_verified_version: "1.0.113"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "1.0.113 tool session and refreshed schema verified. User messages keep their existing interpretation."
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -47,9 +47,9 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "2.2.6"
+    max_verified_version: "2.3.0"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "Native tool session and final weekly verified. See the ledger for evidence."
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -82,9 +82,9 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/model-switched.json"
       - "Resources/Fixtures/stage0/agents/opencode/sqlite_v2/session_message/assistant-failed.json"
   hermes:
-    max_verified_version: "0.23.0"
+    max_verified_version: "0.23.2"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "Native tool session and final weekly verified. See the ledger for evidence."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/hermes/small.json"
@@ -94,8 +94,9 @@ agents:
     # 2026.8.1-2026.9.x were blocked by OpenClaw's own deferred doctor migrations
     # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
     max_verified_version: "2026.11.2"
+    hold: {"version":"2026.11.5","reason":"Config rejects the retired agents.defaults.heartbeat setting. Migrate configuration and rerun a fresh tool turn.","since":"2026-11-17"}
     notes:
-      - "2026.11.2 needs openclaw doctor --fix (agent DB schema 25 -> 27, columns only). After the migration a real tool turn matches the schema-27 fixture."
+      - "Existing storage discovery passes. A 2026.11.5 tool turn is blocked by configuration validation."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
@@ -106,9 +107,9 @@ agents:
       - "AgentSessionsTests/OpenClawSqliteStoreTests.swift"
       - "scripts/tests/test_openclaw_sqlite_monitoring.py"
   cursor:
-    max_verified_version: "2026.11.5"
+    max_verified_version: "2026.11.13"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "Native tool session and final weekly verified. See the ledger for evidence."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
@@ -121,8 +122,9 @@ agents:
       - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
     max_verified_version: "1.5.0"
+    hold: {"version":"1.5.2","reason":"OpenAI OAuth refresh returned invalid_grant. Reauthenticate Pi and rerun a fresh tool turn.","since":"2026-11-17"}
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "1.5.2 cannot complete a tool turn until the configured OpenAI account reauthenticates."
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -143,9 +145,9 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "2.5.2"
+    max_verified_version: "2.6.3"
     notes:
-      - "2.5.2 completed a fresh tool turn, clearing the 2026-11-02 HTTP 429 hold; setup records environment.set_binding and tool_select.initialized are in the fixture."
+      - "2.6.3 tool session and refreshed schema verified. Omitted cache-read counts remain unknown."
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -169,9 +171,9 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.77"
+    max_verified_version: "1.0.88"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "1.0.88 stable on PATH. Fresh authenticated tool session and discovery verified."
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and subagent hierarchy"
     unsupported_surfaces:
@@ -193,8 +195,9 @@ agents:
       - "scripts/grok_chat_schema_probe.py"
   qwen_code:
     max_verified_version: "0.14.3"
+    hold: {"version":"0.28.0","reason":"No active local provider or fresh-session driver. The recorded 0.14.3 ceiling remains based on retained sessions.","since":"2026-11-17"}
     notes:
-      - "Unavailable maintainer lane; no driver; ceiling unchanged and no install/auth chase."
+      - "Unavailable maintainer lane. No active local provider or native driver; the prior ceiling still applies."
     version_field: "record.version"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -264,7 +267,7 @@ agents:
   cline:
     max_verified_version: "3.0.74"
     notes:
-      - "Native tool session and final weekly verified; see the ledger for evidence."
+      - "Native tool session and final weekly verified. See the ledger for evidence."
     desktop_max_verified_version: "0.0.48"
     version_field: "CLI release drift uses max_verified_version and cline --version; Desktop bundle 0.0.48 is recorded separately while the shared persisted v1 contract is monitored from both surfaces"
     support_scope: "tier-2 shared local manifest/messages transcript discovery for Cline CLI and Desktop, browsing, search, Preferences controls, colors, saved-session backfill, and analytics source filtering"
@@ -291,8 +294,9 @@ agents:
       - "scripts/tests/test_cline_monitoring.py"
   deepseek_harness:
     max_verified_version: "0.2.2-rc.1"
+    hold: {"version":"0.2.2-rc.4","reason":"Upstream is a release candidate. The installed rc.1 still passes native validation.","since":"2026-11-17"}
     notes:
-      - "0.2.2-rc.1 installed with owner approval on 2026-11-08; a fresh tool session matches the baseline with no drift."
+      - "A fresh 0.2.2-rc.1 tool session passes. Upstream rc.4 remains outside the stable update lane."
     version_field: "repository release/tag plus physical header version 0-4; fixtures pin source commits ddefc45fbc7f8e46dd73185e68295696d1297887, 639ed015397290b3745d163aafe02ffee4aa3f84 (tag dsh-v0.2.0-rc.2) and 687f282e8625c6b8d11ff58211a90524be2e4317 (tag dsh-v0.2.1-rc.2)"
     support_scope: "read-only local discovery, browse, search, filtered archive snapshots, and normalized v0-v4 plain or independently framed Zstandard histories"
     unsupported_surfaces:

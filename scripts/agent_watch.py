@@ -6319,8 +6319,11 @@ def _classify_prebump_failure(entry: dict[str, Any]) -> str:
         return "quota_failed"
     if any(token in detail for token in ("not logged in", "not signed in", "session expired", "session has expired",
                                          "no authentication", "authentication_failed", "/login", "auth login",
-                                         "oauth token refresh failed", "refresh_token_reused")):
+                                         "oauth token refresh failed", "oauth refresh failed for ",
+                                         "refresh_token_reused")):
         return "auth_failed"
+    if "openclaw config is invalid" in detail:
+        return "config_error"
     if any(token in detail for token in ("model_unavailable", "model is no longer available", "unknown model",
                                          "modelnotfounderror", "model not found", "model has been removed")):
         return "model_unavailable"
