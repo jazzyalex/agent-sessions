@@ -6,6 +6,7 @@ notes:
   - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json and Claude follow-up scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json; historical detail remains in the append-only ledger and tracker."
   - "OpenClaw follow-up verified against scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json."
   - "OpenClaw local-only rerun on e8ac9ab6 validated the recorded version against scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json."
+  - "Pi follow-up on 3b1bb54d cleared the auth hold with a fresh chat-model probe and scoped weekly report scripts/probe_scan_output/agent_watch/20261117-230720-698461Z-p2388/report.json."
 
 agents:
   codex_cli:
@@ -122,10 +123,9 @@ agents:
       - "AgentSessionsTests/CursorSessionParserTests.swift"
       - "scripts/tests/test_cursor_sqlite_probe.py"
   pi:
-    max_verified_version: "1.5.0"
-    hold: {"version":"1.5.2","reason":"OpenAI OAuth refresh returned invalid_grant. Reauthenticate Pi and rerun a fresh tool turn.","since":"2026-11-17"}
+    max_verified_version: "1.5.2"
     notes:
-      - "1.5.2 cannot complete a tool turn until the configured OpenAI account reauthenticates."
+      - "Pi 1.5.2 passed a native tool session after OpenAI sign-in renewal. The one-run GPT-6.1 Sol override produced a tool call and result, and weekly discovery and schema checks passed."
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, session-local token/cost telemetry, and weekly session-format monitoring"
     unsupported_surfaces:

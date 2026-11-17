@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.5+unreleased"
     as_of_date_utc: "2026-11-17"
+    as_of_commit: "3b1bb54d"
+    note: "Pi 1.5.2 passed after renewed OpenAI sign-in using a temporary openai/gpt-6.1-sol chat-model override. The fresh JSONL session recorded one tool call and one result across eight records with zero parse errors or schema drift. Weekly discovery passed and the installed and upstream versions matched."
+    report: "scripts/probe_scan_output/agent_watch/20261117-230720-698461Z-p2388/report.json"
+    verified:
+      pi: {sessions: {max_verified_version: "1.5.2", evidence: ["scripts/probe_scan_output/agent_watch/20261117-230720-698461Z-p2388/report.json", "scripts/probe_scan_output/agent_watch/20261117-230708-133880Z-p2313-prebump/report.json"]}}
+  - agent_sessions_version: "6.5+unreleased"
+    as_of_date_utc: "2026-11-17"
     as_of_commit: "e8ac9ab6"
     note: "The local OpenClaw CLI recorded four tool calls and four results in a fresh native SQLite session with zero parse errors and no schema drift. Across 58 in-run checks the Gateway port stayed closed and automation rows were identical. No heartbeat jobs were created and all probe processes exited."
     report: "scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json"
