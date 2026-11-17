@@ -18,6 +18,10 @@ Update this file when:
 
 ## Upstream Version Check Log
 
+### 2026-11-17 — OpenClaw local-only verification
+
+The OpenClaw 2026.11.5 local CLI wrote 12 records in native SQLite, including four tool calls and four tool results. The session matched the existing baseline without parse errors. The Gateway port stayed closed across 58 checks, the automation store had zero heartbeat jobs throughout, and no OpenClaw processes remained. Evidence `scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json`.
+
 ### 2026-11-17 — OpenClaw heartbeat follow-up
 
 OpenClaw 2026.11.5 moved its retired heartbeat configuration to the `heartbeat-main` automation. The native SQLite probe captured two tool calls and two tool results across eight records, with no unknown schema keys or types. The weekly capture and discovery contract passed, clearing the configuration hold. Evidence `scripts/probe_scan_output/agent_watch/20261117-223408-404205Z-p89183-prebump/report.json` and `scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json`.

@@ -5,6 +5,7 @@ workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Current ceilings and holds derive from scripts/probe_scan_output/agent_watch/20261117-221411-860645Z-p77199/report.json and Claude follow-up scripts/probe_scan_output/agent_watch/20261117-221855-212551Z-p80761/report.json; historical detail remains in the append-only ledger and tracker."
   - "OpenClaw follow-up verified against scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json."
+  - "OpenClaw local-only rerun on e8ac9ab6 validated the recorded version against scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json."
 
 agents:
   codex_cli:
@@ -96,7 +97,7 @@ agents:
     # (openclaw/openclaw#133881, #133962); 2026.10.5 runs again from the owner's profile.
     max_verified_version: "2026.11.5"
     notes:
-      - "Doctor migrated the retired heartbeat into an automation. A fresh SQLite session completed two tool calls and results, and weekly discovery and schema checks passed."
+      - "A local-only rerun on 2026.11.5 recorded four tool calls and four results in SQLite and matched the baseline. The Gateway stayed off, no heartbeat jobs were created, and all probe processes exited."
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"

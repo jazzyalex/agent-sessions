@@ -11,6 +11,13 @@
 entries:
   - agent_sessions_version: "6.5+unreleased"
     as_of_date_utc: "2026-11-17"
+    as_of_commit: "e8ac9ab6"
+    note: "The local OpenClaw CLI recorded four tool calls and four results in a fresh native SQLite session with zero parse errors and no schema drift. Across 58 in-run checks the Gateway port stayed closed and automation rows were identical. No heartbeat jobs were created and all probe processes exited."
+    report: "scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json"
+    verified:
+      openclaw: {sessions: {max_verified_version: "2026.11.5", scope: "installed build rerun", evidence: ["scripts/probe_scan_output/agent_watch/20261117-225530-922324Z-p97039-prebump/report.json"]}}
+  - agent_sessions_version: "6.5+unreleased"
+    as_of_date_utc: "2026-11-17"
     as_of_commit: "99f4f26a"
     note: "OpenClaw Doctor migrated the retired heartbeat to an editable automation. Config validation passed, and a fresh native SQLite session completed two tool calls and two tool results. The weekly scan matched the existing schema baseline and the discovery contract."
     report: "scripts/probe_scan_output/agent_watch/20261117-223453-961141Z-p89502/report.json"
