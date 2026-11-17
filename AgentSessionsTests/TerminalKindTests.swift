@@ -247,6 +247,7 @@ final class MactermLauncherTests: XCTestCase {
         let (root, executable) = try fixture(script: "")
         let record = root.appendingPathComponent("arguments")
         let selected = root.appendingPathComponent("project-selected")
+        let focused = root.appendingPathComponent("pane-focused")
         let listing = String(decoding: try JSONSerialization.data(withJSONObject: ["projects": [["id": "local-project", "path": root.path]]]), as: UTF8.self)
         let script = """
         #!/bin/sh
@@ -261,6 +262,9 @@ final class MactermLauncherTests: XCTestCase {
             exit 4
           fi
           printf '%s\\0' "$@" > \(ShellQuoting.quote(record.path))
+          printf '{"tabs":[{"id":"resume-tab"}]}'
+        elif [ "$1 $2" = "pane focus" ]; then
+          printf '%s\\0' "$@" > \(ShellQuoting.quote(focused.path))
           printf '{}'
         else
           exit 3
@@ -272,5 +276,65 @@ final class MactermLauncherTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: selected, encoding: .utf8), "local-project")
         let data = try Data(contentsOf: record)
         XCTAssertEqual(String(decoding: data, as: UTF8.self).split(separator: "\0").map(String.init), ["tab", "new", "--project", "local-project", "--run", command, "--json"])
+        let focusArguments = try Data(contentsOf: focused)
+        XCTAssertEqual(String(decoding: focusArguments, as: UTF8.self).split(separator: "\0").map(String.init),
+                       ["pane", "focus", "--project", "local-project", "--tab", "resume-tab", "--json"])
+    }
+
+    func testConcurrentResumesCreateOneProjectAndOpenBothTabs() async throws {
+        let (root, executable) = try fixture(script: "")
+        let createCalls = root.appendingPathComponent("create-calls")
+        let project = root.appendingPathComponent("project-created")
+        let tabCommands = root.appendingPathComponent("tab-commands")
+        let listing = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "projects": [["id": "local-project", "path": root.path]]
+        ]), as: UTF8.self)
+        let script = """
+        #!/bin/sh
+        case "$1 $2" in
+          "project list")
+            if [ -f \(ShellQuoting.quote(project.path)) ]; then
+              printf '%s' \(ShellQuoting.quote(listing))
+            else
+              printf '{"projects":[]}'
+            fi ;;
+          "project create")
+            printf 'create\\n' >> \(ShellQuoting.quote(createCalls.path))
+            sleep 1
+            touch \(ShellQuoting.quote(project.path))
+            printf '{}' ;;
+          "project select")
+            [ "$3" = "local-project" ] || exit 4
+            printf '{}' ;;
+          "tab new")
+            [ "$4" = "local-project" ] || exit 5
+            printf '%s\\n' "$6" >> \(ShellQuoting.quote(tabCommands.path))
+            printf '{"tabs":[{"id":"resume-tab"}]}' ;;
+          "pane focus")
+            [ "$4" = "local-project" ] && [ "$6" = "resume-tab" ] || exit 6
+            printf '{}' ;;
+          *) exit 3 ;;
+        esac
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+
+        async let first: Void = AgentTerminalLauncher.openMactermTab(
+            executable, shellCommand: "agent --resume first", workingDirectory: root.path
+        )
+        // Start the second request while the first create has entered the CLI
+        // and the new project is still absent from the listing.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !FileManager.default.fileExists(atPath: createCalls.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: createCalls.path))
+        async let second: Void = AgentTerminalLauncher.openMactermTab(
+            executable, shellCommand: "agent --resume second", workingDirectory: root.path
+        )
+        _ = try await (first, second)
+
+        XCTAssertEqual(try String(contentsOf: createCalls, encoding: .utf8), "create\n")
+        let commands = try String(contentsOf: tabCommands, encoding: .utf8)
+        XCTAssertEqual(commands.split(separator: "\n").sorted(), ["agent --resume first", "agent --resume second"])
     }
 }

@@ -6,10 +6,34 @@ struct MactermLaunchError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+private actor MactermLaunchQueue {
+    private var launchInProgress = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func run(_ launch: @Sendable () async throws -> Void) async throws {
+        if launchInProgress {
+            await withCheckedContinuation { waiting.append($0) }
+        } else {
+            launchInProgress = true
+        }
+        defer {
+            if waiting.isEmpty {
+                launchInProgress = false
+            } else {
+                waiting.removeFirst().resume()
+            }
+        }
+        try Task.checkCancellation()
+        try await launch()
+    }
+}
+
 /// Shared terminal launcher used by all agent resume flows.
 /// Runs a shell command in Terminal.app or iTerm2 via AppleScript.
 @MainActor
 enum AgentTerminalLauncher {
+    private nonisolated static let mactermLaunchQueue = MactermLaunchQueue()
+
     /// How long Warp needs after launch before it will read a tab config.
     private static let warpColdStartSettleNanoseconds: UInt64 = 3_000_000_000
 
@@ -88,22 +112,33 @@ enum AgentTerminalLauncher {
         }
         if !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "com.thdxg.macterm" }) {
             _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
-            let deadline = Date().addingTimeInterval(8)
-            while true {
-                do {
-                    _ = try await runMactermCLI(cliURL, arguments: ["status", "--json"], timeout: 1)
-                    break
-                } catch {
-                    try Task.checkCancellation()
-                    guard Date() < deadline else { throw error }
-                    try await Task.sleep(nanoseconds: 200_000_000)
-                }
+        }
+        // A running app can still be starting its control socket.
+        let deadline = Date().addingTimeInterval(8)
+        while true {
+            do {
+                _ = try await runMactermCLI(cliURL, arguments: ["status", "--json"], timeout: 1)
+                break
+            } catch {
+                try Task.checkCancellation()
+                guard Date() < deadline else { throw error }
+                try await Task.sleep(nanoseconds: 200_000_000)
             }
         }
         try await openMactermTab(cliURL, shellCommand: shellCommand, workingDirectory: directory)
     }
 
     static nonisolated func openMactermTab(_ cliURL: URL, shellCommand: String, workingDirectory: String) async throws {
+        // Hold the queue across the entire operation. Both project creation and
+        // activation change state shared by all Resume requests.
+        try await mactermLaunchQueue.run {
+            try await selectProjectAndOpenMactermTab(cliURL, shellCommand: shellCommand, workingDirectory: workingDirectory)
+        }
+    }
+
+    private static nonisolated func selectProjectAndOpenMactermTab(
+        _ cliURL: URL, shellCommand: String, workingDirectory: String
+    ) async throws {
         let listArguments = ["project", "list", "--json"]
         var projects = try await runMactermCLI(cliURL, arguments: listArguments)
         var projectID = try mactermProjectID(in: projects, workingDirectory: workingDirectory)
@@ -121,7 +156,16 @@ enum AgentTerminalLauncher {
         _ = try await runMactermCLI(cliURL, arguments: ["project", "select", projectID, "--json"])
         // The command builder has already quoted the native ID and working directory.
         // Pass the complete command as one argv value; never interpolate it into a shell here.
-        _ = try await runMactermCLI(cliURL, arguments: ["tab", "new", "--project", projectID, "--run", shellCommand, "--json"])
+        let response = try await runMactermCLI(cliURL, arguments: ["tab", "new", "--project", projectID, "--run", shellCommand, "--json"])
+        struct CreatedTab: Decodable { let id: String }
+        struct TabResponse: Decodable { let tabs: [CreatedTab] }
+        guard let result = try? JSONDecoder().decode(TabResponse.self, from: response),
+              result.tabs.count == 1, let tab = result.tabs.first, !tab.id.isEmpty else {
+            throw mactermError("Macterm did not identify the new Resume tab. Check its tabs before trying again.")
+        }
+        // Project selection sets the CLI's active project but can leave the
+        // window on another project. The command is queued until its pane starts.
+        _ = try await runMactermCLI(cliURL, arguments: ["pane", "focus", "--project", projectID, "--tab", tab.id, "--json"])
     }
 
     static nonisolated func mactermProjectID(in data: Data, workingDirectory: String) throws -> String? {
