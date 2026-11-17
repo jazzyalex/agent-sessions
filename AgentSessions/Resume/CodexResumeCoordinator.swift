@@ -123,6 +123,11 @@ final class CodexResumeCoordinator {
                         shellCommand: package.displayCommand,
                         cwd: package.workingDirectory?.path
                     )
+                case .macterm:
+                    try await AgentTerminalLauncher.launchInMacterm(
+                        shellCommand: package.shellCommand,
+                        cwd: package.workingDirectory?.path
+                    )
                 default:
                     try await terminalLauncher.launchInTerminal(package)
                 }

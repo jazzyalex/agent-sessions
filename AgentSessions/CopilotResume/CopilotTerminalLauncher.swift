@@ -39,3 +39,10 @@ final class CopilotGhosttyLauncher: CopilotTerminalLaunching {
         try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
     }
 }
+
+@MainActor
+final class CopilotMactermLauncher: CopilotTerminalLaunching {
+    func launchInTerminal(_ package: CopilotResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}

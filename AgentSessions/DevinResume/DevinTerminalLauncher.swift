@@ -39,3 +39,10 @@ final class DevinGhosttyLauncher: DevinTerminalLaunching {
         try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
     }
 }
+
+@MainActor
+final class DevinMactermLauncher: DevinTerminalLaunching {
+    func launchInTerminal(_ package: DevinResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}

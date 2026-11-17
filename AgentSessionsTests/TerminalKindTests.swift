@@ -60,6 +60,13 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(kind, .ghostty)
     }
 
+    func testMactermBundleIdentityWinsOverGhosttyTermProgram() {
+        XCTAssertEqual(TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: "com.thdxg.macterm"), .macterm)
+        XCTAssertEqual(TerminalKind.macterm.bundleIdentifier, "com.thdxg.macterm")
+        XCTAssertEqual(TerminalKind.macterm.displayName, "Macterm")
+        XCTAssertEqual(CodexLaunchMode.macterm.title, "Macterm")
+    }
+
     func testGhosttyBundleIdentifierAndDisplayName() {
         XCTAssertEqual(TerminalKind.ghostty.bundleIdentifier, "com.mitchellh.ghostty")
         XCTAssertEqual(TerminalKind.ghostty.displayName, "Ghostty")
@@ -160,5 +167,110 @@ final class TerminalKindTests: XCTestCase {
 
         XCTAssertTrue(toml.contains(#"directory = "/tmp/dir \"quote\"\\slash""#))
         XCTAssertTrue(toml.contains(#"commands = ["echo \"hi\" && printf 'a\\b\nc\td\r'"]"#))
+    }
+}
+
+final class MactermLauncherTests: XCTestCase {
+    private func fixture(script: String) throws -> (URL, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("macterm test ' \" \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        addTeardownBlock { try FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("control cli")
+        try ("#!/bin/sh\n" + script).write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        return (root, executable)
+    }
+
+    func testClosestLocalProjectWinsAndRemoteProjectIsIgnored() throws {
+        let data = Data(#"{"projects":[{"id":"parent","path":"/Users/test"},{"id":"repo","path":"/Users/test/repo"},{"id":"remote","path":"host:/Users/test/repo/sub"}]}"#.utf8)
+        XCTAssertEqual(try AgentTerminalLauncher.mactermProjectID(in: data, workingDirectory: "/Users/test/repo/sub"), "repo")
+        XCTAssertEqual(try AgentTerminalLauncher.mactermProjectID(in: data, workingDirectory: "/Users/test/repo"), "repo")
+    }
+
+    func testProjectPathMustMatchDirectoryBoundary() throws {
+        let data = Data(#"{"projects":[{"id":"wrong","path":"/Users/test/repo"}]}"#.utf8)
+        XCTAssertNil(try AgentTerminalLauncher.mactermProjectID(in: data, workingDirectory: "/Users/test/repository"))
+    }
+
+    func testDuplicateProjectFoldersFailInsteadOfPickingOne() {
+        let data = Data(#"{"projects":[{"id":"one","path":"/Users/test/repo"},{"id":"two","path":"/Users/test/repo"}]}"#.utf8)
+        XCTAssertThrowsError(try AgentTerminalLauncher.mactermProjectID(in: data, workingDirectory: "/Users/test/repo"))
+    }
+
+    func testMalformedProjectListFails() {
+        XCTAssertThrowsError(try AgentTerminalLauncher.mactermProjectID(in: Data("{}".utf8), workingDirectory: "/tmp"))
+    }
+
+    func testCLIArgumentsAreNotEvaluatedByAShell() async throws {
+        let (_, executable) = try fixture(script: "printf '%s\\0' \"$@\"\n")
+        let arguments = ["tab", "new", "--run", "cd '/a folder' && agent --resume 'id'; $(touch should-not-run)"]
+        let data = try await AgentTerminalLauncher.runMactermCLI(executable, arguments: arguments)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self).split(separator: "\0").map(String.init), arguments)
+    }
+
+    func testCLIReportsUnderlyingFailure() async throws {
+        let (_, executable) = try fixture(script: "printf 'control socket unavailable' >&2\nexit 2\n")
+        do {
+            _ = try await AgentTerminalLauncher.runMactermCLI(executable, arguments: [])
+            XCTFail("Expected an error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("control socket unavailable"))
+        }
+    }
+
+    func testCLIHasBoundedWaiting() async throws {
+        let (_, executable) = try fixture(script: "exec /bin/sleep 30\n")
+        let start = Date()
+        do {
+            _ = try await AgentTerminalLauncher.runMactermCLI(executable, arguments: [], timeout: 0.1)
+            XCTFail("Expected a timeout")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("did not respond in time"))
+            XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+        }
+    }
+
+    @MainActor
+    func testCLIWaitingDoesNotBlockTheUIActor() async throws {
+        let (_, executable) = try fixture(script: "exec /bin/sleep 1\n")
+        var finished = false
+        let task = Task {
+            _ = try await AgentTerminalLauncher.runMactermCLI(executable, arguments: [])
+            finished = true
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertFalse(finished)
+        try await task.value
+    }
+
+    func testOpenTabPreservesNativeCommandAndProjectID() async throws {
+        let (root, executable) = try fixture(script: "")
+        let record = root.appendingPathComponent("arguments")
+        let selected = root.appendingPathComponent("project-selected")
+        let listing = String(decoding: try JSONSerialization.data(withJSONObject: ["projects": [["id": "local-project", "path": root.path]]]), as: UTF8.self)
+        let script = """
+        #!/bin/sh
+        if [ "$1 $2" = "project list" ]; then
+          printf '%s' \(ShellQuoting.quote(listing))
+        elif [ "$1 $2" = "project select" ]; then
+          printf '%s' "$3" > \(ShellQuoting.quote(selected.path))
+          printf '{}'
+        elif [ "$1 $2" = "tab new" ]; then
+          if [ ! -f \(ShellQuoting.quote(selected.path)) ]; then
+            printf 'project must be selected before its tab can run' >&2
+            exit 4
+          fi
+          printf '%s\\0' "$@" > \(ShellQuoting.quote(record.path))
+          printf '{}'
+        else
+          exit 3
+        fi
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        let command = "cd \(ShellQuoting.quote(root.path)) && '/a binary' --session 'native-id'"
+        try await AgentTerminalLauncher.openMactermTab(executable, shellCommand: command, workingDirectory: root.path)
+        XCTAssertEqual(try String(contentsOf: selected, encoding: .utf8), "local-project")
+        let data = try Data(contentsOf: record)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self).split(separator: "\0").map(String.init), ["tab", "new", "--project", "local-project", "--run", command, "--json"])
     }
 }

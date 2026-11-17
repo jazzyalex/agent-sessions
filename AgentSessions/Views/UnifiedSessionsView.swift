@@ -3693,6 +3693,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return OpenCodeWarpLauncher()
                     case .warpPreview:             return OpenCodeWarpPreviewLauncher()
                     case .ghostty:                 return OpenCodeGhosttyLauncher()
+                    case .macterm:                 return OpenCodeMactermLauncher()
                     case .terminalApp, .unknown:   return OpenCodeTerminalLauncher()
                     }
                 }()
@@ -3713,6 +3714,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return HermesWarpLauncher()
                     case .warpPreview:             return HermesWarpPreviewLauncher()
                     case .ghostty:                 return HermesGhosttyLauncher()
+                    case .macterm:                 return HermesMactermLauncher()
                     case .terminalApp, .unknown:   return HermesTerminalLauncher()
                     }
                 }()
@@ -3733,6 +3735,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return CopilotWarpLauncher()
                     case .warpPreview:             return CopilotWarpPreviewLauncher()
                     case .ghostty:                 return CopilotGhosttyLauncher()
+                    case .macterm:                 return CopilotMactermLauncher()
                     case .terminalApp, .unknown:   return CopilotTerminalLauncher()
                     }
                 }()
@@ -3753,6 +3756,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return CursorWarpLauncher()
                     case .warpPreview:             return CursorWarpPreviewLauncher()
                     case .ghostty:                 return CursorGhosttyLauncher()
+                    case .macterm:                 return CursorMactermLauncher()
                     case .terminalApp, .unknown:   return CursorTerminalLauncher()
                     }
                 }()
@@ -3774,6 +3778,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return PiWarpLauncher()
                     case .warpPreview:             return PiWarpPreviewLauncher()
                     case .ghostty:                 return PiGhosttyLauncher()
+                    case .macterm:                 return PiMactermLauncher()
                     case .terminalApp, .unknown:   return PiTerminalLauncher()
                     }
                 }()
@@ -3794,6 +3799,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return KimiWarpLauncher()
                     case .warpPreview:             return KimiWarpPreviewLauncher()
                     case .ghostty:                 return KimiGhosttyLauncher()
+                    case .macterm:                 return KimiMactermLauncher()
                     case .terminalApp, .unknown:   return KimiTerminalLauncher()
                     }
                 }()
@@ -3814,6 +3820,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return GrokWarpLauncher()
                     case .warpPreview:             return GrokWarpPreviewLauncher()
                     case .ghostty:                 return GrokGhosttyLauncher()
+                    case .macterm:                 return GrokMactermLauncher()
                     case .terminalApp, .unknown:   return GrokTerminalLauncher()
                     }
                 }()
@@ -3838,6 +3845,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                  return QwenWarpLauncher()
                     case .warpPreview:           return QwenWarpPreviewLauncher()
                     case .ghostty:               return QwenGhosttyLauncher()
+                    case .macterm:               return QwenMactermLauncher()
                     case .terminalApp, .unknown: return QwenTerminalLauncher()
                     }
                 }()
@@ -3863,6 +3871,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return DevinWarpLauncher()
                     case .warpPreview:             return DevinWarpPreviewLauncher()
                     case .ghostty:                 return DevinGhosttyLauncher()
+                    case .macterm:                 return DevinMactermLauncher()
                     case .terminalApp, .unknown:   return DevinTerminalLauncher()
                     }
                 }()
@@ -3884,6 +3893,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                  return FxWarpLauncher()
                     case .warpPreview:           return FxWarpPreviewLauncher()
                     case .ghostty:               return FxGhosttyLauncher()
+                    case .macterm:               return FxMactermLauncher()
                     case .terminalApp, .unknown: return FxTerminalLauncher()
                     }
                 }()
@@ -3904,6 +3914,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return AntigravityWarpLauncher()
                     case .warpPreview:             return AntigravityWarpPreviewLauncher()
                     case .ghostty:                 return AntigravityGhosttyLauncher()
+                    case .macterm:                 return AntigravityMactermLauncher()
                     case .terminalApp, .unknown:   return AntigravityTerminalLauncher()
                     }
                 }()
@@ -3924,6 +3935,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return ClaudeWarpLauncher()
                     case .warpPreview:             return ClaudeWarpPreviewLauncher()
                     case .ghostty:                 return ClaudeGhosttyLauncher()
+                    case .macterm:                 return ClaudeMactermLauncher()
                     case .terminalApp, .unknown:   return ClaudeTerminalLauncher()
                     }
                 }()

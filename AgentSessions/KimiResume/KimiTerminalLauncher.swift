@@ -39,3 +39,10 @@ final class KimiGhosttyLauncher: KimiTerminalLaunching {
         try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
     }
 }
+
+@MainActor
+final class KimiMactermLauncher: KimiTerminalLaunching {
+    func launchInTerminal(_ package: KimiResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}
