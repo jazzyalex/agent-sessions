@@ -18,6 +18,169 @@
         }
       }
     },
+    "A Claude session is already opening in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Claude session is already opening in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已有一个 Claude 会话正在 VS Code 中打开。"
+          }
+        }
+      }
+    },
+    "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@": {
+      "comment": "The placeholder is the folder that could not be verified in VS Code.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法验证 VS Code 中的 Claude Code 工作区。请打开并信任此文件夹，启用 Claude Code 扩展后重试。%@"
+          }
+        }
+      }
+    },
+    "Install VS Code and the Claude Code extension to open this session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install VS Code and the Claude Code extension to open this session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请安装 VS Code 和 Claude Code 扩展以打开此会话。"
+          }
+        }
+      }
+    },
+    "Open in VS Code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in VS Code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开"
+          }
+        }
+      }
+    },
+    "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开会话文件夹，验证 Claude Code 工作区后发送恢复链接。"
+          }
+        }
+      }
+    },
+    "The session’s folder doesn’t exist on this Mac. %@": {
+      "comment": "The placeholder is the original Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session’s folder doesn’t exist on this Mac. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话的文件夹在这台 Mac 上不存在。%@"
+          }
+        }
+      }
+    },
+    "This session has no Claude session ID.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no Claude session ID."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有 Claude 会话 ID。"
+          }
+        }
+      }
+    },
+    "This session has no working directory to open in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no working directory to open in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有可在 VS Code 中打开的工作目录。"
+          }
+        }
+      }
+    },
+    "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法接收 Claude 会话链接。请确认已安装并启用 Claude Code 扩展。"
+          }
+        }
+      }
+    },
+    "VS Code could not open the session’s folder. %@": {
+      "comment": "The placeholder is the Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not open the session’s folder. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法打开此会话的文件夹。%@"
+          }
+        }
+      }
+    },
     "selected page": {
       "comment": "Context kind: the part of a page the person selected.",
       "localizations": {
