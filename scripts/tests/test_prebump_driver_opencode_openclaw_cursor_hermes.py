@@ -1,7 +1,10 @@
 import sqlite3
 import sys
+import time
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -200,7 +203,7 @@ def test_openclaw_driver_runs_and_returns_session_jsonl(tmp_path):
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is True
@@ -225,7 +228,7 @@ def test_openclaw_driver_discovers_real_home_session(tmp_path):
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
     env = {"HOME": str(real_home), "AGENT_WATCH_SESSION_HOME": str(real_home)}
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, env, "Say hi.", timeout=30)
 
     assert res.ok is True
@@ -245,7 +248,7 @@ def test_openclaw_driver_rejects_session_without_probe_marker(tmp_path):
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is False
@@ -273,12 +276,47 @@ def test_openclaw_driver_selects_marker_session_over_newer_unrelated_file(tmp_pa
 
     with (
         mock.patch.object(drv_mod.time, "time", return_value=1500),
-        mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run),
     ):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is True
     assert res.session_path == sb / ".openclaw" / "agents" / "main" / "sessions" / "wanted.jsonl"
+
+
+@pytest.mark.parametrize("exit_path", ["success", "error", "timeout"])
+def test_openclaw_driver_closes_its_child_on_exit(tmp_path, exit_path):
+    executable = tmp_path / "openclaw"
+    child = (
+        "import os, pathlib, sys, time\n"
+        "while os.getppid() == int(sys.argv[1]): time.sleep(0.01)\n"
+        "time.sleep(0.05)\n"
+        "pathlib.Path('child-survived').touch()\n"
+    )
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, str(os.getpid())], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "pathlib.Path('child-started').touch()\n"
+        "mode = os.environ['OPENCLAW_TEST_EXIT']\n"
+        "if mode == 'timeout': time.sleep(60)\n"
+        "if mode == 'error': sys.exit(1)\n"
+        "prompt = sys.argv[sys.argv.index('--message') + 1]\n"
+        "marker = prompt.rsplit(' ', 1)[-1]\n"
+        "session = pathlib.Path('.openclaw/agents/main/sessions/prebump.jsonl')\n"
+        "session.parent.mkdir(parents=True)\n"
+        "session.write_text(json.dumps({'type': 'message', 'message': {'role': 'assistant', 'content': marker}}) + '\\n')\n"
+    )
+    executable.chmod(0o700)
+    env = {"HOME": str(tmp_path), "PATH": str(tmp_path), "OPENCLAW_TEST_EXIT": exit_path}
+    result = drv_mod.DRIVERS["openclaw_local_agent"].run(tmp_path, env, "Say hi.", timeout=0)
+    assert (tmp_path / "child-started").is_file()
+    assert result.ok is (exit_path == "success")
+    if exit_path == "timeout":
+        assert result.exit_code == 124
+    time.sleep(0.15)
+    assert not (tmp_path / "child-survived").exists()
 
 
 def test_cursor_driver_runs_agent_print_and_returns_transcript(tmp_path):

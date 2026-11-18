@@ -318,6 +318,8 @@ def price_key(raw, table):
         return direct
     value = raw.strip().lower()
     value = re.sub(r"\s*\((?:minimal|low|medium|high|xhigh|thinking)\)$", "", value).strip()
+    aliases = table.get("aliases", {})
+    route_alias = aliases.get(value)
     value = value.removeprefix("cline-free/")
     value = re.sub(r"(?::free|-free)$", "", value)
     parts = value.split("/")
@@ -325,7 +327,7 @@ def price_key(raw, table):
                 "x-ai", "qwen", "meta", "opencode", "openrouter", "poolside"}
     if len(parts) == 2 and parts[0] in prefixes:
         value = parts[1]
-    value = table.get("aliases", {}).get(value, value)
+    value = route_alias or aliases.get(value, value)
     if value.startswith("claude-"):
         value = re.sub(r"(?<=\d)\.(?=\d)", "-", value)
     return match(value)

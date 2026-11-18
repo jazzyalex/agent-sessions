@@ -8,9 +8,9 @@ sandbox cwd, including the OpenCode version helper and Copilot's gh-token helper
 Claude 2.1.316's fresh real-home session is still recognized as prebump by its sandbox
 cwd; configured-prompt fallback continues to recognize older sessions. Environment
 names/prefixes to drop are declared in prebump config and stripped in prepare_auth.
-Pi now pins openai/gpt-6-luna, the provider the owner refreshed; this was a deliberate
-config correction, not automatic fallback on an auth failure. The old openai-codex
-credential returned refresh_token_reused/401, and both failed direct reports were kept.
+Pi pins the tool-capable `openai/gpt-6.1-sol` chat model after the 2026-11-17 sign-in.
+The older `openai-codex` credential returned `refresh_token_reused` (HTTP 401).
+The failed direct reports were retained.
 Only model_unavailable permits a configured fallback model. The OpenCode DB rebuild
 helper is diagnostic-only and cannot --emit: inspect its report, then add a redacted
 normal fixture for DB drift explicitly (add a drift-table row only if the kind matters).

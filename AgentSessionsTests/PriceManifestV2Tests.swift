@@ -39,12 +39,16 @@ final class PriceManifestV2Tests: XCTestCase {
             XCTAssertEqual(resolved.price.outputPerMTok, 1.20)
             XCTAssertNil(resolved.price.cacheWritePerMTok)
         }
+        let console = try XCTUnwrap(snapshot.resolvedPrice(forModel: "opencode/deepseek-v4.1-flash"))
+        XCTAssertFalse(console.viaFreeRoute)
+        XCTAssertEqual(console.price.inputPerMTok, 0.30)
         let nemotron = try XCTUnwrap(snapshot.resolvedPrice(forModel: "cline-free/nemotron-3.5-super-vl"))
         XCTAssertTrue(nemotron.viaFreeRoute)
         XCTAssertEqual(nemotron.price.inputPerMTok, 0.06)
         XCTAssertEqual(nemotron.price.cachedInputPerMTok, 0.01)
         XCTAssertEqual(nemotron.price.outputPerMTok, 0.35)
-        for slug in ["~anthropic/claude-fable-latest", "deepseek-flash", "big-pickle"] {
+        for slug in ["~anthropic/claude-fable-latest", "deepseek-flash", "deepseek-v4.1-flash",
+                     "deepseek/deepseek-v4.1-flash", "big-pickle"] {
             XCTAssertNil(snapshot.resolvedPrice(forModel: slug), slug)
         }
     }

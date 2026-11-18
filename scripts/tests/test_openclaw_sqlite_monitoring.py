@@ -231,7 +231,7 @@ def test_driver_returns_the_sqlite_session_written_for_its_key(tmp_path):
         _write_prebump_session(db_path, argv[argv.index("--session-key") + 1], _marker_from(argv), reply=True)
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is True, res.error
@@ -265,7 +265,7 @@ def test_driver_rejects_a_session_whose_marker_is_only_in_the_prompt(tmp_path):
         _write_prebump_session(db_path, argv[argv.index("--session-key") + 1], _marker_from(argv), reply=False)
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is False
@@ -285,7 +285,7 @@ def test_driver_never_returns_the_embedded_codex_rollout(tmp_path):
         rollout.write_text(json.dumps({"type": "session_meta", "payload": {"text": marker}}) + "\n")
         return _sp.CompletedProcess(argv, 0, stdout='{"ok":true}', stderr="")
 
-    with mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run):
+    with mock.patch.object(drv_mod, "_run_openclaw_command", side_effect=fake_run):
         res = drv_mod.DRIVERS["openclaw_local_agent"].run(sb, {"HOME": str(sb)}, "Say hi.", timeout=30)
 
     assert res.ok is False

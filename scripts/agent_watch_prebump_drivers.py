@@ -15,12 +15,14 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import stat
 import subprocess
 import tempfile
 import time
 import uuid as _uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -858,6 +860,24 @@ class OpenCodeRunDriver:
 DRIVERS["opencode_run"] = OpenCodeRunDriver()
 
 
+def _run_openclaw_command(
+    argv: list[str], *, cwd: str, env: dict[str, str], timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    # Scope cleanup to the one-shot invocation. An existing OpenClaw process
+    # or Gateway belongs to a different process group.
+    with subprocess.Popen(
+        argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+        finally:
+            # A helper may outlive the CLI even when the CLI itself exits cleanly.
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+
+
 class OpenClawLocalAgentDriver:
     name = "openclaw_local_agent"
 
@@ -872,7 +892,7 @@ class OpenClawLocalAgentDriver:
         probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
         run_started = time.time()
         try:
-            proc = subprocess.run(
+            proc = _run_openclaw_command(
                 [
                     "openclaw",
                     "agent",
@@ -887,10 +907,6 @@ class OpenClawLocalAgentDriver:
                 ],
                 cwd=str(sandbox),
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
                 timeout=timeout + 5,
             )
         except subprocess.TimeoutExpired as exc:

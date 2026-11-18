@@ -394,6 +394,16 @@ def test_price_prefix_normalization_and_unpriced_negative():
     assert flow.price_key("<synthetic>", table) == "<synthetic>"
 
 
+def test_deepseek_route_estimates_match_coverage():
+    import agent_watch_workflow as flow
+    table = json.loads((REPO / "docs/prices-v2.json").read_text())
+    for slug in ("opencode/deepseek-v4.1-flash", "opencode/deepseek-v4.1-flash-free",
+                 "cline-free/deepseek-v4.1-flash", "DeepSeek-V4.1-Flash-Free (Medium)"):
+        assert flow.price_key(slug, table) == "opencode/deepseek-v4.1-flash"
+    for slug in ("deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash", "deepseek-flash"):
+        assert flow.price_key(slug, table) is None
+
+
 def test_recent_model_coverage_excludes_old_and_tool_input(tmp_path):
     import agent_watch_workflow as flow
     import os

@@ -16,6 +16,21 @@ final class RealSessionReplayTests: XCTestCase {
         var failure_values: [String: Int] = [:]
     }
 
+    private enum ManifestError: Error {
+        case missingSupportedSamples
+    }
+
+    private static func decodeManifest(_ data: Data, supportedSources: Set<String>) throws -> [String: [String]] {
+        let files = try JSONDecoder().decode([String: [String]].self, from: data)
+        guard !files.isEmpty, files.keys.allSatisfy(supportedSources.contains),
+              files.values.allSatisfy({ paths in
+                  !paths.isEmpty && paths.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+              }) else {
+            throw ManifestError.missingSupportedSamples
+        }
+        return files
+    }
+
     func testRealSessionReplay() async throws {
         guard ProcessInfo.processInfo.environment["AS_REAL_SESSION_REPLAY"] == "1" else {
             throw XCTSkip("Set AS_REAL_SESSION_REPLAY=1 for read-only local replay")
@@ -23,6 +38,29 @@ final class RealSessionReplayTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let output = root.appendingPathComponent("scripts/probe_scan_output/replay")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        var report: [String: Counts] = [:]
+        func saveCounts() throws {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(report).write(to: output.appendingPathComponent("counts.json"), options: .atomic)
+        }
+        try saveCounts()
+        let discoveries: [(SessionSource, any SessionDiscovery)] = [
+            (.codex, CodexSessionDiscovery()),
+            (.claude, ClaudeSessionDiscovery()),
+            (.copilot, CopilotSessionDiscovery()),
+            (.kimi, KimiSessionDiscovery()),
+            (.antigravity, AntigravitySessionDiscovery())
+        ]
+        let focusedFiles: [String: [String]]
+        if let manifest = ProcessInfo.processInfo.environment["AS_REAL_SESSION_REPLAY_MANIFEST"] {
+            focusedFiles = try Self.decodeManifest(
+                Data(contentsOf: URL(fileURLWithPath: manifest)),
+                supportedSources: Set(discoveries.map { $0.0.rawValue }))
+        } else {
+            focusedFiles = [:]
+        }
+
         // Independent process: even a blocked synchronous parser cannot prevent
         // the 180-second watchdog from terminating this test host. EOF disarms it.
         let watchdog = Process()
@@ -39,20 +77,6 @@ final class RealSessionReplayTests: XCTestCase {
         }
         let quota = WeeklyQuotaCalibrationStore.makeForTesting()
         let engine = SessionTelemetryEngine(priceTable: .makeForTesting(), quotaStore: quota)
-        let focusedFiles: [String: [String]]
-        if let manifest = ProcessInfo.processInfo.environment["AS_REAL_SESSION_REPLAY_MANIFEST"] {
-            focusedFiles = try JSONDecoder().decode([String: [String]].self,
-                from: Data(contentsOf: URL(fileURLWithPath: manifest)))
-        } else {
-            focusedFiles = [:]
-        }
-        var report: [String: Counts] = [:]
-        func saveCounts() throws {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(report).write(to: output.appendingPathComponent("counts.json"), options: .atomic)
-        }
-        try saveCounts()
         let deadline = Date().addingTimeInterval(180)
         // Production DEBUG parsers print paths. Suppress those while replaying;
         // only the counts file is a replay artifact.
@@ -71,13 +95,6 @@ final class RealSessionReplayTests: XCTestCase {
             close(savedErr)
             close(sink)
         }
-        let discoveries: [(SessionSource, any SessionDiscovery)] = [
-            (.codex, CodexSessionDiscovery()),
-            (.claude, ClaudeSessionDiscovery()),
-            (.copilot, CopilotSessionDiscovery()),
-            (.kimi, KimiSessionDiscovery()),
-            (.antigravity, AntigravitySessionDiscovery())
-        ]
         for (source, discovery) in discoveries {
             if source == .antigravity && focusedFiles[source.rawValue] == nil { continue }
             var counts = Counts()
@@ -144,6 +161,16 @@ final class RealSessionReplayTests: XCTestCase {
             XCTAssertEqual(report[source]?.sessions_read ?? 0, paths.count,
                 "Focused \(source) replay did not finish")
         }
+    }
+
+    func testFocusedManifestRequiresSamplesForSupportedSources() throws {
+        let supported: Set<String> = ["codex", "copilot"]
+        for invalid in ["{}", #"{"typo":[]}"#, #"{"copilot":[]}"#, #"{"codex":[" "]}"#] {
+            XCTAssertThrowsError(try Self.decodeManifest(Data(invalid.utf8), supportedSources: supported))
+        }
+        let valid = #"{"codex":["/tmp/selected session.jsonl"]}"#
+        XCTAssertEqual(try Self.decodeManifest(Data(valid.utf8), supportedSources: supported),
+                       ["codex": ["/tmp/selected session.jsonl"]])
     }
 
     private static func recordOpenCodeUsage(_ telemetry: SessionTelemetry?,
