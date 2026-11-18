@@ -18,6 +18,35 @@ public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     public let toolName: String?
     public let toolInput: String?
     public let toolOutput: String?
+    /// Codex tool namespace (e.g. `mcp__node_repl__`); nil for other agents.
+    public var toolNamespace: String? = nil
+    /// Provider call id linking a tool call to its output (Codex `call_id`); nil when unknown.
+    public var toolCallID: String? = nil
+    // Internal (not `public`): the payload types are module-internal.
+    /// Structured tool output, set only when the original output is an array/object of at most 256 KB minified.
+    var toolOutputValue: ToolPayloadValue? = nil
+    /// Structured facts recorded next to the result text (stdout/stderr split, exit code, agent label).
+    var toolSidecar: ToolSidecar? = nil
+    /// Set when the parser classified the result as a runtime error or a user rejection.
+    var toolDisposition: ToolDisposition? = nil
+    var messageOrigin: MessageOrigin? = nil
+    var messageDisplayText: String? = nil
+    var messageHasEncryptedContent: Bool? = nil
+
+    /// What the user typed: a mixed message's typed items when provenance found them, else `text`.
+    /// User-facing paths (Terminal, titles, housekeeping) read this; search and cwd detection keep
+    /// the raw `text`, which still holds the injected items.
+    var typedText: String? {
+        if messageOrigin?.isUnresolvedMixed == true { return nil }
+        if case .typed = messageOrigin, let display = messageDisplayText { return display }
+        return text
+    }
+
+    /// Provenance says the user typed `typedText`, so preamble heuristics must not reject it.
+    var isProvenTyped: Bool {
+        if case .typed = messageOrigin { return true }
+        return false
+    }
     // Delta/stream grouping
     public let messageID: String?
     public let parentID: String?

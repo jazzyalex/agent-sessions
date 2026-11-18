@@ -706,6 +706,8 @@ final class OpenCodeSessionParser {
                     toolName: toolName,
                     toolInput: inputStr,
                     toolOutput: nil,
+                    toolCallID: ToolCallID.from(callID),
+                    toolSidecar: callSidecar(state: state),
                     messageID: callID ?? msg.id,
                     parentID: nil,
                     isDelta: false,
@@ -732,6 +734,8 @@ final class OpenCodeSessionParser {
                     toolName: toolName,
                     toolInput: nil,
                     toolOutput: outputWithExit,
+                    toolCallID: ToolCallID.from(callID),
+                    toolSidecar: resultSidecar(state: state, exitCode: exitCode),
                     messageID: callID ?? msg.id,
                     parentID: callEvent.id,
                     isDelta: false,
@@ -905,6 +909,8 @@ final class OpenCodeSessionParser {
                     toolName: toolName,
                     toolInput: inputStr,
                     toolOutput: nil,
+                    toolCallID: ToolCallID.from(callID),
+                    toolSidecar: callSidecar(state: state),
                     messageID: callID ?? resolvedMsgID,
                     parentID: nil,
                     isDelta: false,
@@ -931,6 +937,8 @@ final class OpenCodeSessionParser {
                     toolName: toolName,
                     toolInput: nil,
                     toolOutput: outputWithExit,
+                    toolCallID: ToolCallID.from(callID),
+                    toolSidecar: resultSidecar(state: state, exitCode: exitCode),
                     messageID: callID ?? resolvedMsgID,
                     parentID: callEvent.id,
                     isDelta: false,
@@ -988,12 +996,20 @@ final class OpenCodeSessionParser {
         return str.count > limit ? String(str.prefix(limit)) : str
     }
 
+    /// The agent-written label (`state.title`) as a sidecar on the call event, or nil without one.
+    static func callSidecar(state: [String: Any]) -> ToolSidecar? {
+        ToolSidecar(agentLabel: ToolCallID.from(state["title"])).orNilIfEmpty
+    }
+
+    /// Exit code (`state.metadata.exit` and the other keys the parser already reads) plus the label.
+    static func resultSidecar(state: [String: Any], exitCode: Int?) -> ToolSidecar? {
+        ToolSidecar(exitCode: exitCode, agentLabel: ToolCallID.from(state["title"])).orNilIfEmpty
+    }
+
     static func stringifyJSON(_ any: Any?) -> String? {
         guard let any else { return nil }
         if let str = any as? String { return str }
-        if JSONSerialization.isValidJSONObject(any),
-           let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
-           let str = String(data: data, encoding: .utf8) {
+        if let str = ToolJSON.string(from: any, pretty: true) {
             return str
         }
         return String(describing: any)

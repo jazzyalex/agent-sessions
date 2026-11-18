@@ -334,6 +334,7 @@ enum ClineSessionParser {
                                  toolName: block["name"] as? String,
                                  toolInput: jsonString(block["input"]),
                                  toolOutput: nil,
+                                 toolCallID: ToolCallID.from(block["id"]),
                                  messageID: block["id"] as? String ?? messageID,
                                  parentID: messageID, isDelta: false, rawJSON: raw)]
         case "tool_result":
@@ -343,6 +344,7 @@ enum ClineSessionParser {
                                  toolName: block["name"] as? String,
                                  toolInput: nil,
                                  toolOutput: output,
+                                 toolCallID: ToolCallID.from(block["tool_use_id"]),
                                  messageID: block["tool_use_id"] as? String ?? messageID,
                                  parentID: messageID, isDelta: false, rawJSON: raw)]
         default:
@@ -397,12 +399,12 @@ enum ClineSessionParser {
     private static func jsonString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
-        if data.count > 32_768 {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func jsonEncode(_ object: Any) -> String {

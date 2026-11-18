@@ -60,6 +60,7 @@ enum DevinSessionParser {
                                         toolName: call["name"] as? String,
                                         toolInput: jsonString(call["arguments"]),
                                         toolOutput: nil,
+                                        toolCallID: ToolCallID.from(call["id"]),
                                         messageID: call["id"] as? String,
                                         parentID: messageID, isDelta: false, rawJSON: json))
             }
@@ -78,6 +79,7 @@ enum DevinSessionParser {
             }
             return [SessionEvent(id: "\(nodeID)-r", timestamp: time, kind: .tool_result, role: role, text: nil,
                                  toolName: nil, toolInput: nil, toolOutput: output,
+                                 toolCallID: ToolCallID.from(object["tool_call_id"]),
                                  messageID: object["tool_call_id"] as? String,
                                  parentID: nil, isDelta: false, rawJSON: json)]
 
@@ -121,11 +123,11 @@ enum DevinSessionParser {
     private static func jsonString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
-        if data.count > 32_768 {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 }

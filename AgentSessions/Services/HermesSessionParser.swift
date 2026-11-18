@@ -251,6 +251,7 @@ final class HermesSessionParser {
                                                toolName: toolCall.function?.name,
                                                toolInput: toolCall.function?.arguments,
                                                toolOutput: nil,
+                                               toolCallID: ToolCallID.from(toolID),
                                                messageID: toolID,
                                                parentID: nil,
                                                isDelta: false,
@@ -283,6 +284,7 @@ final class HermesSessionParser {
                                            toolName: message.tool_name,
                                            toolInput: nil,
                                            toolOutput: toolOutput,
+                                           toolCallID: ToolCallID.from(message.tool_call_id),
                                            messageID: message.tool_call_id,
                                            parentID: nil,
                                            isDelta: false,
@@ -330,8 +332,7 @@ final class HermesSessionParser {
             var body = (result["summary"] as? String) ?? (result["result"] as? String) ?? ""
             if let inner = body.data(using: .utf8),
                let decoded = try? JSONSerialization.jsonObject(with: inner),
-               let pretty = try? JSONSerialization.data(withJSONObject: decoded, options: [.prettyPrinted, .sortedKeys]),
-               let text = String(data: pretty, encoding: .utf8) {
+               let text = ToolJSON.string(from: decoded, pretty: true) {
                 body = text
             }
             body = body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -584,6 +585,7 @@ struct HermesStateDBReader {
                                            toolName: toolName,
                                            toolInput: nil,
                                            toolOutput: content.map { HermesSessionParser.unwrapDelegateOutput($0) },
+                                           toolCallID: ToolCallID.from(toolCallID),
                                            messageID: toolCallID,
                                            parentID: nil,
                                            isDelta: false,
@@ -653,6 +655,7 @@ struct HermesStateDBReader {
                                 toolName: function?["name"] as? String,
                                 toolInput: function?["arguments"] as? String,
                                 toolOutput: nil,
+                                toolCallID: ToolCallID.from(call["id"]),
                                 messageID: call["id"] as? String,
                                 parentID: nil,
                                 isDelta: false,

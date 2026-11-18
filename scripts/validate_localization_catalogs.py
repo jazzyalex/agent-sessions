@@ -39,9 +39,9 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 1535
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1674
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "a04887f7277b5936407ce0196ad5e47a3ec3dd51d35bcf69c213567dd4d6ae18"
+    "cdc9f125e1303d354f78852fe912603d61e865cb189b4e8ce8c989f441eeb1b4"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -164,7 +164,6 @@ EXPECTED_VERBATIM_EXTRACTED_KEYS = {
     "~/.pi/agent/sessions",
     "~/.qwen/projects",
     "·",
-    "· %@",
     "—",
     "↻",
     "★",

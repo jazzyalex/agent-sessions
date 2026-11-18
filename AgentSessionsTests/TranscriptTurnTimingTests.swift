@@ -12,25 +12,94 @@ import XCTest
 /// - `durationSeconds` = timestamp(last block in turn) − timestamp(user
 ///   block); nil if either timestamp is nil or the delta is negative.
 /// - `toolCallCount` = number of `.toolCall` blocks in the turn.
-/// - Tool duration is computed session-wide (not turn-scoped): each
-///   `.toolOut` is matched to the NEAREST PRECEDING UNMATCHED `.toolCall`
-///   (stack/LIFO discipline — see the interleaved/nested tests below), and
-///   keyed by the toolOut's `globalBlockIndex`. nil if either timestamp is
-///   missing or the delta is negative, or if there's no unmatched toolCall
-///   to match.
+/// - Tool duration comes from `ToolInvocationIndex` pairing (Task 6): by
+///   call id, then FIFO inside the turn, then the stack fallback for an
+///   output with no open call in its own turn. Each output is keyed by its
+///   `globalBlockIndex`. nil if either timestamp is missing or the delta is
+///   negative, or if the output has no call.
 final class TranscriptTurnTimingTests: XCTestCase {
+
+    func testContextBlocksDoNotStartTurns() {
+        for origin in [MessageOrigin.context(kinds: ["test"]), .notification(kind: "test"), .peer(from: "worker")] {
+            var blocks = timedBlocks([.user(0), .assistant(2), .user(10), .assistant(12)])
+            blocks[2].messageOrigin = origin
+            let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
+            XCTAssertEqual(result.turns[1]?.durationSeconds, 12)
+            XCTAssertEqual(result.turns.count, 1)
+        }
+    }
+
+    func testLateHarnessTailDoesNotInflateReply() {
+        for origin in [MessageOrigin.context(kinds: ["test"]), .notification(kind: "test"), .peer(from: "worker")] {
+            var blocks = timedBlocks([.user(0), .assistant(2), .user(100)])
+            blocks[2].messageOrigin = origin
+            XCTAssertEqual(TranscriptTurnTiming.compute(blocks: blocks, source: .codex).turns[1]?.durationSeconds, 2)
+        }
+    }
+
+    func testNoChipOnUserRows() {
+        let blocks = timedBlocks([.user(0), .toolCall(1), .toolOut(2)])
+        XCTAssertTrue(TranscriptTurnTiming.compute(blocks: blocks, source: .codex).turns.isEmpty)
+    }
+
+    func testInjectedNoticePreservesIdlessParallelFIFO() {
+        for origin in [MessageOrigin.context(kinds: ["test"]), .notification(kind: "test"), .peer(from: "worker")] {
+            var blocks = timedBlocks([.user(0), .toolCall(1), .toolCall(2), .user(3), .toolOut(4), .toolOut(5)])
+            blocks[3].messageOrigin = origin
+            let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+            XCTAssertEqual(index.invocationIDByBlock[4], 1)
+            XCTAssertEqual(index.invocationIDByBlock[5], 2)
+        }
+    }
+
+    /// Existing timing cases model visible replies, not empty transport placeholders.
+    private func timedBlocks(_ specs: [TranscriptTestFixtures.TimedBlockSpec]) -> [SessionTranscriptBuilder.LogicalBlock] {
+        TranscriptTestFixtures.makeTimedBlocks(specs).map { block in
+            var block = block
+            if block.kind == .assistant { block.text = "answer" }
+            return block
+        }
+    }
+
+    func testEmptyAssistantDoesNotSwallowChip() {
+        var blocks = timedBlocks([.user(0), .assistant(1), .assistant(2)])
+        blocks[1].text = ""
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
+        XCTAssertNil(result.turns[1])
+        XCTAssertEqual(result.turns[2]?.durationSeconds, 2)
+    }
+
+    func testExplicitInterruptClosesTurnAtNotice() {
+        var blocks = timedBlocks([.user(0), .assistant(2), .user(3), .assistant(20)])
+        blocks[2].text = "[Request interrupted by user]"
+        blocks[2].messageOrigin = .notification(kind: "interrupt")
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .claude)
+        XCTAssertEqual(result.turns[1]?.durationSeconds, 3)
+        XCTAssertNil(result.turns[3])
+    }
+
+    func testUnannotatedInterruptDoesNotStartTypedTurn() {
+        var blocks = timedBlocks([.user(0), .assistant(2), .user(3), .assistant(20)])
+        blocks[2].text = "[Request interrupted by user for tool use]"
+        let notice = TranscriptTurnTiming.compute(blocks: blocks, source: .claude)
+        XCTAssertEqual(notice.turns[1]?.durationSeconds, 3)
+        XCTAssertNil(notice.turns[3])
+        blocks[2].messageOrigin = .typed
+        let literal = TranscriptTurnTiming.compute(blocks: blocks, source: .claude)
+        XCTAssertEqual(literal.turns[3]?.durationSeconds, 17)
+    }
 
     // MARK: - Basic turn + tool timing
 
     func testSingleTurnWithOneToolPair() {
         // user@0, assistant@2, toolCall@2, toolOut@4 — turn ends there.
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .assistant(2),
             .toolCall(2),
             .toolOut(4),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // Anchor = first .assistant block (index 1).
         XCTAssertEqual(result.turns[1], TurnTiming(durationSeconds: 4.0, toolCallCount: 1))
@@ -43,13 +112,13 @@ final class TranscriptTurnTimingTests: XCTestCase {
     func testTwoTurnsKeysDoNotBleed() {
         // Turn 1: user@0, assistant@2 (no tools).
         // Turn 2: user@10, assistant@13 (no tools).
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),        // 0
             .assistant(2),   // 1  <- turn 1 anchor
             .user(10),       // 2
             .assistant(13),  // 3  <- turn 2 anchor
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertEqual(result.turns[1], TurnTiming(durationSeconds: 2.0, toolCallCount: 0))
         // Turn 2 duration must use turn 2's OWN user prompt (t=10), not turn 1's
@@ -62,13 +131,13 @@ final class TranscriptTurnTimingTests: XCTestCase {
     // MARK: - Nil / negative-delta handling
 
     func testNilUserTimestampYieldsNilDurationButStillCountsTools() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(nil),
             .assistant(2),
             .toolCall(2),
             .toolOut(4),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         let timing = result.turns[1]
         XCTAssertNotNil(timing)
@@ -77,13 +146,13 @@ final class TranscriptTurnTimingTests: XCTestCase {
     }
 
     func testNilLastBlockTimestampYieldsNilTurnDuration() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .assistant(2),
             .toolCall(2),
             .toolOut(nil),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
         XCTAssertEqual(result.turns[1]?.toolCallCount, 1)
@@ -93,23 +162,23 @@ final class TranscriptTurnTimingTests: XCTestCase {
 
     func testNegativeDeltaYieldsNilTurnDuration() {
         // Clock skew: last block in the turn timestamped BEFORE the user prompt.
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(10),
             .assistant(2), // before the user prompt
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
     }
 
     func testNegativeDeltaYieldsNilToolDuration() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .assistant(1),
             .toolCall(10),
             .toolOut(2), // before its toolCall — clock skew
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.tools[3]?.durationSeconds)
     }
@@ -118,16 +187,16 @@ final class TranscriptTurnTimingTests: XCTestCase {
 
     func testTurnWithNoAssistantBlockAttachesToUserIndex() {
         // user@0, toolCall@1, toolOut@3 — no assistant block at all.
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .toolCall(1),
             .toolOut(3),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
-        // Anchor falls back to the user block (index 0).
+        // Historical test name retained: the new contract has no fallback user anchor.
         let timing = result.turns[0]
-        XCTAssertEqual(timing, TurnTiming(durationSeconds: 3.0, toolCallCount: 1))
+        XCTAssertNil(timing, "A turn without a visible assistant never attaches a chip to the user")
         // No entry under any other index.
         XCTAssertNil(result.turns[1])
         XCTAssertNil(result.turns[2])
@@ -136,12 +205,12 @@ final class TranscriptTurnTimingTests: XCTestCase {
     // MARK: - Tool matching edge cases
 
     func testToolOutWithNoPrecedingToolCallHasNilDuration() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .assistant(1),
             .toolOut(2), // orphaned — no toolCall precedes it
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.tools[2]?.durationSeconds)
         // Still present (not required either way, but must not crash) — accept
@@ -150,13 +219,13 @@ final class TranscriptTurnTimingTests: XCTestCase {
     }
 
     func testToolCallWithNoToolOutProducesNoEntry() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),
             .assistant(1),
             .toolCall(2),
             // no matching toolOut
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // No crash, and no tools entry keyed by the toolCall's own index (2) —
         // tools are keyed by toolOut index, and there is no toolOut here.
@@ -166,7 +235,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
 
     func testInterleavedToolPairsEachMatchNearestPrecedingUnmatched() {
         // call1@0, out1@1, call2@2, out2@5 — sequential, non-overlapping pairs.
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(0),        // 0
             .assistant(0),   // 1
             .toolCall(0),    // 2  call1
@@ -174,7 +243,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
             .toolCall(2),    // 4  call2
             .toolOut(5),     // 5  out2
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         // out1 (idx 3) matches call1 (idx 2): 1 - 0 = 1.0.
         XCTAssertEqual(result.tools[3], ToolTiming(durationSeconds: 1.0))
@@ -183,43 +252,68 @@ final class TranscriptTurnTimingTests: XCTestCase {
         XCTAssertEqual(result.turns[1]?.toolCallCount, 2)
     }
 
-    func testNestedToolPairsMatchLIFONearestPrecedingUnmatched() {
-        // call1@0, call2@1, out2@3, out1@10 — nested/LIFO: out2 closes the
-        // INNER call (call2, the nearer preceding unmatched one), out1 closes
-        // the outer call (call1). This is the documented, tested decision:
-        // "nearest preceding unmatched" is a stack/LIFO match, not FIFO —
-        // out1 must NOT match call1 by simple output-order pairing if that
-        // would skip over call2's still-unmatched status.
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+    func testIDlessCallsInOneTurnPairFIFO() {
+        // call1@0, call2@1, out@3, out@10 with no call ids — the parallel shape
+        // (spec §6.2: parallel calls are far more common than nested ones).
+        // Without ids, outputs pair with calls in arrival order inside the turn.
+        let blocks = timedBlocks([
             .user(0),        // 0
             .assistant(0),   // 1
-            .toolCall(0),    // 2  call1 (outer)
-            .toolCall(1),    // 3  call2 (inner)
-            .toolOut(3),     // 4  out2
-            .toolOut(10),    // 5  out1
+            .toolCall(0),    // 2  call1
+            .toolCall(1),    // 3  call2
+            .toolOut(3),     // 4  out1
+            .toolOut(10),    // 5  out2
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
-        // out2 (idx 4) matches the NEAREST preceding unmatched toolCall, which
-        // is call2 (idx 3): 3 - 1 = 2.0. (NOT call1 — call1 is further away.)
-        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 2.0))
-        // out1 (idx 5) then matches the next-nearest preceding unmatched
-        // toolCall, call1 (idx 2), since call2 was already consumed by out2:
-        // 10 - 0 = 10.0.
-        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 10.0))
+        // out1 (idx 4) pairs with call1 (idx 2): 3 - 0 = 3.0.
+        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 3.0))
+        // out2 (idx 5) pairs with call2 (idx 3): 10 - 1 = 9.0.
+        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 9.0))
         XCTAssertEqual(result.turns[1]?.toolCallCount, 2)
+    }
+
+    func testToolDurationUsesPairing() {
+        typealias F = TranscriptTestFixtures
+        // c1 c2 o1 o2 with ids: each output pairs with its own call.
+        let inOrder = F.sequence([
+            F.block(.user, at: 0),                  // 0
+            F.block(.assistant, text: "answer", at: 0),             // 1
+            F.block(.toolCall, id: "t1", at: 0),    // 2
+            F.block(.toolCall, id: "t2", at: 1),    // 3
+            F.block(.toolOut, id: "t1", at: 4),     // 4
+            F.block(.toolOut, id: "t2", at: 10),    // 5
+        ])
+        let result = TranscriptTurnTiming.compute(blocks: inOrder, source: .codex)
+        XCTAssertEqual(result.tools[4], ToolTiming(durationSeconds: 4.0))
+        XCTAssertEqual(result.tools[5], ToolTiming(durationSeconds: 9.0))
+
+        // Ids beat arrival order: o2 lands first. The explicit-index entry point.
+        let outOfOrder = F.sequence([
+            F.block(.user, at: 0),                  // 0
+            F.block(.assistant, text: "answer", at: 0),             // 1
+            F.block(.toolCall, id: "t1", at: 0),    // 2
+            F.block(.toolCall, id: "t2", at: 1),    // 3
+            F.block(.toolOut, id: "t2", at: 4),     // 4  pairs with t2 (idx 3)
+            F.block(.toolOut, id: "t1", at: 10),    // 5  pairs with t1 (idx 2)
+        ])
+        let index = ToolInvocationIndex.build(blocks: outOfOrder, source: .claude)
+        let byID = TranscriptTurnTiming.compute(blocks: outOfOrder, index: index)
+        XCTAssertEqual(byID.tools[4], ToolTiming(durationSeconds: 3.0))
+        XCTAssertEqual(byID.tools[5], ToolTiming(durationSeconds: 10.0))
+        XCTAssertEqual(byID.turns[1]?.toolCallCount, 2)
     }
 
     // MARK: - No crash on fully-nil timestamps
 
     func testAllNilTimestampsNeverCrashes() {
-        let blocks = TranscriptTestFixtures.makeTimedBlocks([
+        let blocks = timedBlocks([
             .user(nil),
             .assistant(nil),
             .toolCall(nil),
             .toolOut(nil),
         ])
-        let result = TranscriptTurnTiming.compute(blocks: blocks)
+        let result = TranscriptTurnTiming.compute(blocks: blocks, source: .codex)
 
         XCTAssertNil(result.turns[1]?.durationSeconds)
         XCTAssertNil(result.tools[3]?.durationSeconds)
@@ -227,7 +321,7 @@ final class TranscriptTurnTimingTests: XCTestCase {
     }
 
     func testEmptyBlocksProducesEmptyMaps() {
-        let result = TranscriptTurnTiming.compute(blocks: [])
+        let result = TranscriptTurnTiming.compute(blocks: [], source: .codex)
         XCTAssertTrue(result.turns.isEmpty)
         XCTAssertTrue(result.tools.isEmpty)
     }

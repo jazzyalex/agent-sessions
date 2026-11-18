@@ -223,12 +223,14 @@ enum KimiSessionParser {
                                         toolName: call["name"] as? String,
                                         toolInput: call["arguments"] as? String,
                                         toolOutput: nil,
+                                        toolCallID: ToolCallID.from(call["id"]),
                                         messageID: call["id"] as? String, parentID: nil, isDelta: false, rawJSON: line))
             }
         case "tool":
             let isError = (message["isError"] as? Bool) == true
             out.append(SessionEvent(id: "\(index)-r", timestamp: time, kind: isError ? .error : .tool_result, role: role, text: nil,
                                     toolName: nil, toolInput: nil, toolOutput: text,
+                                    toolCallID: ToolCallID.from(message["toolCallId"]),
                                     messageID: message["toolCallId"] as? String, parentID: nil, isDelta: false, rawJSON: line))
         default:
             out.append(SessionEvent(id: "\(index)-m", timestamp: time, kind: .meta, role: role, text: text,
@@ -273,6 +275,9 @@ enum KimiSessionParser {
                                  toolName: event["name"] as? String,
                                  toolInput: jsonString(event["args"]),
                                  toolOutput: nil,
+                                 toolCallID: ToolCallID.from(event["toolCallId"]),
+                                 // Kimi writes a short summary of the call ("Searching **/*.swift") beside `display`.
+                                 toolSidecar: ToolSidecar(agentLabel: ToolCallID.from(event["description"])).orNilIfEmpty,
                                  messageID: event["toolCallId"] as? String,
                                  parentID: event["stepUuid"] as? String, isDelta: false, rawJSON: line)]
 
@@ -287,6 +292,7 @@ enum KimiSessionParser {
             let isError = (result?["isError"] as? Bool) == true
             return [SessionEvent(id: "\(index)-r", timestamp: time, kind: isError ? .error : .tool_result, role: "tool", text: nil,
                                  toolName: nil, toolInput: nil, toolOutput: output,
+                                 toolCallID: ToolCallID.from(event["toolCallId"]),
                                  messageID: event["toolCallId"] as? String,
                                  parentID: event["parentUuid"] as? String, isDelta: false, rawJSON: line)]
 
@@ -306,12 +312,12 @@ enum KimiSessionParser {
     private static func jsonString(_ value: Any?) -> String? {
         guard let value else { return nil }
         if let string = value as? String { return string }
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
-        if data.count > 32_768 {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        guard let text = ToolJSON.string(from: value, pretty: false) else { return nil }
+        let byteCount = text.utf8.count
+        if byteCount > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     /// Flattens nested ContentParts. `think` parts are reasoning, not answer

@@ -481,6 +481,10 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
+    /// macOS 26 toolbar anchoring (issue #92). Held in `@State`, not `@StateObject`,
+    /// on purpose: this view must not observe it, or every divider drag would
+    /// re-evaluate the whole window body. Only `SessionListToolbarGroup` observes it.
+    @State private var sessionListToolbarAnchor = SessionListToolbarAnchor()
     @AppStorage(PreferencesKey.Unified.collapsedHierarchyParents) private var collapsedHierarchyParentsRaw: String = ""
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -599,6 +603,7 @@ struct UnifiedSessionsView: View {
 			rootContent
 				.preferredColorScheme(preferredColorScheme)
 				.toolbar { toolbarContent }
+				.modifier(PaneAnchoredToolbarTitle())
 				.overlay(alignment: .topTrailing) { topTrailingNotices }
 				.background(
 					WindowKeyObserver(
@@ -1019,10 +1024,11 @@ struct UnifiedSessionsView: View {
 	                // pane is inset by `paneGutter` so neither the list content nor the
 	                // transcript stripes butt against the line — equal margin both sides.
 	                listPaneWithTopSlot
-	                    .frame(minWidth: 320, maxWidth: 1200)
+	                    .frame(minWidth: SessionListToolbarLayout.sideBySideListMinWidth, maxWidth: 1200)
 	                    .padding(.trailing, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
 	                    .overlay(alignment: .trailing) { paneHairline(.vertical) }
+	                    .modifier(ListPaneDividerReporter(anchor: sessionListToolbarAnchor))
 	                transcriptPane
 	                    .frame(minWidth: 450)
 	                    .padding(.leading, Self.paneGutter)
@@ -1240,7 +1246,7 @@ struct UnifiedSessionsView: View {
 	                    if s.source == .claude {
 	                        Button("Open in VS Code") { openInVSCode(s) }
 	                            .disabled(!ClaudeVSCodeLauncher.isEditorInstalled)
-	                            .help("Open this session in the Claude Code extension for VS Code. The session folder opens first.")
+	                            .help("Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link.")
 	                    }
 	                    Divider()
 	                }
@@ -2017,8 +2023,101 @@ struct UnifiedSessionsView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            paneAnchoredToolbarContent
+        } else {
+            classicToolbarContent
+        }
+    }
+
+    /// macOS 15 and earlier: the established layout, kept as-is. Filters sit in the
+    /// centered principal slot, search and actions trail.
+    @ToolbarContentBuilder
+    private var classicToolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
+                sessionFilterControls
+            }
+            .controlSize(.small)
+            .tint(UnifiedSessionsStyle.selectionAccent)
+        }
+        ToolbarItem(placement: .automatic) {
+            sessionSearchField
+                .frame(maxWidth: 520)
+        }
+        if unified.projectSelection != nil {
+            ToolbarItem(placement: .automatic) {
+                projectFilterBadge
+            }
+        }
+        ToolbarItemGroup(placement: .automatic) {
+            sessionActionControls
+        }
+    }
+
+    /// macOS 26 (issue #92): Tahoe draws a glass capsule around each toolbar group
+    /// and the window-centered principal slot straddled the list/transcript divider,
+    /// so nothing read as belonging to either pane. Here every control that scopes
+    /// the session list (filters, search, project badge) is one leading group whose
+    /// width ends at the divider, and the selected-session actions trail over the
+    /// transcript. Glass is hidden so both groups keep the Sequoia look.
+    @available(macOS 26.0, *)
+    @ToolbarContentBuilder
+    private var paneAnchoredToolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            SessionListToolbarGroup(anchor: sessionListToolbarAnchor) { width in
+                SessionListToolbarRow(unified: unified, search: searchCoordinator, focus: focusCoordinator,
+                                      searchState: searchState, filters: sessionListFilterModel,
+                                      fillsWidth: width != nil)
+            }
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarSpacer(.flexible)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            sessionActionControls
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+
+    private var sessionSearchField: some View {
+        UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
+    }
+
+    private var projectFilterBadge: some View {
+        UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
+    }
+
+    /// Everything the macOS 26 session-list row needs from this view's state.
+    private var sessionListFilterModel: SessionListFilterModel {
+        var pinned: [AgentToolbarSpec] = []
+        if codexAgentEnabled {
+            pinned.append(AgentToolbarSpec(id: SessionSource.codex.rawValue, title: "Codex", color: .agentCodex,
+                                           isOn: $unified.includeCodex, shortcut: "1"))
+        }
+        if claudeAgentEnabled {
+            pinned.append(AgentToolbarSpec(id: SessionSource.claude.rawValue, title: "Claude", color: .agentClaude,
+                                           isOn: $unified.includeClaude, shortcut: "2"))
+        }
+        return SessionListFilterModel(
+            liveOnly: $showActiveSessionsOnly,
+            liveFeatureEnabled: liveSessionsFeatureEnabled,
+            hierarchy: $showSubagentHierarchy,
+            isHierarchyBrowsing: isHierarchyBrowsing,
+            canCollapseAll: isHierarchyBrowsing && !currentExpandableParentIDs.isEmpty,
+            canExpandAll: isHierarchyBrowsing && !collapsedParents.isEmpty,
+            collapseAll: { collapseAllHierarchyParents() },
+            expandAll: { expandAllHierarchyParents() },
+            pinnedAgents: pinned,
+            otherAgents: enabledOtherAgentSpecs,
+            isMonochrome: stripMonochrome,
+            clearProject: { applyProjectSelection(nil) }
+        )
+    }
+
+    @ViewBuilder
+    private var sessionFilterControls: some View {
                 ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
                     .disabled(!liveSessionsFeatureEnabled)
                     .help(
@@ -2082,24 +2181,14 @@ struct UnifiedSessionsView: View {
                 // filter menu once more than four agents are enabled (⌘ shortcuts
                 // are preserved either way).
                 agentToggleControls()
-            }
-            .controlSize(.small)
-            .tint(UnifiedSessionsStyle.selectionAccent)
-        }
-        ToolbarItem(placement: .automatic) {
-            UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
-                .frame(maxWidth: 520)
-        }
-        if unified.projectSelection != nil {
-            ToolbarItem(placement: .automatic) {
-                UnifiedProjectFilterBadgeView(unified: unified, onClear: { applyProjectSelection(nil) })
-            }
-        }
-        // Ranked by how often a control is reached for without thinking. Three
-        // action glyphs, two view toggles, and one menu for everything that is
-        // looked for rather than reflexed at — a named menu row is more
-        // discoverable than an unlabelled glyph, not less.
-        ToolbarItemGroup(placement: .automatic) {
+    }
+
+    // Ranked by how often a control is reached for without thinking. Three
+    // action glyphs, two view toggles, and one menu for everything that is
+    // looked for rather than reflexed at — a named menu row is more
+    // discoverable than an unlabelled glyph, not less.
+    @ViewBuilder
+    private var sessionActionControls: some View {
             ToolbarIconButton(
                 help: liveSessionsFeatureEnabled
                     ? "Open the Quota Meter."
@@ -2175,7 +2264,6 @@ struct UnifiedSessionsView: View {
             // workaround the source pills already use when they collapse into
             // AgentOverflowMenu.
             overflowMenuShortcuts
-        }
     }
 
     @ViewBuilder
@@ -3624,6 +3712,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return OpenCodeWarpLauncher()
                     case .warpPreview:             return OpenCodeWarpPreviewLauncher()
                     case .ghostty:                 return OpenCodeGhosttyLauncher()
+                    case .macterm:                 return OpenCodeMactermLauncher()
                     case .terminalApp, .unknown:   return OpenCodeTerminalLauncher()
                     }
                 }()
@@ -3644,6 +3733,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return HermesWarpLauncher()
                     case .warpPreview:             return HermesWarpPreviewLauncher()
                     case .ghostty:                 return HermesGhosttyLauncher()
+                    case .macterm:                 return HermesMactermLauncher()
                     case .terminalApp, .unknown:   return HermesTerminalLauncher()
                     }
                 }()
@@ -3664,6 +3754,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return CopilotWarpLauncher()
                     case .warpPreview:             return CopilotWarpPreviewLauncher()
                     case .ghostty:                 return CopilotGhosttyLauncher()
+                    case .macterm:                 return CopilotMactermLauncher()
                     case .terminalApp, .unknown:   return CopilotTerminalLauncher()
                     }
                 }()
@@ -3684,6 +3775,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return CursorWarpLauncher()
                     case .warpPreview:             return CursorWarpPreviewLauncher()
                     case .ghostty:                 return CursorGhosttyLauncher()
+                    case .macterm:                 return CursorMactermLauncher()
                     case .terminalApp, .unknown:   return CursorTerminalLauncher()
                     }
                 }()
@@ -3705,6 +3797,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return PiWarpLauncher()
                     case .warpPreview:             return PiWarpPreviewLauncher()
                     case .ghostty:                 return PiGhosttyLauncher()
+                    case .macterm:                 return PiMactermLauncher()
                     case .terminalApp, .unknown:   return PiTerminalLauncher()
                     }
                 }()
@@ -3725,6 +3818,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return KimiWarpLauncher()
                     case .warpPreview:             return KimiWarpPreviewLauncher()
                     case .ghostty:                 return KimiGhosttyLauncher()
+                    case .macterm:                 return KimiMactermLauncher()
                     case .terminalApp, .unknown:   return KimiTerminalLauncher()
                     }
                 }()
@@ -3745,6 +3839,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return GrokWarpLauncher()
                     case .warpPreview:             return GrokWarpPreviewLauncher()
                     case .ghostty:                 return GrokGhosttyLauncher()
+                    case .macterm:                 return GrokMactermLauncher()
                     case .terminalApp, .unknown:   return GrokTerminalLauncher()
                     }
                 }()
@@ -3769,6 +3864,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                  return QwenWarpLauncher()
                     case .warpPreview:           return QwenWarpPreviewLauncher()
                     case .ghostty:               return QwenGhosttyLauncher()
+                    case .macterm:               return QwenMactermLauncher()
                     case .terminalApp, .unknown: return QwenTerminalLauncher()
                     }
                 }()
@@ -3794,6 +3890,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return DevinWarpLauncher()
                     case .warpPreview:             return DevinWarpPreviewLauncher()
                     case .ghostty:                 return DevinGhosttyLauncher()
+                    case .macterm:                 return DevinMactermLauncher()
                     case .terminalApp, .unknown:   return DevinTerminalLauncher()
                     }
                 }()
@@ -3815,6 +3912,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                  return FxWarpLauncher()
                     case .warpPreview:           return FxWarpPreviewLauncher()
                     case .ghostty:               return FxGhosttyLauncher()
+                    case .macterm:               return FxMactermLauncher()
                     case .terminalApp, .unknown: return FxTerminalLauncher()
                     }
                 }()
@@ -3835,6 +3933,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return AntigravityWarpLauncher()
                     case .warpPreview:             return AntigravityWarpPreviewLauncher()
                     case .ghostty:                 return AntigravityGhosttyLauncher()
+                    case .macterm:                 return AntigravityMactermLauncher()
                     case .terminalApp, .unknown:   return AntigravityTerminalLauncher()
                     }
                 }()
@@ -3855,6 +3954,7 @@ struct UnifiedSessionsView: View {
                     case .warp:                    return ClaudeWarpLauncher()
                     case .warpPreview:             return ClaudeWarpPreviewLauncher()
                     case .ghostty:                 return ClaudeGhosttyLauncher()
+                    case .macterm:                 return ClaudeMactermLauncher()
                     case .terminalApp, .unknown:   return ClaudeTerminalLauncher()
                     }
                 }()
@@ -4137,7 +4237,7 @@ struct UnifiedSessionsView: View {
 /// Describes one non-Codex/Claude agent toggle so it can render either as a
 /// toolbar pill or as a row in the overflow filter menu without duplicating the
 /// title/color/binding/shortcut in two places.
-private struct AgentToolbarSpec: Identifiable {
+struct AgentToolbarSpec: Identifiable {
     let id: String
     let title: String
     let color: Color
@@ -4641,13 +4741,7 @@ private struct SessionTitleCell: View, Equatable {
     }
 
     private var displayTitle: String {
-        let candidates = [displayTitleOverride, session.listTitle, session.firstUserPreview]
-        if let clean = candidates
-            .compactMap({ SessionInfoMetadataSanitizer.title($0, source: session.source) })
-            .first {
-            return clean
-        }
-        return "Untitled session"
+        SessionInfoMetadataSanitizer.rowTitle(for: session, override: displayTitleOverride) ?? "Untitled session"
     }
 
     private var subagentPillHelp: String {
@@ -4708,14 +4802,18 @@ private struct SearchScopeChip: View {
     let symbol: String
     let title: LocalizedStringResource
     let help: LocalizedStringResource
+    /// Narrow macOS 26 list pane: the symbol alone, title kept for VoiceOver.
+    var iconOnly: Bool = false
 
     var body: some View {
         Button { isOn.toggle() } label: {
             HStack(spacing: 4) {
                 Image(systemName: isOn ? "\(symbol).fill" : symbol)
                     .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
+                if !iconOnly {
+                    Text(title)
+                        .font(.system(size: 11, weight: .medium))
+                }
             }
             .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 7)
@@ -4743,6 +4841,9 @@ private struct ArchivedScopeChip: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     let codexEnabled: Bool
     let claudeEnabled: Bool
+    /// Narrow macOS 26 list pane: the box symbol alone; a filled box still shows
+    /// that a filter is on.
+    var iconOnly: Bool = false
 
     private var activeCount: Int {
         (codexEnabled && unified.showArchivedCodexDesktopOnly ? 1 : 0)
@@ -4772,9 +4873,11 @@ private struct ArchivedScopeChip: View {
                 HStack(spacing: 4) {
                     Image(systemName: activeCount > 0 ? "archivebox.fill" : "archivebox")
                         .font(.system(size: 10, weight: .semibold))
-                    Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
-                        .font(.system(size: 11, weight: .medium))
-                        .monospacedDigit()
+                    if !iconOnly {
+                        Text(activeCount > 1 ? "Archived · \(activeCount)" : "Archived")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                    }
                 }
                 .foregroundStyle(activeCount > 0 ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 7)
@@ -4795,6 +4898,10 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
+    /// macOS 26 pane-anchored toolbar: the field may shrink further, and the ⌥⌘F
+    /// hint and scope-chip titles drop out when the list pane is narrow. Off, the
+    /// field keeps its established layout.
+    var adaptive: Bool = false
     // The pi/kimi/grok enablement flags this view used to AND into its two `search.start`
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
     // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
@@ -4805,6 +4912,28 @@ private struct UnifiedSearchFiltersView: View {
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
     private enum SearchFocusTarget: Hashable { case field, clear }
+
+    private var shortcutHint: some View {
+        Text("⌥⌘F")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func scopeChips(iconOnly: Bool) -> some View {
+        SearchScopeChip(isOn: $unified.showFavoritesOnly,
+                        symbol: "star",
+                        title: "Saved",
+                        help: "Show only saved sessions",
+                        iconOnly: iconOnly)
+
+        ArchivedScopeChip(unified: unified,
+                          codexEnabled: codexAgentEnabled,
+                          claudeEnabled: claudeAgentEnabled,
+                          iconOnly: iconOnly)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Inline search field (always visible to keep global search front-and-center)
@@ -4815,7 +4944,8 @@ private struct UnifiedSearchFiltersView: View {
 
                 // Use an AppKit-backed text field to ensure focus works inside a toolbar
                 ToolbarSearchTextField(text: $unified.queryDraft,
-                                       placeholder: "Search",
+                                       placeholder: String(localized: "Search sessions",
+                                                           comment: "Placeholder in the main window search field; it searches every indexed session, not the open transcript."),
                                        isFirstResponder: Binding(get: { searchFocus == .field },
                                                                  set: { want in
                                                                      if want { searchFocus = .field }
@@ -4824,14 +4954,19 @@ private struct UnifiedSearchFiltersView: View {
                                        focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() },
                                        onEscape: { clearSearchFromField() })
-                    .frame(minWidth: 220)
+                    .frame(minWidth: adaptive ? 80 : 220)
                     .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("⌥⌘F")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                    if adaptive {
+                        ViewThatFits(in: .horizontal) {
+                            shortcutHint
+                            Color.clear.frame(width: 0, height: 0)
+                        }
+                        .layoutPriority(1)
+                    } else {
+                        shortcutHint
+                    }
                 } else {
                     Button(action: {
                         clearSearchFromField()
@@ -4850,14 +4985,15 @@ private struct UnifiedSearchFiltersView: View {
                 // field with the other scoping, not as a separate toolbar glyph.
                 Divider().frame(height: 14)
 
-                SearchScopeChip(isOn: $unified.showFavoritesOnly,
-                                symbol: "star",
-                                title: "Saved",
-                                help: "Show only saved sessions")
-
-                ArchivedScopeChip(unified: unified,
-                                  codexEnabled: codexAgentEnabled,
-                                  claudeEnabled: claudeAgentEnabled)
+                if adaptive {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { scopeChips(iconOnly: false) }
+                        HStack(spacing: 8) { scopeChips(iconOnly: true) }
+                    }
+                    .layoutPriority(1)
+                } else {
+                    scopeChips(iconOnly: false)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -5008,11 +5144,44 @@ private struct UnifiedSearchFiltersView: View {
 
 private struct UnifiedProjectFilterBadgeView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
+    /// Narrow macOS 26 list pane: one tinted "remove folder filter" button; the
+    /// project name moves to its tooltip and VoiceOver value.
+    var compact: Bool = false
     var onClear: () -> Void
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        let accent = stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
+        if compact {
+            compactBody
+        } else {
+            regularBody
+        }
+    }
+
+    private var accent: Color {
+        stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
+    }
+
+    private var compactBody: some View {
+        let name = unified.projectSelection.map(Self.badgeText(for:)) ?? ""
+        return Button(action: onClear) {
+            Image(systemName: "folder.badge.minus")
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(accent.opacity(0.1))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(accent.opacity(0.3)))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(Text(verbatim: name + "\n") + Text("Remove the project filter and show all sessions"))
+        .accessibilityLabel(Text("Remove the project filter and show all sessions"))
+        .accessibilityValue(Text(verbatim: name))
+        .fixedSize()
+    }
+
+    private var regularBody: some View {
         HStack(spacing: 4) {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
@@ -5052,6 +5221,385 @@ private struct UnifiedProjectFilterBadgeView: View {
 }
 
 // MARK: - AppKit-backed text field for reliable toolbar focus
+/// Width math for the macOS 26 session-list toolbar group (issue #92). The group
+/// starts at the toolbar's leading slot and must stop just short of the
+/// list/transcript divider, so it is sized from two window-space measurements.
+enum SessionListToolbarLayout {
+    /// Breathing room between the group's trailing edge and the divider line,
+    /// matching the pane gutter used inside the split.
+    static let dividerGap: CGFloat = LayoutTokens.sm
+
+    /// Narrowest side-by-side list pane. On macOS 26 the session-list toolbar group
+    /// must fit above it in its minimal form (Filters menu, search with icon-only
+    /// chips, compact project button); `SessionListToolbarLayoutTests` measures
+    /// that row against this width. Older systems keep 320.
+    static var sideBySideListMinWidth: CGFloat {
+        if #available(macOS 26.0, *) { return tahoeListMinWidth }
+        return 320
+    }
+    static let tahoeListMinWidth: CGFloat = 470
+
+    /// The space between the group's leading edge and the divider, never more:
+    /// the group is clipped to this, so it cannot reach into the transcript.
+    /// `nil` means "no side-by-side divider to align to" (stacked layout, hidden
+    /// transcript, or not yet measured): the group then uses its natural width.
+    static func groupWidth(dividerX: CGFloat?, groupMinX: CGFloat?) -> CGFloat? {
+        guard let dividerX, let groupMinX else { return nil }
+        return max(0, (dividerX - groupMinX - dividerGap).rounded(.down))
+    }
+
+    /// Sub-point jitter must not write state, or the measure → resize → measure
+    /// cycle never settles.
+    static func hasMoved(_ old: CGFloat?, to new: CGFloat) -> Bool {
+        guard let old else { return true }
+        return abs(old - new) >= 0.5
+    }
+}
+
+/// The session-list filter state the macOS 26 toolbar row renders. A plain value
+/// so the row can be built (and measured) without the whole window view.
+struct SessionListFilterModel {
+    var liveOnly: Binding<Bool>
+    var liveFeatureEnabled: Bool
+    var hierarchy: Binding<Bool>
+    var isHierarchyBrowsing: Bool
+    var canCollapseAll: Bool
+    var canExpandAll: Bool
+    var collapseAll: () -> Void
+    var expandAll: () -> Void
+    /// Codex and Claude, which stay as their own pills in the regular tier.
+    var pinnedAgents: [AgentToolbarSpec]
+    var otherAgents: [AgentToolbarSpec]
+    var isMonochrome: Bool
+    var clearProject: () -> Void
+
+    var allAgents: [AgentToolbarSpec] { pinnedAgents + otherAgents }
+}
+
+/// How much of the filter cluster stays visible. The row picks the first tier
+/// that fits before the divider.
+enum SessionFilterTier: CaseIterable {
+    /// Live, hierarchy (+ collapse/expand), agent pills.
+    case regular
+    /// Same, with every agent in one Agents menu.
+    case compact
+    /// One Filters menu holding all of the above. Sized so the row still fits
+    /// above the narrowest macOS 26 list pane with a project filter active.
+    case minimal
+}
+
+/// macOS 26 session-list toolbar row (issue #92): filters, search and project
+/// badge. Filters and badge are offered space first and fall back to smaller
+/// forms; the single search field takes what is left down to its minimum, so it
+/// is never recreated and keeps focus and text while the divider moves.
+struct SessionListToolbarRow: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    let search: SearchCoordinator
+    let focus: WindowFocusCoordinator
+    let searchState: UnifiedSearchState
+    let filters: SessionListFilterModel
+    /// True when sized to the divider; false lets search keep its 520 pt cap.
+    var fillsWidth: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                SessionFilterCluster(model: filters, tier: .regular)
+                SessionFilterCluster(model: filters, tier: .compact)
+                SessionFilterCluster(model: filters, tier: .minimal)
+            }
+            .controlSize(.small)
+            .tint(UnifiedSessionsStyle.selectionAccent)
+            .layoutPriority(1)
+
+            UnifiedSearchFiltersView(unified: unified, search: search, focus: focus,
+                                     searchState: searchState, adaptive: true)
+                .frame(maxWidth: fillsWidth ? .infinity : 520)
+
+            if unified.projectSelection != nil {
+                ViewThatFits(in: .horizontal) {
+                    UnifiedProjectFilterBadgeView(unified: unified, onClear: filters.clearProject)
+                    UnifiedProjectFilterBadgeView(unified: unified, compact: true, onClear: filters.clearProject)
+                }
+                .layoutPriority(1)
+            }
+        }
+        // ViewThatFits may keep every tier alive, so no shortcut lives inside a
+        // tier; they are registered exactly once here.
+        .background { shortcuts }
+    }
+
+    @ViewBuilder
+    private var shortcuts: some View {
+        HiddenShortcutButton(key: "h", modifiers: [.command, .shift]) { filters.hierarchy.wrappedValue.toggle() }
+        ForEach(filters.allAgents) { spec in
+            if let key = spec.shortcut {
+                HiddenShortcutButton(key: key, modifiers: .command) { spec.isOn.wrappedValue.toggle() }
+            }
+        }
+    }
+}
+
+private struct HiddenShortcutButton: View {
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+    let action: () -> Void
+
+    var body: some View {
+        Button("", action: action)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+    }
+}
+
+/// One tier of the macOS 26 filter cluster. Holds no keyboard shortcuts.
+private struct SessionFilterCluster: View {
+    let model: SessionListFilterModel
+    let tier: SessionFilterTier
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if tier == .minimal {
+                SessionFiltersMenu(model: model)
+            } else {
+                ActiveSessionsOnlyToggle(isOn: model.liveOnly)
+                    .disabled(!model.liveFeatureEnabled)
+                    .help(
+                        model.liveFeatureEnabled
+                            ? "Show only live sessions in the list (Codex, Claude)"
+                            : "Enable live session detection (Beta) in Settings → Quota Meter."
+                    )
+
+                Button(action: { model.hierarchy.wrappedValue.toggle() }) {
+                    Image(systemName: model.hierarchy.wrappedValue ? "list.bullet.indent" : "list.bullet")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(model.hierarchy.wrappedValue ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(model.hierarchy.wrappedValue ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
+
+                if model.isHierarchyBrowsing {
+                    ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        model.collapseAll()
+                    }
+                    .disabled(!model.canCollapseAll)
+
+                    ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        model.expandAll()
+                    }
+                    .disabled(!model.canExpandAll)
+                }
+
+                if tier == .compact {
+                    AgentOverflowMenu(specs: model.allAgents)
+                } else {
+                    ForEach(model.pinnedAgents) { spec in
+                        AgentTabToggle(title: spec.title, color: spec.color,
+                                       isMonochrome: model.isMonochrome, isOn: spec.isOn)
+                            .help(spec.id == SessionSource.claude.rawValue
+                                  ? "Show or hide Claude sessions (⌘2)"
+                                  : "Show or hide Codex sessions (⌘1)")
+                    }
+                    // Same crowding rule as the classic toolbar: past four agents
+                    // the non-pinned ones collapse into the Agents menu.
+                    if model.allAgents.count > 4 {
+                        AgentOverflowMenu(specs: model.otherAgents)
+                    } else {
+                        ForEach(model.otherAgents) { spec in
+                            AgentTabToggle(title: spec.title, color: spec.color,
+                                           isMonochrome: model.isMonochrome, isOn: spec.isOn)
+                                .help("Show or hide \(spec.title) sessions in the list")
+                        }
+                    }
+                }
+            }
+        }
+        .fixedSize()
+    }
+}
+
+/// The minimal tier: every session-list filter in one menu, styled like the
+/// agent pills. The funnel fills while the live-only filter is on.
+private struct SessionFiltersMenu: View {
+    let model: SessionListFilterModel
+
+    var body: some View {
+        Menu {
+            Toggle("Live sessions only", isOn: model.liveOnly)
+                .disabled(!model.liveFeatureEnabled)
+            Toggle("Show subagent hierarchy (⇧⌘H)", isOn: model.hierarchy)
+            if model.isHierarchyBrowsing {
+                Button("Collapse All", action: model.collapseAll)
+                    .disabled(!model.canCollapseAll)
+                Button("Expand All", action: model.expandAll)
+                    .disabled(!model.canExpandAll)
+            }
+            Divider()
+            ForEach(model.allAgents) { spec in
+                Toggle(isOn: spec.isOn) { Text(spec.title) }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.liveOnly.wrappedValue
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+                Text("Filters")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+            .agentPillSurface()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("Filters"))
+        .accessibilityLabel(Text("Filters"))
+    }
+}
+
+/// Window-space measurements for the macOS 26 session-list toolbar group.
+final class SessionListToolbarAnchor: ObservableObject {
+    /// x of the list/transcript divider; `nil` when panes are not side by side.
+    @Published var dividerX: CGFloat?
+    /// x of the toolbar group's leading edge.
+    @Published var groupMinX: CGFloat?
+
+    var groupWidth: CGFloat? {
+        SessionListToolbarLayout.groupWidth(dividerX: dividerX, groupMinX: groupMinX)
+    }
+}
+
+/// The only view that observes the anchor, so divider drags re-render just the
+/// toolbar group.
+private struct SessionListToolbarGroup<Content: View>: View {
+    @ObservedObject var anchor: SessionListToolbarAnchor
+    @ViewBuilder var content: (CGFloat?) -> Content
+
+    var body: some View {
+        let width = anchor.groupWidth
+        content(width)
+            .frame(width: width, alignment: .leading)
+            // Last resort only: the compact variants are sized to fit the
+            // narrowest list pane, but nothing may ever draw past the divider.
+            .clipped()
+            .background(WindowFrameReader { [anchor] frame in
+                if SessionListToolbarLayout.hasMoved(anchor.groupMinX, to: frame.minX) {
+                    anchor.groupMinX = frame.minX
+                }
+            })
+    }
+}
+
+/// macOS 26: the window title would take ~120 pt from the session-list group at
+/// the leading edge (or float over the transcript after it), so it is not drawn
+/// in the toolbar. The window keeps its title for the Window menu and Mission
+/// Control. Older systems are unchanged.
+private struct PaneAnchoredToolbarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports where the list pane ends (the divider) on macOS 26. A no-op on older
+/// systems, whose toolbar does not align to the panes.
+private struct ListPaneDividerReporter: ViewModifier {
+    let anchor: SessionListToolbarAnchor
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .background(WindowFrameReader { [anchor] frame in
+                    if SessionListToolbarLayout.hasMoved(anchor.dividerX, to: frame.maxX) {
+                        anchor.dividerX = frame.maxX
+                    }
+                })
+                .onDisappear { [anchor] in anchor.dividerX = nil }
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports the hosting view's frame in window coordinates. SwiftUI's `.global`
+/// space is per hosting view, and toolbar items live in a different hosting view
+/// from the split, so the two can only be compared in AppKit window space.
+private struct WindowFrameReader: NSViewRepresentable {
+    var onChange: (CGRect) -> Void
+
+    func makeNSView(context: Context) -> FrameReportingView {
+        let view = FrameReportingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: FrameReportingView, context: Context) {
+        view.onChange = onChange
+        view.reportSoon()
+    }
+
+    final class FrameReportingView: NSView {
+        var onChange: ((CGRect) -> Void)?
+        private var resizeObserver: NSObjectProtocol?
+        private var lastReported: CGRect?
+        private var reportPending = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+            resizeObserver = nil
+            lastReported = nil
+            guard let window else { return }
+            resizeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportSoon() }
+            }
+            reportSoon()
+        }
+
+        override func layout() {
+            super.layout()
+            reportSoon()
+        }
+
+        /// Deferred one runloop turn: the callback writes SwiftUI state, which must
+        /// not happen during a view update, and coalescing keeps live resize cheap.
+        func reportSoon() {
+            guard !reportPending else { return }
+            reportPending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reportPending = false
+                guard self.window != nil else { return }
+                let frame = self.convert(self.bounds, to: nil)
+                guard frame != self.lastReported else { return }
+                self.lastReported = frame
+                self.onChange?(frame)
+            }
+        }
+
+        deinit {
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+        }
+    }
+}
+
 private struct ToolbarSearchTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String

@@ -413,6 +413,7 @@ final class DroidSessionParser {
                             toolName: toolName,
                             toolInput: stringifyJSON(input),
                             toolOutput: nil,
+                            toolCallID: ToolCallID.from(toolID),
                             messageID: toolID,
                             parentID: envelopeID,
                             isDelta: false,
@@ -441,6 +442,8 @@ final class DroidSessionParser {
                             toolName: toolName,
                             toolInput: toolInput,
                             toolOutput: output,
+                            toolCallID: ToolCallID.from(toolUseID),
+                            toolSidecar: ToolSidecar(isError: boolValue(p["is_error"]) ?? boolValue(p["isError"])).orNilIfEmpty,
                             messageID: toolUseID,
                             parentID: envelopeID,
                             isDelta: false,
@@ -708,6 +711,7 @@ final class DroidSessionParser {
                         toolName: name,
                         toolInput: stringifyJSON(params),
                         toolOutput: nil,
+                        toolCallID: ToolCallID.from(callID),
                         messageID: callID,
                         parentID: stringValue(obj, keys: ["messageId", "message_id"]),
                         isDelta: false,
@@ -749,6 +753,8 @@ final class DroidSessionParser {
                         toolName: name,
                         toolInput: callID.flatMap { stringifyJSON(toolByCallID[$0]?.params) },
                         toolOutput: output,
+                        toolCallID: ToolCallID.from(callID),
+                        toolSidecar: ToolSidecar(isError: boolValue(obj["isError"]) ?? boolValue(obj["is_error"])).orNilIfEmpty,
                         messageID: callID,
                         parentID: stringValue(obj, keys: ["messageId", "message_id"]),
                         isDelta: false,
@@ -918,10 +924,10 @@ final class DroidSessionParser {
     private static func stringifyJSON(_ any: Any?) -> String? {
         guard let any else { return nil }
         if let s = any as? String { return s }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: any, pretty: false) else {
             return String(describing: any)
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func rawJSONBase64(_ obj: Any) -> String {

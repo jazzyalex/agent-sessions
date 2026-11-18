@@ -12758,4 +12758,32 @@ final class SessionParserTests: XCTestCase {
                        "AS531-DATASET-MEMBERSHIP-REFRESH: superseded run must not publish after newer results")
         XCTAssertEqual(settled, [b.id])
     }
+
+    // MARK: - Codex namespace and web search
+
+    private func parseCodexLine(_ line: String) -> SessionEvent? {
+        SessionIndexer.parseLine(line, eventID: "e-test").0
+    }
+
+    func testCodexWebSearchCallGetsQuery() throws {
+        let line = #"{"timestamp":"2026-06-01T00:00:00Z","type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{"type":"search","query":"swift textkit"}}}"#
+        let e = try XCTUnwrap(parseCodexLine(line))
+        XCTAssertEqual(e.kind, .tool_call)
+        XCTAssertEqual(e.toolName, "web_search")
+        XCTAssertEqual(TranscriptToolSummary.summary(toolName: e.toolName, toolInput: e.toolInput), "swift textkit")
+    }
+
+    func testCodexWebSearchQueriesAndPageActions() throws {
+        let q = #"{"type":"response_item","payload":{"type":"web_search_call","action":{"type":"search","queries":["a","b"]}}}"#
+        XCTAssertEqual(try XCTUnwrap(parseCodexLine(q)).toolInput, #"{"queries":["a","b"]}"#)
+        let open = #"{"type":"response_item","payload":{"type":"web_search_call","action":{"type":"open_page","url":"https://x.dev/a"}}}"#
+        XCTAssertEqual(try XCTUnwrap(parseCodexLine(open)).toolInput, #"{"url":"https://x.dev/a"}"#)
+        let find = #"{"type":"response_item","payload":{"type":"web_search_call","action":{"type":"find_in_page","url":"https://x.dev/a","pattern":"foo"}}}"#
+        XCTAssertEqual(try XCTUnwrap(parseCodexLine(find)).toolInput, #"{"pattern":"foo","url":"https://x.dev/a"}"#)
+    }
+
+    func testCodexNamespaceIsKept() throws {
+        let line = #"{"type":"response_item","payload":{"type":"function_call","namespace":"mcp__node_repl__","name":"js","arguments":"{\"code\":\"1\"}","call_id":"c1"}}"#
+        XCTAssertEqual(try XCTUnwrap(parseCodexLine(line)).toolNamespace, "mcp__node_repl__")
+    }
 }

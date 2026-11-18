@@ -41,7 +41,8 @@ struct SessionTranscriptBuilder {
                                              filters: TranscriptFilters,
                                              mode: TranscriptRenderMode = .normal) -> String {
         let opts = options(from: filters, mode: mode, source: source)
-        let blocks = coalesce(events: events, source: source, includeMeta: opts.showMeta)
+        let blocks = injectedUserAsMeta(coalesce(events: events, source: source, includeMeta: opts.showMeta),
+                                        showMeta: opts.showMeta)
         var out = ""
         // Intentionally omit session header and divider for a cleaner transcript view.
         for b in blocks {
@@ -49,6 +50,21 @@ struct SessionTranscriptBuilder {
             out += "\n"
         }
         return out
+    }
+
+    /// Text renderings (Text view, Copy, export) show a user block that provenance marks as injected
+    /// context as metadata, never under the user prefix: kept only when meta is shown.
+    static func injectedUserAsMeta(_ blocks: [LogicalBlock], showMeta: Bool) -> [LogicalBlock] {
+        guard blocks.contains(where: { $0.kind == .user && $0.messageOrigin?.isUnresolvedMixed == true }) else {
+            return blocks
+        }
+        return blocks.compactMap { block in
+            guard block.kind == .user, block.messageOrigin?.isUnresolvedMixed == true else { return block }
+            guard showMeta else { return nil }
+            var meta = block
+            meta.kind = .meta
+            return meta
+        }
     }
 
     /// Returns true when rendering a tail slice independently will preserve output shape.
@@ -64,7 +80,7 @@ struct SessionTranscriptBuilder {
     /// Terminal mode helper that also returns NSRanges for command lines and user text to enable styling in the UI.
     static func buildTerminalPlainWithRanges(session: Session, filters: TranscriptFilters) -> (String, [NSRange], [NSRange]) {
         let opts = options(from: filters, mode: .terminal, source: session.source)
-        let blocks = coalesce(session: session, includeMeta: opts.showMeta)
+        let blocks = injectedUserAsMeta(coalesce(session: session, includeMeta: opts.showMeta), showMeta: opts.showMeta)
         var out = ""
         var commandRanges: [NSRange] = []
         var userRanges: [NSRange] = []
@@ -87,7 +103,7 @@ struct SessionTranscriptBuilder {
                 let head = timestampPrefix(b.timestamp, options: opts)
                 let prefix = userPrefix
                 out += head + prefix
-                markRange(b.text, into: &userRanges)
+                markRange(b.typedText, into: &userRanges)
             default:
                 out += render(block: b, options: opts)
             }
@@ -305,9 +321,62 @@ struct SessionTranscriptBuilder {
         /// Index of this block's FIRST originating event within `session.events`
         /// (first event of a merge chain). -1 until assigned by `coalesce`.
         var firstEventIndex: Int = -1
+        /// Codex tool namespace of the originating tool call (e.g. `mcp__node_repl__`).
+        var toolNamespace: String? = nil
+        /// Provider call id of the originating tool call/result; outputs with different ids never merge.
+        var toolCallID: String? = nil
+        /// Structured output of the originating result (array/object, ≤ 256 KB minified).
+        var toolOutputValue: ToolPayloadValue? = nil
+        /// Structured facts recorded next to the originating result.
+        var toolSidecar: ToolSidecar? = nil
+        /// Runtime error or user rejection, when the parser classified the result as one.
+        var toolDisposition: ToolDisposition? = nil
+        var messageOrigin: MessageOrigin? = nil
+        var messageDisplayText: String? = nil
+        var messageHasEncryptedContent: Bool? = nil
+        var presentation: MessagePresentation? = nil
+
+        /// What the user typed: a mixed message's typed items, else `text` (`SessionEvent.typedText`).
+        var typedText: String {
+            if case .typed = messageOrigin, let display = messageDisplayText { return display }
+            return text
+        }
+
+        /// Shared semantic turn boundary. Legacy fixtures without provenance remain typed.
+        var isTypedUserMessage: Bool {
+            guard kind == .user, !isInterruptControlMessage else { return false }
+            return (presentation?.origin ?? messageOrigin ?? .typed) == .typed
+        }
+
+        /// A turn starts at a typed prompt or at a sub-session's task from its parent.
+        var startsTurn: Bool {
+            guard kind == .user, !isInterruptControlMessage else { return false }
+            let origin = presentation?.origin ?? messageOrigin ?? .typed
+            return origin == .typed || origin == .parentTask
+        }
+
+        /// Explicit typed provenance wins over a literal spelling of a control marker.
+        var isInterruptControlMessage: Bool {
+            kind == .user && (presentation?.origin ?? messageOrigin) != .typed
+                && ToolInvocationIndex.isInterruptNotice(text)
+        }
+
+        func resolvedPresentation(source: SessionSource = .claude) -> MessagePresentation? {
+            presentation ?? MessageOriginClassifier.presentation(for: self, context: .init(
+                source: source, isFirstUserBlock: false))
+        }
+
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
+        var block = rawBlock(from: e)
+        block.messageOrigin = e.messageOrigin
+        block.messageDisplayText = e.messageDisplayText
+        block.messageHasEncryptedContent = e.messageHasEncryptedContent
+        return block
+    }
+
+    private static func rawBlock(from e: SessionEvent) -> LogicalBlock {
         switch e.kind {
         case .user:
             return LogicalBlock(kind: .user,
@@ -342,7 +411,12 @@ struct SessionTranscriptBuilder {
                                 toolInput: e.toolInput,
                                 isErrorOutput: false,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .tool_result:
             let outputText = e.toolOutput ?? e.text ?? ""
             let exitCode = ToolTextBlockNormalizer.exitCode(from: e.rawJSON)
@@ -356,7 +430,12 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: looksLikeError,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .error:
             if e.toolName != nil || e.toolOutput != nil {
                 let outputText = e.toolOutput ?? e.text ?? ""
@@ -369,10 +448,17 @@ struct SessionTranscriptBuilder {
                                     toolInput: nil,
                                     isErrorOutput: true,
                                     eventID: e.id,
-                                    rawJSON: e.rawJSON)
+                                    rawJSON: e.rawJSON,
+                                    toolNamespace: e.toolNamespace,
+                                    toolCallID: e.toolCallID,
+                                    toolOutputValue: e.toolOutputValue,
+                                    toolSidecar: e.toolSidecar,
+                                    toolDisposition: e.toolDisposition)
             }
             // If text is empty, fall back to pretty textified raw JSON
             let txt = (e.text?.isEmpty == false) ? e.text! : PrettyJSON.prettyPrinted(e.rawJSON)
+            // A Claude runtime error lands here (no tool name); its call id lets pairing
+            // treat the block as that call's output.
             return LogicalBlock(kind: .error,
                                 text: txt,
                                 timestamp: e.timestamp,
@@ -382,9 +468,15 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: true,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         case .meta:
             let txt = e.text ?? PrettyJSON.prettyPrinted(e.rawJSON)
+            // A Claude user rejection is a meta event in P1; it keeps its call id and disposition.
             return LogicalBlock(kind: .meta,
                                 text: txt,
                                 timestamp: e.timestamp,
@@ -394,7 +486,12 @@ struct SessionTranscriptBuilder {
                                 toolInput: nil,
                                 isErrorOutput: false,
                                 eventID: e.id,
-                                rawJSON: e.rawJSON)
+                                rawJSON: e.rawJSON,
+                                toolNamespace: e.toolNamespace,
+                                toolCallID: e.toolCallID,
+                                toolOutputValue: e.toolOutputValue,
+                                toolSidecar: e.toolSidecar,
+                                toolDisposition: e.toolDisposition)
         }
     }
 
@@ -463,14 +560,17 @@ struct SessionTranscriptBuilder {
     /// This keeps the structural grouping logic in one place while allowing
     /// new views to render the underlying data differently.
     static func coalescedBlocks(for session: Session,
-                                includeMeta: Bool) -> [LogicalBlock] {
-        let key = "\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)" as NSString
+                                includeMeta: Bool,
+                                includeMessageContext: Bool = false) -> [LogicalBlock] {
+        // JSON encoding keeps arbitrary metadata strings from colliding at separators.
+        let classifierIdentity = String(data: try! JSONEncoder().encode([session.source.rawValue, session.parentSessionID, session.subagentType]), encoding: .utf8)!
+        let key = "\(classifierIdentity)|\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)|\(includeMessageContext ? 1 : 0)" as NSString
         if let hit = coalesceCache.object(forKey: key) {
             return hit
         }
         let _span = Perf.begin("transcriptCoalesce", thresholdMs: 20, "events=\(session.events.count)")
         defer { Perf.end(_span) }
-        let blocks = coalesce(session: session, includeMeta: includeMeta)
+        let blocks = coalesce(session: session, includeMeta: includeMeta, includeMessageContext: includeMessageContext)
         coalesceCache.setObject(blocks, forKey: key)
         return blocks
     }
@@ -482,6 +582,8 @@ struct SessionTranscriptBuilder {
     private static func canMerge(_ a: LogicalBlock, _ b: LogicalBlock) -> Bool {
         // Only merge assistant/toolOut/meta streams
         guard a.kind == b.kind else { return false }
+        // Outputs of different tool calls never fuse, even when they share a message ID.
+        if let ai = a.toolCallID, let bi = b.toolCallID, ai != bi { return false }
         switch a.kind {
         case .assistant, .toolOut:
             if let am = a.messageID, let bm = b.messageID { return am == bm }
@@ -498,20 +600,33 @@ struct SessionTranscriptBuilder {
         }
     }
 
-    private static func coalesce(session: Session, includeMeta: Bool) -> [LogicalBlock] {
-        coalesce(events: session.events, source: session.source, includeMeta: includeMeta)
+    private static func coalesce(session: Session, includeMeta: Bool, includeMessageContext: Bool = false) -> [LogicalBlock] {
+        // Only a sub-session's first prompt is a parent task; side chats and forks keep "User".
+        let isSubagent = session.effectiveRelationshipKind == .subagent
+        return coalesce(events: session.events, source: session.source, subagentType: isSubagent ? session.subagentType : nil,
+                        parentSessionID: isSubagent ? session.parentSessionID : nil,
+                        includeMeta: includeMeta, includeMessageContext: includeMessageContext)
     }
 
-    private static func coalesce(events: [SessionEvent], source: SessionSource, includeMeta: Bool) -> [LogicalBlock] {
+    private static func coalesce(events: [SessionEvent], source: SessionSource, subagentType: String? = nil, parentSessionID: String? = nil, includeMeta: Bool, includeMessageContext: Bool = false) -> [LogicalBlock] {
         var blocks: [LogicalBlock] = []
         blocks.reserveCapacity(events.count)
         for (eventIndex, e) in events.enumerated() {
-            if e.kind == .meta && !includeMeta { continue }
-            let base = block(from: e)
+            if e.kind == .meta && !includeMeta && !(includeMessageContext && e.messageOrigin != nil) { continue }
+            var base = block(from: e)
+            if includeMessageContext && e.kind == .meta {
+                switch e.messageOrigin {
+                case .peer, .typed: base.kind = .user
+                default: break
+                }
+            }
             let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
             for var b in expanded {
                 if source == .codex {
                     b.text = normalizeCodexInlineImageMarkers(b.text)
+                    if let displayText = b.messageDisplayText {
+                        b.messageDisplayText = normalizeCodexInlineImageMarkers(displayText)
+                    }
                 }
                 // Merge in place: taking a copy of `blocks.last` and appending to it
                 // makes the accumulated text buffer multiply-referenced, so every
@@ -522,11 +637,22 @@ struct SessionTranscriptBuilder {
                 }
                 if mergeWithLast {
                     let i = blocks.count - 1
+                    if blocks[i].messageDisplayText != nil || b.messageDisplayText != nil {
+                        blocks[i].messageDisplayText = (blocks[i].messageDisplayText ?? blocks[i].text) + (b.messageDisplayText ?? b.text)
+                    }
+                    if blocks[i].messageOrigin == nil { blocks[i].messageOrigin = b.messageOrigin }
+                    if b.messageHasEncryptedContent == true { blocks[i].messageHasEncryptedContent = true }
+                    else if blocks[i].messageHasEncryptedContent == nil { blocks[i].messageHasEncryptedContent = b.messageHasEncryptedContent }
                     blocks[i].text += b.text
                     if blocks[i].timestamp == nil { blocks[i].timestamp = b.timestamp }
                     blocks[i].rawJSON = b.rawJSON
                     if blocks[i].toolName == nil { blocks[i].toolName = b.toolName }
                     if blocks[i].toolInput == nil { blocks[i].toolInput = b.toolInput }
+                    if blocks[i].toolNamespace == nil { blocks[i].toolNamespace = b.toolNamespace }
+                    if blocks[i].toolCallID == nil { blocks[i].toolCallID = b.toolCallID }
+                    if blocks[i].toolOutputValue == nil { blocks[i].toolOutputValue = b.toolOutputValue }
+                    if blocks[i].toolSidecar == nil { blocks[i].toolSidecar = b.toolSidecar }
+                    if blocks[i].toolDisposition == nil { blocks[i].toolDisposition = b.toolDisposition }
                     blocks[i].isErrorOutput = blocks[i].isErrorOutput || b.isErrorOutput
                     // firstEventIndex stays the merge chain's FIRST event (already set).
                 } else {
@@ -537,8 +663,21 @@ struct SessionTranscriptBuilder {
         }
         // Assign the stable global block index as the final stream offset. Done in
         // a single pass after coalescing so merges don't leave gaps.
+        var hasEligibleUserBlock = false
         for i in blocks.indices {
             blocks[i].globalBlockIndex = i
+            // Raw consumers keep their original stream; meta presentation is Session-only.
+            if blocks[i].kind != .meta || includeMessageContext {
+                blocks[i].presentation = MessageOriginClassifier.presentation(for: blocks[i], context: .init(
+                    source: source, subagentType: subagentType, isFirstUserBlock: !hasEligibleUserBlock,
+                    parentSessionID: parentSessionID))
+            }
+            if blocks[i].kind == .user {
+                switch blocks[i].presentation?.origin {
+                case .typed, .parentTask: hasEligibleUserBlock = true
+                default: break
+                }
+            }
         }
         return blocks
     }
@@ -570,6 +709,16 @@ struct SessionTranscriptBuilder {
     private static func expandUserEmbeddedNoticesIfNeeded(block: LogicalBlock) -> [LogicalBlock] {
         guard block.kind == .user else { return [block] }
         if !block.text.localizedCaseInsensitiveContains("<turn_aborted") { return [block] }
+        // Provenance knows which items the user typed (only mixed messages carry typed display
+        // text). A notice tag in injected items is context, not an interruption, so split the
+        // typed items alone; splitting the raw text would hand an injected notice the typed origin.
+        if block.messageOrigin == .typed, let typed = block.messageDisplayText {
+            guard typed.localizedCaseInsensitiveContains("<turn_aborted") else { return [block] }
+            var typedBlock = block
+            typedBlock.text = typed
+            typedBlock.messageDisplayText = nil
+            return splitTurnAbortedBlocks(from: typedBlock)
+        }
         return splitTurnAbortedBlocks(from: block)
     }
     
@@ -583,16 +732,11 @@ struct SessionTranscriptBuilder {
         var found = false
         
         func makeBlock(kind: LogicalBlock.Kind, text: String) -> LogicalBlock {
-            LogicalBlock(kind: kind,
-                         text: text,
-                         timestamp: block.timestamp,
-                         messageID: block.messageID,
-                         toolName: block.toolName,
-                         isDelta: block.isDelta,
-                         toolInput: block.toolInput,
-                         isErrorOutput: block.isErrorOutput,
-                         eventID: block.eventID,
-                         rawJSON: block.rawJSON)
+            var part = block
+            part.kind = kind
+            part.text = text
+            part.presentation = nil
+            return part
         }
         
         while let openStart = remainder.range(of: "<turn_aborted", options: [.caseInsensitive]) {
@@ -636,7 +780,29 @@ struct SessionTranscriptBuilder {
             out.append(makeBlock(kind: .user, text: tail))
         }
         
-        return found ? out : [block]
+        guard found else { return [block] }
+        if let display = block.messageDisplayText {
+            var displayBlock = block
+            displayBlock.text = display
+            displayBlock.messageDisplayText = nil
+            let displayParts = splitTurnAbortedBlocks(from: displayBlock)
+            let userDisplayParts = displayParts.filter { $0.kind == .user }.map(\.text)
+            let userIndices = out.indices.filter { out[$0].kind == .user }
+            for (offset, index) in userIndices.enumerated() {
+                // Envelope decoding may have changed the notice structure. Preserve
+                // the complete display body once rather than dropping unmatched parts.
+                out[index].messageDisplayText = userIndices.count == userDisplayParts.count
+                    ? userDisplayParts[offset]
+                    : (offset == 0 ? userDisplayParts.joined(separator: "\n") : "")
+            }
+            for index in out.indices where out[index].kind == .meta {
+                out[index].messageDisplayText = nil
+            }
+            if userIndices.isEmpty, let first = out.indices.first {
+                out[first].messageDisplayText = display
+            }
+        }
+        return out
     }
     
 	    private static func turnAbortedDisplayText(from inner: String) -> String? {
@@ -674,12 +840,13 @@ struct SessionTranscriptBuilder {
         switch b.kind {
         case .user:
             let head = timestampPrefix(b.timestamp, options: options)
-            if let nl = b.text.firstIndex(of: "\n") {
-                let first = String(b.text[..<nl])
-                let rest = String(b.text[nl...])
+            let typed = b.typedText
+            if let nl = typed.firstIndex(of: "\n") {
+                let first = String(typed[..<nl])
+                let rest = String(typed[nl...])
                 return head + userPrefix + first + rest
             } else {
-                return head + userPrefix + b.text
+                return head + userPrefix + typed
             }
         case .assistant:
             let head = timestampPrefix(b.timestamp, options: options)
@@ -739,19 +906,29 @@ struct SessionTranscriptBuilder {
 
     private static func renderToolCallLabel(name: String?, args: String?) -> String {
         var label = name ?? "?"
+        if let primary = TranscriptToolSummary.callLabelArgument(toolName: name, toolInput: args) {
+            let oneLine = primary.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " ")
+            return truncateTo(label + " " + oneLine, max: 120)
+        }
         if let a = args, !a.isEmpty {
-            let compact = compactJSONOneLine(a)
+            // A large input is never parsed whole for a label: show its start on one line.
+            let compact = a.utf8.count > TranscriptToolSummary.largeInputBytes ? collapsedStart(of: a) : compactJSONOneLine(a)
             let truncated = truncateTo(compact, max: 120)
             label += " " + truncated
         }
         return label
     }
 
+    /// The first 2,048 characters of `s` with whitespace runs collapsed to one space.
+    private static func collapsedStart(of s: String) -> String {
+        String(s.prefix(2_048)).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     private static func compactJSONOneLine(_ s: String) -> String {
         guard let data = s.data(using: .utf8) else { return s }
         if let obj = try? JSONSerialization.jsonObject(with: data, options: []) {
-            if let min = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
-                return String(data: min, encoding: .utf8) ?? s
+            if let min = ToolJSON.string(from: obj, pretty: false) {
+                return min
             }
         }
         // Not JSON – compress whitespace by splitting on whitespace/newlines

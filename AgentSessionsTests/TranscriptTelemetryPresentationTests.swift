@@ -2,6 +2,48 @@ import XCTest
 @testable import AgentSessions
 
 final class TranscriptTelemetryPresentationTests: XCTestCase {
+    private func activityProjection(_ entries: [(SessionEventKind, MessageOrigin, String)]) -> [SessionTranscriptBuilder.LogicalBlock] {
+        let events = entries.enumerated().map { index, entry in
+            var event = SessionEvent(id: "activity-\(index)", timestamp: nil, kind: entry.0, role: nil,
+                                     text: entry.2, toolName: nil, toolInput: nil, toolOutput: nil,
+                                     messageID: "activity-\(index)", parentID: nil, isDelta: false, rawJSON: "{}")
+            event.messageOrigin = entry.1
+            return event
+        }
+        let session = Session(id: UUID().uuidString, source: .codex, startTime: nil, endTime: nil,
+                              model: nil, filePath: "/tmp/activity-projection.jsonl", eventCount: events.count, events: events)
+        return SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false, includeMessageContext: true)
+    }
+
+    func testSessionActivityCountsTypedMessagesIncludingRepeatsButNotRetainedPeer() {
+        var blocks = activityProjection([(.user, .typed, "same prompt"), (.meta, .peer(from: "Ada"), "peer reply"), (.user, .typed, "same prompt")])
+        blocks.append(TranscriptTestFixtures.block(.assistant, text: "answer"))
+        blocks.append(TranscriptTestFixtures.block(.toolCall, text: "tool"))
+        XCTAssertEqual(blocks.prefix(3).map(\.kind), [.user, .user, .user], "the projection retains a peer as a user-kind block")
+        let source = telemetry(events: [])
+        let activity = TranscriptTelemetryPresentation.activity(source, blocks: blocks, usesMessageOrigins: true)
+        XCTAssertEqual(activity.userBlocks, 2, "repeated typed messages are both real human messages")
+        XCTAssertEqual(activity.assistantBlocks, 1)
+        XCTAssertEqual(activity.toolBlocks, 1)
+        XCTAssertEqual(activity.requests, TranscriptTelemetryPresentation.activity(source, blocks: blocks).requests)
+        XCTAssertEqual(blocks.prefix(3).map(\.globalBlockIndex), [0, 1, 2], "history indices remain projected")
+    }
+
+    func testSessionActivityChildParentTaskDoesNotCountAsYou() {
+        let blocks = activityProjection([(.user, .parentTask, "delegated task"), (.meta, .peer(from: "coordinator"), "status")])
+        let activity = TranscriptTelemetryPresentation.activity(telemetry(events: []), blocks: blocks, usesMessageOrigins: true)
+        XCTAssertEqual(activity.userBlocks, 0)
+    }
+
+    func testActivityRawDefaultRetainsUserKindCounting() {
+        let blocks = activityProjection([(.user, .typed, "prompt"), (.meta, .peer(from: "Ada"), "reply"), (.user, .parentTask, "task")])
+        let source = telemetry(events: [])
+        let defaultActivity = TranscriptTelemetryPresentation.activity(source, blocks: blocks)
+        XCTAssertEqual(defaultActivity.userBlocks, blocks.filter { $0.kind == .user }.count)
+        XCTAssertEqual(defaultActivity.userBlocks, 3)
+        XCTAssertEqual(defaultActivity, TranscriptTelemetryPresentation.activity(source, blocks: blocks, usesMessageOrigins: false))
+    }
+
     func testTelemetryLoadRequestDoesNotTrackSelectionWhileInspectorIsHidden() {
         let selection = TranscriptTelemetrySelectionIdentity(
             source: .codex, sessionID: "session-a", filePath: "/tmp/a.jsonl")
@@ -124,13 +166,28 @@ final class TranscriptTelemetryPresentationTests: XCTestCase {
     @MainActor
     func testMarkerSplitsToolGroupAndPreservesBodyIDsAndText() {
         let blocks = [block(0, record: 1, kind: .toolCall), block(1, record: 3, kind: .toolOut)]
+        // Unpaired (no index): two one-block invocations; the marker ends the run, so no group.
         let rows = BlockTableController.rowsWithTelemetry(from: blocks[...], markers: [1: ["Model changed"]],
                                                           totalBlockCount: 2, activeRoles: [])
         XCTAssertEqual(rows.map(\.id), [0, -2, 1])
-        XCTAssertEqual(rows[0].primaryBlock, blocks[0])
-        XCTAssertEqual(rows[2].primaryBlock, blocks[1])
+        XCTAssertEqual(rows.map(\.anchorBlockIndex), [0, -2, 1])
+        for row in [rows[0], rows[2]] {
+            guard case .toolInvocation(let invocation) = row.content else { return XCTFail("expected an invocation row") }
+            XCTAssertEqual(invocation.position, .solo)
+            XCTAssertNil(invocation.groupID)
+        }
         XCTAssertTrue(rows[1].isMeta)
         XCTAssertFalse(rows[1].isToolCard)
+        XCTAssertEqual(rows[1].bodyText, "Model changed")
+
+        // Paired: the call and its output are one invocation row; the marker above the output
+        // stays, and every block id is untouched.
+        let index = ToolInvocationIndex.build(blocks: blocks, source: .codex)
+        let paired = BlockTableController.rowsWithTelemetry(from: blocks[...], markers: [1: ["Model changed"]],
+                                                            totalBlockCount: 2, activeRoles: [], index: index)
+        XCTAssertEqual(paired.map(\.id), [0, -2])
+        XCTAssertEqual(blocks.map(\.globalBlockIndex), [0, 1])
+        XCTAssertEqual(blocks.map(\.text), ["Original message 0", "Original message 1"])
     }
 
     @MainActor

@@ -511,6 +511,28 @@ final class ClaudeSessionParser {
             role = baseText?.isEmpty == false ? "assistant" : "meta"
         }
 
+        let recordMessageText = (obj["message"] as? [String: Any]).flatMap(extractContent(from:)) ?? baseText
+        func messageOrigin(for text: String?) -> MessageOrigin? {
+            guard obj["type"] as? String == "user", role == "user" else { return nil }
+            if obj["isCompactSummary"] as? Bool == true { return .compaction }
+            let origin = (obj["origin"] as? [String: Any])?["kind"] as? String
+            if origin == "task-notification" { return .notification(kind: "task") }
+            if origin == "peer" { return .peer(from: "another session") }
+            if origin == "coordinator" { return .peer(from: "coordinator") }
+            if obj["isMeta"] as? Bool == true {
+                let prefix = "Base directory for this skill:"
+                if let text, text.hasPrefix(prefix) {
+                    let firstLine = text.components(separatedBy: "\n")[0]
+                    let path = String(firstLine.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                    return .skill(name: URL(fileURLWithPath: path).lastPathComponent)
+                }
+                return .context(kinds: ["claude.meta"])
+            }
+            if origin == "human" { return .typed }
+            if let origin { return .context(kinds: ["claude.origin.\(origin)"]) }
+            return nil
+        }
+
         // If we have message.content blocks, split them into events in-order.
         if let message = obj["message"] as? [String: Any],
            let contentArray = message["content"] as? [[String: Any]] {
@@ -563,6 +585,7 @@ final class ClaudeSessionParser {
                         rawJSON: rawJSON
                     )
                 )
+                out[out.count - 1].messageOrigin = messageOrigin(for: recordMessageText ?? joined)
             }
 
             for block in contentArray {
@@ -608,6 +631,7 @@ final class ClaudeSessionParser {
                             toolName: toolName,
                             toolInput: toolInput,
                             toolOutput: nil,
+                            toolCallID: nonEmptyString(block["id"]),
                             messageID: messageID,
                             parentID: parentID,
                             isDelta: false,
@@ -622,34 +646,40 @@ final class ClaudeSessionParser {
                     let role: String?
                     let text: String?
                     let toolOutputField: String?
+                    let toolDisposition: ToolDisposition?
                     switch disposition {
                     case .runtimeError:
                         kind = .error
                         role = "tool"
                         text = toolOutput
                         toolOutputField = nil
+                        toolDisposition = .runtimeError
                     case .rejectedOrPermissions:
                         // Hide by default (meta is off), but keep for JSON inspection.
                         kind = .meta
                         role = "system"
                         text = toolOutput.flatMap { "Rejected tool use: " + $0 }
                         toolOutputField = nil
+                        toolDisposition = .rejected
                     case .notFoundOrMismatch:
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     case .otherToolFailure:
                         // Keep visible as tool output unless we can confidently call it runtime-ish.
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     case .ok:
                         kind = .tool_result
                         role = "tool"
                         text = nil
                         toolOutputField = toolOutput
+                        toolDisposition = nil
                     }
                     out.append(
                         SessionEvent(
@@ -661,6 +691,9 @@ final class ClaudeSessionParser {
                             toolName: (block["name"] as? String) ?? (block["tool"] as? String),
                             toolInput: nil,
                             toolOutput: toolOutputField,
+                            toolCallID: nonEmptyString(block["tool_use_id"]),
+                            toolSidecar: toolResultSidecar(from: obj, block: block),
+                            toolDisposition: toolDisposition,
                             messageID: messageID,
                             parentID: parentID,
                             isDelta: false,
@@ -704,8 +737,7 @@ final class ClaudeSessionParser {
         let et = eventType?.lowercased()
         let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
         let baseKind = SessionEventKind.from(role: role, type: eventType)
-        return [
-            SessionEvent(
+        var event = SessionEvent(
                 id: baseEventID,
                 timestamp: timestamp,
                 kind: isMetaEvent ? .meta : baseKind,
@@ -719,7 +751,26 @@ final class ClaudeSessionParser {
                 isDelta: false,
                 rawJSON: rawJSON
             )
-        ]
+        event.messageOrigin = messageOrigin(for: baseText)
+        return [event]
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let s = value as? String, !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Sidecar for a tool_result: `stdout`/`stderr`/`interrupted` from a `toolUseResult` object
+    /// (empty strings kept as ""), `isError` from the block's `is_error`. Nil when none is present.
+    private static func toolResultSidecar(from obj: [String: Any], block: [String: Any]) -> ToolSidecar? {
+        var sidecar = ToolSidecar()
+        if let result = obj["toolUseResult"] as? [String: Any] {
+            sidecar.stdout = result["stdout"] as? String
+            sidecar.stderr = result["stderr"] as? String
+            sidecar.interrupted = result["interrupted"] as? Bool
+        }
+        sidecar.isError = block["is_error"] as? Bool
+        return sidecar == ToolSidecar() ? nil : sidecar
     }
 
     private enum ToolResultDisposition {
@@ -1259,11 +1310,8 @@ final class ClaudeSessionParser {
 
     private static func stringifyJSON(_ any: Any) -> String? {
         if let str = any as? String { return str }
-        if JSONSerialization.isValidJSONObject(any) {
-            if let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
-               let str = String(data: data, encoding: .utf8) {
-                return str
-            }
+        if let str = ToolJSON.string(from: any, pretty: true) {
+            return str
         }
         return String(describing: any)
     }
@@ -1271,13 +1319,14 @@ final class ClaudeSessionParser {
     private static func stringifyJSONBounded(_ any: Any) -> String? {
         if let str = any as? String { return str }
         guard JSONSerialization.isValidJSONObject(any) else { return String(describing: any) }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+        guard let text = ToolJSON.string(from: any, pretty: false) else {
             return String(describing: any)
         }
-        if data.count > maxFallbackStringifyBytes {
-            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        let byteCount = text.utf8.count
+        if byteCount > maxFallbackStringifyBytes {
+            return "[OMITTED large JSON payload bytes=\(byteCount)]"
         }
-        return String(data: data, encoding: .utf8)
+        return text
     }
 
     private static func sanitizeLargeStrings(in any: Any) -> Any {

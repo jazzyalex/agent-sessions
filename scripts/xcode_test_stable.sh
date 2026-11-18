@@ -12,7 +12,8 @@ DESTINATION="platform=macOS,arch=arm64"
 DERIVED_DATA_PATH=".deriveddata-tests"
 
 exec env AGENT_SESSIONS_TEST_MODE=1 \
-  TEST_RUNNER_AS_REAL_SESSION_REPLAY="${AS_REAL_SESSION_REPLAY:-0}" xcodebuild \
+  TEST_RUNNER_AS_REAL_SESSION_REPLAY="${AS_REAL_SESSION_REPLAY:-0}" \
+  TEST_RUNNER_AS_TOOL_CORPUS_CHECK="${AS_TOOL_CORPUS_CHECK:-0}" xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \
   -configuration "${CONFIGURATION}" \

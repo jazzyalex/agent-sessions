@@ -9,13 +9,13 @@ final class ClaudeVSCodeLauncherTests: XCTestCase {
     // MARK: - Link
 
     func testSessionURLUsesExtensionOpenHandler() {
-        let url = ClaudeVSCodeLauncher.sessionURL(sessionID: sessionID, scheme: "vscode")
-        XCTAssertEqual(url?.absoluteString, "vscode://anthropic.claude-code/open?session=\(sessionID)")
+        let url = ClaudeVSCodeLauncher.sessionURL(sessionID: sessionID, scheme: "vscode", windowID: 12)
+        XCTAssertEqual(url?.absoluteString, "vscode://anthropic.claude-code/open?session=\(sessionID)&windowId=12")
     }
 
     func testSessionURLForInsidersUsesItsScheme() {
-        let url = ClaudeVSCodeLauncher.sessionURL(sessionID: sessionID, scheme: "vscode-insiders")
-        XCTAssertEqual(url?.absoluteString, "vscode-insiders://anthropic.claude-code/open?session=\(sessionID)")
+        let url = ClaudeVSCodeLauncher.sessionURL(sessionID: sessionID, scheme: "vscode-insiders", windowID: 12)
+        XCTAssertEqual(url?.absoluteString, "vscode-insiders://anthropic.claude-code/open?session=\(sessionID)&windowId=12")
     }
 
     // MARK: - Request validation
@@ -80,42 +80,91 @@ final class ClaudeVSCodeLauncherTests: XCTestCase {
         XCTAssertTrue(workspace.calls.isEmpty, "Nothing may launch without an editor")
     }
 
-    func testOpenWithRunningEditorOpensFolderThenWaitsThenSendsLink() async {
+    func testOpenWaitsForVerifiedWindowAndTargetsIt() async {
         let folder = makeTemporaryDirectory()
-        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], running: ["com.microsoft.VSCode"])
+        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], windows: [nil, 12])
         let outcome = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: folder, workspace: workspace)
-        XCTAssertEqual(outcome, .launched)
+        XCTAssertEqual(outcome, .sent)
         XCTAssertEqual(workspace.calls, [
             .openFolder(folder.path),
-            .pause(ClaudeVSCodeLauncher.warmStartDelay),
-            .openURL("vscode://anthropic.claude-code/open?session=\(sessionID)"),
+            .verify(folder.path),
+            .verify(folder.path),
+            .openURL("vscode://anthropic.claude-code/open?session=\(sessionID)&windowId=12"),
         ])
     }
 
-    func testOpenWithStoppedEditorWaitsLonger() async {
-        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], running: [])
-        _ = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: makeTemporaryDirectory(), workspace: workspace)
-        XCTAssertTrue(workspace.calls.contains(.pause(ClaudeVSCodeLauncher.coldStartDelay)))
+    func testUnverifiedWorkspaceDoesNotSendURI() async {
+        let folder = makeTemporaryDirectory()
+        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], windows: [nil])
+        let outcome = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: folder,
+                                                       workspace: workspace, verificationTimeout: .zero)
+        guard case .failure = outcome else { return XCTFail("An unverified folder must fail") }
+        XCTAssertEqual(workspace.calls, [.openFolder(folder.path), .verify(folder.path)])
     }
 
     func testOpenFallsBackToInsiders() async {
-        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCodeInsiders"], running: ["com.microsoft.VSCodeInsiders"])
+        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCodeInsiders"])
         _ = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: makeTemporaryDirectory(), workspace: workspace)
-        XCTAssertEqual(workspace.calls.last, .openURL("vscode-insiders://anthropic.claude-code/open?session=\(sessionID)"))
+        XCTAssertEqual(workspace.calls.last, .openURL("vscode-insiders://anthropic.claude-code/open?session=\(sessionID)&windowId=12"))
     }
 
     func testOpenDoesNotSendLinkWhenFolderFailsToOpen() async {
-        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], running: ["com.microsoft.VSCode"], folderOpenFails: true)
-        let outcome = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: makeTemporaryDirectory(), workspace: workspace)
+        let folder = makeTemporaryDirectory()
+        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], folderOpenFails: true)
+        let outcome = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: folder, workspace: workspace)
         guard case .failure = outcome else { return XCTFail("Expected a failure when the folder can't open") }
-        XCTAssertFalse(workspace.calls.contains { if case .openURL = $0 { return true } else { return false } },
-                       "The link would start a fresh conversation in whatever window is focused")
+        XCTAssertEqual(workspace.calls, [.openFolder(folder.path)])
     }
 
     func testOpenReportsRejectedLink() async {
-        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], running: ["com.microsoft.VSCode"], linkAccepted: false)
+        let workspace = FakeWorkspace(installed: ["com.microsoft.VSCode"], linkAccepted: false)
         let outcome = await ClaudeVSCodeLauncher.open(sessionID: sessionID, workingDirectory: makeTemporaryDirectory(), workspace: workspace)
         guard case .failure = outcome else { return XCTFail("Expected a failure when the link is rejected") }
+    }
+
+    func testLockRequiresExactSingleFolderAndEditor() throws {
+        let root = makeTemporaryDirectory()
+        let lock = root.appendingPathComponent("12345.lock")
+        let target = root.appendingPathComponent("one/shared")
+        let other = root.appendingPathComponent("two/shared")
+        func writeLock(_ folders: [URL]) throws {
+            try JSONSerialization.data(withJSONObject: [
+                "pid": 3000, "workspaceFolders": folders.map(\.path),
+                "ideName": "Visual Studio Code", "transport": "ws",
+            ]).write(to: lock)
+        }
+        try writeLock([other])
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.readLock(lock, matching: target, editorName: "Visual Studio Code"))
+        try writeLock([target, other])
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.readLock(lock, matching: target, editorName: "Visual Studio Code"))
+        try writeLock([target])
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.readLock(lock, matching: target, editorName: "Visual Studio Code - Insiders"))
+        XCTAssertEqual(ClaudeVSCodeWindowEvidence.readLock(lock, matching: target, editorName: "Visual Studio Code")?.port, 12345)
+    }
+
+    func testWindowIDAmbiguityAndWrongEditorFailClosed() {
+        let status = """
+                    CPU % Mem MB PID Process
+                    0 100 500 code
+                    0 100 501 window [2] (shared)
+                    0 100 502 extension-host [2]
+                    0 100 503 window [21] (shared)
+                    0 100 504 extension-host [21]
+                    """
+        typealias Listener = ClaudeVSCodeWindowEvidence.Listener
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.windowID(in: status, listeners: [Listener(editorPID: 500, processID: 502)]))
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.windowID(in: status, listeners: [Listener(editorPID: 900, processID: 504)]))
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.windowID(in: status, listeners: [Listener(editorPID: 500, processID: 501)]))
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.windowID(in: status, listeners: [
+            Listener(editorPID: 500, processID: 502), Listener(editorPID: 500, processID: 504),
+        ]))
+        XCTAssertEqual(ClaudeVSCodeWindowEvidence.windowID(in: status, listeners: [Listener(editorPID: 500, processID: 504)]), 21)
+    }
+
+    func testListenerMustHaveOneLiveOwner() {
+        XCTAssertEqual(ClaudeVSCodeWindowEvidence.listenerPID(in: "p500\nf1\n"), 500)
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.listenerPID(in: "p500\np501\n"))
+        XCTAssertNil(ClaudeVSCodeWindowEvidence.listenerPID(in: ""))
     }
 
     // MARK: - Helpers
@@ -132,21 +181,19 @@ final class ClaudeVSCodeLauncherTests: XCTestCase {
 private final class FakeWorkspace: ClaudeVSCodeWorkspace {
     enum Call: Equatable {
         case openFolder(String)
-        case pause(Duration)
+        case verify(String)
         case openURL(String)
     }
 
-    struct FolderOpenError: Error {}
-
     private let installed: Set<String>
-    private let running: Set<String>
+    private var windows: [Int?]
     private let folderOpenFails: Bool
     private let linkAccepted: Bool
     private(set) var calls: [Call] = []
 
-    init(installed: Set<String>, running: Set<String> = [], folderOpenFails: Bool = false, linkAccepted: Bool = true) {
+    init(installed: Set<String>, windows: [Int?] = [12], folderOpenFails: Bool = false, linkAccepted: Bool = true) {
         self.installed = installed
-        self.running = running
+        self.windows = windows
         self.folderOpenFails = folderOpenFails
         self.linkAccepted = linkAccepted
     }
@@ -155,21 +202,18 @@ private final class FakeWorkspace: ClaudeVSCodeWorkspace {
         installed.contains(bundleIdentifier) ? URL(fileURLWithPath: "/Applications/\(bundleIdentifier).app") : nil
     }
 
-    func isRunning(bundleIdentifier: String) -> Bool {
-        running.contains(bundleIdentifier)
-    }
-
-    func openFolder(_ folder: URL, withApplicationAt applicationURL: URL) async throws {
+    func openFolder(_ folder: URL, withApplicationAt applicationURL: URL) async -> Bool {
         calls.append(.openFolder(folder.path))
-        if folderOpenFails { throw FolderOpenError() }
+        return !folderOpenFails
     }
 
-    func openURL(_ url: URL) -> Bool {
+    func verifiedWindow(for folder: URL, editor: ClaudeVSCodeLauncher.Editor, applicationURL: URL) async -> Int? {
+        calls.append(.verify(folder.path))
+        return windows.isEmpty ? nil : windows.removeFirst()
+    }
+
+    func openURL(_ url: URL, withApplicationAt applicationURL: URL) async -> Bool {
         calls.append(.openURL(url.absoluteString))
         return linkAccepted
-    }
-
-    func pause(for duration: Duration) async {
-        calls.append(.pause(duration))
     }
 }

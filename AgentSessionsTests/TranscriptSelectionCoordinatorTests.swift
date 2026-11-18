@@ -90,6 +90,29 @@ final class TranscriptSelectionCoordinatorTests: XCTestCase {
                        NSRange(location: 0, length: lengths[2]))
     }
 
+    /// The table layer can replace a block's substring (tool rows copy their visible text); an
+    /// empty replacement drops the block.
+    func testCopyTextHookReplacesAndDropsBlocks() {
+        let c = coord((0, 0), (2, 8))
+        let texts = ["0123456789", "abcde", "ABCDEFGH"]
+        let copied = c.selectedText(blockTexts: texts) { ordinal, range in
+            switch ordinal {
+            case 1: return "summary \(range.length)"
+            case 2: return ""
+            default: return nil
+            }
+        }
+        XCTAssertEqual(copied, "0123456789\n\nsummary 5")
+    }
+
+    func testToolTextCopySkipsGutterAndControls() {
+        let text = NSMutableAttributedString(string: "\t1\tlet a\n", attributes: [:])
+        text.addAttribute(.toolGutter, value: true, range: NSRange(location: 0, length: 3))
+        text.append(NSAttributedString(string: "+3 lines", attributes: [.toolNoCopy: true]))
+        XCTAssertEqual(ToolDetailRenderer.copyText(of: text, in: NSRange(location: 0, length: text.length)), "let a\n")
+        XCTAssertEqual(ToolDetailRenderer.copyText(of: text, in: NSRange(location: 1, length: 5)), "let")
+    }
+
     /// An empty middle block (textLength 0) contributes no text and is dropped
     /// from the joined output (no spurious blank segment / double separator).
     func testEmptyMiddleBlockDropped() {

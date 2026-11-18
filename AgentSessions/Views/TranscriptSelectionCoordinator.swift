@@ -13,11 +13,11 @@ import Foundation
 /// struct free of row-identity bookkeeping.
 ///
 /// Locked P1 decisions encoded here:
-/// - Collapsed tool cards contribute NOTHING to selection (`excludedBlockOrdinals`).
-///   Meta-separator rows are likewise excluded by the table layer.
-/// - Expanded tool cards contribute their RENDERED (possibly truncated) text —
-///   "copy what you see". The table layer passes that exact string as the
-///   block's text.
+/// - Meta-separator rows contribute NOTHING to selection (`excludedBlockOrdinals`).
+/// - Tool rows (Task 14) contribute their visible text: a group header its title,
+///   an invocation row its L1 lines and, when open, its L2 body. The table layer
+///   passes a string that defines the row's offset space and supplies the copied
+///   text through `selectedText(blockTexts:copyText:)`.
 /// - Copy joins contributing blocks with "\n\n".
 struct TranscriptSelectionCoordinator: Equatable {
     struct Position: Comparable, Equatable {
@@ -70,11 +70,17 @@ struct TranscriptSelectionCoordinator: Equatable {
     /// drop out entirely — no blank segments, no doubled separators. Full
     /// middle-block selections (length == textLength) are included by this rule
     /// since their length is > 0.
-    func selectedText(blockTexts: [String]) -> String {
+    ///
+    /// `copyText` lets the table layer replace a block's substring: it gets the block ordinal and
+    /// the non-empty selected range, and returns the text to copy, or nil to use the substring
+    /// (tool rows copy their visible text, not the string their offsets are measured in). A
+    /// returned empty string drops the block.
+    func selectedText(blockTexts: [String], copyText: ((Int, NSRange) -> String?)? = nil) -> String {
         blockTexts.indices.compactMap { i -> String? in
             let ns = blockTexts[i] as NSString
             guard let r = selectionRange(blockOrdinal: i, textLength: ns.length),
                   r.length > 0 else { return nil }
+            if let custom = copyText?(i, r) { return custom.isEmpty ? nil : custom }
             return ns.substring(with: r)
         }.joined(separator: "\n\n")
     }

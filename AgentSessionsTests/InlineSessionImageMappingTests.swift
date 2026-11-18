@@ -244,6 +244,22 @@ final class InlineSessionImageMappingTests: XCTestCase {
         """
     }
 
+    func testSessionProjectionMapsImageAfterRetainedContext() throws {
+        let url = try writeTempJSONL(claudeRequestLogImageTranscript(base64: "QUJDRA==") + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let parsed = try XCTUnwrap(ClaudeSessionParser.parseFileFull(at: url))
+        var meta = makeEvent(id: "context", kind: .meta, text: "environment", rawJSON: "{}")
+        meta.messageOrigin = .context(kinds: ["environment"])
+        let events = [meta] + parsed.events
+        let session = Session(id: "image-projection", source: .claude, startTime: nil, endTime: nil, model: nil, filePath: url.path, eventCount: events.count, events: events)
+        let raw = SessionInlineImageMapper.imagesByUserBlockIndex(for: session)
+        let rich = SessionInlineImageMapper.imagesByUserBlockIndex(for: session, includeMessageContext: true)
+        XCTAssertEqual(raw.keys.sorted(), [0])
+        XCTAssertEqual(rich.keys.sorted(), [1])
+        XCTAssertEqual(raw[0]?.map(\.id), rich[1]?.map(\.id))
+        XCTAssertEqual(rich[1]?.count, 1)
+    }
+
     func testClaudeImageMapsToItsPromptAcrossSkippedRequestLogLines() throws {
         let url = try writeTempJSONL(claudeRequestLogImageTranscript(base64: "QUJDRA==") + "\n")
         defer { try? FileManager.default.removeItem(at: url) }

@@ -46,6 +46,7 @@ extension PreferencesView {
                             case .warp:        codexMode = .warp
                             case .warpPreview: codexMode = .warpPreview
                             case .ghostty:     codexMode = .ghostty
+                            case .macterm:     codexMode = .macterm
                             default:           codexMode = .terminal
                             }
                             resumeSettings.setLaunchMode(codexMode)
@@ -395,6 +396,9 @@ extension PreferencesView {
                 Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
                     .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
 
+                Toggle("Show harness context in Session view", isOn: $sessionShowContext)
+                    .help("Show text the agent’s harness added: instructions, environment, skill files")
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height
@@ -557,7 +561,7 @@ struct DetectedTerminal: Identifiable {
 }
 
 private func detectInstalledTerminals() -> [DetectedTerminal] {
-    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview, .ghostty]
+    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview, .ghostty, .macterm]
     return candidates.filter { kind in
         guard let bundle = kind.bundleIdentifier else { return false }
         return isTerminalInstalled(bundleId: bundle)

@@ -437,4 +437,23 @@ final class KimiSessionParserTests: XCTestCase {
             .appendingPathComponent("wire.jsonl")
         XCTAssertNil(KimiSessionParser.parseFile(at: stray))
     }
+
+    /// Kimi 2.5.2 writes `environment.set_binding` and `tool_select.initialized`
+    /// at session start. They are setup records and must not become messages.
+    func testKimi252SetupRecordsAreNotMessages() throws {
+        let wire = try stagedFixture()
+        let text = try String(contentsOf: wire, encoding: .utf8)
+        let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: wire))
+        for type in ["environment.set_binding", "tool_select.initialized"] {
+            let marker = "\"type\":\"\(type)\""
+            let expected = text.split(separator: "\n").filter { $0.contains(marker) }.count
+            XCTAssertGreaterThan(expected, 0, "fixture must keep a \(type) record")
+            let events = session.events.filter {
+                let data = Data(base64Encoded: $0.rawJSON) ?? Data($0.rawJSON.utf8)
+                return String(decoding: data, as: UTF8.self).contains(marker)
+            }
+            XCTAssertEqual(events.count, expected, "each \(type) record survives parsing once")
+            XCTAssertTrue(events.allSatisfy { $0.kind == .meta }, "\(type) must stay metadata")
+        }
+    }
 }

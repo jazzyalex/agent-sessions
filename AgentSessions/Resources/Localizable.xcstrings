@@ -1,6 +1,1075 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "*Pasted text*": {
+      "comment": "Small label above text the person pasted into a prompt. Keep the asterisks (Markdown italics).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*Pasted text*"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*粘贴的文本*"
+          }
+        }
+      }
+    },
+    "A Claude session is already opening in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Claude session is already opening in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已有一个 Claude 会话正在 VS Code 中打开。"
+          }
+        }
+      }
+    },
+    "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@": {
+      "comment": "The placeholder is the folder that could not be verified in VS Code.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法验证 VS Code 中的 Claude Code 工作区。请打开并信任此文件夹，启用 Claude Code 扩展后重试。%@"
+          }
+        }
+      }
+    },
+    "Install VS Code and the Claude Code extension to open this session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install VS Code and the Claude Code extension to open this session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请安装 VS Code 和 Claude Code 扩展以打开此会话。"
+          }
+        }
+      }
+    },
+    "Open in VS Code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in VS Code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开"
+          }
+        }
+      }
+    },
+    "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开会话文件夹，验证 Claude Code 工作区后发送恢复链接。"
+          }
+        }
+      }
+    },
+    "The session’s folder doesn’t exist on this Mac. %@": {
+      "comment": "The placeholder is the original Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session’s folder doesn’t exist on this Mac. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话的文件夹在这台 Mac 上不存在。%@"
+          }
+        }
+      }
+    },
+    "This session has no Claude session ID.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no Claude session ID."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有 Claude 会话 ID。"
+          }
+        }
+      }
+    },
+    "This session has no working directory to open in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no working directory to open in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有可在 VS Code 中打开的工作目录。"
+          }
+        }
+      }
+    },
+    "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法接收 Claude 会话链接。请确认已安装并启用 Claude Code 扩展。"
+          }
+        }
+      }
+    },
+    "VS Code could not open the session’s folder. %@": {
+      "comment": "The placeholder is the Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not open the session’s folder. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法打开此会话的文件夹。%@"
+          }
+        }
+      }
+    },
+    "selected page": {
+      "comment": "Context kind: the part of a page the person selected.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "selected page"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选页面"
+          }
+        }
+      }
+    },
+    "environment": {
+      "comment": "Context kind: working directory, shell and date.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "environment"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "环境"
+          }
+        }
+      }
+    },
+    "instructions": {
+      "comment": "Context kind: agent instructions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "instructions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指令"
+          }
+        }
+      }
+    },
+    "open page": {
+      "comment": "Context kind: the page open in an app.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "open page"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开的页面"
+          }
+        }
+      }
+    },
+    "goal": {
+      "comment": "Context kind: the session goal.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "goal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目标"
+          }
+        }
+      }
+    },
+    "system reminder": {
+      "comment": "Context kind: a harness reminder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "system reminder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统提醒"
+          }
+        }
+      }
+    },
+    "harness note": {
+      "comment": "Context kind: a note the harness added.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "harness note"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具附注"
+          }
+        }
+      }
+    },
+    "command caveat": {
+      "comment": "Context kind: a caveat about local command output.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "command caveat"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令说明"
+          }
+        }
+      }
+    },
+    "workspace info": {
+      "comment": "Context kind: workspace details.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "workspace info"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区信息"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "comment": "Context kind: conversation metadata.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "metadata"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据"
+          }
+        }
+      }
+    },
+    "review history": {
+      "comment": "Context kind: earlier approval reviews.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "review history"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审核历史"
+          }
+        }
+      }
+    },
+    "completed": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成"
+          }
+        }
+      }
+    },
+    "failed": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
+    },
+    "running": {
+      "comment": "Background task status.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "running"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行中"
+          }
+        }
+      }
+    },
+    "stopped": {
+      "comment": "Background task status: killed or cancelled.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "stopped"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已停止"
+          }
+        }
+      }
+    },
+    "Request interrupted": {
+      "comment": "A recorded user-interruption control notice.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request interrupted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求已中断"
+          }
+        }
+      }
+    },
+    "Empty structured message": {
+      "comment": "Transcript empty decoded content label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty structured message"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空的结构化消息"
+          }
+        }
+      }
+    },
+    "No input text": {
+      "comment": "Transcript empty decoded content label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No input text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无输入文本"
+          }
+        }
+      }
+    },
+    "Peer message preview · remaining content omitted": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peer message preview · remaining content omitted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息预览 · 其余内容已省略"
+          }
+        }
+      }
+    },
+    "Additional content encrypted in the log": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Additional content encrypted in the log"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志中的其他内容已加密"
+          }
+        }
+      }
+    },
+    "Large structured message · shown without envelope decoding": {
+      "comment": "Transcript bounded display fallback.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large structured message · shown without envelope decoding"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型结构化消息 · 未进行封装解码"
+          }
+        }
+      }
+    },
+    "No answer": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No answer"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未回答"
+          }
+        }
+      }
+    },
+    "**Question:** %@\n\n**Answer:** %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**Question:** %@\n\n**Answer:** %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**问题：** %@\n\n**回答：** %@"
+          }
+        }
+      }
+    },
+    "*Memory citations: %lld*": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*Memory citations: %lld*"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "*记忆引用：%lld*"
+          }
+        }
+      }
+    },
+    "Context · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文 · %@"
+          }
+        }
+      }
+    },
+    "Skill loaded · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skill loaded · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载技能 · %@"
+          }
+        }
+      }
+    },
+    "Conversation compacted": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversation compacted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话已压缩"
+          }
+        }
+      }
+    },
+    "Scheduled prompt · %@ · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled prompt · %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计划提示 · %@ · %@"
+          }
+        }
+      }
+    },
+    "Harness asked the agent to continue": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Harness asked the agent to continue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行框架请求代理继续"
+          }
+        }
+      }
+    },
+    "Message from %@ · content encrypted in the log": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message from %@ · content encrypted in the log"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 %@ 的消息 · 日志中的内容已加密"
+          }
+        }
+      }
+    },
+    "Message received from %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message received from %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收到来自 %@ 的消息"
+          }
+        }
+      }
+    },
+    "Background task %@ · %@": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background task %@ · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台任务 %@ · %@"
+          }
+        }
+      }
+    },
+    "Background task update": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background task update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台任务更新"
+          }
+        }
+      }
+    },
+    "Large structured message · shown without field formatting": {
+      "comment": "Transcript message presentation. Preserve all format placeholders.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large structured message · shown without field formatting"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型结构化消息 · 未进行字段格式化"
+          }
+        }
+      }
+    },
+    "Allowed": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已允许"
+          }
+        }
+      }
+    },
+    "Denied": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Denied"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拒绝"
+          }
+        }
+      }
+    },
+    "**Justification:** %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**Justification:** %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**理由：** %@"
+          }
+        }
+      }
+    },
+    "Sandbox: %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sandbox: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙盒：%@"
+          }
+        }
+      }
+    },
+    "**%@** · risk %@ · user authorization %@": {
+      "comment": "Guardian approval presentation. Preserve placeholders and Markdown.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** · risk %@ · user authorization %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** · 风险 %@ · 用户授权 %@"
+          }
+        }
+      }
+    },
+    "Show harness context in Session view": {
+      "comment": "Settings toggle: show text the agent's harness added to the session (instructions, environment, skill files).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show harness context in Session view"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话视图中显示运行框架上下文"
+          }
+        }
+      }
+    },
+    "Show text the agent’s harness added: instructions, environment, skill files": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show text the agent’s harness added: instructions, environment, skill files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示代理运行框架添加的文本：指令、环境、技能文件"
+          }
+        }
+      }
+    },
+    "Message from %@": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message from %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 %@ 的消息"
+          }
+        }
+      }
+    },
+    "Task from parent session": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task from parent session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自父会话的任务"
+          }
+        }
+      }
+    },
+    "Approval request": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval request"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审批请求"
+          }
+        }
+      }
+    },
+    "Guardian verdict": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardian verdict"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "守护程序裁决"
+          }
+        }
+      }
+    },
+    "Command": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令"
+          }
+        }
+      }
+    },
+    "another session": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "another session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个会话"
+          }
+        }
+      }
+    },
+    "coordinator": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "coordinator"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "协调者"
+          }
+        }
+      }
+    },
+    "User": {
+      "comment": "Session transcript label for text the session's user typed (the viewer may not be that user). Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用户"
+          }
+        }
+      }
+    },
+    "Tool": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        }
+      }
+    },
+    "Meta": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meta"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据"
+          }
+        }
+      }
+    },
+    "×%lld": {
+      "comment": "Session transcript origin label or control. Preserve the placeholder and multiplication sign where present.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "×%lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "×%lld"
+          }
+        }
+      }
+    },
     "Missing API price component: %@": {
       "comment": "Quota Meter OpenCode row tooltip in the $ lens. %@ lists model:component pairs, e.g. gpt-5:cacheWrite5m.",
       "localizations": {
@@ -34,6 +1103,510 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Agent Sessions could not find saved Codex credentials." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Agent Sessions 找不到已保存的 Codex 凭据。" } }
+      }
+    },
+    "binary data (%lld KB)": {
+      "comment": "Transcript placeholder shown in place of base64 binary tool output. %lld is the decoded size in kilobytes.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "binary data (%lld KB)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "二进制数据（%lld KB）" } }
+      }
+    },
+    "tool.verb.ran": {
+      "comment": "Transcript tool row verb before a shell command or its description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ran" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行" } }
+      }
+    },
+    "tool.verb.polled": {
+      "comment": "Transcript tool row verb: the agent checked a running process for new output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Polled" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "轮询" } }
+      }
+    },
+    "tool.verb.sentInput": {
+      "comment": "Transcript tool row verb: the agent typed input into a running process.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sent input" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "发送输入" } }
+      }
+    },
+    "tool.verb.ranScript": {
+      "comment": "Transcript tool row verb before a script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ran script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行脚本" } }
+      }
+    },
+    "tool.verb.read": {
+      "comment": "Transcript tool row verb (past tense) before a file name the agent read.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Read" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "读取" } }
+      }
+    },
+    "tool.verb.created": {
+      "comment": "Transcript tool row verb before a file path the agent wrote.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Created" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "创建" } }
+      }
+    },
+    "tool.verb.edited": {
+      "comment": "Transcript tool row verb before a file name the agent edited.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Edited" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "编辑" } }
+      }
+    },
+    "tool.verb.searched": {
+      "comment": "Transcript tool row verb before a search pattern.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Searched" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "搜索" } }
+      }
+    },
+    "tool.verb.listed": {
+      "comment": "Transcript tool row verb before a directory the agent listed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Listed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "列出" } }
+      }
+    },
+    "tool.verb.fetched": {
+      "comment": "Transcript tool row verb before a URL the agent fetched.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Fetched" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "获取" } }
+      }
+    },
+    "tool.verb.searchedWeb": {
+      "comment": "Transcript tool row verb before a web search query.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Searched the web" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "搜索网页" } }
+      }
+    },
+    "tool.verb.updatedPlan": {
+      "comment": "Transcript tool row verb: the agent changed its task plan.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Updated plan" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "更新计划" } }
+      }
+    },
+    "tool.verb.subagent": {
+      "comment": "Transcript tool row label for a call that starts or messages another agent.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Subagent" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "子智能体" } }
+      }
+    },
+    "tool.verb.asked": {
+      "comment": "Transcript tool row verb before a question the agent asked the user.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Asked" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "提问" } }
+      }
+    },
+    "tool.verb.screenshot": {
+      "comment": "Transcript tool row label for an image or screenshot tool call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Screenshot" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "截图" } }
+      }
+    },
+    "tool.verb.output": {
+      "comment": "Transcript tool row label for tool output whose call is not shown.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出" } }
+      }
+    },
+    "exit %lld": {
+      "comment": "Transcript tool row chip: the command's exit code. %lld is the code.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "exit %lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "退出码 %lld" } }
+      }
+    },
+    "error": {
+      "comment": "Transcript tool row chip: the tool call failed without an exit code.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "error" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "错误" } }
+      }
+    },
+    "%lld lines": {
+      "comment": "Transcript tool row chip: number of output lines. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld line" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld lines" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld 行" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld 行" } }
+            }
+          }
+        }
+      }
+    },
+    "no output": {
+      "comment": "Transcript tool row chip: the tool call finished with empty output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无输出" } }
+      }
+    },
+    "no matches": {
+      "comment": "Transcript tool row chip: a search command found nothing.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no matches" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无匹配" } }
+      }
+    },
+    "cut by %@": {
+      "comment": "Transcript tool row chip: the agent shortened this output before saving it. %@ is the agent name, for example Codex.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cut by %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已被 %@ 截断" } }
+      }
+    },
+    "rejected by you": {
+      "comment": "Transcript tool row chip: the user declined this tool call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "rejected by you" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已被你拒绝" } }
+      }
+    },
+    "interrupted": {
+      "comment": "Transcript tool row chip: the tool call stopped because the turn was interrupted.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "interrupted" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已中断" } }
+      }
+    },
+    "no result recorded": {
+      "comment": "Transcript tool row chip: the session continued but stored no result for this call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result recorded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "未记录结果" } }
+      }
+    },
+    "no result yet": {
+      "comment": "Transcript tool row chip: the call is the latest one and has no result so far.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result yet" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "尚无结果" } }
+      }
+    },
+    "session %@": {
+      "comment": "Transcript tool row detail of a process poll. %@ is the process session ID, a number.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "session %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "会话 %@" } }
+      }
+    },
+    "cell %@": {
+      "comment": "Transcript tool row detail of a wait call. %@ is the ID of the running script cell.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cell %@" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "单元 %@" } }
+      }
+    },
+    "exec script · command %lld of %lld": {
+      "comment": "Transcript tool context line: this command is one of several in an exec script. The first number is its position, the second the total. 'exec' is a tool name and stays verbatim.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "exec script · command %1$lld of %2$lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "exec 脚本 · 第 %1$lld 条命令，共 %2$lld 条" } }
+      }
+    },
+    "message encrypted in the log (%lld chars)": {
+      "comment": "Transcript placeholder for an agent message stored encrypted in the session log. %lld is its length in characters.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "message encrypted in the log (%lld chars)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "消息在日志中已加密（%lld 个字符）" } }
+      }
+    },
+    "⋯ %lld more lines": {
+      "comment": "Transcript tool pane fold row: this many lines are hidden here. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ %lld more line" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ %lld more lines" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ 还有 %lld 行" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ 还有 %lld 行" } }
+            }
+          }
+        }
+      }
+    },
+    "⋯ %lld more lines past the display limit": {
+      "comment": "Transcript tool pane fold row after Show all stopped at its limit (20,000 lines or 2 MB). %lld is the count of lines not shown.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ %lld more line past the display limit" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ %lld more lines past the display limit" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "⋯ 另有 %lld 行超出显示上限" } },
+              "other": { "stringUnit": { "state": "translated", "value": "⋯ 另有 %lld 行超出显示上限" } }
+            }
+          }
+        }
+      }
+    },
+    "Show %lld more": {
+      "comment": "Transcript tool output fold link: shows the next hidden lines. %lld is the step, 500.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show %lld more" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "再显示 %lld 行" } }
+      }
+    },
+    "Show all": {
+      "comment": "Transcript tool pane fold link: shows every hidden line.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show all" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "全部显示" } }
+      }
+    },
+    "Copy output": {
+      "comment": "Transcript tool output fold link: copies the whole tool output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "复制输出" } }
+      }
+    },
+    "Copy script": {
+      "comment": "Transcript tool script pane fold link: copies the whole script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "复制脚本" } }
+      }
+    },
+    "… +%lld chars": {
+      "comment": "Transcript tool pane: a long line or value stops here; this many characters follow. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "… +%lld char" } },
+              "other": { "stringUnit": { "state": "translated", "value": "… +%lld chars" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "… 另有 %lld 个字符" } },
+              "other": { "stringUnit": { "state": "translated", "value": "… 另有 %lld 个字符" } }
+            }
+          }
+        }
+      }
+    },
+    "Show script": {
+      "comment": "Transcript tool detail link: shows the script the agent ran.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "显示脚本" } }
+      }
+    },
+    "Hide script": {
+      "comment": "Transcript tool detail link: hides the script pane the agent's script was shown in.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hide script" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "隐藏脚本" } }
+      }
+    },
+    "Copy Command": {
+      "comment": "Transcript tool row context menu: copies the shell command of the call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy Command" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "拷贝命令" } }
+      }
+    },
+    "Copy Output": {
+      "comment": "Transcript tool row context menu: copies the decoded output of the call.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy Output" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "拷贝输出" } }
+      }
+    },
+    "Copy as Markdown": {
+      "comment": "Transcript tool row context menu: copies the call as Markdown, one fenced block per action.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Copy as Markdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "以 Markdown 格式拷贝" } }
+      }
+    },
+    "Show Raw Event": {
+      "comment": "Transcript tool row context menu and hover button: shows the raw JSON of the call and its output.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show Raw Event" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "显示原始事件" } }
+      }
+    },
+    "Expand All in Group": {
+      "comment": "Transcript tool row context menu: opens every tool call of the group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Expand All in Group" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "展开组内全部" } }
+      }
+    },
+    "Tool call": {
+      "comment": "Title of the context menu of a transcript tool call row.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tool call" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工具调用" } }
+      }
+    },
+    "Large strings were shortened when the app stored this event.": {
+      "comment": "Notice in the raw event popover of a tool call: very long strings in the stored event were cut.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Large strings were shortened when the app stored this event." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "存储此事件时，过长的字符串已被截短。" } }
+      }
+    },
+    "No raw event was stored for this call.": {
+      "comment": "Text in the raw event popover of a tool call when the session holds no raw event for it.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No raw event was stored for this call." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此调用没有存储原始事件。" } }
+      }
+    },
+    "tool.status.succeeded": {
+      "comment": "VoiceOver status of a transcript tool call that finished without an error.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "succeeded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已成功" } }
+      }
+    },
+    "tool.status.failed": {
+      "comment": "VoiceOver status of a transcript tool call that failed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已失败" } }
+      }
+    },
+    "tool.status.rejected": {
+      "comment": "VoiceOver status of a transcript tool call the user declined.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "rejected" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已拒绝" } }
+      }
+    },
+    "tool.status.noResult": {
+      "comment": "VoiceOver status of a transcript tool call that has no stored result.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "no result" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无结果" } }
+      }
+    },
+    "tool.status.running": {
+      "comment": "VoiceOver status of a transcript tool call that has no result yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "running" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "运行中" } }
+      }
+    },
+    "tool.row.expanded": {
+      "comment": "VoiceOver state of an open transcript tool row or group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "expanded" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已展开" } }
+      }
+    },
+    "tool.row.collapsed": {
+      "comment": "VoiceOver state of a closed transcript tool row or group.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "collapsed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已折叠" } }
+      }
+    },
+    "system note": {
+      "comment": "Transcript tool detail: a collapsed note the agent's app added to the tool output (for example a system reminder).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "system note" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "系统备注" } }
+      }
+    },
+    "output saved to a file": {
+      "comment": "Transcript tool footer: the agent saved the full output to a file and kept a preview.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "output saved to a file" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出已保存到文件" } }
+      }
+    },
+    "output saved to a file (%@)": {
+      "comment": "Transcript tool footer: the agent saved the full output to a file and kept a preview. %@ is the file size, for example 38.4 KB.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "output saved to a file (%@)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "输出已保存到文件（%@）" } }
+      }
+    },
+    "%lld tokens": {
+      "comment": "Transcript tool footer: size of the output before the agent shortened it, in model tokens. %lld is the count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld token" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld tokens" } }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld 个词元" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld 个词元" } }
+            }
+          }
+        }
+      }
+    },
+    "tool.context.cwd": {
+      "comment": "Transcript tool context line label before the working directory of a command.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cwd" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工作目录" } }
+      }
+    },
+    "tool.context.shell": {
+      "comment": "Transcript tool context line label before the shell that ran a command, for example zsh -lc.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "shell" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Shell" } }
+      }
+    },
+    "tool.context.timeout": {
+      "comment": "Transcript tool context line label before the command's time limit.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "timeout" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "超时" } }
       }
     },
     "Check that Codex can access your account, then choose Retry. Sign in again with codex login if Codex also reports a sign-in problem.": {
@@ -1034,6 +2607,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "CLI 会话现在也可以在 Ghostty 中继续。"
+          }
+        }
+      }
+    },
+    "Tool calls in the transcript are now one readable row each, for every agent.": {
+      "comment": "One-line teaser for the Agent Sessions 6.4 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool calls in the transcript are now one readable row each, for every agent."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对话记录中的每个工具调用现在都是一行清晰易读的内容，适用于所有代理。"
+          }
+        }
+      }
+    },
+    "The Session view now reads as prompt and answer, with tool work one click away.": {
+      "comment": "One-line teaser for the Agent Sessions 6.5 What's New card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Session view now reads as prompt and answer, with tool work one click away."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图现在以提问和回答为主，工具调用一键即可查看。"
+          }
+        }
+      }
+    },
+    "Prompts and answers first": {
+      "comment": "Title for the Agent Sessions 6.5 What's New highlight: the Session view shows prompts and answers, with tool calls hidden behind the Tools chip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompts and answers first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提问和回答优先"
+          }
+        }
+      }
+    },
+    "Each turn in the Session view shows the prompt and the agent's answer. Tool calls and the agent's working notes sit behind the Tools chip, which is off by default. Turn it on to see them. Find still searches them.": {
+      "comment": "Body for the Agent Sessions 6.5 What's New highlight. Session view is the app's transcript pane; Tools is the name of a filter chip in its toolbar.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each turn in the Session view shows the prompt and the agent's answer. Tool calls and the agent's working notes sit behind the Tools chip, which is off by default. Turn it on to see them. Find still searches them."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图中的每一轮都显示提问和代理的回答。工具调用和代理的工作笔记收在“Tools”按钮后面，默认关闭。打开它即可查看。查找仍会搜索这些内容。"
+          }
+        }
+      }
+    },
+    "Only typed text is “User”": {
+      "comment": "Title for the Agent Sessions 6.5 What's New highlight: only text the session's user typed is labeled User.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only typed text is “User”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有输入的文字才标为“用户”"
+          }
+        }
+      }
+    },
+    "Injected instructions, page snapshots and skill files no longer look like messages the user typed. To see them, turn on Settings → General → Show harness context in Session view.": {
+      "comment": "Body for the Agent Sessions 6.5 What's New highlight. Keep the Settings path matching the Settings labels.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Injected instructions, page snapshots and skill files no longer look like messages the user typed. To see them, turn on Settings → General → Show harness context in Session view."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注入的指令、页面快照和技能文件不再显示为用户输入的消息。如需查看，请打开“设置 → 通用 → 在会话视图中显示运行框架上下文”。"
+          }
+        }
+      }
+    },
+    "A readable tool view": {
+      "comment": "Title for the Agent Sessions 6.4 What's New highlight about the new tool call rows in the Session transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A readable tool view"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清晰易读的工具视图"
+          }
+        }
+      }
+    },
+    "Each tool call in the Session view is one row, with its command or path first. Open a row to read the decoded output, which folds when it is long. Exit codes and errors show on the row. Works for all 17 agents.": {
+      "comment": "Body for the Agent Sessions 6.4 What's New highlight. Session view is the app's transcript pane.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each tool call in the Session view is one row, with its command or path first. Open a row to read the decoded output, which folds when it is long. Exit codes and errors show on the row. Works for all 17 agents."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话视图中的每个工具调用都是一行，命令或路径显示在最前面。展开一行即可阅读解码后的输出，较长的输出会自动折叠。退出码和错误直接显示在该行上。适用于全部 17 个代理。"
           }
         }
       }
@@ -2987,6 +4696,61 @@
             }
           }
         }
+      }
+    },
+    "%lld tool calls": {
+      "comment": "Header of a collapsed transcript card that groups several tool calls. The number is the call count.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tool call"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld tool calls"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个工具调用"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld 个工具调用"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld failed": {
+      "comment": "Transcript tool group header pill: how many of the group's tool calls failed. %lld is the count.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%lld 个失败" } }
+      }
+    },
+    "tool.group.digestEntry": {
+      "comment": "Transcript tool group header: a verb and how many of the group's actions used it, for example Ran 3. The first value is the verb, the second the count.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$@ %2$lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "%1$@ %2$lld 次" } }
       }
     },
     "%lld you · %lld agent · %lld tools": {
@@ -18726,6 +20490,23 @@
         }
       }
     },
+    "Search sessions": {
+      "comment": "Placeholder in the main window search field; it searches every indexed session, not the open transcript.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索会话"
+          }
+        }
+      }
+    },
     "Search sessions (⌥⌘F)": {
       "localizations": {
         "en": {
@@ -18754,6 +20535,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索会话（⌥⌘F）。筛选器：repo:NAME、path:PATH。短语请使用引号；请转义 \\\" 和 \\\\。按 Return 进行完整深度扫描。"
+          }
+        }
+      }
+    },
+    "Searching tool output…": {
+      "comment": "Session view find bar status: tool outputs are still being prepared for search, so the match count can still change.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching tool output…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在搜索工具输出…"
           }
         }
       }
@@ -20264,47 +22062,6 @@
         }
       }
     },
-    "Show all %lld lines": {
-      "comment": "User-visible copy from TranscriptBlockListView. Preserve runtime placeholders and allow value reordering for grammar.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Show all %lld line"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Show all %lld lines"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "显示全部%lld行"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "显示全部%lld行"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "Show all blocks again": {
       "comment": "Tooltip for the only active transcript role chip.",
       "localizations": {
@@ -20318,6 +22075,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新显示所有区块"
+          }
+        }
+      }
+    },
+    "Show tool calls and the agent's working notes": {
+      "comment": "Tooltip for the Tools chip while tool calls are hidden.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show tool calls and the agent's working notes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示工具调用和智能体的工作笔记"
+          }
+        }
+      }
+    },
+    "Hide tool calls and the agent's working notes": {
+      "comment": "Tooltip for the Tools chip while tool calls are shown.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide tool calls and the agent's working notes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏工具调用和智能体的工作笔记"
           }
         }
       }

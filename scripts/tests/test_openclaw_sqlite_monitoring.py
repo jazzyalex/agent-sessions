@@ -71,7 +71,7 @@ def test_fixture_fingerprint_decodes_the_compressed_row():
     )
     assert fp["parse_errors"] == 0
     assert fp["compressed_events"] == 1
-    assert fp["schema_version"] == 25 and fp["app_version"] == "2026.10.5"
+    assert fp["schema_version"] == 27 and fp["app_version"] == "2026.11.2"
     assert fp["type_counts"] == {"message": 8, "session": 2}
     # `__openclaw.toolOutput` exists only inside the zstd row.
     assert "message.message.__openclaw.toolOutput" in fp["type_keys"]

@@ -4,9 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Improvements
+- Resume supported CLI sessions in Macterm. The shared terminal picker detects Macterm, reuses the closest local project, and opens a new tab with the native resume command in the session folder.
+- **Open Claude sessions in VS Code.** Right-click a Claude Code session to open its local folder and send the resume link to the verified window in VS Code or Insiders. Enable the Claude Code extension and trust the folder first. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.
 
-- **Open Claude sessions in VS Code.** Right-click a Claude Code session and choose Open in VS Code. Agent Sessions opens the session's folder in VS Code, then hands the session to the Claude Code extension, which resumes it in a tab. A removed worktree falls back to its repository root. Needs VS Code or VS Code Insiders with the Claude Code extension.
+## [6.5] - 2026-11-09
+
+### Highlights
+
+- **Prompts and answers first.** Each turn in the Session view shows the prompt and the agent's answer. Tool calls and working notes now sit behind the Tools chip, off by default; Find still searches them.
+- **Only typed text is “User.”** The label was “You”, since you may be reading someone else's sessions. Notifications, peer messages, commands and scheduled prompts get their own labels; injected instructions and skill files stay hidden unless you turn on "Show harness context in Session view" in Settings.
+
+### Bug Fixes
+
+- Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of "Untitled session".
+- **Codex prompts logged with environment context show again.** When Codex wrote the environment block and the prompt as one message, the prompt was hidden from the Text view, export and the session title.
+- **Copilot sessions on MAI-Code 1.1 Flash show a cost.** They had no estimated cost because the model had no price.
+- **Injected context no longer impersonates your messages.** First-prompt navigation also respects explicitly typed instructions instead of treating their wording as a harness preamble.
+- **Message envelopes read as messages.** Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.
+- **No more empty agent rows.** Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.
+- **Your messages no longer show a duration.** The meaningless `0.0s` chip is gone from user rows.
+- **Toolbar controls line up with their pane on macOS 26.** Session filters and search sit above the session list and stop at the divider; session actions sit above the transcript, without the extra glass capsules. As the list narrows, agents fold into one Agents menu, then all list filters into one Filters menu, so every control stays reachable. The search field now reads "Search sessions" (#92).
+
+## [6.4] - 2026-11-07
+
+### Highlights
+
+- **A tool view you can actually read, for all 17 agents.** Every tool call is one row with its command or path first, and parallel calls get a row each. Open one for decoded output that folds when long; exit codes and errors sit right on the row. Right-click to copy the command, the output or the raw event.
+- **Find matches what you see.** A match inside folded output opens the fold, and Esc closes it again. The Errors filter steps through single failed calls.
+
+### Bug Fixes
+
+- **No more escaped slashes.** Paths and URLs in tool calls read `/`, not `\/`.
+- **Codex output shows as text.** Output stored as a list of text items now has real line breaks instead of raw JSON.
+- **Parallel tool outputs stay separate.** They no longer merge into one block.
 
 ## [6.3] - 2026-11-03
 

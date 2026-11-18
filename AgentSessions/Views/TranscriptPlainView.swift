@@ -94,6 +94,8 @@ enum TranscriptMarkdownExporter {
             }
             switch block.kind {
             case .user:
+                // Injected context is not the user's text: export leaves it out (meta is not exported).
+                if block.messageOrigin?.isUnresolvedMixed == true { continue }
                 let userPart = renderUser(block, showTimestamps: showTimestamps)
                 if !images.isEmpty {
                     parts.append(userPart + "\n\n" + renderImages(images, imageReferenceBuilder: imageReferenceBuilder))
@@ -148,7 +150,8 @@ enum TranscriptMarkdownExporter {
 
     private static func renderUser(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
         let heading = headingLine("User", timestamp: block.timestamp, showTimestamps: showTimestamps)
-        let text = normalizedBody(block.text)
+        // A mixed message exports its typed items only; injected context is not the user's text.
+        let text = normalizedBody(block.typedText)
         guard !text.isEmpty else { return heading }
         if shouldBlockquoteUserText(text) {
             return heading + "\n\n" + blockquote(text)
@@ -609,13 +612,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var richUnifiedFindDirection: Int = 1
     @State private var richUnifiedFindReset: Bool = true
     @State private var richUnifiedFindAllowAutoScroll: Bool = true
+    /// The auto-jump into a session opened from the list may turn Tools on; type-ahead may not.
+    @State private var richUnifiedFindRevealsHidden: Bool = false
     @State private var richUnifiedMatchesCount: Int = 0
     @State private var richUnifiedCurrentIndex: Int = 0
+    /// Agent ▲▼ stops as the Session table last reported them (hidden notes excluded).
+    @State private var richAgentStopCount: Int = 0
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.terminal.rawValue
+    @AppStorage("SessionShowContext") private var showsContext = false
     @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.blocks.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -624,8 +632,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // toggles. Persisted as a comma-joined raw string; the live Set is seeded
     // from it on appear and written back on every toggle. Threaded into
     // `TranscriptBlockListView`, which filters rows (and find matches) by kind.
-    @AppStorage("SessionRoleFilters") private var sessionRoleFilterRaw: String = "user,assistant,tools,errors"
-    @State private var activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)
+    @AppStorage("SessionRoleFilters") private var sessionRoleFilterRaw: String = SessionRoleFilters.defaultRaw
+    @State private var activeRoleFilters: Set<TranscriptRoleFilter> = SessionRoleFilters.parsed(SessionRoleFilters.defaultRaw)
+    /// Find turned Tools on for this session; never saved (`SessionRoleFilters.reduce`).
+    @State private var toolsShownByFind = false
     // Role ▲▼ jump-navigation intent (token bump = jump request; role+direction
     // tell the block controller which occurrence to scroll to).
     @State private var roleJumpToken: Int = 0
@@ -686,6 +696,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // (old Terminal-backed Session view, removed from the UI in C4a) always
         // lands on .blocks (the new Session view) instead of an unreachable state.
         resolveViewMode(viewModeRaw: viewModeRaw, renderModeRaw: renderModeRaw)
+    }
+
+    /// The tool-output decode pass serves only the Session view's Find (Task 15), so it runs only
+    /// in that view mode.
+    private func syncToolTextDecoding() {
+        derivedState.setDecodesToolText(viewMode == .blocks)
     }
 
     /// Keep the legacy TranscriptRenderMode preference in sync with SessionViewMode
@@ -801,7 +817,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard let id = sessionID else { return "none" }
 
         if let session = resolvedSessionForRender(id: id) {
-            return sessionBuildKey(session)
+            return "\(sessionBuildKey(session))|\(viewModeRaw)|\(session.source)|\(session.parentSessionID ?? "")|\(session.subagentType ?? "")"
         }
         return "unresolved:\(id)"
     }
@@ -855,6 +871,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         telemetry: selectedTelemetry,
                         telemetryLoadState: telemetryLoadState,
                         blocks: blocksReady ? derivedState.snapshot.blocks : [],
+                        usesMessageOrigins: viewMode == .blocks,
                         loading: telemetryLoading,
                         isSubagent: telemetrySession?.isSubagent ?? false,
                         delegatedRequestCount: selectedTelemetry.map { telemetry in
@@ -1006,10 +1023,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 isNearTranscriptTop = true
                 loadRoleFilters()
                 refreshRichInlineImages(session: session)
+                syncToolTextDecoding()
             }
             .onDisappear {
                 richInlineImagesTask?.cancel()
                 richInlineImagesTask = nil
+                derivedState.setDecodesToolText(false)
             }
             .onChange(of: session.id) { _, _ in
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -1020,6 +1039,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     contentVersion: transcriptContentVersion(for: session)
                 )
                 isNearTranscriptTop = true
+                applyRoleFilterEvent(.sessionChanged)
                 refreshRichInlineImages(session: session)
             }
             .onChange(of: session.events.count) { _, _ in
@@ -1048,12 +1068,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 derivedState.update(
                     session: resolvedSession,
                     settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(),
-                                    reviewCardsEnabled: transcriptReviewCardsEnabled))
+                                    reviewCardsEnabled: transcriptReviewCardsEnabled,
+                                    includeMessageContext: viewMode == .blocks))
                 guard viewMode != .terminal, viewMode != .blocks else { return }
                 rebuild(session: resolvedSession)
             }
             .onChange(of: viewModeRaw) { _, _ in
                 syncRenderModeWithViewMode()
+                syncToolTextDecoding()
                 // Switching INTO Rich must kick the (previously skipped) inline
                 // image scan; switching OUT clears it and cancels any in-flight
                 // scan so we never double-run alongside Terminal's own refresh.
@@ -1289,7 +1311,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             guard !Task.isCancelled else { return }
 
             let out = SessionInlineImageMapper.imagesByUserBlockIndex(
-                for: sessionSnapshot, shouldCancel: { Task.isCancelled })
+                for: sessionSnapshot, includeMessageContext: true, shouldCancel: { Task.isCancelled })
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
@@ -1303,10 +1325,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // MARK: - Session role filter (parity with Terminal's role toggles)
 
     private func loadRoleFilters() {
-        let parsed = Set(sessionRoleFilterRaw
-            .split(separator: ",")
-            .compactMap { TranscriptRoleFilter(rawValue: String($0)) })
-        activeRoleFilters = parsed.isEmpty ? Set(TranscriptRoleFilter.allCases) : parsed
+        SessionRoleFilters.migrateIfNeeded(defaults: .standard)
+        // The migration writes UserDefaults directly; read the stored value so
+        // the stale @AppStorage copy cannot bring Tools back.
+        let raw = UserDefaults.standard.string(forKey: "SessionRoleFilters") ?? sessionRoleFilterRaw
+        let parsed = SessionRoleFilters.parsed(raw)
+        activeRoleFilters = parsed.isEmpty ? SessionRoleFilters.parsed(SessionRoleFilters.defaultRaw) : parsed
+        toolsShownByFind = false
+    }
+
+    private func applyRoleFilterEvent(_ event: SessionRoleFilters.Event) {
+        let result = SessionRoleFilters.reduce(
+            SessionRoleFilters.State(active: activeRoleFilters, toolsShownByFind: toolsShownByFind), event)
+        if activeRoleFilters != result.state.active { activeRoleFilters = result.state.active }
+        toolsShownByFind = result.state.toolsShownByFind
+        if result.persist { persistRoleFilters() }
     }
 
     private func persistRoleFilters() {
@@ -1323,30 +1356,29 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     /// chip necessary — with focus-on-first-click there is nothing left for it
     /// to undo.
     private func toggleRoleFilter(_ role: TranscriptRoleFilter) {
-        let everything = Set(TranscriptRoleFilter.allCases)
-        if activeRoleFilters == everything {
-            activeRoleFilters = [role]
-        } else if activeRoleFilters == [role] {
-            activeRoleFilters = everything
-        } else if activeRoleFilters.contains(role) {
-            activeRoleFilters.remove(role)
-            // Never leave the transcript with every role hidden: an empty set
-            // renders a blank pane with no obvious way back.
-            if activeRoleFilters.isEmpty { activeRoleFilters = everything }
-        } else {
-            activeRoleFilters.insert(role)
-        }
-        persistRoleFilters()
+        applyRoleFilterEvent(.chipClicked(role))
+    }
+
+    /// An explicit Find step landed on a row only Tools hides: turn Tools on for this session, unsaved.
+    private func showToolsForFind() {
+        applyRoleFilterEvent(.findRequestedTools)
     }
 
     private func roleFilterChipHelp(_ role: TranscriptRoleFilter,
                                     label: String, isOn: Bool) -> String {
-        let everything = Set(TranscriptRoleFilter.allCases)
-        if activeRoleFilters == everything {
+        if role == .tools {
+            return isOn
+                ? String(localized: "Hide tool calls and the agent's working notes",
+                         comment: "Tooltip for the Tools chip while tool calls are shown.")
+                : String(localized: "Show tool calls and the agent's working notes",
+                         comment: "Tooltip for the Tools chip while tool calls are hidden.")
+        }
+        let base: Set<TranscriptRoleFilter> = [.user, .assistant, .errors]
+        if activeRoleFilters.subtracting([.tools]) == base {
             return String(localized: "Show only \(label) blocks",
                           comment: "Tooltip for a transcript role chip while every role is shown.")
         }
-        if activeRoleFilters == [role] {
+        if activeRoleFilters.subtracting([.tools]) == [role] {
             return String(localized: "Show all blocks again",
                           comment: "Tooltip for the only active transcript role chip.")
         }
@@ -1357,7 +1389,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func roleFilterLabel(_ role: TranscriptRoleFilter) -> String {
         switch role {
-        case .user: return "You"
+        case .user: return "User"
         case .assistant: return "Agent"
         case .tools: return "Tools"
         case .errors: return "Errors"
@@ -1376,16 +1408,25 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
     }
 
-    /// Number of blocks of the given role in the current snapshot — drives the
-    /// ▲▼ jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
+    /// Number of ▲▼ stops of the given role in the current snapshot (one per tool invocation for
+    /// Tools and Errors, one per visible agent row for Agent, one per block otherwise) — drives the jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
     /// dependency so the chevrons enable/disable as the snapshot lands.
     private func roleOccurrenceCount(_ role: TranscriptRoleFilter) -> Int {
         let snap = derivedState.snapshot
         switch role {
-        case .user: return snap.userBlockIndices.count
-        case .tools: return snap.toolBlockIndices.count
-        case .errors: return snap.errorBlockIndices.count
-        case .assistant: return snap.blocks.reduce(0) { $0 + ($1.kind == .assistant ? 1 : 0) }
+        case .assistant:
+            // Agent rows that show, as the Session table counts them (hidden notes are not stops).
+            guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
+            return richAgentStopCount
+        case .user:
+            guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
+            let markers = TranscriptTelemetryPresentation.markers(changes: selectedTelemetry?.configurationChanges ?? [], blocks: snap.blocks)
+            let groups = derivedState.messageGroups(showsContext: showsContext, markers: markers, imageBlocks: Set(richInlineImagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
+            return groups.groupsByID.values.filter { TranscriptRoleFilter.governing($0.block, source: snap.source) == role }.count
+        case .tools: return snap.toolJumpIDs.count
+        case .errors:
+            return SessionRoleFilters.shownErrorStops(snap.errorJumpIDs, failedInvocationIDs: snap.failedInvocationIDs,
+                                                      activeRoles: activeRoleFilters).count
         }
     }
 
@@ -1409,7 +1450,29 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         .help(help)
     }
 
-    private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource) -> some View {
+    /// How much of each role chip fits the toolbar. A narrow window first drops the space reserved
+    /// for the hover ▲▼ (⌘G / ⇧⌘G still step), then the label (it stays in the tooltip).
+    private enum RoleChipDensity { case regular, compact, minimal }
+
+    /// The role chips, at the widest density that fits the space the toolbar leaves them.
+    private func roleFilterChips(source: SessionSource) -> some View {
+        ViewThatFits(in: .horizontal) {
+            roleFilterChipRow(source: source, density: .regular)
+            roleFilterChipRow(source: source, density: .compact)
+            roleFilterChipRow(source: source, density: .minimal)
+        }
+    }
+
+    private func roleFilterChipRow(source: SessionSource, density: RoleChipDensity) -> some View {
+        HStack(alignment: .center, spacing: density == .regular ? 10 : 4) {
+            ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
+                sessionRoleFilterChip(role, source: source, density: density)
+            }
+        }
+    }
+
+    private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource,
+                                       density: RoleChipDensity) -> some View {
         // A chip's fill states one thing only: whether this role is currently
         // shown. An earlier version dimmed every chip once all four were active,
         // on the theory that "all on" equals "no filter" — but that made turning
@@ -1426,29 +1489,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // Errors is the only role whose count changes the decision to press it,
         // so it is the only one that carries a number. A session with no errors
         // shows a dimmed chip and no count rather than a reassuring zero.
-        let showsCount = role == .errors && count > 0
+        // Tools also carries a muted count while off, so hidden work stays visible.
+        let showsCount = (role == .errors && count > 0) || (role == .tools && !isOn && count > 0)
         // The jump chevrons appear on the chip being navigated, not on all four
         // at once: eight permanent controls for one action was most of the old
         // second row's weight. ⌘G / ⇧⌘G stay available regardless.
         let showsNav = navEnabled && hoveredRoleFilter == role
         return HStack(spacing: 3) {
             Button(action: { toggleRoleFilter(role) }) {
-                HStack(spacing: 6) {
+                HStack(spacing: density == .minimal ? 4 : 6) {
                     Circle()
                         .fill(roleFilterAccent(role, source: source).opacity(isOn ? 1.0 : 0.3))
                         .frame(width: 9, height: 9)
-                    Text(label)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(isOn ? Color.primary : Color.secondary)
-                        .lineLimit(1)
+                    if density != .minimal {
+                        Text(label)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(isOn ? Color.primary : Color.secondary)
+                            .lineLimit(1)
+                    }
                     if showsCount {
                         Text("\(count)")
                             .font(.system(size: 11, weight: .medium))
                             .monospacedDigit()
-                            .foregroundStyle(roleFilterAccent(role, source: source))
+                            .foregroundStyle(role == .tools ? Color.secondary : roleFilterAccent(role, source: source))
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, density == .regular ? 10 : 7)
                 .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -1459,20 +1525,24 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .buttonStyle(.plain)
             .fixedSize(horizontal: true, vertical: false)
             .help(roleFilterChipHelp(role, label: label, isOn: isOn))
+            .accessibilityLabel(label)
 
             // Width is reserved whether or not the chevrons are showing: if the
             // chip grew on hover it would push its neighbours out from under a
             // stationary pointer, which then reveals THEIR chevrons and shifts
-            // the row back — a flicker loop at every chip boundary.
-            HStack(spacing: 1) {
-                roleJumpChevron("chevron.up", role: role, direction: -1,
-                                enabled: navEnabled, help: "Previous \(label)")
-                roleJumpChevron("chevron.down", role: role, direction: 1,
-                                enabled: navEnabled, help: "Next \(label)")
+            // the row back — a flicker loop at every chip boundary. A narrow
+            // toolbar drops them instead of reserving the width.
+            if density == .regular {
+                HStack(spacing: 1) {
+                    roleJumpChevron("chevron.up", role: role, direction: -1,
+                                    enabled: navEnabled, help: "Previous \(label)")
+                    roleJumpChevron("chevron.down", role: role, direction: 1,
+                                    enabled: navEnabled, help: "Next \(label)")
+                }
+                .opacity(showsNav ? 1 : 0)
+                .allowsHitTesting(showsNav)
+                .accessibilityHidden(!showsNav)
             }
-            .opacity(showsNav ? 1 : 0)
-            .allowsHitTesting(showsNav)
-            .accessibilityHidden(!showsNav)
         }
         .onHover { hovering in
             if hovering {
@@ -1486,6 +1556,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func blocksTranscriptView(session: Session) -> some View {
         TranscriptBlockListView(
             derivedState: derivedState,
+            showsContext: showsContext,
             session: session,
             fontSize: CGFloat(transcriptFontSize),
             configurationChanges: selectedTelemetry?.configurationChanges ?? [],
@@ -1500,6 +1571,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             scrollToBottomToken: tailUpdateState.scrollToBottomToken,
             onBottomProximityChange: updateBottomProximity,
             onTopProximityChange: updateTopProximity,
+            onAgentStopCountChange: { richAgentStopCount = $0 },
+            onRequestToolsShown: showToolsForFind,
             firstPromptJumpToken: richFirstPromptJumpToken,
             eventJumpToken: richEventJumpToken,
             eventJumpID: richEventJumpID,
@@ -1519,6 +1592,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             unifiedFindDirection: richUnifiedFindDirection,
             unifiedFindReset: richUnifiedFindReset,
             unifiedFindAllowAutoScroll: richUnifiedFindAllowAutoScroll,
+            unifiedFindRevealsHidden: richUnifiedFindRevealsHidden,
             unifiedMatchCount: $richUnifiedMatchesCount,
             unifiedCurrentIndex: $richUnifiedCurrentIndex,
             activeRoleFilters: activeRoleFilters,
@@ -1594,9 +1668,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // the overflow menu — a once-a-year choice was holding the primary slot.
             HStack(alignment: .center, spacing: 10) {
                 if viewMode == .blocks {
-                    ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
-                        sessionRoleFilterChip(role, source: session.source)
-                    }
+                    roleFilterChips(source: session.source)
                 }
 
                 if isJSONMode && isBuildingJSON {
@@ -1923,6 +1995,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
 
             Spacer(minLength: 0)
+
+            // Session view Find searches decoded tool output (spec §6.8). Until the decode pass
+            // ends, outputs not decoded yet are searched raw, and Find re-runs once at the end.
+            // The query is checked first: without one the body does not depend on the pass.
+            if !findQuery.isEmpty, viewMode == .blocks, derivedState.isDecodingToolText {
+                Text(String(localized: "Searching tool output…",
+                            comment: "Session view find bar status: tool outputs are still being prepared for search, so the match count can still change."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             HStack(spacing: 6) {
                 Button(action: { performFind(resetIndex: false, direction: -1, shouldJump: true) }) {
@@ -2468,7 +2551,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-	    private func performUnifiedFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
+	    private func performUnifiedFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true,
+	                                    revealsHidden: Bool = false) {
 	        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
 	        if viewMode == .terminal {
             let q = unifiedFreeText
@@ -2497,11 +2581,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 richUnifiedMatchesCount = 0
                 richUnifiedCurrentIndex = 0
                 richUnifiedFindAllowAutoScroll = false
+                richUnifiedFindRevealsHidden = false
                 richUnifiedFindReset = true
                 richUnifiedFindToken &+= 1
                 return
             }
             richUnifiedFindAllowAutoScroll = shouldJump
+            richUnifiedFindRevealsHidden = revealsHidden
             richUnifiedFindDirection = direction
             richUnifiedFindReset = resetIndex
             richUnifiedFindToken &+= 1
@@ -2911,7 +2997,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             displayedSessionID: session.id,
             isTranscriptReady: isTranscriptReady(for: session)
         ) else { return }
-        performUnifiedFind(resetIndex: true, shouldJump: true)
+        // The reader opened this session for the hit: landing on it may turn Tools on.
+        performUnifiedFind(resetIndex: true, shouldJump: true, revealsHidden: true)
         lastHandledAutoJumpToken = pendingAutoJumpToken!
         pendingAutoJumpToken = nil
         pendingAutoJumpSessionID = nil
@@ -2923,7 +3010,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         // ready, the block controller can resolve a unified match to a block and
         // auto-jump, mirroring Terminal's post-9456faa3 auto-jump-on-open.
         if viewMode == .blocks {
-            return derivedState.snapshot.key?.sessionID == session.id && !derivedState.isComputing
+            return derivedState.snapshot.key == TranscriptDerivedState.Key(session: session, settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(), reviewCardsEnabled: transcriptReviewCardsEnabled, includeMessageContext: true)) && !derivedState.isComputing
         }
         guard let key = lastBuildKey else { return false }
         return key.hasPrefix("\(session.id)|")
@@ -3275,7 +3362,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
         let r: NSRange?
         if session.source == .codex {
-            r = conversationStartRangeForJump(text: transcript)
+            // A mixed first message shows its typed items only, so the preamble marker may be gone;
+            // then the first prompt is the first user line.
+            r = conversationStartRangeForJump(text: transcript) ?? firstUserLineRange(session: session)
         } else if session.source == .claude {
             r = claudeConversationStartRangeForJump(text: transcript, session: session)
         } else if session.source == .droid {
@@ -3488,6 +3577,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
 
         return text
+    }
+
+    /// The Text view line of the session's first user message, by its typed text.
+    private func firstUserLineRange(session: Session) -> NSRange? {
+        // The Text view writes a user block as prefix + typed text verbatim, so look for that run
+        // as is (leading spaces and newlines included).
+        guard let typed = session.events.first(where: { $0.kind == .user && $0.typedText?.isEmpty == false })?.typedText
+        else { return nil }
+        let needle = SessionTranscriptBuilder.userPrefix + String(typed.prefix(80))
+        guard let range = transcript.range(of: needle) else { return nil }
+        return NSRange(range.lowerBound..<transcript.index(after: range.lowerBound), in: transcript)
     }
 
     private func conversationStartRangeForJump(text: String) -> NSRange? {

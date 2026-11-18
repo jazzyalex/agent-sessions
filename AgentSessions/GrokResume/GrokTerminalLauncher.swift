@@ -39,3 +39,10 @@ final class GrokGhosttyLauncher: GrokTerminalLaunching {
         try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
     }
 }
+
+@MainActor
+final class GrokMactermLauncher: GrokTerminalLaunching {
+    func launchInTerminal(_ package: GrokResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}

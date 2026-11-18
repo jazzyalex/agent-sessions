@@ -877,7 +877,7 @@ enum MarkdownBodyRenderer {
 /// `#0d0d14` / `#cdd6f4`) appears here; every color below is either a system
 /// semantic color (already appearance-correct by definition) or a hand-rolled
 /// alpha wash resolved per-appearance the same way `inlineCodeChip` always has.
-private enum MarkdownStyle {
+enum MarkdownStyle {
     /// Tasteful middle ground for the inline-code chip: distinct enough to read
     /// as a chip (the owner disliked the old near-invisible ~5% wash) without
     /// becoming the heavy gray box the owner also rejected earlier. Inline code

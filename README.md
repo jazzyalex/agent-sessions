@@ -9,7 +9,7 @@ Search local conversations from [Codex](https://jazzyalex.github.io/agent-sessio
 Open source. Your session history stays on your Mac. No telemetry.
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg"><b>Download Agent Sessions 6.3</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v6.5/AgentSessions-6.5.dmg"><b>Download Agent Sessions 6.5</b></a>
   ·
   <a href="https://jazzyalex.github.io/agent-sessions/?campaign=github&ref=readme-demo">See the product page</a>
   ·
@@ -29,10 +29,21 @@ brew install --cask jazzyalex/agent-sessions/agent-sessions
 ## What it does
 
 - **Find past work.** Search prompts, responses, tool calls, command output, errors, file paths, and supported image references across local agent histories.
-- **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, Warp, or Ghostty. Ghostty requires AppleScript support (verified with 1.4.0).
+- **Pick up where you left off.** Copy a resume command or open a supported CLI session in Terminal.app, iTerm2, Warp, Ghostty, or Macterm. Ghostty requires AppleScript support (verified with 1.4.0).
 - **See which session is burning your quota.** Track live per-session Codex and Claude burn against 5-hour and weekly windows, plus each OpenCode session's token or cost rate; switch between quota, tokens, and estimated API-equivalent cost. Weekly local estimates show pace without a run-out time.
 - **See what a session used.** Session Info opens beside every supported agent transcript, showing immediate provider-neutral metadata and detailed model, token, activity, or pricing data when the source records it.
 - **Keep transcripts on your Mac.** Agent Sessions builds its search index locally and does not upload session history.
+
+## What's New in 6.5
+
+- **Prompts and answers first.** Each turn in the Session view shows the prompt and the agent's answer. Tool calls, failed ones included, and the agent's working notes sit behind the Tools chip, off by default. Turn it on to see them; Find still searches them.
+- **Only typed text is "User".** Instructions, page snapshots and skill files that the agent's harness injects no longer look like typed messages. Notifications, peer messages, commands and scheduled prompts get their own labels. Settings → General → Show harness context in Session view brings the injected text back.
+- **The macOS 26 toolbar stays inside its pane.** Session filters and search end at the list divider, and fold into menus as the list narrows.
+
+## What's New in 6.4
+
+- **A readable tool view, for all 17 agents.** Each tool call in the Session view is one row with its command or path first, and parallel calls get one row each. Open a row to read the decoded output: no escaped slashes or raw JSON, long output folds, and exit codes and errors show on the row.
+- **Find matches what you see.** A match inside folded output opens the fold, and Esc closes it again. The Errors filter steps through single failed calls.
 
 ## What's New in 6.3
 
@@ -163,7 +174,7 @@ The price is an API-equivalent estimate, not your subscription bill.
 
 ## Install
 
-Download [AgentSessions-6.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.3/AgentSessions-6.3.dmg), open it, and drag **Agent Sessions.app** into Applications.
+Download [AgentSessions-6.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v6.5/AgentSessions-6.5.dmg), open it, and drag **Agent Sessions.app** into Applications.
 
 Or use Homebrew:
 
@@ -210,6 +221,10 @@ Run the stable test wrapper:
 ```
 
 Found a session you thought you had lost? [Star Agent Sessions](https://github.com/jazzyalex/agent-sessions) to help other developers find it.
+
+## Also by me
+
+[Living Wall](https://livingwallapp.com/gh) — a little living world on your Mac desktop. Waves roll in, a dog trots across the yard, fish drift by on the reef.
 
 ## License
 

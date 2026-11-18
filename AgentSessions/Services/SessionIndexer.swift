@@ -2930,10 +2930,8 @@ final class SessionIndexer: ObservableObject {
                 // Extract cwd from session_meta or environment_context
                 if cwd == nil {
                     if let text = ev.text, text.contains("<cwd>") {
-                        if let start = text.range(of: "<cwd>"),
-                           let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
-                            cwd = String(text[start.upperBound..<end.lowerBound])
-                        }
+                        // Same rule as `Session.cwd` (`Session.codexCwd(in:)`).
+                        if let found = Session.codexCwd(in: text) { cwd = found }
                     } else if let payload {
                         if let cwdValue = payload["cwd"] as? String, !cwdValue.isEmpty { cwd = cwdValue }
                     } else if let cwdValue = obj["cwd"] as? String, !cwdValue.isEmpty {
@@ -3054,7 +3052,9 @@ final class SessionIndexer: ObservableObject {
                               cwd: cwd,
                               repoName: nil,  // Will be computed from cwd
                               lightweightTitle: title,
-                              isHousekeeping: tempIsHousekeeping || title == "No prompt",
+                              // A typed prompt is never housekeeping, even one whose text is "No prompt".
+                              isHousekeeping: tempIsHousekeeping
+                                  || (title == "No prompt" && !sampleEvents.contains { $0.isProvenTyped }),
                               codexInternalSessionIDHint: internalSessionIDHint,
                               parentSessionID: parentSessionID,
                               subagentType: subagentType,
@@ -3071,6 +3071,15 @@ final class SessionIndexer: ObservableObject {
     }
 
     // swiftlint:disable:next cyclomatic_complexity function_body_length
+    /// True when `text`, trimmed, is exactly one `<environment_context>…</environment_context>` block
+    /// (one opening tag, at the start, closed at the end) and not a prompt that quotes such blocks.
+    static func isWholeEnvironmentBlock(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let open = "<environment_context>", close = "</environment_context>"
+        guard trimmed.hasPrefix(open), trimmed.hasSuffix(close) else { return false }
+        return trimmed.components(separatedBy: open).count == 2 && trimmed.components(separatedBy: close).count == 2
+    }
+
     static func parseLine(_ line: String, eventID: String) -> (SessionEvent, String?) {
         var timestamp: Date? = nil
         var role: String? = nil
@@ -3079,10 +3088,16 @@ final class SessionIndexer: ObservableObject {
         var toolName: String? = nil
         var toolInput: String? = nil
         var toolOutput: String? = nil
+        var toolNamespace: String? = nil
+        var toolCallID: String? = nil
+        var toolOutputValue: ToolPayloadValue? = nil
         var model: String? = nil
         var messageID: String? = nil
         var parentID: String? = nil
         var isDelta: Bool = false
+        var messageOrigin: MessageOrigin?
+        var messageDisplayText: String?
+        var messageHasEncryptedContent: Bool?
 
         if let data = line.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -3144,9 +3159,82 @@ final class SessionIndexer: ObservableObject {
                 if !pieces.isEmpty { text = pieces.joined() }
             }
 
+            // Provenance is presentation data; leave the original text and role/type untouched.
+            if obj["type"] as? String == "response_item" {
+                if type == "message", role == "user" {
+                    let metadata = workingObj["internal_chat_message_metadata_passthrough"]
+                        ?? obj["internal_chat_message_metadata_passthrough"]
+                    if let metadata {
+                        let rawKinds = (metadata as? [String: Any])?["content_item_kinds"] as? [String]
+                        let kinds = rawKinds?.map { $0.components(separatedBy: " | ")[0] }
+                        if let kinds, !kinds.isEmpty, kinds.allSatisfy({ !$0.isEmpty }) {
+                            // An item's text, read like the raw text join above (images excepted).
+                            func itemText(_ item: Any) -> String? {
+                                if let string = item as? String { return string }
+                                guard let part = item as? [String: Any] else { return nil }
+                                if let partType = part["type"] as? String, partType.contains("image") { return nil }
+                                return part["text"] as? String ?? part["value"] as? String ?? part["data"] as? String
+                            }
+                            if kinds.allSatisfy({ $0 == "user.text" }) {
+                                messageOrigin = .typed
+                                // Codex has labeled a whole environment block user.text. Next to a
+                                // real prompt, that block is still context: keep the prompt only.
+                                if let items = workingObj["content"] as? [Any] {
+                                    let texts = items.compactMap(itemText)
+                                    let typed = texts.filter { !Self.isWholeEnvironmentBlock($0) }
+                                    if typed.count < texts.count, !typed.isEmpty {
+                                        messageDisplayText = typed.joined()
+                                    }
+                                }
+                            } else if !kinds.contains("user.text") {
+                                var unique: [String] = []
+                                for kind in kinds where !unique.contains(kind) { unique.append(kind) }
+                                messageOrigin = .context(kinds: unique)
+                            } else if let items = workingObj["content"] as? [Any], items.count == kinds.count {
+                                messageOrigin = .typed
+                                messageDisplayText = zip(items, kinds).compactMap { item, kind -> String? in
+                                    kind == "user.text" ? itemText(item) : nil
+                                }.joined()
+                            } else {
+                                messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
+                            }
+                        } else {
+                            messageOrigin = .context(kinds: ["codex.mixed.unresolved"])
+                        }
+                    } else if text?.contains("<environment_context>") == true {
+                        messageOrigin = .context(kinds: ["environment_context"])
+                    }
+                } else if type == "agent_message" {
+                    let author = workingObj["author"] as? String ?? "another session"
+                    let from = author == "/root" ? "root" : (author.hasPrefix("/root/") ? String(author.dropFirst(6)) : author)
+                    messageOrigin = .peer(from: from)
+                    let items = workingObj["content"] as? [[String: Any]] ?? []
+                    messageHasEncryptedContent = items.contains { $0["type"] as? String == "encrypted_content" }
+                    var body = items.compactMap { part -> String? in
+                        guard part["type"] as? String == "input_text" else { return nil }
+                        return part["text"] as? String
+                    }.joined()
+                    if body.hasPrefix("Message Type:"), let payload = body.range(of: "\nPayload:") {
+                        body = String(body[payload.upperBound...])
+                        if body.hasPrefix("\n") { body.removeFirst() }
+                    }
+                    messageDisplayText = body
+                }
+            }
+
             // Heuristic: environment_context appears as an XML-ish block often logged under 'user'.
-            // Treat any event whose text contains this block as meta regardless of role/type.
-            if let t = text, t.contains("<environment_context>") { type = "environment_context" }
+            // Treat any event whose text contains this block as meta regardless of role/type,
+            // unless provenance marked typed items in it (mixed context + prompt). That event stays a
+            // user event with its raw text intact (search and cwd detection read every item); user-
+            // facing paths show `messageDisplayText`, the typed items alone (`SessionEvent.typedText`).
+            // A typed prompt that only names the tag stays too; typed items that are themselves one
+            // whole context block (Codex has logged those as user.text) are still context.
+            if let t = text, t.contains("<environment_context>") {
+                var typedPrompt: String?
+                if case .typed = messageOrigin { typedPrompt = messageDisplayText ?? t }
+                let trimmed = typedPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if trimmed.isEmpty || Self.isWholeEnvironmentBlock(trimmed) { type = "environment_context" }
+            }
 
             if text == nil, let t = type?.lowercased(), t == "thread_rolled_back" {
                 var numTurns: Int? = nil
@@ -3177,7 +3265,32 @@ final class SessionIndexer: ObservableObject {
             if toolName == nil, let name = workingObj["name"] as? String { toolName = name }
             if toolName == nil, let fn = (workingObj["function"] as? [String: Any])?["name"] as? String { toolName = fn }
 
-            if let input = workingObj["input"] as? String { toolInput = input }
+            if let ns = workingObj["namespace"] as? String, !ns.isEmpty { toolNamespace = ns }
+            // Same read serves calls and outputs, so both carry the id (calls do from this task on).
+            if let cid = workingObj["call_id"] as? String, !cid.isEmpty { toolCallID = cid }
+
+            // Codex web_search_call carries its query in `action`, not in `arguments`.
+            if type == "web_search_call" {
+                toolName = "web_search"
+                if let action = workingObj["action"] as? [String: Any] {
+                    var input: [String: Any]?
+                    if let q = action["query"] as? String, !q.isEmpty {
+                        input = ["query": q]
+                    } else if let qs = action["queries"] as? [Any], !qs.isEmpty {
+                        input = ["queries": qs]
+                    } else if let kind = action["type"] as? String, kind == "open_page" || kind == "find_in_page",
+                              let url = action["url"] as? String, !url.isEmpty {
+                        var obj: [String: Any] = ["url": url]
+                        if kind == "find_in_page", let pattern = action["pattern"] as? String, !pattern.isEmpty {
+                            obj["pattern"] = pattern
+                        }
+                        input = obj
+                    }
+                    if let input, let s = ToolJSON.string(from: input, pretty: false) { toolInput = s }
+                }
+            }
+
+            if toolInput == nil, let input = workingObj["input"] as? String { toolInput = input }
             if toolInput == nil, let args = workingObj["arguments"] as? String { toolInput = args }
             // Arguments may be non-string; minify to single-line JSON
             if toolInput == nil, let argsObj = workingObj["arguments"] {
@@ -3189,7 +3302,17 @@ final class SessionIndexer: ObservableObject {
             if let stdout = workingObj["stdout"] { outputs.append(Self.stringifyJSON(stdout, pretty: true) ?? String(describing: stdout)) }
             if let stderr = workingObj["stderr"] { outputs.append(Self.stringifyJSON(stderr, pretty: true) ?? String(describing: stderr)) }
             if let result = workingObj["result"] { outputs.append(Self.stringifyJSON(result, pretty: true) ?? String(describing: result)) }
-            if let output = workingObj["output"] { outputs.append(Self.stringifyJSON(output, pretty: true) ?? String(describing: output)) }
+            if let output = workingObj["output"] {
+                if let joined = ToolJSON.joinedContentItemText(output) {
+                    outputs.append(joined)
+                } else {
+                    outputs.append(Self.stringifyJSON(output, pretty: true) ?? String(describing: output))
+                }
+                // Array/object outputs also keep their structure (≤ 256 KB); strings stay text only.
+                if output is [Any] || output is [String: Any] {
+                    toolOutputValue = ToolPayloadValue.outputValue(fromRawOutput: output, sourceBytes: line.utf8.count)
+                }
+            }
             if !outputs.isEmpty {
                 toolOutput = outputs.joined(separator: "\n")
             }
@@ -3199,7 +3322,7 @@ final class SessionIndexer: ObservableObject {
         }
 
         let kind = SessionEventKind.from(role: role, type: type)
-        let event = SessionEvent(
+        var event = SessionEvent(
             id: eventID,
             timestamp: timestamp,
             kind: kind,
@@ -3208,11 +3331,17 @@ final class SessionIndexer: ObservableObject {
             toolName: toolName,
             toolInput: toolInput,
             toolOutput: toolOutput,
+            toolNamespace: toolNamespace,
+            toolCallID: toolCallID,
+            toolOutputValue: toolOutputValue,
             messageID: messageID,
             parentID: parentID,
             isDelta: isDelta,
             rawJSON: line
         )
+        event.messageOrigin = messageOrigin
+        event.messageDisplayText = messageDisplayText
+        event.messageHasEncryptedContent = messageHasEncryptedContent
         return (event, model)
     }
     
@@ -3369,8 +3498,18 @@ final class SessionIndexer: ObservableObject {
         // For extremely long lines (>5MB UTF-8 bytes), skip entirely
         let utf8Count = line.utf8.count
         if utf8Count > 5_000_000 {
-            // Just return a minimal JSON stub - the line is too large to parse usefully anyway
-            return #"{"type":"omitted","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
+            // Just return a minimal JSON stub - the line is too large to parse usefully anyway.
+            let megabytes = utf8Count / 1_000_000
+            // A tool output keeps its type, `call_id` and time, so the call still shows a result
+            // (spec §9: "Large event (N MB) not loaded").
+            if let callID = rawCallID(in: line), let outputType = rawOutputType(in: line) {
+                let time = rawTopLevelTimestamp(in: line).map { #","timestamp":"\#($0)""# } ?? ""
+                return #"{"type":"\#(outputType)","call_id":"\#(callID)"\#(time),"output":"Large event (\#(megabytes) MB) not loaded"}"#
+            }
+            if let callID = rawCallID(in: line) {
+                return #"{"type":"omitted","call_id":"\#(callID)","text":"[Large event omitted - \#(megabytes)MB]"}"#
+            }
+            return #"{"type":"omitted","text":"[Large event omitted - \#(megabytes)MB]"}"#
         }
 
         // For moderately large lines (1-5MB), use a simpler/faster approach
@@ -3407,6 +3546,49 @@ final class SessionIndexer: ObservableObject {
         }
 
         return result
+    }
+
+    private static let rawCallIDKey = Array(#""call_id":""#.utf8)
+
+    /// The first `"call_id":"…"` value in a raw JSONL line, found without a JSON parse.
+    /// Codex writes `call_id` before `output`, so the first match is the payload's own id.
+    /// Returns nil when the key is missing or the value is empty, longer than 256 bytes,
+    /// or holds an escape or control byte (the value is embedded in a stub unescaped).
+    static func rawCallID(in line: String) -> String? {
+        let utf8 = line.utf8
+        guard let key = utf8.firstRange(of: rawCallIDKey) else { return nil }
+        let tail = utf8[key.upperBound...].prefix(257)
+        guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+        let value = utf8[key.upperBound..<end]
+        guard !value.isEmpty,
+              !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
+        return String(decoding: value, as: UTF8.self)
+    }
+
+    private static let rawOutputTypes = ["function_call_output", "custom_tool_call_output"]
+
+    /// The tool-output payload type of a raw Codex line (`function_call_output` /
+    /// `custom_tool_call_output`), read from the line's first 1 KB without a JSON parse: the
+    /// payload must open with that type (`"payload":{"type":"…"`), as Codex writes it. An output
+    /// type nested anywhere else does not count. Nil for any other line.
+    static func rawOutputType(in line: String) -> String? {
+        let head = String(decoding: line.utf8.prefix(1024), as: UTF8.self)
+        return rawOutputTypes.first { head.contains(#""payload":{"type":"\#($0)""#) }
+    }
+
+    private static let rawTimestampPrefix = Array(#"{"timestamp":""#.utf8)
+
+    /// The top-level `timestamp` of a raw Codex line (`{"timestamp":"…",…`), without a JSON
+    /// parse. Nil when the line does not start with it or the value holds an escape.
+    static func rawTopLevelTimestamp(in line: String) -> String? {
+        let utf8 = line.utf8
+        guard utf8.starts(with: rawTimestampPrefix) else { return nil }
+        let tail = utf8.dropFirst(rawTimestampPrefix.count).prefix(65)
+        guard let end = tail.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+        let value = tail[..<end]
+        guard !value.isEmpty,
+              !value.contains(where: { $0 == UInt8(ascii: "\\") || $0 < 0x20 }) else { return nil }
+        return String(decoding: value, as: UTF8.self)
     }
 
     /// Composite sanitizer for unusually large JSONL lines.
@@ -3499,8 +3681,8 @@ final class SessionIndexer: ObservableObject {
         if let s = any as? String { return s }
         // Numbers, bools, arrays, dicts → JSON text
         if JSONSerialization.isValidJSONObject(any) {
-            if let data = try? JSONSerialization.data(withJSONObject: any, options: pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]) {
-                return String(data: data, encoding: .utf8)
+            if let text = ToolJSON.string(from: any, pretty: pretty) {
+                return text
             }
         } else {
             // Wrap simple types into JSON-compatible representation

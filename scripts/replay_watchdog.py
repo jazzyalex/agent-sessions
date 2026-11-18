@@ -14,7 +14,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seconds", type=float, default=180)
     seconds = parser.parse_args().seconds
-    if not 0 < seconds <= 180:
+    # 1800 s: the opt-in tool corpus check (TranscriptToolCorpusCheckTests) reads up to
+    # 200 sessions per source; the session replay keeps its 180 s.
+    if not 0 < seconds <= 1800:
         return 2
     parent = os.getppid()
     ready, _, _ = select.select([sys.stdin], [], [], seconds)

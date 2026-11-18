@@ -123,4 +123,45 @@ enum TranscriptTestFixtures {
             return block
         }
     }
+
+    // MARK: - Tool blocks for pairing and status tests (Task 6)
+
+    /// One `LogicalBlock` with the tool fields pairing and status read. Tool blocks
+    /// default to the tool name "shell". `sequence(_:)` assigns `globalBlockIndex`.
+    static func block(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind,
+                      id: String? = nil,
+                      text: String = "",
+                      toolName: String? = nil,
+                      toolInput: String? = nil,
+                      isError: Bool = false,
+                      sidecar: ToolSidecar? = nil,
+                      disposition: ToolDisposition? = nil,
+                      at offset: Double? = nil) -> SessionTranscriptBuilder.LogicalBlock {
+        let isTool = kind == .toolCall || kind == .toolOut
+        var block = SessionTranscriptBuilder.LogicalBlock(
+            kind: kind,
+            text: text,
+            timestamp: offset.map { Date(timeIntervalSince1970: $0) },
+            messageID: nil,
+            toolName: toolName ?? (isTool ? "shell" : nil),
+            isDelta: false,
+            toolInput: toolInput,
+            isErrorOutput: isError,
+            eventID: "",
+            rawJSON: "")
+        block.toolCallID = id
+        block.toolSidecar = sidecar
+        block.toolDisposition = disposition
+        return block
+    }
+
+    /// The blocks as a full session stream: `globalBlockIndex` = position, `eventID` = "e<position>".
+    static func sequence(_ blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [SessionTranscriptBuilder.LogicalBlock] {
+        blocks.enumerated().map { offset, block in
+            var b = block
+            b.globalBlockIndex = offset
+            b.eventID = "e\(offset)"
+            return b
+        }
+    }
 }

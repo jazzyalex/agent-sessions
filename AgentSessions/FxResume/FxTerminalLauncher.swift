@@ -39,3 +39,10 @@ final class FxGhosttyLauncher: FxTerminalLaunching {
         try await AgentTerminalLauncher.launchInGhostty(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path)
     }
 }
+
+@MainActor
+final class FxMactermLauncher: FxTerminalLaunching {
+    func launchInTerminal(_ package: FxResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}

@@ -155,7 +155,8 @@ enum TranscriptTelemetryPresentation {
     }
 
     static func activity(_ telemetry: SessionTelemetry,
-                         blocks: [SessionTranscriptBuilder.LogicalBlock]) -> ActivitySummary {
+                         blocks: [SessionTranscriptBuilder.LogicalBlock],
+                         usesMessageOrigins: Bool = false) -> ActivitySummary {
         let owned = telemetry.usageEvents.filter { $0.ownership == .session }
         let usageUnavailableReason = telemetry.usageSummary?.unavailableReason
             ?? (telemetry.usageSummary?.hasComponentBreakdown == false
@@ -171,7 +172,8 @@ enum TranscriptTelemetryPresentation {
         var user = 0, assistant = 0, tools = 0
         for block in blocks {
             switch block.kind {
-            case .user: user += 1
+            case .user:
+                if !usesMessageOrigins || block.isTypedUserMessage { user += 1 }
             case .assistant: assistant += 1
             case .toolCall: tools += 1
             default: break
@@ -702,6 +704,8 @@ struct TranscriptTelemetryView: View {
     let telemetry: SessionTelemetry?
     let telemetryLoadState: SessionInfoTelemetryLoadState
     let blocks: [SessionTranscriptBuilder.LogicalBlock]
+    /// Session projection counts human-authored messages; raw/Terminal keeps kind-based counts.
+    var usesMessageOrigins: Bool = false
     let loading: Bool
     let isSubagent: Bool
     /// Delegated usage records in this transcript. The telemetry carries no
@@ -950,7 +954,7 @@ struct TranscriptTelemetryView: View {
     /// What the session spent its time on. Every figure here comes from this
     /// transcript's own records — no cross-session aggregate is involved.
     private func activity(_ telemetry: SessionTelemetry) -> some View {
-        let summary = TranscriptTelemetryPresentation.activity(telemetry, blocks: blocks)
+        let summary = TranscriptTelemetryPresentation.activity(telemetry, blocks: blocks, usesMessageOrigins: usesMessageOrigins)
         return SessionInfoSection(title: "Activity") {
             VStack(alignment: .leading, spacing: LayoutTokens.xs) {
                 SessionInfoRow(label: "Transcript span", value: spanValue(summary))

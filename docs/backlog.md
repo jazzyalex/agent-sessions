@@ -1334,6 +1334,42 @@ time), `steering`, `interrupted`, `context_checkpoint`, manifest `title`/`model`
 
 ## Transcript UI
 
+### Switching to Text or JSON view beachballs
+> **open** · sev: low · urg: low · verified 2026-11-09
+
+- **What:** switching the Session view to Text or JSON is very slow and shows the spinning cursor (owner QA, 2026-11-09, build 8c53f7bf). Blocks view is fine.
+- **Why low:** owner: almost nobody uses Text or JSON; Blocks is the default.
+- **To close:** profile the switch on a large session (PerfBench + `sample`), move the full-transcript build off the main thread.
+
+### Mixed Codex messages: known edge cases after the 2026-11-09 review loop
+> **open** · sev: low · urg: low · verified 2026-11-09
+
+- **What:** a Codex user message can mix injected items (environment, AGENTS.md) with typed ones (`content_item_kinds`). User-facing paths now read the typed items (`SessionEvent.typedText`); raw text stays for search and cwd. Four Codex review rounds left these cases, all built by hand, none seen in real logs:
+  - Items that are all labeled `user.text`: a whole `<environment_context>` item is dropped as context, so a typed literal example of that block is dropped too; two such items with no prompt stay a user message.
+  - A whole environment block inside an aligned mixed message (other kinds + `user.text`) is shown as typed.
+  - A typed quote of an environment block with `<cwd>`, placed before the real one, wins `cwd` detection (`Session.codexCwd(in:)`).
+  - An unresolved mixed message containing `<turn_aborted>` still produces a meta notice.
+  - Search indexes typed and raw text from one budget; many long mixed messages can push a later prompt out of the Instant sample.
+  - Extending the message-group index copies the cached dictionaries (copy-on-write) on the main actor; not measured.
+  - First-prompt jump misses a prompt whose image marker coalescing rewrote.
+  - Stored index rows keep old titles and search text until their file changes (no forced reindex).
+- **Why deferred:** each fix moved a heuristic and the next round found the opposite case; log labels cannot tell these shapes apart.
+- **To close:** find a real log with one of these shapes, then fix that shape with a fixture.
+
+### Transcript polish: code and diff highlighting, better layout
+> **open** · sev: low · urg: low · verified 2026-11-08
+
+- **What:** after 6.4 (tool view) and 55aec3c4 (message origin), transcripts are readable but plain. Code snippets and diffs in tool rows have no color, and the overall layout can improve. Owner: "we still can better", not urgent.
+- **Where:** tool row bodies in `AgentSessions/ToolRendering/` (no diff or code coloring today); the only coloring is JSON in `AgentSessions/Views/TranscriptPlainView.swift` (`jsonSyntaxHighlightRanges`, `applySyntaxColors`).
+- **Before any spec, answer two questions (owner, 2026-11-08):**
+  1. **Prior art.** How do the Codex, Claude and OpenCode desktop apps show a session? What UI, UX and formatting can we borrow: diff view, code blocks, tool rows, message layout, collapse rules? Capture screenshots of the same kinds of turns in each app.
+  2. **User need.** What do Agent Sessions users actually need from a transcript, and why? AS is a history browser, not a live chat, so what users do there (search, review, resume, copy) decides what earns the effort.
+- **Research done 2026-11-08:** both questions answered in `docs/superpowers/specs/2026-11-08-transcript-polish-research.md`. No user asked for highlighting or layout; every peer colors diffs and code. Proposal ranked a per-turn "Worked for …" fold first, then diff coloring.
+- **Layout part done 2026-11-09:** owner rejected the "Worked for …" line (bloat) and chose hiding tool work behind the Tools chip, default off (spec `docs/superpowers/specs/2026-11-08-transcript-hide-tool-work-design.md`). Remaining: code and diff coloring in tool rows.
+- **Why deferred:** not urgent; the readability work just shipped and needs time in use.
+- **Risk if wrong:** a spec written before these two answers would copy chat-app styling that does not fit a history browser, or polish rows that users seldom open.
+- **To close:** both answers written up, then a spec, then the work.
+
 ### Session info does not expose known models for most agents
 > **partial** · sev: low · urg: low · verified 2026-10-15
 - **Update 2026-10-15:** the premise is stale. All 17 sources have telemetry and every descriptor declares `configuration` supported or partial (`testQuickFactsCoverEveryRegisteredSource`). Line citations below have drifted. Residue: per-provider model-history gaps marked `.partial` (Devin, Fx, Antigravity, Claude).

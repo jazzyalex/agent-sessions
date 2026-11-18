@@ -291,3 +291,10 @@ final class QwenResumeCoordinator {
         }
     }
 }
+
+@MainActor
+final class QwenMactermLauncher: QwenTerminalLaunching {
+    func launchInTerminal(_ package: QwenResumeCommandBuilder.CommandPackage) async throws {
+        try await AgentTerminalLauncher.launchInMacterm(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path)
+    }
+}

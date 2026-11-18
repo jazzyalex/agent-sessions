@@ -23,6 +23,10 @@ Run in this order:
    Confirm a real tool call and non-zero `baseline_type_count` for fresh sessions.
 5. Triage every new key/type as handled, noise, watch or candidate (§1e). Handled needs
    a read path and a behavior test. Candidates belong in `docs/backlog.md`.
+   Tests: do not add a test per sweep. When a new record's event kind matters to the user
+   (it must not render as a prompt, reply or tool call), add one row to
+   `testDriftRecordsParseAsTheirExpectedKind` in `Stage0GoldenFixturesTests.swift`. A
+   field the parser only has to tolerate needs no test: the fixture and fingerprint cover it.
 6. Run gated real-session replay and verify official prices for every table provider.
 7. Fix proven defects; add positive and negative cases for each changed usage/parsing
    rule. Treat the first fix as a draft. Run Python and stable Xcode tests.

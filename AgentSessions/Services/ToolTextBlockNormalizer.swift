@@ -981,9 +981,7 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func prettyStructuredLines(from obj: Any) -> [String]? {
-        guard JSONSerialization.isValidJSONObject(obj),
-              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
+        guard let text = ToolJSON.string(from: obj, pretty: true) else {
             return nil
         }
         return splitAndTrimTrailingEmptyLines(text)
@@ -1653,18 +1651,14 @@ enum ToolTextBlockNormalizer {
         if let s = value as? String {
             return s.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if JSONSerialization.isValidJSONObject(value),
-           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
-           let str = String(data: data, encoding: .utf8) {
+        if let str = ToolJSON.string(from: value, pretty: false) {
             return str
         }
         return String(describing: value)
     }
 
     private static func compactJSONString(_ dict: [String: Any]) -> String? {
-        guard JSONSerialization.isValidJSONObject(dict),
-              let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
-              let str = String(data: data, encoding: .utf8) else {
+        guard let str = ToolJSON.string(from: dict, pretty: false) else {
             return nil
         }
         return str
