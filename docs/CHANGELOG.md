@@ -4,8 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Resume supported CLI sessions in Macterm. The shared terminal picker detects Macterm, reuses the closest local project, and opens a new tab with the native resume command in the session folder.
-- **Open Claude sessions in VS Code.** Right-click a Claude Code session to open its local folder and send the resume link to the verified window in VS Code or Insiders. Enable the Claude Code extension and trust the folder first. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.
+## [6.6] - 2026-11-18
+
+### Highlights
+
+- **Open Claude Code sessions in VS Code.** Right-click a Claude Code session to open its local folder and resume in the verified VS Code or Insiders window. Install the Claude Code extension and trust the project folder. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.
+- **Resume supported CLI sessions in Macterm.** Select Macterm under Settings → General → Terminal App. Resume reuses the nearest local project and opens a new tab in the session folder. Contributed by @kian1991 in #94.
+
+### Improvements
+
+- **Updated model pricing.** Session cost estimates and Quota Meter now use GPT-6.2 pricing and refreshed rates for other models.
 
 ## [6.5] - 2026-11-09
 
