@@ -1,10 +1,39 @@
 import Foundation
 import AppKit
 
+struct MactermLaunchError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+private actor MactermLaunchQueue {
+    private var launchInProgress = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func run(_ launch: @Sendable () async throws -> Void) async throws {
+        if launchInProgress {
+            await withCheckedContinuation { waiting.append($0) }
+        } else {
+            launchInProgress = true
+        }
+        defer {
+            if waiting.isEmpty {
+                launchInProgress = false
+            } else {
+                waiting.removeFirst().resume()
+            }
+        }
+        try Task.checkCancellation()
+        try await launch()
+    }
+}
+
 /// Shared terminal launcher used by all agent resume flows.
 /// Runs a shell command in Terminal.app or iTerm2 via AppleScript.
 @MainActor
 enum AgentTerminalLauncher {
+    private nonisolated static let mactermLaunchQueue = MactermLaunchQueue()
+
     /// How long Warp needs after launch before it will read a tab config.
     private static let warpColdStartSettleNanoseconds: UInt64 = 3_000_000_000
 
@@ -60,6 +89,152 @@ enum AgentTerminalLauncher {
         }
         let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         try await runGhosttyAppleScript(ghosttyScriptLines(), arguments: [shellCommand, directory], domain: domain)
+    }
+
+    /// Uses Macterm's bundled control CLI rather than Ghostty's AppleScript interface.
+    static func launchInMacterm(shellCommand: String, cwd: String?) async throws {
+        do { try await performMactermLaunch(shellCommand: shellCommand, cwd: cwd) }
+        catch { throw MactermLaunchError(message: error.localizedDescription) }
+    }
+
+    private static func performMactermLaunch(shellCommand: String, cwd: String?) async throws {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.thdxg.macterm") else {
+            throw mactermError("Macterm is not installed.")
+        }
+        let cliURL = appURL.appendingPathComponent("Contents/Resources/bin/macterm")
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw mactermError("Macterm's control CLI is missing. Update Macterm and try again.")
+        }
+        let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw mactermError("The session's working directory no longer exists: \(directory)")
+        }
+        if !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "com.thdxg.macterm" }) {
+            _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
+        }
+        // A running app can still be starting its control socket.
+        let deadline = Date().addingTimeInterval(8)
+        while true {
+            do {
+                _ = try await runMactermCLI(cliURL, arguments: ["status", "--json"], timeout: 1)
+                break
+            } catch {
+                try Task.checkCancellation()
+                guard Date() < deadline else { throw error }
+                try await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        try await openMactermTab(cliURL, shellCommand: shellCommand, workingDirectory: directory)
+    }
+
+    static nonisolated func openMactermTab(_ cliURL: URL, shellCommand: String, workingDirectory: String) async throws {
+        // Hold the queue across the entire operation. Both project creation and
+        // activation change state shared by all Resume requests.
+        try await mactermLaunchQueue.run {
+            try await selectProjectAndOpenMactermTab(cliURL, shellCommand: shellCommand, workingDirectory: workingDirectory)
+        }
+    }
+
+    private static nonisolated func selectProjectAndOpenMactermTab(
+        _ cliURL: URL, shellCommand: String, workingDirectory: String
+    ) async throws {
+        let listArguments = ["project", "list", "--json"]
+        var projects = try await runMactermCLI(cliURL, arguments: listArguments)
+        var projectID = try mactermProjectID(in: projects, workingDirectory: workingDirectory)
+        if projectID == nil {
+            // Creating a project is not idempotent: never retry this command.
+            _ = try await runMactermCLI(cliURL, arguments: ["project", "create", workingDirectory, "--json"])
+            projects = try await runMactermCLI(cliURL, arguments: listArguments)
+            projectID = try mactermProjectID(in: projects, workingDirectory: workingDirectory)
+        }
+        guard let projectID else {
+            throw mactermError("Macterm did not return a project for the session's working directory.")
+        }
+        // `tab new --project` does not activate a different project. Its shell
+        // may never materialize until the project is selected explicitly.
+        _ = try await runMactermCLI(cliURL, arguments: ["project", "select", projectID, "--json"])
+        // The command builder has already quoted the native ID and working directory.
+        // Pass the complete command as one argv value; never interpolate it into a shell here.
+        let response = try await runMactermCLI(cliURL, arguments: ["tab", "new", "--project", projectID, "--run", shellCommand, "--json"])
+        struct CreatedTab: Decodable { let id: String }
+        struct TabResponse: Decodable { let tabs: [CreatedTab] }
+        guard let result = try? JSONDecoder().decode(TabResponse.self, from: response),
+              result.tabs.count == 1, let tab = result.tabs.first, !tab.id.isEmpty else {
+            throw mactermError("Macterm did not identify the new Resume tab. Check its tabs before trying again.")
+        }
+        // Project selection sets the CLI's active project but can leave the
+        // window on another project. The command is queued until its pane starts.
+        _ = try await runMactermCLI(cliURL, arguments: ["pane", "focus", "--project", projectID, "--tab", tab.id, "--json"])
+    }
+
+    static nonisolated func mactermProjectID(in data: Data, workingDirectory: String) throws -> String? {
+        struct Project: Decodable { let id: String; let path: String }
+        struct Listing: Decodable { let projects: [Project] }
+        let listing: Listing
+        do { listing = try JSONDecoder().decode(Listing.self, from: data) }
+        catch { throw mactermError("Macterm returned an unreadable project list. Update Macterm and try again.") }
+        let directory = URL(fileURLWithPath: workingDirectory).resolvingSymlinksInPath().standardizedFileURL.path
+        let matches = listing.projects.compactMap { project -> (String, String)? in
+            // Remote projects are deliberately outside this local resume flow.
+            guard project.path.hasPrefix("/") else { return nil }
+            let path = URL(fileURLWithPath: project.path).resolvingSymlinksInPath().standardizedFileURL.path
+            guard directory == path || directory.hasPrefix(path == "/" ? "/" : path + "/") else { return nil }
+            return (project.id, path)
+        }
+        guard let longest = matches.map({ $0.1.count }).max() else { return nil }
+        let closest = matches.filter { $0.1.count == longest }
+        guard closest.count == 1, let match = closest.first, !match.0.isEmpty else {
+            throw mactermError("More than one Macterm project matches this session. Give the projects distinct local folders before resuming.")
+        }
+        return match.0
+    }
+
+    /// Runs away from the UI actor, with bounded waiting and file-backed output.
+    static nonisolated func runMactermCLI(_ executable: URL, arguments: [String], timeout: TimeInterval = 10) async throws -> Data {
+        try Task.checkCancellation()
+        let result = try await Task.detached {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("macterm-resume-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let output = directory.appendingPathComponent("stdout")
+            let errors = directory.appendingPathComponent("stderr")
+            guard FileManager.default.createFile(atPath: output.path, contents: nil, attributes: [.posixPermissions: 0o600]),
+                  FileManager.default.createFile(atPath: errors.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            let outputHandle = try FileHandle(forWritingTo: output)
+            defer { try? outputHandle.close() }
+            let errorHandle = try FileHandle(forWritingTo: errors)
+            defer { try? errorHandle.close() }
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = arguments
+            process.standardOutput = outputHandle
+            process.standardError = errorHandle
+            try process.run()
+            guard process.waitForExit(timeout: timeout) else {
+                throw mactermError("Macterm did not respond in time. Check its tabs before trying Resume again.")
+            }
+            guard process.terminationStatus == 0 else {
+                let reader = try FileHandle(forReadingFrom: errors)
+                defer { try? reader.close() }
+                let data = try reader.read(upToCount: 16_384) ?? Data()
+                let detail = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                throw mactermError(detail.isEmpty ? "Macterm could not open the session." : "Macterm: \(detail)")
+            }
+            let reader = try FileHandle(forReadingFrom: output)
+            defer { try? reader.close() }
+            let data = try reader.read(upToCount: 1_048_577) ?? Data()
+            guard data.count <= 1_048_576 else { throw mactermError("Macterm's response is too large.") }
+            return data
+        }.value
+        try Task.checkCancellation()
+        return result
+    }
+
+    private static nonisolated func mactermError(_ message: String) -> MactermLaunchError {
+        MactermLaunchError(message: message)
     }
 
     /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.

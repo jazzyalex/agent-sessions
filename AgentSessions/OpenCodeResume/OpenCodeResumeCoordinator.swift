@@ -67,7 +67,8 @@ final class OpenCodeResumeCoordinator {
             try await launcher.launchInTerminal(pkg)
             return OpenCodeResumeResult(launched: true, strategy: used, error: nil, command: pkg.shellCommand)
         } catch {
-            if policy == .resumeThenContinue, used == .resumeByID, info.supportsContinue {
+            // A terminal transport failure cannot be fixed by resuming a different session.
+            if !(error is MactermLaunchError), policy == .resumeThenContinue, used == .resumeByID, info.supportsContinue {
                 do {
                     let pkg2 = try builder.makeCommand(strategy: .continueMostRecent, binaryURL: info.binaryURL, workingDirectory: input.workingDirectory)
                     try await launcher.launchInTerminal(pkg2)

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Resume supported CLI sessions in Macterm. The shared terminal picker detects Macterm, reuses the closest local project, and opens a new tab with the native resume command in the session folder.
+
 ## [6.5] - 2026-11-09
 
 ### Highlights
