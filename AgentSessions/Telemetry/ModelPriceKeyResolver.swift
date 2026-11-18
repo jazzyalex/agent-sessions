@@ -37,6 +37,9 @@ enum ModelPriceKeyResolver {
                 value = String(value[..<open]).trimmingCharacters(in: .whitespaces)
             }
         }
+        // A route-specific alias can retain provider or promotion identity
+        // that the generic normalization below would otherwise strip.
+        let routeAlias = aliases[value]
 
         // 3. Free route.
         var viaFreeRoute = false
@@ -57,7 +60,7 @@ enum ModelPriceKeyResolver {
         guard !value.isEmpty else { return nil }
 
         // 5. Alias.
-        if let alias = aliases[value] { value = alias }
+        value = routeAlias ?? aliases[value] ?? value
 
         // 6. Claude dot variant: "4.5" → "4-5" between digits.
         if value.hasPrefix("claude-") {
