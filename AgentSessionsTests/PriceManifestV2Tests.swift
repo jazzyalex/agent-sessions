@@ -2,6 +2,65 @@ import XCTest
 @testable import AgentSessions
 
 final class PriceManifestV2Tests: XCTestCase {
+    func testLivePriceRefreshCoalescesUsesValidatorsAndKeepsLastGoodTable() throws {
+        let transport = RunwayManifestTestTransport()
+        let table = transport.makeTable()
+        let initial = table.sequence
+        let next = initial + 1
+
+        DispatchQueue.concurrentPerform(iterations: 20) { _ in table.refreshInBackground() }
+        XCTAssertEqual(transport.requestCount, 1)
+        XCTAssertEqual(table.sequence, initial)
+        XCTAssertNil(transport.lastRequest?.value(forHTTPHeaderField: "If-None-Match"))
+        try transport.complete(status: 200, data: transport.manifest(sequence: next), etag: "\"prices-2\"")
+        XCTAssertEqual(table.sequence, next)
+        XCTAssertEqual(transport.persistedCount, 1)
+
+        transport.advance(seconds: 899)
+        table.refreshInBackground()
+        XCTAssertEqual(transport.requestCount, 1)
+        transport.advance(seconds: 1)
+        table.refreshInBackground()
+        XCTAssertEqual(transport.lastRequest?.value(forHTTPHeaderField: "If-None-Match"), "\"prices-2\"")
+        try transport.complete(status: 304)
+        XCTAssertEqual(table.sequence, next)
+        XCTAssertEqual(transport.persistedCount, 1)
+
+        // Suspend the same process for weeks, then drive its first visible cycle.
+        transport.advance(seconds: 21 * 24 * 60 * 60)
+        table.refreshInBackground()
+        try transport.complete(status: 200, data: transport.manifest(sequence: initial))
+        XCTAssertEqual(table.sequence, next, "a stale CDN answer cannot roll prices back")
+        XCTAssertEqual(transport.persistedCount, 1)
+    }
+
+    func testOfflineAndMalformedResponsesRetryInTheSameProcessWithCappedBackoff() throws {
+        let transport = RunwayManifestTestTransport()
+        let table = transport.makeTable()
+        let initial = table.sequence
+        table.refreshInBackground()
+        for (index, delay) in [30, 60, 120, 240, 300, 300].enumerated() {
+            if index == 0 {
+                try transport.complete(status: nil)
+            } else {
+                try transport.complete(status: 200, data: Data("malformed".utf8))
+            }
+            XCTAssertEqual(table.sequence, initial)
+            transport.advance(seconds: delay - 1)
+            table.refreshInBackground()
+            XCTAssertEqual(transport.requestCount, index + 1)
+            transport.advance(seconds: 1)
+            table.refreshInBackground()
+            XCTAssertEqual(transport.requestCount, index + 2)
+        }
+        try transport.complete(status: 200, data: transport.manifest(sequence: initial + 1))
+        XCTAssertEqual(table.sequence, initial + 1)
+        XCTAssertEqual(transport.persistedCount, 1)
+        transport.advance(seconds: 899)
+        table.refreshInBackground()
+        XCTAssertEqual(transport.requestCount, 7, "success resets the failure cadence")
+    }
+
     func testNovember62And52StandardFastAndContextRates() throws {
         let snapshot = RunwayPriceTable.makeForTesting().snapshot()
         for (slug, input, read, output, shortWrite, longWrite, threshold) in [
@@ -649,5 +708,62 @@ final class PriceManifestV2Tests: XCTestCase {
         XCTAssertEqual(gemini.inputPerMTok, 0.75)
         XCTAssertEqual(gemini.outputPerMTok, 3.75)
         XCTAssertTrue(manifest.models.values.allSatisfy { $0.inputPerMTok >= 0 && $0.outputPerMTok >= 0 })
+    }
+}
+
+/// A controllable clock and HTTP transport for same-process price refresh tests.
+final class RunwayManifestTestTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant = ContinuousClock.now
+    private var requests: [URLRequest] = []
+    private var pending: (@Sendable (Data?, HTTPURLResponse?) -> Void)?
+    private var writes = 0
+
+    var requestCount: Int { lock.withLock { requests.count } }
+    var lastRequest: URLRequest? { lock.withLock { requests.last } }
+    var persistedCount: Int { lock.withLock { writes } }
+
+    func makeTable(loadBundled: Bool = true) -> RunwayPriceTable {
+        RunwayPriceTable(loadBundled: loadBundled, readCache: false,
+                         refreshClock: { [self] in lock.withLock { instant } },
+                         requestManifest: { [self] request, completion in
+                             lock.withLock {
+                                 requests.append(request)
+                                 pending = completion
+                             }
+                         },
+                         persistManifest: { [self] _ in lock.withLock { writes += 1 } })
+    }
+
+    func advance(seconds: Int) {
+        lock.withLock { instant = instant.advanced(by: .seconds(seconds)) }
+    }
+
+    func manifest(sequence: Int, excluding model: String? = nil) throws -> Data {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(RunwayPriceTable.bundledJSON.utf8)) as? [String: Any])
+        object["sequence"] = sequence
+        if let model {
+            var models = try XCTUnwrap(object["models"] as? [String: Any])
+            models.removeValue(forKey: model)
+            object["models"] = models
+        }
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func complete(status: Int?, data: Data? = nil, etag: String? = nil) throws {
+        let (request, completion) = lock.withLock {
+            let result = (requests.last, pending)
+            pending = nil
+            return result
+        }
+        let resolved = try XCTUnwrap(completion)
+        if let status {
+            let url = try XCTUnwrap(request?.url)
+            resolved(data, HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                                          headerFields: etag.map { ["ETag": $0] }))
+        } else {
+            resolved(data, nil)
+        }
     }
 }

@@ -106,8 +106,21 @@ actor OpenCodeRateSampler {
     private struct CacheEntry {
         let tail: String?
         let lastRead: Date
-        let window: OpenCodeRecentWindow?
+        let window: OpenCodeRecentWindow
         let activity: OpenCodeSessionActivity?
+        let priceRevision: Int
+
+        init(tail: String?, lastRead: Date, window: OpenCodeRecentWindow, prices: RunwayPriceSnapshot) {
+            self.tail = tail
+            self.lastRead = lastRead
+            self.window = window
+            self.priceRevision = prices.revision
+            if case .usage(let events) = window, let burst = OpenCodeSessionRate.burst(events) {
+                self.activity = OpenCodeSessionRate.activity(burst: burst, prices: prices)
+            } else {
+                self.activity = nil
+            }
+        }
     }
 
     private let store: OpenCodeRateStore
@@ -212,13 +225,12 @@ actor OpenCodeRateSampler {
             let key = CacheKey(path: path, sessionID: id)
             switch results?[id] {
             case .loaded(let tail, let window):
-                var activity: OpenCodeSessionActivity?
-                if case .usage(let events) = window, let burst = OpenCodeSessionRate.burst(events) {
-                    activity = OpenCodeSessionRate.activity(burst: burst, prices: snapshotPrices)
-                }
-                cache[key] = CacheEntry(tail: tail, lastRead: now, window: window, activity: activity)
+                cache[key] = CacheEntry(tail: tail, lastRead: now, window: window, prices: snapshotPrices)
             case .unchanged:
-                break
+                if let entry = cache[key], entry.priceRevision != snapshotPrices.revision {
+                    cache[key] = CacheEntry(tail: entry.tail, lastRead: entry.lastRead,
+                                            window: entry.window, prices: snapshotPrices)
+                }
             case .unreadable, .none:
                 cache[key] = nil
             }

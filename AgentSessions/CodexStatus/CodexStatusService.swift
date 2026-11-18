@@ -214,6 +214,8 @@ final class CodexUsageModel: ObservableObject {
     @Published var authStatus: UsageAuthStatus?
 
     private var service: CodexStatusService?
+    private var weeklyCalibrationInput: (snapshot: CodexUsageSnapshot, observedAt: Date,
+                                         accountHash: String, priceRevision: Int?)?
     /// Single long-lived Codex auth classifier. STATEFUL (debounces the
     /// signed-out verdict), so it MUST be exactly one instance living in one
     /// isolation domain — the main actor. `classify` runs here; the async/IO
@@ -249,6 +251,8 @@ final class CodexUsageModel: ObservableObject {
     private var weeklyBurnRateSource: CodexLimitsSource?
     private let calibrationStore: WeeklyQuotaCalibrationStore
     private let calibrationDefaults: UserDefaults
+    private let calibrationPrices: RunwayPriceTable
+    private let calibrationAccountID: (Date) -> String?
     private var isEnabled: Bool = false
     private var refreshGeneration: UInt64 = 0
     private var stripVisible: Bool = false
@@ -260,9 +264,13 @@ final class CodexUsageModel: ObservableObject {
     private var appIsActive: Bool = false
 
     init(calibrationStore: WeeklyQuotaCalibrationStore = .shared,
-         calibrationDefaults: UserDefaults = .standard) {
+         calibrationDefaults: UserDefaults = .standard,
+         calibrationPrices: RunwayPriceTable = .shared,
+         calibrationAccountID: @escaping (Date) -> String? = { CodexCalibrationAccountScope.accountId(now: $0) }) {
         self.calibrationStore = calibrationStore
         self.calibrationDefaults = calibrationDefaults
+        self.calibrationPrices = calibrationPrices
+        self.calibrationAccountID = calibrationAccountID
     }
 
 #if DEBUG
@@ -568,6 +576,7 @@ final class CodexUsageModel: ObservableObject {
             await service?.stop()
         }
         service = nil
+        weeklyCalibrationInput = nil
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
@@ -664,64 +673,7 @@ final class CodexUsageModel: ObservableObject {
             freshness: weeklyFreshness,
             observedAt: observedAt
         ), now: now)
-        // Weekly %/h calibration. Separate from the burn-rate tracker above: that
-        // one measures a short-lived account rate and must stay fresh, while this
-        // learns a near-static pp-per-API-dollar conversion and therefore tolerates
-        // a much longer interval (Codex weekly percent moves in whole points, so a
-        // 30-minute cap would make it unacquirable on ordinary days).
-        let currentAccountID = CodexCalibrationAccountScope.accountId(now: now)
-        let weeklyAccountHash = Self.weeklyCalibrationAccountHash(
-            snapshot: s,
-            currentAccountID: currentAccountID
-        )
-        if s.hasWeekRateLimit,
-           s.quotaFetchIssue == nil,
-           Self.canCalibrateWeeklyQuota(source: s.weekLimitsSource),
-           weeklyFreshness.allowsProjectedDisplay,
-           // Anchor, not display — same rule as the Claude path. Codex's OAuth text
-           // is ISO-8601 today, but a legacy or fallback source supplying a relative
-           // countdown would silently key the cache by `now`.
-           let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
-                                                            source: .codex,
-                                                            raw: s.weekResetText,
-                                                            now: observedAt),
-           weekResetAt > observedAt,
-           let weeklyAccountHash {
-            // Historical bootstrap remains available for diagnostics and guarded
-            // attribution. Runway's displayed rate uses an observed live interval.
-            // Scan once per anchor off the main thread.
-            CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource?.rawValue ?? "none")")
-            calibrationStore.ensureBootstrap(
-                provider: "codex",
-                root: CodexRunwayRecentSessionScanner.defaultRoot(),
-                resetsAt: weekResetAt,
-                windowMinutes: 10080,
-                usedPercentPoints: Double(100 - s.weekRemainingPercent),
-                accountHash: weeklyAccountHash,
-                limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
-                sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
-                now: now,
-                defaults: calibrationDefaults
-            )
-            calibrationStore.observeQuota(
-                provider: "codex",
-                remainingPercent: Double(s.weekRemainingPercent),
-                // Codex supplies only an integer percent, so a 1pp quantum is the
-                // smallest trustworthy drop.
-                hasExactPercent: false,
-                resetAt: weekResetAt,
-                observedAt: observedAt,
-                scope: WeeklyQuotaCalibrationScope(
-                    provider: "codex",
-                    accountHash: weeklyAccountHash,
-                    sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
-                    limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
-                    priceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "codex")
-                ),
-                now: now,
-                defaults: calibrationDefaults
-            )
-        }
+        updateWeeklyCalibration(from: s, observedAt: observedAt, now: now)
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
         limitNotifier.handle(snapshot: UsageLimitSnapshot(
             provider: .codex,
@@ -744,6 +696,84 @@ final class CodexUsageModel: ObservableObject {
         // "usage updated" hook and runs on every poll. The fetcher's own long
         // cooldown gates the network, so calling it here is cheap.
         refreshResetCredits()
+    }
+
+    func refreshWeeklyCalibrationForNewPrices(now: Date) {
+        guard let input = weeklyCalibrationInput,
+              calibrationPrices.rateRevision(forProvider: "codex") != input.priceRevision,
+              now.timeIntervalSince(input.observedAt) <= 10 * 60 else { return }
+        updateWeeklyCalibration(from: input.snapshot, observedAt: input.observedAt,
+                                now: now, matchingAccountHash: input.accountHash)
+    }
+
+    private func updateWeeklyCalibration(from s: CodexUsageSnapshot, observedAt: Date, now: Date,
+                                         matchingAccountHash: String? = nil) {
+        let priceRevision = calibrationPrices.rateRevision(forProvider: "codex")
+        // Weekly %/h calibration. Separate from the burn-rate tracker above: that
+        // one measures a short-lived account rate and must stay fresh, while this
+        // learns a near-static pp-per-API-dollar conversion and therefore tolerates
+        // a much longer interval (Codex weekly percent moves in whole points, so a
+        // 30-minute cap would make it unacquirable on ordinary days).
+        let currentAccountID = calibrationAccountID(now)
+        let weeklyAccountHash = Self.weeklyCalibrationAccountHash(
+            snapshot: s,
+            currentAccountID: currentAccountID
+        )
+        if s.hasWeekRateLimit,
+           s.quotaFetchIssue == nil,
+           Self.canCalibrateWeeklyQuota(source: s.weekLimitsSource),
+           Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: s.eventTimestamp,
+                               now: now).allowsProjectedDisplay,
+           // Anchor, not display — same rule as the Claude path. Codex's OAuth text
+           // is ISO-8601 today, but a legacy or fallback source supplying a relative
+           // countdown would silently key the cache by `now`.
+           let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
+                                                            source: .codex,
+                                                            raw: s.weekResetText,
+                                                            now: observedAt),
+           weekResetAt > max(now, observedAt),
+           let weeklyAccountHash,
+           matchingAccountHash.map({ $0 == weeklyAccountHash }) ?? true {
+            // Bootstrap from existing transcripts while the live tracker
+            // gathers a compatible quota interval.
+            CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource?.rawValue ?? "none")")
+            let bootstrapScopeIsCurrent = calibrationStore.ensureBootstrap(
+                provider: "codex",
+                root: CodexRunwayRecentSessionScanner.defaultRoot(),
+                resetsAt: weekResetAt,
+                windowMinutes: 10080,
+                usedPercentPoints: Double(100 - s.weekRemainingPercent),
+                accountHash: weeklyAccountHash,
+                limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
+                sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
+                matchingPriceRevision: priceRevision,
+                quotaObservedAt: observedAt,
+                now: now,
+                defaults: calibrationDefaults
+            )
+            calibrationStore.observeQuota(
+                provider: "codex",
+                remainingPercent: Double(s.weekRemainingPercent),
+                // Codex supplies only an integer percent, so a 1pp quantum is the
+                // smallest trustworthy drop.
+                hasExactPercent: false,
+                resetAt: weekResetAt,
+                observedAt: observedAt,
+                scope: WeeklyQuotaCalibrationScope(
+                    provider: "codex",
+                    accountHash: weeklyAccountHash,
+                    sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
+                    limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
+                    priceRevision: priceRevision
+                ),
+                now: now,
+                defaults: calibrationDefaults
+            )
+            weeklyCalibrationInput = (s, observedAt, weeklyAccountHash,
+                                      bootstrapScopeIsCurrent ? priceRevision : nil)
+        } else {
+            weeklyCalibrationInput = nil
+        }
     }
 
     /// OAuth quota data may only condition the account that was used for the
