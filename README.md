@@ -16,6 +16,8 @@ Open source. Your session history stays on your Mac. No telemetry.
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All releases</a>
 </p>
 
+<p align="center"><sub>Also by me: <a href="https://livingwallapp.com/gh">Living Wall</a> — a little living world on your Mac desktop.</sub></p>
+
 ```bash
 brew install --cask jazzyalex/agent-sessions/agent-sessions
 ```
@@ -227,10 +229,6 @@ Run the stable test wrapper:
 ```
 
 Found a session you thought you had lost? [Star Agent Sessions](https://github.com/jazzyalex/agent-sessions) to help other developers find it.
-
-## Also by me
-
-[Living Wall](https://livingwallapp.com/gh) — a little living world on your Mac desktop. Waves roll in, a dog trots across the yard, fish drift by on the reef.
 
 ## License
 
