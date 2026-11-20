@@ -332,7 +332,7 @@ final class CodexQuotaRecoveryTests: XCTestCase {
         XCTAssertEqual(blip.weekRemainingPercent, 98)
 
         var aged = blip
-        aged.eventTimestamp = Date().addingTimeInterval(-CodexStatusService.failureGraceSeconds - 1)
+        aged.weekEventTimestamp = Date().addingTimeInterval(-CodexStatusService.failureGraceSeconds - 1)
         await service.setSnapshotForTesting(aged)
         scenario.advance(60)
         let expired = await service.refreshLiveLimitsForTesting()
