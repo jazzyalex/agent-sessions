@@ -344,14 +344,31 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let legacyV1FileName = "prices.json"
     static let cacheFileName = "prices-v2.json"
     private static let manifestURL = URL(string: "https://jazzyalex.github.io/agent-sessions/prices-v2.json")!
-    private static let minRefreshInterval: TimeInterval = 24 * 60 * 60
+    private static let refreshInterval: Duration = .seconds(15 * 60)
+    private static let retryIntervals = [30, 60, 120, 240, 300]
+    private static let manifestSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(configuration: configuration)
+    }()
+
+    typealias ManifestRequest = @Sendable (
+        URLRequest, @escaping @Sendable (Data?, HTTPURLResponse?) -> Void
+    ) -> Void
 
     private let lock = NSLock()
+    private let refreshEnabled: Bool
+    private let refreshClock: @Sendable () -> ContinuousClock.Instant
+    private let requestManifest: ManifestRequest
+    private let persistManifest: @Sendable (Data) -> Void
     private var models: [String: RunwayModelPrice] = [:]
     private var aliases: [String: String] = [:]
     private var _revision = 0
     private var _manifestFingerprint = ""
-    private var lastFetchAt: Date?
+    private var nextFetchAt: ContinuousClock.Instant?
+    private var fetchInFlight = false
+    private var consecutiveFailures = 0
+    private var etag: String?
     /// `updated` of the table currently in `models`. Metadata only: it no longer
     /// orders manifests (`sequence` does), but telemetry stamps it onto results.
     private var loadedUpdated: String = ""
@@ -369,12 +386,31 @@ final class RunwayPriceTable: @unchecked Sendable {
         let manifestFingerprint: String
     }
 
-    init(loadBundled: Bool = true, readCache: Bool = true) {
+    init(loadBundled: Bool = true, readCache: Bool = true,
+         refreshClock: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
+         requestManifest: ManifestRequest? = nil,
+         cacheDirectory: URL? = nil,
+         persistManifest: (@Sendable (Data) -> Void)? = nil) {
+        let usesProductionTransport = requestManifest == nil
+        let usesProductionCache = cacheDirectory == nil
+        self.refreshEnabled = !AppRuntime.isRunningTests || !usesProductionTransport
+        self.refreshClock = refreshClock
+        self.requestManifest = requestManifest ?? { request, completion in
+            Self.manifestSession.dataTask(with: request) { data, response, error in
+                completion(error == nil ? data : nil, response as? HTTPURLResponse)
+            }.resume()
+        }
+        self.persistManifest = persistManifest ?? { data in
+            guard !AppRuntime.isRunningTests || cacheDirectory != nil else { return }
+            Self.persist(data, to: Self.cacheURL(in: cacheDirectory))
+        }
         if loadBundled, let decoded = Self.decode(Data(Self.bundledJSON.utf8)) {
             install(decoded)
         }
         // Overlay a previously fetched manifest only when its sequence is higher.
-        if readCache, let data = try? Data(contentsOf: Self.cacheURL()), let decoded = Self.decode(data) {
+        if readCache, (!AppRuntime.isRunningTests || !usesProductionCache),
+           let data = try? Data(contentsOf: Self.cacheURL(in: cacheDirectory)),
+           let decoded = Self.decode(data) {
             adopt(decoded)
         }
     }
@@ -435,33 +471,53 @@ final class RunwayPriceTable: @unchecked Sendable {
         return RunwayPriceSnapshot.price(forModel: slug, in: models, provider: provider)
     }
 
-    /// Fire-and-forget: fetch the manifest at most once/day and cache it. Never
-    /// blocks; failures are silent (the current table stays).
-    func refreshInBackground(now: Date = Date()) {
+    /// Called by the existing priced-view refresh loops. One request is shared
+    /// across views, including when they become visible again after sleep.
+    func refreshInBackground() {
+        guard refreshEnabled else { return }
         lock.lock()
-        if let last = lastFetchAt, now.timeIntervalSince(last) < Self.minRefreshInterval {
+        if fetchInFlight || nextFetchAt.map({ refreshClock() < $0 }) == true {
             lock.unlock(); return
         }
-        lastFetchAt = now
+        fetchInFlight = true
+        let sentETag = etag
         lock.unlock()
         var request = URLRequest(url: Self.manifestURL)
         request.httpMethod = "GET"
+        request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
-            guard let self,
-                  let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let data, let decoded = Self.decode(data) else { return }
-            // Ignore (and don't cache) a manifest whose sequence is not higher than
-            // what we already have — e.g. the host still serves a file predating
-            // this build's bundled table.
-            guard self.adopt(decoded) else { return }
-            Self.persist(data)
-        }.resume()
+        request.setValue(sentETag, forHTTPHeaderField: "If-None-Match")
+        requestManifest(request) { [weak self] data, response in
+            self?.finishRefresh(data: data, response: response, sentETag: sentETag)
+        }
+    }
+
+    private func finishRefresh(data: Data?, response: HTTPURLResponse?, sentETag: String?) {
+        let decoded = response?.statusCode == 200 ? data.flatMap(Self.decode) : nil
+        if let decoded, let data, adopt(decoded) {
+            persistManifest(data)
+        }
+        lock.lock(); defer { lock.unlock() }
+        let delay: Duration
+        if let decoded {
+            etag = decoded.sequence >= loadedSequence ? response?.value(forHTTPHeaderField: "ETag") : nil
+            consecutiveFailures = 0
+            delay = Self.refreshInterval
+        } else if response?.statusCode == 304, sentETag != nil {
+            consecutiveFailures = 0
+            delay = Self.refreshInterval
+        } else {
+            let intervals = Self.retryIntervals
+            delay = .seconds(intervals[consecutiveFailures])
+            consecutiveFailures = min(consecutiveFailures + 1, intervals.count - 1)
+        }
+        nextFetchAt = refreshClock().advanced(by: delay)
+        fetchInFlight = false
     }
 
     /// Writes the v2 cache file only. Never touches `legacyV1FileName`.
-    private static func persist(_ data: Data) {
-        try? data.write(to: cacheURL(), options: .atomic)
+    private static func persist(_ data: Data, to url: URL? = nil) {
+        try? data.write(to: url ?? cacheURL(), options: .atomic)
     }
 
     // MARK: - Decoding
@@ -695,7 +751,10 @@ final class RunwayPriceTable: @unchecked Sendable {
         return Int(digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) } & UInt64(Int.max))
     }
 
-    private static func cacheURL() -> URL {
+    private static func cacheURL(in directory: URL? = nil) -> URL {
+        if let directory {
+            return directory.appendingPathComponent(cacheFileName)
+        }
         #if DEBUG
         if let override = cacheDirectoryOverride {
             return override.appendingPathComponent(cacheFileName)
@@ -716,7 +775,7 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     /// Test seam: the same write `refreshInBackground` performs after adopting.
     func persistForTesting(_ data: Data) {
-        Self.persist(data)
+        persistManifest(data)
     }
 
     /// Test seam: load a manifest from raw JSON (bypassing the network/cache).
@@ -729,6 +788,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     }
     static func makeForTesting() -> RunwayPriceTable { RunwayPriceTable(loadBundled: true, readCache: false) }
     static func makeEmptyForTesting() -> RunwayPriceTable { RunwayPriceTable(loadBundled: false, readCache: false) }
+    var refreshEnabledForTesting: Bool { refreshEnabled }
     #endif
 
     /// Compiled-in default snapshot. Also published at `docs/prices-v2.json` for the

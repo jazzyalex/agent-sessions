@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Quota Meter picks up new model prices in the open app. The $ and Wk views recalculate from existing usage, and failed price checks retry automatically.
+
 ## [6.6] - 2026-11-18
 
 ### Highlights

@@ -477,6 +477,15 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     var weeklyPercentPointsPerDollar: Double? {
         weeklyCalibration.state.canDisplayRate ? weeklyCalibration.ratio : nil
     }
+    func weeklyCalibration(matching prices: RunwayPriceSnapshot) -> WeeklyRunwayCalibration {
+        let provider = baseline.source == .codex ? "codex" : "claude"
+        if let provenance = weeklyCalibration.provenance,
+           provenance.priceRevision != prices.rateRevision(forProvider: provider) {
+            return .measuring
+        }
+        return weeklyCalibration
+    }
+
     /// False when the provider exposes no weekly limit at all — weekly rows then
     /// read "n/a" instead of waiting for a calibration that can never arrive.
     let weeklyWindowAvailable: Bool
@@ -603,7 +612,9 @@ enum CodexRunwaySnapshotLoader {
         "\(request.baseline.source)|\(request.recentSessionsRoot?.path ?? "")"
     }
 
-    static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
+    static func snapshot(for request: CodexRunwaySnapshotRequest,
+                         priceTable: RunwayPriceTable = .shared,
+                         calibrationStore: WeeklyQuotaCalibrationStore = .shared) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let needsWeeklyHistory = request.weeklyResetAt != nil
@@ -659,9 +670,9 @@ enum CodexRunwaySnapshotLoader {
                             now: request.now
                         )
                     } ?? (events: [], coverageComplete: false)
-                WeeklyQuotaCalibrationStore.shared.ledger(provider: "codex").recordIncremental(
+                calibrationStore.ledger(provider: "codex").recordIncremental(
                     events: ledgerScan.events,
-                    priceTable: RunwayPriceTable.shared,
+                    priceTable: priceTable,
                     now: request.now,
                     coverageComplete: ledgerSessionScan.coverageComplete && ledgerScan.coverageComplete
                 )
@@ -678,9 +689,12 @@ enum CodexRunwaySnapshotLoader {
                 var weeklyUnavailableIDs: Set<String> = []
                 // With a calibration in hand, "no current burn" is a measured zero
                 // ("flat"), not an unanswered question (the clock).
+                let prices = priceTable.snapshot()
+                let weeklyCalibration = request.weeklyCalibration(matching: prices)
+                let weeklyRatio = weeklyCalibration.state.canDisplayRate ? weeklyCalibration.ratio : nil
                 let weeklyPendingConfidence: RunwayAttributionConfidence =
                     (request.baseline.rateUnit == .weeklyPercentPerHour
-                     && request.weeklyPercentPointsPerDollar != nil) ? .direct : .waiting
+                     && weeklyRatio != nil) ? .direct : .waiting
                 switch request.baseline.rateUnit {
                 case .tokensPerHour:
                     // 5h window dropped → no run-out to normalize against, so rows
@@ -693,9 +707,7 @@ enum CodexRunwaySnapshotLoader {
                         maxRows: request.maxRows
                     )
                 case .dollarsPerHour:
-                    // Lazy, self-throttling (<=1/day): the price manifest is only
-                    // ever fetched once someone actually uses the $ presentation.
-                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
+                    priceTable.refreshInBackground()
                     // Per-session $/h from the price table. Sessions we can't price
                     // are dropped; only when NOTHING is priceable do we fall back to
                     // token snapshot-wide (P1) with a token baseline so rows never
@@ -703,7 +715,7 @@ enum CodexRunwaySnapshotLoader {
                     if let dollars = CodexRunwayCalculator.dollarSnapshot(
                         baseline: request.baseline,
                         activities: activities,
-                        priceTable: RunwayPriceTable.shared,
+                        prices: prices, at: request.now,
                         maxRows: request.maxRows
                     ) {
                         core = dollars.snapshot
@@ -724,27 +736,27 @@ enum CodexRunwaySnapshotLoader {
                     // There is deliberately NO fallback to tokens here: `Wk` must
                     // never render tk/h. Without a calibration the rows stay on the
                     // waiting clock; sessions that can never be estimated get "n/a".
-                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
+                    priceTable.refreshInBackground()
                     if !request.weeklyWindowAvailable || request.weeklyCalibrationAbandoned
-                        || request.weeklyCalibration.state.isUnavailable {
+                        || weeklyCalibration.state.isUnavailable {
                         // No weekly limit on this provider at all, or we have waited
                         // long enough that a calibration is evidently not coming.
                         // Either way the clock would be promising a number that will
                         // not arrive, so say "n/a" instead.
                         core = nil
                         weeklyUnavailableIDs = Set(identities.map(\.id))
-                    } else if let calibration = request.weeklyPercentPointsPerDollar,
+                    } else if let calibration = weeklyRatio,
                               let weekly = CodexRunwayCalculator.weeklyEstimatedSnapshot(
                                   baseline: request.baseline,
                                   activities: weeklyProfile.activities,
-                                  priceTable: RunwayPriceTable.shared,
+                                  prices: prices, at: request.now,
                                   percentPointsPerDollar: calibration,
                                   maxRows: request.maxRows
                               ) {
                         core = weekly.snapshot
                         weeklyUnavailableIDs = weekly.unpriceableIDs
                         pendingIdentities = identities.filter { !weekly.unpriceableIDs.contains($0.id) }
-                    } else if request.weeklyPercentPointsPerDollar != nil {
+                    } else if weeklyRatio != nil {
                         // Calibrated, but nothing currently priceable.
                         core = nil
                         weeklyUnavailableIDs = Set(weeklyProfile.activities.map(\.identity.id))
@@ -785,8 +797,8 @@ enum CodexRunwaySnapshotLoader {
                     waitingIDs: weeklyProfile.measuringIDs
                 )
                 if request.baseline.rateUnit == .weeklyPercentPerHour {
-                    snapshot?.weeklyCalibrationState = request.weeklyCalibration.state
-                    snapshot?.weeklyCalibrationRatio = request.weeklyPercentPointsPerDollar
+                    snapshot?.weeklyCalibrationState = weeklyCalibration.state
+                    snapshot?.weeklyCalibrationRatio = weeklyRatio
                 }
                 snapshot?.dollarAggregateIncomplete = dollarAggregateIncomplete
                 // Aggregate token throughput (fine-grained, window-independent) — an
@@ -1329,7 +1341,7 @@ enum CodexRunwayCalculator {
     /// fall back to tokens on nil: `Wk` never renders `tk/h`.
     static func weeklyEstimatedSnapshot(baseline: RunwayProviderBaseline,
                                         activities: [RunwaySessionActivity],
-                                        priceTable: RunwayPriceTable,
+                                        prices: RunwayPriceSnapshot, at: Date = Date(),
                                         percentPointsPerDollar: Double,
                                         maxRows: Int) -> (snapshot: CodexRunwaySnapshot, unpriceableIDs: Set<String>)? {
         guard maxRows > 0 else { return nil }
@@ -1338,7 +1350,7 @@ enum CodexRunwayCalculator {
         var estimated: [(activity: RunwaySessionActivity, percentPerHour: Double)] = []
         var unpriceableIDs: Set<String> = []
         for activity in activities {
-            guard let dollarsPerHour = dollarsPerHour(for: activity, priceTable: priceTable,
+            guard let dollarsPerHour = dollarsPerHour(for: activity, prices: prices, at: at,
                                                       source: baseline.source) else {
                 // Cannot be weighted, so it cannot be estimated. Surfaced as "n/a"
                 // rather than silently omitted or shown as a waiting clock.
@@ -1406,7 +1418,7 @@ enum CodexRunwayCalculator {
     /// Runway burn is provider quota spend, and a session on a third-party model
     /// (`glm-4.7` through Claude Code) is not, even though Session Info prices it.
     static func dollarsPerHour(for activity: RunwaySessionActivity,
-                               priceTable: RunwayPriceTable,
+                               prices: RunwayPriceSnapshot, at: Date = Date(),
                                source: UsageTrackingSource) -> Double? {
         let provider: String
         switch source {
@@ -1424,7 +1436,7 @@ enum CodexRunwayCalculator {
             // the session rather than drop it honestly. That covers an unknown model
             // AND a slice served at a billing tier the model has no rates for — a
             // fast-mode record priced at standard would understate it by half.
-            guard let p = priceTable.price(forModel: component.modelSlug, provider: provider)?.effective(at: Date()),
+            guard let p = prices.price(forModel: component.modelSlug, provider: provider)?.effective(at: at),
                   (component.cacheCreationPerSecond == 0 || p.cacheWritePerMTok != nil),
                   (component.cacheCreation1hPerSecond == 0 || p.cacheWrite1hPerMTok != nil),
                   let rates = p.rates(for: component.speed,
@@ -1455,13 +1467,13 @@ enum CodexRunwayCalculator {
     /// genuinely burning.
     static func dollarSnapshot(baseline: RunwayProviderBaseline,
                                activities: [RunwaySessionActivity],
-                               priceTable: RunwayPriceTable,
+                               prices: RunwayPriceSnapshot, at: Date = Date(),
                                maxRows: Int) -> (snapshot: CodexRunwaySnapshot, unpriceableIDs: Set<String>)? {
         guard maxRows > 0 else { return nil }
         var priced: [(activity: RunwaySessionActivity, dollarsPerHour: Double)] = []
         var unpriceableIDs: Set<String> = []
         for a in activities {
-            if let rate = dollarsPerHour(for: a, priceTable: priceTable, source: baseline.source) {
+            if let rate = dollarsPerHour(for: a, prices: prices, at: at, source: baseline.source) {
                 priced.append((a, rate))
             } else {
                 unpriceableIDs.insert(a.identity.id)

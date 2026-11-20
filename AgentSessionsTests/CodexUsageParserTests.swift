@@ -749,7 +749,9 @@ final class CodexUsageParserTests: XCTestCase {
                 weekLimitsSource: .cliRPC,
                 limitsSource: nil,
                 usageLine: nil,
-                eventTimestamp: previousEventTimestamp
+                eventTimestamp: previousEventTimestamp,
+                fiveHourEventTimestamp: previousEventTimestamp,
+                weekEventTimestamp: previousEventTimestamp
             )
         )
 
@@ -777,8 +779,37 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(merged.weekLimitsSource, .cliRPC)
         XCTAssertEqual(merged.usageLine, "Usage is stale (>3m)")
         XCTAssertEqual(merged.eventTimestamp, summaryEventTimestamp)
+        XCTAssertEqual(merged.fiveHourEventTimestamp, previousEventTimestamp,
+                       "JSONL activity must not move an authoritative five-hour quota observation")
+        XCTAssertEqual(merged.weekEventTimestamp, previousEventTimestamp,
+                       "JSONL activity must not move an authoritative weekly quota observation")
         let cachedReset = await service.lastFiveHourResetDateForTesting
         XCTAssertEqual(cachedReset, summaryFiveHourReset)
+    }
+
+    func testFailureGraceUsesPerWindowQuotaObservationsInsteadOfJSONLActivity() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var snapshot = CodexUsageSnapshot(
+            fiveHourRemainingPercent: 70,
+            fiveHourResetText: "2027-01-01T00:00:00Z",
+            hasFiveHourRateLimit: true,
+            fiveHourLimitsSource: .oauth,
+            weekRemainingPercent: 44,
+            weekResetText: "2027-01-01T00:00:00Z",
+            hasWeekRateLimit: true,
+            weekLimitsSource: .cliRPC,
+            eventTimestamp: now.addingTimeInterval(-8 * 60),
+            fiveHourEventTimestamp: now.addingTimeInterval(-30),
+            weekEventTimestamp: now.addingTimeInterval(-30)
+        )
+
+        XCTAssertTrue(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now),
+                      "an older transcript must not invalidate fresh dual-window quota")
+        snapshot.weekEventTimestamp = now.addingTimeInterval(-10 * 60)
+        XCTAssertFalse(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now),
+                       "every authoritative window must still be within grace")
+        snapshot.weekEventTimestamp = now.addingTimeInterval(-2 * 60)
+        XCTAssertTrue(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now))
     }
 
     func testStatusProbeMergePreservesValidZeroPercentBuckets() async {
@@ -1205,6 +1236,41 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 30 * 60, accuracy: 0.001)
         XCTAssertTrue(events.first?.title.contains("weekly usage is burning fast") ?? false)
         XCTAssertTrue(events.first?.body.contains("20% remaining, burning to empty in about 30 min") ?? false)
+    }
+
+    func testUsageLimitAlertEvaluatorDoesNotUseNewerSessionTimeForOldWeeklyQuota() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let weeklyReset = now.addingTimeInterval(4 * 24 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 100,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 40,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: now,
+            weeklyObservedAt: now
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 100,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 20,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: now.addingTimeInterval(30 * 60),
+            weeklyObservedAt: now.addingTimeInterval(5 * 60)
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events, [],
+                       "old weekly quota must not inherit a newer transcript time for alert projection")
     }
 
     func testLimitAlertReadinessFormatterReportsUserFacingStates() {
@@ -4530,10 +4596,10 @@ final class CodexUsageParserTests: XCTestCase {
 
         let single = CodexRunwayCalculator.weeklyEstimatedSnapshot(
             baseline: baseline, activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
-            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+            prices: prices.snapshot(), percentPointsPerDollar: 2.0, maxRows: 5)
         let doubled = CodexRunwayCalculator.weeklyEstimatedSnapshot(
             baseline: baseline, activities: [weeklyActivity("a", outputPerSecond: 200, now: now)],
-            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+            prices: prices.snapshot(), percentPointsPerDollar: 2.0, maxRows: 5)
 
         let one = single?.snapshot.rows.first?.displayRate ?? 0
         let two = doubled?.snapshot.rows.first?.displayRate ?? 0
@@ -4542,7 +4608,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         // And the value is calibration × $/h, not a share of anything.
         let dollars = CodexRunwayCalculator.dollarsPerHour(
-            for: weeklyActivity("a", outputPerSecond: 100, now: now), priceTable: prices,
+            for: weeklyActivity("a", outputPerSecond: 100, now: now), prices: prices.snapshot(),
             source: .codex) ?? 0
         XCTAssertEqual(one, 2.0 * dollars, accuracy: 0.0001)
     }
@@ -4556,7 +4622,7 @@ final class CodexUsageParserTests: XCTestCase {
         let activities = [weeklyActivity("a", outputPerSecond: 300, now: now),
                           weeklyActivity("b", outputPerSecond: 100, now: now)]
         let expected = activities
-            .compactMap { CodexRunwayCalculator.dollarsPerHour(for: $0, priceTable: prices, source: .codex) }
+            .compactMap { CodexRunwayCalculator.dollarsPerHour(for: $0, prices: prices.snapshot(), source: .codex) }
             .reduce(0, +) * 3.0
 
         // Two baselines whose implied account rates differ by 24x.
@@ -4566,7 +4632,7 @@ final class CodexUsageParserTests: XCTestCase {
                 currentRunoutAt: now.addingTimeInterval(runoutHours * 3600), observedAt: now,
                 hasProjectedRunout: true, windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
             let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
-                baseline: baseline, activities: activities, priceTable: prices,
+                baseline: baseline, activities: activities, prices: prices.snapshot(),
                 percentPointsPerDollar: 3.0, maxRows: 5)
             let total = (snap?.snapshot.rows.reduce(0) { $0 + $1.displayRate } ?? 0)
                 + (snap?.snapshot.burstSummary?.displayRate ?? 0)
@@ -4586,7 +4652,7 @@ final class CodexUsageParserTests: XCTestCase {
             outputPerSecond: 50, modelSlug: "totally-unknown-model")
         let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
             baseline: weeklyBaseline(now: now), activities: [known, unknown],
-            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+            prices: prices.snapshot(), percentPointsPerDollar: 2.0, maxRows: 5)
         XCTAssertEqual(snap?.snapshot.rows.map(\.id), ["a"])
         XCTAssertEqual(snap?.unpriceableIDs, ["b"])
     }
@@ -4598,7 +4664,7 @@ final class CodexUsageParserTests: XCTestCase {
         let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
             baseline: weeklyBaseline(now: now),
             activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
-            priceTable: prices, percentPointsPerDollar: 1_000_000, maxRows: 5)
+            prices: prices.snapshot(), percentPointsPerDollar: 1_000_000, maxRows: 5)
         XCTAssertNil(snap, "a contaminated calibration must not render a confident number")
     }
 
@@ -4606,12 +4672,12 @@ final class CodexUsageParserTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let prices = RunwayPriceTable.makeForTesting()
         XCTAssertNil(CodexRunwayCalculator.weeklyEstimatedSnapshot(
-            baseline: weeklyBaseline(now: now), activities: [], priceTable: prices,
+            baseline: weeklyBaseline(now: now), activities: [], prices: prices.snapshot(),
             percentPointsPerDollar: 2.0, maxRows: 5))
         XCTAssertNil(CodexRunwayCalculator.weeklyEstimatedSnapshot(
             baseline: weeklyBaseline(now: now),
             activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
-            priceTable: prices, percentPointsPerDollar: 0, maxRows: 5))
+            prices: prices.snapshot(), percentPointsPerDollar: 0, maxRows: 5))
     }
 
     func testAstraRunwayPricingAndWeeklyBurn() throws {
@@ -4639,11 +4705,11 @@ final class CodexUsageParserTests: XCTestCase {
             tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
             inputPerSecond: 10, cachedInputPerSecond: 1000, outputPerSecond: 10,
             modelSlug: "gpt-6-astra", contextInputTokens: 200_000)
-        let dollars = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(for: activity, priceTable: table,
+        let dollars = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(for: activity, prices: table.snapshot(),
                                                                          source: .codex))
         XCTAssertEqual(dollars, 5.76, accuracy: 0.000001)
         let weekly = try XCTUnwrap(CodexRunwayCalculator.weeklyEstimatedSnapshot(
-            baseline: weeklyBaseline(now: now), activities: [activity], priceTable: table,
+            baseline: weeklyBaseline(now: now), activities: [activity], prices: table.snapshot(),
             percentPointsPerDollar: 2, maxRows: 5))
         XCTAssertTrue(weekly.unpriceableIDs.isEmpty)
         XCTAssertEqual(try XCTUnwrap(weekly.snapshot.rows.first).displayRate, 11.52, accuracy: 0.000001)
@@ -4679,7 +4745,7 @@ final class CodexUsageParserTests: XCTestCase {
                 inputPerSecond: 10, cachedInputPerSecond: 100, outputPerSecond: 10,
                 modelSlug: model, contextInputTokens: 200_000)
             XCTAssertEqual(try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(
-                for: activity, priceTable: table, source: .codex)), expectedPerHour, accuracy: 0.000_001)
+                for: activity, prices: table.snapshot(), source: .codex)), expectedPerHour, accuracy: 0.000_001)
         }
         XCTAssertNil(table.price(forModel: "gpt-6-luna-preview"))
     }
@@ -4986,7 +5052,7 @@ final class CodexUsageParserTests: XCTestCase {
             tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
             inputPerSecond: 10, cachedInputPerSecond: 1000, outputPerSecond: 10,
             cacheCreationPerSecond: 0, modelSlug: "claude-sonnet-4-5")
-        let snap = CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], priceTable: table, maxRows: 5)
+        let snap = CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], prices: table.snapshot(), maxRows: 5)
         let inputCost: Double = 10.0 * 3.0
         let cachedCost: Double = 1000.0 * 0.3
         let outputCost: Double = 10.0 * 15.0
@@ -5009,7 +5075,7 @@ final class CodexUsageParserTests: XCTestCase {
             inputPerSecond: 10, cachedInputPerSecond: 0, outputPerSecond: 10,
             cacheCreationPerSecond: 0, modelSlug: "no-such-model")
         // Nothing priceable at all → nil so the loader falls back to token snapshot-wide.
-        XCTAssertNil(CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], priceTable: table, maxRows: 5))
+        XCTAssertNil(CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], prices: table.snapshot(), maxRows: 5))
     }
 
     /// Runway burn measures the provider's own quota. A Codex or Claude Code session
@@ -5033,11 +5099,11 @@ final class CodexUsageParserTests: XCTestCase {
             }
             let activities = [activity("own", own), activity("glm", "glm-4.7")]
             let dollars = try XCTUnwrap(CodexRunwayCalculator.dollarSnapshot(
-                baseline: baseline, activities: activities, priceTable: table, maxRows: 5), "\(source)")
+                baseline: baseline, activities: activities, prices: table.snapshot(), maxRows: 5), "\(source)")
             XCTAssertEqual(dollars.snapshot.rows.map(\.id), ["own"], "\(source)")
             XCTAssertEqual(dollars.unpriceableIDs, ["glm"], "\(source)")
             let weekly = try XCTUnwrap(CodexRunwayCalculator.weeklyEstimatedSnapshot(
-                baseline: baseline, activities: activities, priceTable: table,
+                baseline: baseline, activities: activities, prices: table.snapshot(),
                 percentPointsPerDollar: 0.01, maxRows: 5), "\(source)")
             XCTAssertEqual(weekly.unpriceableIDs, ["glm"], "\(source)")
         }
@@ -5071,7 +5137,7 @@ final class CodexUsageParserTests: XCTestCase {
             cacheCreationPerSecond: 0, modelSlug: "claude-sonnet-5")
 
         let snap = CodexRunwayCalculator.dollarSnapshot(
-            baseline: baseline, activities: [priced, unknownModel, noPerType], priceTable: table, maxRows: 5)
+            baseline: baseline, activities: [priced, unknownModel, noPerType], prices: table.snapshot(), maxRows: 5)
         XCTAssertNotNil(snap, "a priceable peer must keep the snapshot in $")
         XCTAssertEqual(snap?.snapshot.rows.map(\.id), ["priced"], "only the priceable session gets a $ row")
 
@@ -5228,7 +5294,7 @@ final class CodexUsageParserTests: XCTestCase {
         // Correct: 100*25 (opus out) + 100*10 (sonnet out), per second → /1e6 * 3600.
         let expected: Double = (100.0 * 25.0 + 100.0 * 10.0) / 1_000_000.0 * 3600.0
         let snap = CodexRunwayCalculator.dollarSnapshot(
-            baseline: baseline, activities: [activity], priceTable: table, maxRows: 5)
+            baseline: baseline, activities: [activity], prices: table.snapshot(), maxRows: 5)
         XCTAssertEqual(snap?.snapshot.rows.first?.displayRate ?? 0, expected, accuracy: 1e-9)
 
         // The old behaviour priced all 200 tok/s at the parent's model. Pin that the
@@ -5281,7 +5347,7 @@ final class CodexUsageParserTests: XCTestCase {
         let table = RunwayPriceTable.makeForTesting()
         let expected: Double = (10.0 * 20.0 + 10.0 * 1.2) / 1_000_000.0 * 3600.0
         let blended: Double = (20.0 * 20.0) / 1_000_000.0 * 3600.0
-        let rate = CodexRunwayCalculator.dollarsPerHour(for: activity!, priceTable: table, source: .codex)
+        let rate = CodexRunwayCalculator.dollarsPerHour(for: activity!, prices: table.snapshot(), source: .codex)
         XCTAssertEqual(rate ?? 0, expected, accuracy: 1e-9)
         XCTAssertLessThan(rate ?? 0, blended, "blending the child into the parent's model overstates cost")
     }
@@ -5308,10 +5374,10 @@ final class CodexUsageParserTests: XCTestCase {
         }
         // A zero-rate unknown slice costs nothing → still priceable.
         XCTAssertNotNil(CodexRunwayCalculator.dollarsPerHour(
-            for: activity([known, idleUnknown]), priceTable: table, source: .claude))
+            for: activity([known, idleUnknown]), prices: table.snapshot(), source: .claude))
         // A burning unknown slice → drop the session (never understate).
         XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(
-            for: activity([known, busyUnknown]), priceTable: table, source: .claude))
+            for: activity([known, busyUnknown]), prices: table.snapshot(), source: .claude))
     }
 
     func testLiveDollarsRejectUnpublishedCacheWriteRates() {
@@ -5326,8 +5392,8 @@ final class CodexUsageParserTests: XCTestCase {
             cacheCreationPerSecond: 0, cacheCreation1hPerSecond: 1, modelSlug: "gpt-5.5")
         let table = RunwayPriceTable.makeForTesting()
 
-        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: fiveMinute, priceTable: table, source: .codex))
-        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: oneHour, priceTable: table, source: .codex))
+        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: fiveMinute, prices: table.snapshot(), source: .codex))
+        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(for: oneHour, prices: table.snapshot(), source: .codex))
     }
 
     /// A stale cached manifest must never shadow a corrected bundled table.
@@ -5612,7 +5678,7 @@ final class CodexUsageParserTests: XCTestCase {
             freshPerSecond * 4 + cachedPerSecond * 0.4 + outputPerSecond * 20
         ) / 1_000_000 * 3_600
         let dollarsPerHour = try XCTUnwrap(CodexRunwayCalculator.dollarsPerHour(
-            for: activity, priceTable: RunwayPriceTable.makeForTesting(), source: .codex))
+            for: activity, prices: RunwayPriceTable.makeForTesting().snapshot(), source: .codex))
         XCTAssertEqual(dollarsPerHour, expectedDollarsPerHour, accuracy: 0.000_001)
     }
 
