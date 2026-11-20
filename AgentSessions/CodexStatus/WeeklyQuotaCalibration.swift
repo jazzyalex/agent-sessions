@@ -957,6 +957,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 usedPercentPoints: usedPercentPoints,
                 priceTable: priceTable,
                 now: now,
+                shouldCancel: shouldCancel,
                 fileManager: FileManager.default)
         }
         guard let accountHash else { return nil }

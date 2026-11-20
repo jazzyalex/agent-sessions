@@ -749,7 +749,9 @@ final class CodexUsageParserTests: XCTestCase {
                 weekLimitsSource: .cliRPC,
                 limitsSource: nil,
                 usageLine: nil,
-                eventTimestamp: previousEventTimestamp
+                eventTimestamp: previousEventTimestamp,
+                fiveHourEventTimestamp: previousEventTimestamp,
+                weekEventTimestamp: previousEventTimestamp
             )
         )
 
@@ -777,8 +779,37 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(merged.weekLimitsSource, .cliRPC)
         XCTAssertEqual(merged.usageLine, "Usage is stale (>3m)")
         XCTAssertEqual(merged.eventTimestamp, summaryEventTimestamp)
+        XCTAssertEqual(merged.fiveHourEventTimestamp, previousEventTimestamp,
+                       "JSONL activity must not move an authoritative five-hour quota observation")
+        XCTAssertEqual(merged.weekEventTimestamp, previousEventTimestamp,
+                       "JSONL activity must not move an authoritative weekly quota observation")
         let cachedReset = await service.lastFiveHourResetDateForTesting
         XCTAssertEqual(cachedReset, summaryFiveHourReset)
+    }
+
+    func testFailureGraceUsesPerWindowQuotaObservationsInsteadOfJSONLActivity() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var snapshot = CodexUsageSnapshot(
+            fiveHourRemainingPercent: 70,
+            fiveHourResetText: "2027-01-01T00:00:00Z",
+            hasFiveHourRateLimit: true,
+            fiveHourLimitsSource: .oauth,
+            weekRemainingPercent: 44,
+            weekResetText: "2027-01-01T00:00:00Z",
+            hasWeekRateLimit: true,
+            weekLimitsSource: .cliRPC,
+            eventTimestamp: now.addingTimeInterval(-8 * 60),
+            fiveHourEventTimestamp: now.addingTimeInterval(-30),
+            weekEventTimestamp: now.addingTimeInterval(-30)
+        )
+
+        XCTAssertTrue(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now),
+                      "an older transcript must not invalidate fresh dual-window quota")
+        snapshot.weekEventTimestamp = now.addingTimeInterval(-10 * 60)
+        XCTAssertFalse(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now),
+                       "every authoritative window must still be within grace")
+        snapshot.weekEventTimestamp = now.addingTimeInterval(-2 * 60)
+        XCTAssertTrue(CodexStatusService.liveReadingIsWithinFailureGrace(snapshot, now: now))
     }
 
     func testStatusProbeMergePreservesValidZeroPercentBuckets() async {
@@ -1205,6 +1236,41 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 30 * 60, accuracy: 0.001)
         XCTAssertTrue(events.first?.title.contains("weekly usage is burning fast") ?? false)
         XCTAssertTrue(events.first?.body.contains("20% remaining, burning to empty in about 30 min") ?? false)
+    }
+
+    func testUsageLimitAlertEvaluatorDoesNotUseNewerSessionTimeForOldWeeklyQuota() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let weeklyReset = now.addingTimeInterval(4 * 24 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 100,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 40,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: now,
+            weeklyObservedAt: now
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 100,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 20,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: now.addingTimeInterval(30 * 60),
+            weeklyObservedAt: now.addingTimeInterval(5 * 60)
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events, [],
+                       "old weekly quota must not inherit a newer transcript time for alert projection")
     }
 
     func testLimitAlertReadinessFormatterReportsUserFacingStates() {

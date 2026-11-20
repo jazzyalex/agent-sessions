@@ -111,6 +111,21 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
         XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
     }
 
+    func testClaudeCancellationStopsDecodedLineWalk() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write(Array(repeating: "{}", count: 1_100) + [
+            claudeUsageLine(id: "cancelled", at: at, oneHourCacheWrite: 1_000_000)
+        ], name: "claude-cancelled.jsonl")
+        let gate = CancellationGate(cancelAfter: 9)
+
+        XCTAssertNil(ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080,
+            usedPercentPoints: 5, priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600), shouldCancel: gate.shouldCancel))
+        XCTAssertGreaterThanOrEqual(gate.checkCount, 10,
+                                    "cancellation must be observed during the decoded line walk")
+    }
+
     /// Real records carry the flat total AND the sub-object that breaks it down, so
     /// the scan must not bill the same tokens through both.
     func testClaudeScanDoesNotDoubleCountFlatAndSplitCacheCreation() throws {

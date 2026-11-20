@@ -97,6 +97,14 @@ struct CodexUsageSnapshot: Equatable {
     var accountLine: String? = nil
     var modelLine: String? = nil
     var eventTimestamp: Date? = nil
+    /// Observation time for the five-hour quota value. Kept separate from the
+    /// latest transcript event so JSONL activity cannot freshen or stale a live
+    /// OAuth/CLI-RPC reading.
+    var fiveHourEventTimestamp: Date? = nil
+    /// Observation time for the weekly quota value. This stays attached to an
+    /// authoritative OAuth/CLI-RPC reading when a later JSONL usage record updates
+    /// `eventTimestamp`, so calibration never prices activity after that reading.
+    var weekEventTimestamp: Date? = nil
     // New: surfaced usage (latest turn or snapshot)
     var lastInputTokens: Int? = nil
     var lastCachedInputTokens: Int? = nil
@@ -610,11 +618,14 @@ final class CodexUsageModel: ObservableObject {
     private func apply(_ s: CodexUsageSnapshot) {
         let now = Date()
         quotaFetchIssue = s.quotaFetchIssue
-        let observedAt = s.eventTimestamp ?? now
+        let eventObservedAt = s.eventTimestamp ?? now
+        let fiveHourObservedAt = s.fiveHourEventTimestamp ?? eventObservedAt
+        let weeklyObservedAt = s.weekEventTimestamp ?? eventObservedAt
+        let observedAt = s.hasFiveHourRateLimit ? fiveHourObservedAt : weeklyObservedAt
         let fiveHourFreshness = s.quotaFetchIssue == nil
-            ? Self.alertFreshness(source: s.fiveHourLimitsSource, eventTimestamp: s.eventTimestamp, now: now) : .stale
+            ? Self.alertFreshness(source: s.fiveHourLimitsSource, eventTimestamp: fiveHourObservedAt, now: now) : .stale
         let weeklyFreshness = s.quotaFetchIssue == nil
-            ? Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: s.eventTimestamp, now: now) : .stale
+            ? Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: weeklyObservedAt, now: now) : .stale
         fiveHourRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekRemainingPercent = clampPercent(s.weekRemainingPercent)
         fiveHourResetText = s.fiveHourResetText
@@ -671,9 +682,9 @@ final class CodexUsageModel: ObservableObject {
             resetText: s.weekResetText,
             hasRateLimit: s.hasWeekRateLimit,
             freshness: weeklyFreshness,
-            observedAt: observedAt
+            observedAt: weeklyObservedAt
         ), now: now)
-        updateWeeklyCalibration(from: s, observedAt: observedAt, now: now)
+        updateWeeklyCalibration(from: s, observedAt: weeklyObservedAt, now: now)
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
         limitNotifier.handle(snapshot: UsageLimitSnapshot(
             provider: .codex,
@@ -686,6 +697,8 @@ final class CodexUsageModel: ObservableObject {
             fiveHourFreshness: fiveHourFreshness,
             weeklyFreshness: weeklyFreshness,
             observedAt: observedAt,
+            fiveHourObservedAt: fiveHourObservedAt,
+            weeklyObservedAt: weeklyObservedAt,
             sourceDescription: s.limitsSource?.displayName,
             fiveHourSourceDescription: s.fiveHourLimitsSource?.displayName,
             weeklySourceDescription: s.weekLimitsSource?.displayName
@@ -722,7 +735,8 @@ final class CodexUsageModel: ObservableObject {
         if s.hasWeekRateLimit,
            s.quotaFetchIssue == nil,
            Self.canCalibrateWeeklyQuota(source: s.weekLimitsSource),
-           Self.alertFreshness(source: s.weekLimitsSource, eventTimestamp: s.eventTimestamp,
+           Self.alertFreshness(source: s.weekLimitsSource,
+                               eventTimestamp: s.weekEventTimestamp ?? s.eventTimestamp,
                                now: now).allowsProjectedDisplay,
            // Anchor, not display — same rule as the Claude path. Codex's OAuth text
            // is ISO-8601 today, but a legacy or fallback source supplying a relative
@@ -998,6 +1012,9 @@ final class CodexUsageModel: ObservableObject {
     private static func alertFreshness(source: CodexLimitsSource?, eventTimestamp: Date?, now: Date = Date()) -> UsageLimitAlertFreshness {
         switch source {
         case .oauth, .cliRPC, .statusProbe:
+            guard let eventTimestamp, now.timeIntervalSince(eventTimestamp) <= 3 * 60 else {
+                return .stale
+            }
             return .fresh
         case .jsonlFallback:
             guard let eventTimestamp else { return .stale }
@@ -1066,6 +1083,8 @@ struct UsageLimitSnapshot: Equatable {
     let fiveHourFreshness: UsageLimitAlertFreshness
     let weeklyFreshness: UsageLimitAlertFreshness
     let observedAt: Date?
+    let fiveHourObservedAt: Date?
+    let weeklyObservedAt: Date?
     let sourceDescription: String?
     let fiveHourSourceDescription: String?
     let weeklySourceDescription: String?
@@ -1083,6 +1102,8 @@ struct UsageLimitSnapshot: Equatable {
          fiveHourFreshness: UsageLimitAlertFreshness? = nil,
          weeklyFreshness: UsageLimitAlertFreshness? = nil,
          observedAt: Date? = nil,
+         fiveHourObservedAt: Date? = nil,
+         weeklyObservedAt: Date? = nil,
          sourceDescription: String? = nil,
          fiveHourSourceDescription: String? = nil,
          weeklySourceDescription: String? = nil) {
@@ -1098,6 +1119,8 @@ struct UsageLimitSnapshot: Equatable {
         self.fiveHourFreshness = fiveHourFreshness ?? freshness
         self.weeklyFreshness = weeklyFreshness ?? freshness
         self.observedAt = observedAt
+        self.fiveHourObservedAt = fiveHourObservedAt ?? observedAt
+        self.weeklyObservedAt = weeklyObservedAt ?? observedAt
         self.sourceDescription = sourceDescription
         self.fiveHourSourceDescription = fiveHourSourceDescription ?? sourceDescription
         self.weeklySourceDescription = weeklySourceDescription ?? sourceDescription
@@ -1473,8 +1496,11 @@ final class UsageLimitAlertEvaluator {
 
         var events: [UsageLimitAlertEvent] = []
         let previous = previousSnapshots[snapshot.provider]
-        let previousTime = previous?.observedAt ?? previousSnapshotTimes[snapshot.provider]
-        let currentTime = snapshot.observedAt ?? now
+        let fallbackPreviousTime = previous?.observedAt ?? previousSnapshotTimes[snapshot.provider]
+        let fiveHourPreviousTime = previous?.fiveHourObservedAt ?? fallbackPreviousTime
+        let weeklyPreviousTime = previous?.weeklyObservedAt ?? fallbackPreviousTime
+        let fiveHourCurrentTime = snapshot.fiveHourObservedAt ?? snapshot.observedAt ?? now
+        let weeklyCurrentTime = snapshot.weeklyObservedAt ?? snapshot.observedAt ?? now
         events.append(contentsOf: projectedExhaustionEvents(snapshot: snapshot, now: now))
         events.append(contentsOf: pressureEvents(
             window: .fiveHour,
@@ -1485,8 +1511,8 @@ final class UsageLimitAlertEvaluator {
             freshness: snapshot.fiveHourFreshness,
             previousRemainingPercent: previous?.fiveHourRemainingPercent,
             previousFreshness: previous?.fiveHourFreshness,
-            previousTime: previousTime,
-            currentTime: currentTime,
+            previousTime: fiveHourPreviousTime,
+            currentTime: fiveHourCurrentTime,
             now: now
         ))
         events.append(contentsOf: pressureEvents(
@@ -1498,8 +1524,8 @@ final class UsageLimitAlertEvaluator {
             freshness: snapshot.weeklyFreshness,
             previousRemainingPercent: previous?.weeklyRemainingPercent,
             previousFreshness: previous?.weeklyFreshness,
-            previousTime: previousTime,
-            currentTime: currentTime,
+            previousTime: weeklyPreviousTime,
+            currentTime: weeklyCurrentTime,
             now: now
         ))
 
@@ -1579,11 +1605,14 @@ final class UsageLimitAlertEvaluator {
 
     private func projectedExhaustionEvents(snapshot: UsageLimitSnapshot, now: Date) -> [UsageLimitAlertEvent] {
         guard projectedEnabled,
-              let previous = previousSnapshots[snapshot.provider],
-              let previousTime = previous.observedAt ?? previousSnapshotTimes[snapshot.provider] else {
+              let previous = previousSnapshots[snapshot.provider] else {
             return []
         }
-        let currentTime = snapshot.observedAt ?? now
+        let fallbackPreviousTime = previous.observedAt ?? previousSnapshotTimes[snapshot.provider]
+        let fiveHourPreviousTime = previous.fiveHourObservedAt ?? fallbackPreviousTime
+        let weeklyPreviousTime = previous.weeklyObservedAt ?? fallbackPreviousTime
+        let fiveHourCurrentTime = snapshot.fiveHourObservedAt ?? snapshot.observedAt ?? now
+        let weeklyCurrentTime = snapshot.weeklyObservedAt ?? snapshot.observedAt ?? now
 
         return [
             projectedExhaustionEvent(
@@ -1597,8 +1626,8 @@ final class UsageLimitAlertEvaluator {
                 hasRateLimit: snapshot.hasFiveHourRateLimit,
                 currentFreshness: snapshot.fiveHourFreshness,
                 previousFreshness: previous.fiveHourFreshness,
-                previousTime: previousTime,
-                currentTime: currentTime,
+                previousTime: fiveHourPreviousTime ?? fiveHourCurrentTime,
+                currentTime: fiveHourCurrentTime,
                 now: now
             ),
             projectedExhaustionEvent(
@@ -1612,8 +1641,8 @@ final class UsageLimitAlertEvaluator {
                 hasRateLimit: snapshot.hasWeeklyRateLimit,
                 currentFreshness: snapshot.weeklyFreshness,
                 previousFreshness: previous.weeklyFreshness,
-                previousTime: previousTime,
-                currentTime: currentTime,
+                previousTime: weeklyPreviousTime ?? weeklyCurrentTime,
+                currentTime: weeklyCurrentTime,
                 now: now
             )
         ].compactMap { $0 }
@@ -2829,12 +2858,14 @@ actor CodexStatusService {
         if source.limitsSource == .oauth || source.limitsSource == .cliRPC {
             dest.quotaFetchIssue = nil
         }
+        let mergedAt = source.eventTimestamp ?? Date()
         let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent >= 0)
         if shouldMergeFiveHour {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
             dest.hasFiveHourRateLimit = true
             if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
             dest.fiveHourLimitsSource = source.fiveHourLimitsSource ?? source.limitsSource
+            dest.fiveHourEventTimestamp = source.fiveHourEventTimestamp ?? mergedAt
         } else if replacesMissingWindows && !source.hasFiveHourRateLimit {
             // A complete authoritative fetch that no longer reports this window
             // (e.g. OpenAI dropped the 5h limit) must clear the stale value, or the
@@ -2844,6 +2875,7 @@ actor CodexStatusService {
             dest.hasFiveHourRateLimit = false
             dest.fiveHourResetText = ""
             dest.fiveHourLimitsSource = nil
+            dest.fiveHourEventTimestamp = nil
         }
         let shouldMergeWeek = source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent >= 0)
         if shouldMergeWeek {
@@ -2851,11 +2883,13 @@ actor CodexStatusService {
             dest.hasWeekRateLimit = true
             if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
             dest.weekLimitsSource = source.weekLimitsSource ?? source.limitsSource
+            dest.weekEventTimestamp = source.weekEventTimestamp ?? mergedAt
         } else if replacesMissingWindows && !source.hasWeekRateLimit {
             dest.weekRemainingPercent = 0
             dest.hasWeekRateLimit = false
             dest.weekResetText = ""
             dest.weekLimitsSource = nil
+            dest.weekEventTimestamp = nil
         }
         // Only a complete authoritative fetch (OAuth/CLI-RPC, which pass
         // `replacesMissingWindows`) evaluates the format verdict. Fragment probes
@@ -2869,7 +2903,7 @@ actor CodexStatusService {
         }
         dest.limitsSource = aggregateLimitsSource(for: dest)
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
-        dest.eventTimestamp = Date()
+        dest.eventTimestamp = mergedAt
         snapshot = dest
         updateHandler(snapshot)
     }
@@ -2897,6 +2931,9 @@ actor CodexStatusService {
             s.fiveHourResetText = ""
             s.fiveHourLimitsSource = nil
         }
+        if canApplyFiveHourFallback {
+            s.fiveHourEventTimestamp = s.hasFiveHourRateLimit ? summary.eventTimestamp : nil
+        }
         let canApplyWeekFallback = !isAuthoritativeLimitsSource(s.weekLimitsSource)
         if canApplyWeekFallback, let p = summary.weekly.remainingPercent {
             s.weekRemainingPercent = clampPercent(p)
@@ -2915,6 +2952,9 @@ actor CodexStatusService {
             s.hasWeekRateLimit = false
             s.weekResetText = ""
             s.weekLimitsSource = nil
+        }
+        if canApplyWeekFallback {
+            s.weekEventTimestamp = s.hasWeekRateLimit ? summary.eventTimestamp : nil
         }
         // Only let the JSONL verdict drive the suspect flag when JSONL actually
         // contributed a window; an authoritative live source that owns both
@@ -3650,10 +3690,22 @@ actor CodexStatusService {
     nonisolated static let failureGraceSeconds: TimeInterval = 5 * 60
 
     nonisolated static func liveReadingIsWithinFailureGrace(_ snapshot: CodexUsageSnapshot, now: Date) -> Bool {
-        guard snapshot.quotaFetchIssue == nil,
-              snapshot.limitsSource == .oauth || snapshot.limitsSource == .cliRPC,
-              let observedAt = snapshot.eventTimestamp else { return false }
-        return now.timeIntervalSince(observedAt) < failureGraceSeconds
+        guard snapshot.quotaFetchIssue == nil else { return false }
+        var authoritativeObservations: [Date] = []
+        if snapshot.hasFiveHourRateLimit,
+           (snapshot.fiveHourLimitsSource == .oauth || snapshot.fiveHourLimitsSource == .cliRPC),
+           let observedAt = snapshot.fiveHourEventTimestamp ?? snapshot.eventTimestamp {
+            authoritativeObservations.append(observedAt)
+        }
+        if snapshot.hasWeekRateLimit,
+           (snapshot.weekLimitsSource == .oauth || snapshot.weekLimitsSource == .cliRPC),
+           let observedAt = snapshot.weekEventTimestamp ?? snapshot.eventTimestamp {
+            authoritativeObservations.append(observedAt)
+        }
+        guard !authoritativeObservations.isEmpty else { return false }
+        return authoritativeObservations.allSatisfy {
+            now.timeIntervalSince($0) < failureGraceSeconds
+        }
     }
 
     private func nextInterval() -> UInt64 {

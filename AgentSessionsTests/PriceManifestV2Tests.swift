@@ -2,6 +2,28 @@ import XCTest
 @testable import AgentSessions
 
 final class PriceManifestV2Tests: XCTestCase {
+    func testDefaultTestTableDisablesLiveRefreshAndUserCacheAccess() throws {
+        XCTAssertTrue(AppRuntime.isRunningTests)
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-TestPriceCache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir); RunwayPriceTable.cacheDirectoryOverride = nil }
+        RunwayPriceTable.cacheDirectoryOverride = dir
+
+        let noCacheTable = RunwayPriceTable(loadBundled: true, readCache: false)
+        XCTAssertFalse(noCacheTable.refreshEnabledForTesting)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path),
+                       "constructing a test table must not create the production cache directory")
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let cachedSequence = 9_999_999_999
+        try manifest(sequence: cachedSequence, opusOutput: 1)
+            .write(to: dir.appendingPathComponent(RunwayPriceTable.cacheFileName))
+
+        let table = RunwayPriceTable(loadBundled: true, readCache: true)
+        XCTAssertFalse(table.refreshEnabledForTesting)
+        XCTAssertNotEqual(table.sequence, cachedSequence)
+    }
+
     func testLivePriceRefreshCoalescesUsesValidatorsAndKeepsLastGoodTable() throws {
         let transport = RunwayManifestTestTransport()
         let table = transport.makeTable()
@@ -304,10 +326,10 @@ final class PriceManifestV2Tests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentSessions-PriceCache-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir); RunwayPriceTable.cacheDirectoryOverride = nil }
-        RunwayPriceTable.cacheDirectoryOverride = dir
+        defer { try? FileManager.default.removeItem(at: dir) }
 
         let legacyURL = dir.appendingPathComponent(RunwayPriceTable.legacyV1FileName)
+        let v2URL = dir.appendingPathComponent(RunwayPriceTable.cacheFileName)
         // The sentinel at the legacy file name is a manifest the v2 decoder WOULD
         // adopt (schema 2, a sequence far above the bundled one, a distinctive
         // rate), so the "not read" assertion below can actually fail on a read.
@@ -319,15 +341,21 @@ final class PriceManifestV2Tests: XCTestCase {
         try sentinel.write(to: legacyURL)
         let before = try FileManager.default.attributesOfItem(atPath: legacyURL.path)[.modificationDate] as? Date
 
-        let table = RunwayPriceTable(loadBundled: true, readCache: true)
-        XCTAssertNotEqual(table.price(forModel: "claude-opus-4-8")?.outputPerMTok, 1,
-                          "the v1 cache must not be read")
-        table.persistForTesting(manifest(sequence: table.sequence + 1, opusOutput: 25))
+        let v2Sentinel = manifest(sequence: 9_999_999_998, opusOutput: 37)
+        try v2Sentinel.write(to: v2URL)
+        let table = RunwayPriceTable(
+            loadBundled: true,
+            readCache: true,
+            cacheDirectory: dir
+        )
+        XCTAssertEqual(table.price(forModel: "claude-opus-4-8")?.outputPerMTok, 37,
+                       "an explicitly injected v2 cache must still exercise production adoption")
+        let replacement = manifest(sequence: table.sequence + 1, opusOutput: 25)
+        table.persistForTesting(replacement)
 
         XCTAssertEqual(try Data(contentsOf: legacyURL), sentinel)
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: legacyURL.path)[.modificationDate] as? Date, before)
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: dir.appendingPathComponent(RunwayPriceTable.cacheFileName).path))
+        XCTAssertEqual(try Data(contentsOf: v2URL), replacement)
     }
 
     // MARK: - Guards (data invariants)

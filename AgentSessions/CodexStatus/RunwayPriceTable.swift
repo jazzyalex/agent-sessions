@@ -357,6 +357,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     ) -> Void
 
     private let lock = NSLock()
+    private let refreshEnabled: Bool
     private let refreshClock: @Sendable () -> ContinuousClock.Instant
     private let requestManifest: ManifestRequest
     private let persistManifest: @Sendable (Data) -> Void
@@ -388,19 +389,28 @@ final class RunwayPriceTable: @unchecked Sendable {
     init(loadBundled: Bool = true, readCache: Bool = true,
          refreshClock: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
          requestManifest: ManifestRequest? = nil,
+         cacheDirectory: URL? = nil,
          persistManifest: (@Sendable (Data) -> Void)? = nil) {
+        let usesProductionTransport = requestManifest == nil
+        let usesProductionCache = cacheDirectory == nil
+        self.refreshEnabled = !AppRuntime.isRunningTests || !usesProductionTransport
         self.refreshClock = refreshClock
         self.requestManifest = requestManifest ?? { request, completion in
             Self.manifestSession.dataTask(with: request) { data, response, error in
                 completion(error == nil ? data : nil, response as? HTTPURLResponse)
             }.resume()
         }
-        self.persistManifest = persistManifest ?? { Self.persist($0) }
+        self.persistManifest = persistManifest ?? { data in
+            guard !AppRuntime.isRunningTests || cacheDirectory != nil else { return }
+            Self.persist(data, to: Self.cacheURL(in: cacheDirectory))
+        }
         if loadBundled, let decoded = Self.decode(Data(Self.bundledJSON.utf8)) {
             install(decoded)
         }
         // Overlay a previously fetched manifest only when its sequence is higher.
-        if readCache, let data = try? Data(contentsOf: Self.cacheURL()), let decoded = Self.decode(data) {
+        if readCache, (!AppRuntime.isRunningTests || !usesProductionCache),
+           let data = try? Data(contentsOf: Self.cacheURL(in: cacheDirectory)),
+           let decoded = Self.decode(data) {
             adopt(decoded)
         }
     }
@@ -464,6 +474,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// Called by the existing priced-view refresh loops. One request is shared
     /// across views, including when they become visible again after sleep.
     func refreshInBackground() {
+        guard refreshEnabled else { return }
         lock.lock()
         if fetchInFlight || nextFetchAt.map({ refreshClock() < $0 }) == true {
             lock.unlock(); return
@@ -505,8 +516,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     }
 
     /// Writes the v2 cache file only. Never touches `legacyV1FileName`.
-    private static func persist(_ data: Data) {
-        try? data.write(to: cacheURL(), options: .atomic)
+    private static func persist(_ data: Data, to url: URL? = nil) {
+        try? data.write(to: url ?? cacheURL(), options: .atomic)
     }
 
     // MARK: - Decoding
@@ -740,7 +751,10 @@ final class RunwayPriceTable: @unchecked Sendable {
         return Int(digest.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) } & UInt64(Int.max))
     }
 
-    private static func cacheURL() -> URL {
+    private static func cacheURL(in directory: URL? = nil) -> URL {
+        if let directory {
+            return directory.appendingPathComponent(cacheFileName)
+        }
         #if DEBUG
         if let override = cacheDirectoryOverride {
             return override.appendingPathComponent(cacheFileName)
@@ -761,7 +775,7 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     /// Test seam: the same write `refreshInBackground` performs after adopting.
     func persistForTesting(_ data: Data) {
-        Self.persist(data)
+        persistManifest(data)
     }
 
     /// Test seam: load a manifest from raw JSON (bypassing the network/cache).
@@ -774,6 +788,7 @@ final class RunwayPriceTable: @unchecked Sendable {
     }
     static func makeForTesting() -> RunwayPriceTable { RunwayPriceTable(loadBundled: true, readCache: false) }
     static func makeEmptyForTesting() -> RunwayPriceTable { RunwayPriceTable(loadBundled: false, readCache: false) }
+    var refreshEnabledForTesting: Bool { refreshEnabled }
     #endif
 
     /// Compiled-in default snapshot. Also published at `docs/prices-v2.json` for the

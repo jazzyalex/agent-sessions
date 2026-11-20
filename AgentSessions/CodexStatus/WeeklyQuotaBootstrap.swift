@@ -550,6 +550,21 @@ enum CodexWeeklyQuotaBootstrapScanner {
 ///    (`ClaudeLimitSnapshot` exposes no account scope).
 /// 2. `message.usage` is already per-call, so entries are summed directly with no
 ///    cumulative diffing, deduped by message id exactly as the runway parser does.
+private final class WeeklyQuotaCancellationLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func markCancelled() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true
+    }
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+}
+
 enum ClaudeWeeklyQuotaBootstrapScanner {
 
     static let defaultProjectsRoot: URL = URL(fileURLWithPath: NSHomeDirectory())
@@ -561,10 +576,18 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                      usedPercentPoints: Double,
                      priceTable: RunwayPriceTable,
                      now: Date,
+                     shouldCancel: @Sendable () -> Bool = { false },
                      fileManager: FileManager = .default) -> WeeklyQuotaBootstrapResult? {
         CodexWeeklyQuotaBootstrapScanner.debugLog(
             "claude scan start used=\(usedPercentPoints)pp resetsAt=\(resetsAt.timeIntervalSince1970)")
-        guard usedPercentPoints >= CodexWeeklyQuotaBootstrapScanner.minimumUsedPercentPoints else {
+        let cancellation = WeeklyQuotaCancellationLatch()
+        func cancellationRequested() -> Bool {
+            if cancellation.isCancelled { return true }
+            if shouldCancel() { cancellation.markCancelled() }
+            return cancellation.isCancelled
+        }
+        guard !cancellationRequested(),
+              usedPercentPoints >= CodexWeeklyQuotaBootstrapScanner.minimumUsedPercentPoints else {
             CodexWeeklyQuotaBootstrapScanner.debugLog("claude scan REJECT: used too small")
             return nil
         }
@@ -576,7 +599,9 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
         let priceSnapshot = priceTable.snapshot()
 
         let urls = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
-            root: root, modifiedAfter: windowStart, fileManager: fileManager)
+            root: root, modifiedAfter: windowStart,
+            shouldCancel: cancellationRequested, fileManager: fileManager)
+        guard !cancellationRequested() else { return nil }
 
         // Claude's week is an order of magnitude larger than Codex's (~680 MB vs
         // ~44 MB here), enough that a serial walk blew straight through the 60s
@@ -600,12 +625,17 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
             var index = worker
             while index < urls.count {
                 defer { index += workers }
+                guard !cancellationRequested() else { return }
                 let url = urls[index]
+                guard !cancellationRequested() else { return }
                 guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+                guard !cancellationRequested() else { return }
                 var localEntries: [(id: Int?, dollars: Double, volume: Double, priced: Bool)] = []
 
                 let text = String(decoding: data, as: UTF8.self)
-                for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+                guard !cancellationRequested() else { return }
+                for (lineIndex, line) in text.split(separator: "\n", omittingEmptySubsequences: true).enumerated() {
+                    if lineIndex.isMultiple(of: 1024), cancellationRequested() { return }
                     guard line.contains("\"usage\"") else { continue }
                     guard let lineData = line.data(using: .utf8),
                           let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
@@ -665,6 +695,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                 accumulator.unlock()
             }
         }
+        guard !cancellationRequested() else { return nil }
         let files = urls.count
 
         let totalVolume = pricedVolume + unpricedVolume
