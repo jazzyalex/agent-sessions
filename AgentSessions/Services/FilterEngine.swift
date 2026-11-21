@@ -101,6 +101,12 @@ enum SearchTextMatcher {
         return false
     }
 
+    /// Lowercased with accents removed, so "quebec" finds "Québec" as the search index does.
+    private static func fold(_ token: String) -> String {
+        let lower = token.lowercased()
+        return lower.utf8.allSatisfy { $0 < 128 } ? lower : lower.folding(options: .diacriticInsensitive, locale: nil)
+    }
+
     static func hasMatch(in text: String, query: String, cacheKey: TokenCacheKey? = nil) -> Bool {
         guard let pattern = buildPattern(from: query) else { return false }
         if case .phrase(let phrase) = pattern,
@@ -284,7 +290,7 @@ enum SearchTextMatcher {
             } else if let s = start {
                 let tokenRange = s..<idx
                 let token = String(text[tokenRange])
-                let lower = token.lowercased()
+                let lower = fold(token)
                 let range = NSRange(tokenRange, in: text)
                 out.append(TextToken(range: range, valueLower: lower))
                 start = nil
@@ -295,7 +301,7 @@ enum SearchTextMatcher {
         if let s = start {
             let tokenRange = s..<end
             let token = String(text[tokenRange])
-            let lower = token.lowercased()
+            let lower = fold(token)
             let range = NSRange(tokenRange, in: text)
             out.append(TextToken(range: range, valueLower: lower))
         }
@@ -319,7 +325,7 @@ enum SearchTextMatcher {
             } else if let s = start {
                 let tokenRange = s..<idx
                 let token = String(term[tokenRange])
-                let lower = token.lowercased()
+                let lower = fold(token)
                 let isPrefix = scalar == "*"
                 out.append(QueryTokenSpec(text: lower, isPrefix: isPrefix))
                 start = nil
@@ -330,7 +336,7 @@ enum SearchTextMatcher {
         if let s = start {
             let tokenRange = s..<end
             let token = String(term[tokenRange])
-            let lower = token.lowercased()
+            let lower = fold(token)
             out.append(QueryTokenSpec(text: lower, isPrefix: false))
         }
 
@@ -511,7 +517,7 @@ enum SearchTextMatcher {
                 // Preserve the original Unicode lowercase semantics, including
                 // characters such as Kelvin sign, while allocating only for the
                 // rare token whose candidate prefix actually contains Unicode.
-                matches = text[tokenStart..<tokenEnd].lowercased().hasPrefix(normalizedPrefix)
+                matches = fold(String(text[tokenStart..<tokenEnd])).hasPrefix(normalizedPrefix)
             } else {
                 matches = asciiPrefixIndex >= prefixBytes.count && !asciiMismatch
             }

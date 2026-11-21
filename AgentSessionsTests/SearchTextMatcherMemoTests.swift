@@ -72,4 +72,15 @@ final class SearchTextMatcherMemoTests: XCTestCase {
         XCTAssertEqual(SearchTextMatcher.memoizedTokenizationMisses, 0,
                        "simple prefix search must not allocate a token entry for every unrelated word")
     }
+
+    // The FTS index (unicode61) already ignores accents; the matcher must agree, or a
+    // session the index returns shows no highlight and Find counts zero matches.
+    func testMatchingIgnoresAccentsInTextAndQuery() {
+        let text = "Lettre envoyée à Revenu Québec hier"
+        let found = SearchTextMatcher.matchRanges(in: text, query: "quebec").map { (text as NSString).substring(with: $0) }
+        XCTAssertEqual(found, ["Québec"])
+        XCTAssertTrue(SearchTextMatcher.hasMatch(in: "Revenu Quebec", query: "québec"))
+        XCTAssertTrue(SearchTextMatcher.hasMatch(in: text, query: "queb*"), "prefix over an accented word")
+        XCTAssertFalse(SearchTextMatcher.hasMatch(in: text, query: "quebecois"))
+    }
 }

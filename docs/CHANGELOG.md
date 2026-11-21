@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- **Search ignores accents everywhere.** Typing `quebec` already listed a session that says "Québec", but the transcript highlighted nothing, Find counted no matches, and titles and not-yet-indexed sessions did not match. They all match now.
+
 ## [6.6] - 2026-11-18
 
 ### Highlights
