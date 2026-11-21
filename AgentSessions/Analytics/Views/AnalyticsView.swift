@@ -36,6 +36,9 @@ struct AnalyticsView: View {
     @State private var availableProjects: [String] = []
     @State private var isRefreshing: Bool = false
     @State private var aggregationMetric: AnalyticsAggregationMetric = .messages
+    @State private var section: AnalyticsSection = .overview
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var refreshGeneration = UUID()
 
     /// Exhaustive on purpose, with no `default`. This view used to carry four
     /// independent hand-written lists of agents — an OR chain, an AND chain, a
@@ -139,11 +142,16 @@ struct AnalyticsView: View {
         .onChange(of: dateRange) { _, _ in refreshData() }
         .onChange(of: agentFilter) { _, _ in refreshData() }
         .onChange(of: projectFilter) { _, _ in refreshData() }
+        .onChange(of: section) { _, _ in refreshData() }
         // One observer over the derived list rather than one per flag. Twelve
         // separate `onChange` modifiers were both a hand-maintained list that
         // stopped at Kimi and enough of a modifier chain to push `body` past the
         // type-checker's time limit.
         .onChange(of: enabledSources) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onDisappear {
+            refreshTask?.cancel()
+            service.cancelEconomicsAnalysis()
+        }
         // Apply preferredColorScheme only for explicit Light/Dark modes
         // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
@@ -180,6 +188,15 @@ struct AnalyticsView: View {
                 }
             }
             Spacer()
+
+            Picker("Analytics section", selection: $section) {
+                ForEach(AnalyticsSection.allCases) { section in
+                    Text(section.displayName).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 210)
 
             // Date range picker
             Picker("Date Range", selection: $dateRange) {
@@ -232,7 +249,19 @@ struct AnalyticsView: View {
 
     // MARK: - Content
 
-    private var content: some View { totalView }
+    @ViewBuilder
+    private var content: some View {
+        switch section {
+        case .overview:
+            totalView
+        case .economics:
+            EconomicsAnalyticsView(
+                snapshot: service.economicsSnapshot,
+                phase: service.economicsPhase,
+                progress: service.economicsProgress
+            )
+        }
+    }
 
     private var totalView: some View {
         ScrollView {
@@ -372,14 +401,39 @@ struct AnalyticsView: View {
     // MARK: - Helpers
 
     private func refreshData() {
+        refreshTask?.cancel()
+        if section != .economics {
+            service.cancelEconomicsAnalysis()
+        }
+        let generation = UUID()
+        refreshGeneration = generation
         isRefreshing = true
+        let requestedSection = section
+        let requestedDateRange = dateRange
+        let requestedAgentFilter = agentFilter
+        let requestedProjectFilter = projectFilter
 
-        Task {
-            await service.calculate(dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
+        refreshTask = Task {
+            switch requestedSection {
+            case .overview:
+                await service.calculate(
+                    dateRange: requestedDateRange,
+                    agentFilter: requestedAgentFilter,
+                    projectFilter: requestedProjectFilter
+                )
+            case .economics:
+                await service.calculateEconomics(
+                    dateRange: requestedDateRange,
+                    agentFilter: requestedAgentFilter,
+                    projectFilter: requestedProjectFilter
+                )
+            }
+
+            guard !Task.isCancelled, refreshGeneration == generation else { return }
 
             // Simulate brief delay for animation
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
-
+            guard !Task.isCancelled, refreshGeneration == generation else { return }
             isRefreshing = false
         }
     }

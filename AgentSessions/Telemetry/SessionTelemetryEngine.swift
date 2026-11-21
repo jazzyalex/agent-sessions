@@ -63,10 +63,11 @@ struct CodexTranscriptAccountIdentity {
 
 /// On-demand telemetry for one session.
 ///
-/// Telemetry is not stored on `Session`, not in SQLite, and NOT derived from
-/// hydrated `SessionEvent`s: both transcript parsers truncate `rawJSON` (Claude at
-/// 8 KB, Codex sanitizes lines over 100 KB), so `message.usage` on a large assistant
-/// line is already gone by the time events exist. The file is therefore re-read.
+/// Telemetry is not stored on `Session` and is NOT derived from hydrated
+/// `SessionEvent`s: both transcript parsers truncate `rawJSON` (Claude at 8 KB,
+/// Codex sanitizes lines over 100 KB), so `message.usage` on a large assistant line
+/// is already gone by the time events exist. A compact repricable copy can be kept
+/// in the Economics SQLite index; a cache miss still requires a transcript re-read.
 ///
 /// Recompute is a FULL re-read, so callers must not poll this on a timer — a live
 /// session's file signature changes on every append. It is built for "the user
@@ -271,11 +272,16 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     }
 
     enum ReadResult: Sendable {
-        case available(SessionTelemetry)
+        case available(SessionTelemetry, evidence: SessionTelemetryIndexEvidence)
         case unavailable(UnavailableReason)
 
         var telemetry: SessionTelemetry? {
-            if case let .available(value) = self { return value }
+            if case let .available(value, _) = self { return value }
+            return nil
+        }
+
+        var indexEvidence: SessionTelemetryIndexEvidence? {
+            if case let .available(_, evidence) = self { return evidence }
             return nil
         }
 
@@ -293,6 +299,65 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
     func telemetryReadResult(for session: Session) async -> ReadResult {
         await telemetry(for: session, revisionRetryCount: 0)
+    }
+
+    /// Transcript-derived evidence suitable for durable indexing. The returned
+    /// telemetry has current event pricing but no live weekly-quota attribution;
+    /// callers persist the token evidence and re-apply price/quota on warm reads.
+    func economicsIndexEvidence(for session: Session) async -> SessionTelemetryIndexEvidence? {
+        (await telemetryReadResult(for: session)).indexEvidence
+    }
+
+    /// Cheap revision proof used before accepting a persistent Economics row.
+    /// File sources stat only; shared-storage sources use their registry-owned
+    /// logical revision (including WAL-aware identities where applicable).
+    func economicsRevisionKey(for session: Session) -> String? {
+        let descriptor = SessionSourceRegistry.descriptor(for: session.source)
+        return resolveTelemetryRevision(
+            for: session,
+            telemetryRevision: descriptor.telemetryRevision
+        )?.economicsPersistenceKey
+    }
+
+    /// Aggregate, current-window quota conversion used by Economics.
+    /// Per-session telemetry intentionally remains stricter: without a durable
+    /// transcript account id it still refuses to claim an account-scoped share.
+    func economicsQuotaContext(for source: SessionSource,
+                               now: Date) -> WeeklyQuotaEconomicsContext? {
+        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        guard descriptor.telemetry.weeklyQuota.isAvailable,
+              let context = quotaStore.economicsContext(provider: source.rawValue, now: now),
+              context.calibrationProvenance.priceRevision
+                == priceTable.snapshot().rateRevision(forProvider: source.rawValue) else {
+            return nil
+        }
+        return context
+    }
+
+    /// Reprices persisted token evidence and refreshes quota attribution without
+    /// reopening the transcript. A revision or parser mismatch fails closed.
+    func telemetry(fromIndexed evidence: SessionTelemetryIndexEvidence,
+                   for session: Session) -> SessionTelemetry? {
+        guard evidence.telemetry.source == session.source,
+              evidence.telemetry.parserVersion == SessionTelemetry.parserVersion,
+              economicsRevisionKey(for: session) == evidence.revisionKey else { return nil }
+        let descriptor = SessionSourceRegistry.descriptor(for: session.source)
+        let snapshot = priceTable.snapshot()
+        let pricing = TelemetryPricingIdentity(snapshot: snapshot)
+        let repriced = repricedTelemetry(
+            evidence.telemetry,
+            for: session,
+            capabilities: descriptor.telemetry,
+            priceSnapshot: snapshot
+        )
+        return applyingWeeklyQuota(
+            to: repriced,
+            source: session.source,
+            capabilities: descriptor.telemetry,
+            durableAccountHash: evidence.durableAccountHash,
+            pricing: pricing,
+            now: now()
+        )
     }
 
     private func telemetry(for session: Session, revisionRetryCount: Int) async -> ReadResult {
@@ -359,7 +424,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             }
             guard !Task.isCancelled else { return .unavailable(.cancelled) }
             metrics.recordCacheHit()
-            return .available(result)
+            return .available(
+                result,
+                evidence: SessionTelemetryIndexEvidence(
+                    telemetry: cached.telemetry,
+                    durableAccountHash: cached.durableAccountHash,
+                    revisionKey: expectedRevision.economicsPersistenceKey
+                )
+            )
         }
 
         if selection.joinedInFlight {
@@ -402,7 +474,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             return await telemetry(for: session, revisionRetryCount: revisionRetryCount + 1)
         }
         guard !Task.isCancelled else { return .unavailable(.cancelled) }
-        return .available(result)
+        return .available(
+            result,
+            evidence: SessionTelemetryIndexEvidence(
+                telemetry: computed.telemetry,
+                durableAccountHash: computed.durableAccountHash,
+                revisionKey: expectedRevision.economicsPersistenceKey
+            )
+        )
     }
 
     private func resolveTelemetryRevision(
@@ -622,47 +701,59 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         let durableAccountHash = parsed.durableAccountHash
         lock.lock(); _parseCount += 1; lock.unlock()
 
-        // Pricing needs both permission and component tokens: a legacy total-only
-        // transcript reports a token count but can never be priced.
-        guard capabilities.cost.isAvailable,
-              base.usageSummary?.unavailableReason == nil,
-              base.usageSummary?.costUnavailableReason == nil,
-              base.usageSummary?.hasComponentBreakdown == true else {
-            return TelemetryScanResult(
-                computed: ComputedTelemetry(
-                    telemetry: base,
-                    durableAccountHash: durableAccountHash,
-                    pricing: TelemetryPricingIdentity(snapshot: priceSnapshot)),
-                bytesScanned: bytesScanned,
-                revisionChanged: false)
-        }
+        let repriced = repricedTelemetry(
+            base,
+            for: session,
+            capabilities: capabilities,
+            priceSnapshot: priceSnapshot
+        )
+        return TelemetryScanResult(
+            computed: ComputedTelemetry(
+                telemetry: repriced,
+                durableAccountHash: durableAccountHash,
+                pricing: TelemetryPricingIdentity(snapshot: priceSnapshot)),
+            bytesScanned: bytesScanned,
+            revisionChanged: false)
+    }
+
+    /// Rebuilds price-derived fields from token evidence. This is shared by a
+    /// cold transcript parse and a persistent-index hit, which guarantees that a
+    /// price manifest update never requires rereading transcript bytes.
+    private func repricedTelemetry(_ base: SessionTelemetry,
+                                   for session: Session,
+                                   capabilities: TelemetryCapabilities,
+                                   priceSnapshot: RunwayPriceSnapshot) -> SessionTelemetry {
+        let canPrice = capabilities.cost.isAvailable
+            && base.usageSummary?.unavailableReason == nil
+            && base.usageSummary?.costUnavailableReason == nil
+            && base.usageSummary?.hasComponentBreakdown == true
         let sessionInterval: ClosedRange<Date>? = {
             guard let start = session.startTime ?? session.endTime,
                   let end = session.endTime ?? session.startTime else { return nil }
             return min(start, end)...max(start, end)
         }()
-        let priced = TelemetryCostCalculator.price(events: base.usageEvents,
-                                                   fallbackSlices: base.usageSlices,
-                                                   snapshot: priceSnapshot,
-                                                   sessionInterval: sessionInterval,
-                                                   cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified,
-                                                   recordsCacheWrites: capabilities.recordsCacheWrites)
-        return TelemetryScanResult(
-            computed: ComputedTelemetry(
-                telemetry: SessionTelemetry(source: base.source,
-                                            initialConfiguration: base.initialConfiguration,
-                                            currentConfiguration: base.currentConfiguration,
-                                            configurationChanges: base.configurationChanges,
-                                            usageSlices: base.usageSlices,
-                                            usageEvents: priced.events,
-                                            usageSummary: base.usageSummary,
-                                            costEstimate: priced.estimate,
-                                            weeklyQuotaEstimate: nil,
-                                            parserVersion: base.parserVersion),
-                durableAccountHash: durableAccountHash,
-                pricing: TelemetryPricingIdentity(snapshot: priceSnapshot)),
-            bytesScanned: bytesScanned,
-            revisionChanged: false)
+        let priced = canPrice
+            ? TelemetryCostCalculator.price(
+                events: base.usageEvents,
+                fallbackSlices: base.usageSlices,
+                snapshot: priceSnapshot,
+                sessionInterval: sessionInterval,
+                cacheWriteTTLVerified: capabilities.cacheWriteTTLVerified,
+                recordsCacheWrites: capabilities.recordsCacheWrites
+            )
+            : nil
+        return SessionTelemetry(
+            source: base.source,
+            initialConfiguration: base.initialConfiguration,
+            currentConfiguration: base.currentConfiguration,
+            configurationChanges: base.configurationChanges,
+            usageSlices: base.usageSlices,
+            usageEvents: priced?.events ?? base.usageEvents,
+            usageSummary: base.usageSummary,
+            costEstimate: priced?.estimate,
+            weeklyQuotaEstimate: nil,
+            parserVersion: base.parserVersion
+        )
     }
 
     /// Weekly attribution depends on live account calibration, not transcript

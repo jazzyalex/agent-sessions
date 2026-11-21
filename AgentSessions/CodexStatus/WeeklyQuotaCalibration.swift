@@ -169,6 +169,20 @@ struct WeeklyQuotaAttributionContext: Sendable {
     let calibrationProvenance: WeeklyQuotaCalibrationProvenance
 }
 
+/// Provider-window conversion for aggregate Economics reporting.
+///
+/// This deliberately uses the same displayable local estimate as Quota Meter.
+/// Unlike per-session attribution, it does not claim that a transcript belongs
+/// to a particular account. Callers may only apply it to local usage inside the
+/// returned provider window and must continue to label the result estimated.
+struct WeeklyQuotaEconomicsContext: Sendable {
+    let percentPointsPerDollar: Double
+    let windowStart: Date
+    let resetAt: Date
+    let isLocalEstimate: Bool
+    let calibrationProvenance: WeeklyQuotaCalibrationProvenance
+}
+
 /// One accepted observation of the conversion.
 struct WeeklyQuotaCalibration: Equatable, Codable, Sendable {
     let percentPointsPerDollar: Double
@@ -1330,6 +1344,53 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                              scope: scope,
                                              latestSnapshot: latest,
                                              calibrationProvenance: selection.provenance)
+    }
+
+    /// Aggregate quota economics for the current provider window.
+    ///
+    /// Quota Meter already presents account-unidentified transcript history as a
+    /// local estimate because providers do not stamp every transcript with a
+    /// durable account id. Economics needs that same aggregate conversion; using
+    /// `attributionContext` here made quota/hour permanently unavailable for real
+    /// Codex history. The exact per-session path remains unchanged and fail-closed.
+    func economicsContext(provider: String, now: Date) -> WeeklyQuotaEconomicsContext? {
+        lock.lock(); defer { lock.unlock() }
+        let calibration = runwayCalibrationLocked(provider: provider, now: now)
+        guard calibration.state.canDisplayRate,
+              let ratio = calibration.ratio,
+              ratio.isFinite,
+              ratio > 0,
+              let provenance = calibration.provenance else { return nil }
+
+        let scope = trackers[provider]?.currentScope
+        let scopedReset: Date? = snapshots[provider]?.last.flatMap { snapshot -> Date? in
+            guard let scope,
+                  snapshot.provider == scope.provider,
+                  snapshot.accountHash == scope.accountHash,
+                  snapshot.sourceFamily == scope.sourceFamily,
+                  snapshot.limitShape == scope.limitShape,
+                  snapshot.priceRevision == scope.priceRevision else { return nil }
+            return snapshot.resetAt
+        }
+        let currentReset = scopedReset
+            ?? latestResetsAt[provider]
+            ?? provenance.originResetAt
+        guard let resetAt = currentReset else { return nil }
+
+        let measuredWindow = provenance.originResetAt.flatMap { originReset in
+            provenance.originWindowStart.map { originReset.timeIntervalSince($0) }
+        }
+        let windowSeconds = measuredWindow.flatMap {
+            $0.isFinite && $0 > 0 ? $0 : nil
+        } ?? (7 * 24 * 60 * 60)
+
+        return WeeklyQuotaEconomicsContext(
+            percentPointsPerDollar: ratio,
+            windowStart: resetAt.addingTimeInterval(-windowSeconds),
+            resetAt: resetAt,
+            isLocalEstimate: calibration.state == .localEstimate,
+            calibrationProvenance: provenance
+        )
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger

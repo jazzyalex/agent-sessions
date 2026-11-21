@@ -15,6 +15,24 @@ struct SessionTelemetryProviderResult: Sendable {
 enum SessionTelemetryRevision: Hashable, Sendable {
     case file(RunwayFileSignature)
     case logical(String)
+
+    /// Stable, locale-independent identity persisted by the Economics index.
+    /// A file mtime uses its exact IEEE-754 bit pattern rather than a formatted
+    /// decimal, so a warm lookup cannot accidentally accept a nearby revision.
+    var economicsPersistenceKey: String {
+        switch self {
+        case .file(let signature):
+            return "file:\(signature.mtime.bitPattern):\(signature.size)"
+        case .logical(let revision):
+            return "logical:\(revision)"
+        }
+    }
+}
+
+struct SessionTelemetryIndexEvidence: Sendable {
+    let telemetry: SessionTelemetry
+    let durableAccountHash: String?
+    let revisionKey: String
 }
 
 /// Result of a registry-owned non-JSONL telemetry scan.
