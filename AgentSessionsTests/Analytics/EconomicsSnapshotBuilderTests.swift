@@ -67,7 +67,6 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.totalAPIEquivalentUSD, 9, accuracy: 0.0001)
-        XCTAssertNil(snapshot.totalWeeklyQuotaPercentPoints)
         XCTAssertNil(snapshot.rows.first?.weeklyQuotaPercentPointsPerHour)
         XCTAssertEqual(snapshot.coverage.quotaFraction, 0)
     }
@@ -120,6 +119,297 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         let points = try XCTUnwrap(snapshot.trendByConfiguration[key.id])
         XCTAssertEqual(points.compactMap(\.apiCostPerHour), [1])
         XCTAssertEqual(snapshot.totalAPIEquivalentUSD, 1, accuracy: 0.0001)
+    }
+
+    func testShortTimedSampleKeepsValueButDoesNotExtrapolateHourlyRate() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let start = try date("2026-11-13T12:00:00Z")
+        let key = EconomicsConfigurationKey(
+            source: .claude,
+            model: "claude-sonnet-5-5",
+            effort: "medium"
+        )
+
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("short", key, try date("2026-11-20T11:00:00Z"),
+                            api: 0.14, quota: 0.003, active: 5)
+            ],
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 1,
+            analyzedSessions: 1
+        )
+
+        let row = try XCTUnwrap(snapshot.rows.first)
+        XCTAssertEqual(row.apiEquivalentUSD, 0.14, accuracy: 0.0001)
+        XCTAssertEqual(row.apiTimedSeconds, 5, accuracy: 0.0001)
+        XCTAssertEqual(row.quotaTimedSeconds, 5, accuracy: 0.0001)
+        XCTAssertNil(row.apiCostPerHour)
+        XCTAssertNil(row.weeklyQuotaPercentPointsPerHour)
+        XCTAssertFalse(row.hasSufficientTimedSample(for: .apiCostPerHour))
+    }
+
+    func testUntimedSpendIsExcludedFromHourlyRateNumerator() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let start = try date("2026-11-13T12:00:00Z")
+        let key = EconomicsConfigurationKey(source: .codex, model: "gpt-6.2-astra", effort: "xhigh")
+
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("timed", key, try date("2026-11-20T10:00:00Z"),
+                            api: 2, quota: 0.4, active: 3600),
+                observation("untimed", key, try date("2026-11-20T11:00:00Z"),
+                            api: 20, quota: 4, active: nil)
+            ],
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 2,
+            analyzedSessions: 2
+        )
+
+        let row = try XCTUnwrap(snapshot.rows.first)
+        XCTAssertEqual(row.apiEquivalentUSD, 22, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.apiCostPerHour), 2, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.weeklyQuotaPercentPointsPerHour), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(row.timedPriceCoverage, 0.5, accuracy: 0.0001)
+    }
+
+    func testTimingRequiresTwoUsageTimestampsAndUsesTheirSpan() throws {
+        let start = try date("2026-11-20T10:00:00Z")
+        let end = try date("2026-11-20T10:05:00Z")
+        let first = usageEvent(at: start, input: 100)
+        let last = usageEvent(at: end, input: 200)
+
+        XCTAssertTrue(EconomicsTiming.intervals(for: [first]).isEmpty)
+        let intervals = EconomicsTiming.intervals(for: [last, first])
+        XCTAssertEqual(try XCTUnwrap(intervals[0]).seconds, 300, accuracy: 0.0001)
+    }
+
+    func testTimingRejectsIdleGapsAndConfigurationChangesButUsesExactRequestDuration() throws {
+        let start = try date("2026-11-20T10:00:00Z")
+        let idle = try date("2026-11-20T10:31:00Z")
+        let switched = try date("2026-11-20T10:35:00Z")
+        let exactEnd = try date("2026-11-20T10:45:00Z")
+        let events = [
+            usageEvent(at: start, input: 100),
+            usageEvent(at: idle, input: 200),
+            usageEvent(at: switched, input: 300, model: "gpt-6.2-astra"),
+            usageEvent(at: switched, input: 400, model: "gpt-6.2-astra", completedAt: exactEnd)
+        ]
+
+        let intervals = EconomicsTiming.intervals(for: events)
+        XCTAssertNil(intervals[0])
+        XCTAssertNil(intervals[1], "gaps above 30 minutes are idle, not model time")
+        XCTAssertNil(intervals[2], "a gap crossing a configuration change is ambiguous")
+        XCTAssertEqual(try XCTUnwrap(intervals[3]).seconds, 600, accuracy: 0.0001)
+    }
+
+    func testTimingTreatsOpenCodeV1FinishWriteAsPointButKeepsV2RequestInterval() throws {
+        let start = try date("2026-11-20T10:00:00Z")
+        let v1 = usageEvent(
+            at: start,
+            input: 100,
+            completedAt: start.addingTimeInterval(0.001),
+            recordID: "native-part-id",
+            usageFamily: "opencode.step-finish.tokens"
+        )
+        let v2 = usageEvent(
+            at: start,
+            input: 100,
+            completedAt: start.addingTimeInterval(6.5),
+            recordID: "assistant-step-finish",
+            usageFamily: "opencode.step-finish.tokens"
+        )
+
+        XCTAssertTrue(EconomicsTiming.intervals(for: [v1]).isEmpty,
+                      "v1 part create-to-update time is a database write, not request execution")
+        XCTAssertEqual(try XCTUnwrap(EconomicsTiming.intervals(for: [v2])[0]).seconds,
+                       6.5, accuracy: 0.0001)
+    }
+
+    func testAPIAndQuotaRatesUseSeparateCoveredSeconds() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let start = try date("2026-11-13T12:00:00Z")
+        let key = EconomicsConfigurationKey(source: .codex, model: "gpt-6.2-astra", effort: "xhigh")
+        let observations = [
+            EconomicsObservation(
+                sessionID: "covered",
+                configuration: key,
+                observedAt: try date("2026-11-20T10:00:00Z"),
+                apiEquivalentUSD: 2,
+                weeklyQuotaPercentPoints: 0.4,
+                apiTimedSeconds: 3600,
+                quotaTimedSeconds: 3600
+            ),
+            EconomicsObservation(
+                sessionID: "api-only",
+                configuration: key,
+                observedAt: try date("2026-11-20T11:00:00Z"),
+                apiEquivalentUSD: 20,
+                weeklyQuotaPercentPoints: nil,
+                apiTimedSeconds: 9 * 3600,
+                quotaTimedSeconds: nil
+            )
+        ]
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: observations,
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 2,
+            analyzedSessions: 2
+        )
+
+        let row = try XCTUnwrap(snapshot.rows.first)
+        XCTAssertEqual(try XCTUnwrap(row.apiCostPerHour), 2.2, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.weeklyQuotaPercentPointsPerHour), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(row.apiTimedSeconds, 10 * 3600, accuracy: 0.0001)
+        XCTAssertEqual(row.quotaTimedSeconds, 3600, accuracy: 0.0001)
+    }
+
+    func testQuotaTotalsRemainSeparatedByProvider() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let start = try date("2026-11-13T12:00:00Z")
+        let codex = EconomicsConfigurationKey(source: .codex, model: "gpt-6.2-astra", effort: "xhigh")
+        let claude = EconomicsConfigurationKey(source: .claude, model: "claude-fable-5-2", effort: "high")
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("codex", codex, try date("2026-11-20T10:00:00Z"),
+                            api: 2, quota: 30, active: 3600),
+                observation("claude", claude, try date("2026-11-20T11:00:00Z"),
+                            api: 3, quota: 20, active: 3600)
+            ],
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 2,
+            analyzedSessions: 2
+        )
+
+        XCTAssertEqual(snapshot.quotaPercentPointsBySource[.codex], 30)
+        XCTAssertEqual(snapshot.quotaPercentPointsBySource[.claude], 20)
+    }
+
+    func testAllTimeIncludesUndatedSpendWithoutRatesQuotaOrTrend() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let key = EconomicsConfigurationKey(source: .codex, model: "gpt-6.2-sol", effort: "high")
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                EconomicsObservation(
+                    sessionID: "undated",
+                    configuration: key,
+                    observedAt: nil,
+                    apiEquivalentUSD: 7,
+                    weeklyQuotaPercentPoints: nil,
+                    apiTimedSeconds: nil,
+                    quotaTimedSeconds: nil
+                ),
+                observation("dated", key, try date("2026-11-20T10:00:00Z"),
+                            api: 2, quota: 1, active: 60)
+            ],
+            current: EconomicsPeriod(start: nil, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 2,
+            analyzedSessions: 2
+        )
+
+        XCTAssertEqual(snapshot.totalAPIEquivalentUSD, 9, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(snapshot.rows.first?.apiEquivalentUSD), 9, accuracy: 0.0001)
+        XCTAssertNil(snapshot.rows.first?.apiCostPerHour)
+        XCTAssertEqual(snapshot.quotaPercentPointsBySource[.codex], 1)
+        XCTAssertTrue(snapshot.trendByConfiguration[key.id]?.allSatisfy {
+            $0.apiCostPerHour == nil && $0.weeklyQuotaPercentPointsPerHour == nil
+        } == true)
+    }
+
+    func testTrendRejectsTimedIntervalCrossingWeekBoundary() throws {
+        let now = try date("2026-11-18T12:00:00Z")
+        let weekStart = try XCTUnwrap(calendar.dateInterval(of: .weekOfYear, for: now)?.start)
+        let key = EconomicsConfigurationKey(source: .codex, model: "gpt-6.2-sol", effort: "high")
+        let crossingEnd = weekStart.addingTimeInterval(60)
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("crossing", key, crossingEnd, api: 10, quota: 2, active: 20 * 60)
+            ],
+            current: EconomicsPeriod(start: weekStart.addingTimeInterval(-3600), end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 1,
+            analyzedSessions: 1
+        )
+
+        let point = try XCTUnwrap(snapshot.trendByConfiguration[key.id]?.first {
+            $0.weekStart == weekStart
+        })
+        XCTAssertNil(point.apiCostPerHour)
+        XCTAssertNil(point.weeklyQuotaPercentPointsPerHour)
+    }
+
+    func testRowsSortBySelectedMetricWithUnavailableValuesLast() throws {
+        let now = try date("2026-11-20T12:00:00Z")
+        let start = try date("2026-11-13T12:00:00Z")
+        let apiLeader = EconomicsConfigurationKey(source: .codex, model: "api-leader", effort: "high")
+        let quotaLeader = EconomicsConfigurationKey(source: .codex, model: "quota-leader", effort: "high")
+        let unavailable = EconomicsConfigurationKey(source: .codex, model: "unavailable", effort: "high")
+        let snapshot = EconomicsSnapshotBuilder.build(
+            observations: [
+                observation("api", apiLeader, try date("2026-11-20T09:00:00Z"),
+                            api: 10, quota: 1, active: 3600),
+                observation("quota", quotaLeader, try date("2026-11-20T10:00:00Z"),
+                            api: 2, quota: 5, active: 3600),
+                observation("none", unavailable, try date("2026-11-20T11:00:00Z"),
+                            api: 100, quota: 100, active: 5)
+            ],
+            current: EconomicsPeriod(start: start, end: now),
+            previous: nil,
+            now: now,
+            calendar: calendar,
+            eligibleSessions: 3,
+            analyzedSessions: 3
+        )
+
+        XCTAssertEqual(EconomicsRowOrdering.sorted(snapshot.rows, by: .apiCostPerHour).map(\.configuration.model),
+                       ["api-leader", "quota-leader", "unavailable"])
+        XCTAssertEqual(EconomicsRowOrdering.sorted(snapshot.rows, by: .quotaPerHour).map(\.configuration.model),
+                       ["quota-leader", "api-leader", "unavailable"])
+    }
+
+    func testDatedEvidenceOutsideFilterCannotFallBackToLifetimeCost() throws {
+        let period = EconomicsPeriod(
+            start: try date("2026-11-13T12:00:00Z"),
+            end: try date("2026-11-20T12:00:00Z")
+        )
+        let historical = indexedTelemetry(events: [
+            usageEvent(at: try date("2026-10-20T12:00:00Z"), input: 100)
+        ])
+        let historicalSelection = EconomicsEventSelection.select(from: historical, period: period)
+        XCTAssertTrue(historicalSelection.eventsInPeriod.isEmpty)
+        XCTAssertFalse(historicalSelection.canUseAggregateFallback,
+                       "cold backfill must match the warm date index and keep lifetime spend out")
+
+        let eventless = indexedTelemetry(events: [])
+        XCTAssertTrue(EconomicsEventSelection.select(from: eventless, period: period).canUseAggregateFallback)
+
+        let mixed = indexedTelemetry(events: [
+            usageEvent(at: try date("2026-11-19T12:00:00Z"), input: 100),
+            usageEvent(at: nil, input: 200)
+        ])
+        XCTAssertEqual(EconomicsEventSelection.select(
+            from: mixed,
+            period: EconomicsPeriod(start: nil, end: period.end)
+        ).eventsInPeriod.count, 2, "All Time keeps undated spend as lifetime-only evidence")
+        XCTAssertEqual(EconomicsEventSelection.select(from: mixed, period: period).eventsInPeriod.count, 1,
+                       "dated filters must not assign undated spend a synthetic date")
     }
 
     func testPersistentTelemetryIndexUsesEventDatesWithoutDroppingRepriceEvidence() async throws {
@@ -206,10 +496,10 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
     private func observation(
         _ sessionID: String,
         _ configuration: EconomicsConfigurationKey,
-        _ date: Date,
+        _ date: Date?,
         api: Double?,
         quota: Double?,
-        active: TimeInterval
+        active: TimeInterval?
     ) -> EconomicsObservation {
         EconomicsObservation(
             sessionID: sessionID,
@@ -217,7 +507,8 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
             observedAt: date,
             apiEquivalentUSD: api,
             weeklyQuotaPercentPoints: quota,
-            activeSeconds: active
+            apiTimedSeconds: active,
+            quotaTimedSeconds: active
         )
     }
 
@@ -226,22 +517,31 @@ final class EconomicsSnapshotBuilderTests: XCTestCase {
         return try XCTUnwrap(formatter.date(from: value))
     }
 
-    private func usageEvent(at date: Date, input: Int) -> TelemetryUsageEvent {
+    private func usageEvent(
+        at date: Date?,
+        input: Int,
+        model: String = "gpt-6.2-sol",
+        effort: String = "high",
+        completedAt: Date? = nil,
+        recordID: String = UUID().uuidString,
+        usageFamily: String = "test"
+    ) -> TelemetryUsageEvent {
         TelemetryUsageEvent(
-            recordID: UUID().uuidString,
+            recordID: recordID,
             observedAt: date,
             anchorLine: 0,
-            usageFamily: "test",
+            usageFamily: usageFamily,
             ownership: .session,
-            model: "gpt-6.2-sol",
-            reasoningEffort: "high",
+            model: model,
+            reasoningEffort: effort,
             speed: "standard",
             freshInputTokens: input,
             cacheReadTokens: 0,
             cacheWrite5mTokens: 0,
             cacheWrite1hTokens: 0,
             outputTokens: 0,
-            contextInputTokens: input
+            contextInputTokens: input,
+            completedAt: completedAt
         )
     }
 

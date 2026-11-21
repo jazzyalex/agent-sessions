@@ -27476,39 +27476,6 @@
         }
       }
     },
-    "$ / hour": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "$ / hour"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "$ / 小时"
-          }
-        }
-      }
-    },
-    "% quota / hour": {
-      "comment": "The percent sign denotes percentage points of a weekly quota used per hour.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "% quota / hour"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "% 配额 / 小时"
-          }
-        }
-      }
-    },
     "%lld of %lld sessions": {
       "comment": "Progress label: analyzed session count followed by total session count.",
       "localizations": {
@@ -27543,22 +27510,6 @@
         }
       }
     },
-    "API $ / hour": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API $ / hour"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API $ / 小时"
-          }
-        }
-      }
-    },
     "API-equivalent value": {
       "localizations": {
         "en": {
@@ -27571,38 +27522,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "API 等值"
-          }
-        }
-      }
-    },
-    "API-equivalent value uses published model prices. Weekly quota is an estimate from account-level calibration and appears only for usage inside a compatible observed quota window. Session span runs from first to last observed activity and is allocated by token share when a session changes configuration.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API-equivalent value uses published model prices. Weekly quota is an estimate from account-level calibration and appears only for usage inside a compatible observed quota window. Session span runs from first to last observed activity and is allocated by token share when a session changes configuration."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API 等值使用已发布的模型价格。每周配额是根据账户级校准得出的估算值，并且仅显示兼容的已观测配额窗口内的用量。会话时间跨度从首次到最后一次观测活动计算，并在会话更改配置时按令牌占比分配。"
-          }
-        }
-      }
-    },
-    "Session span": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Session span"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "会话时间跨度"
           }
         }
       }
@@ -27815,22 +27734,6 @@
         }
       }
     },
-    "Quota / hour": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quota / hour"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配额 / 小时"
-          }
-        }
-      }
-    },
     "Quota coverage": {
       "localizations": {
         "en": {
@@ -27927,22 +27830,6 @@
         }
       }
     },
-    "Weekly quota used": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weekly quota used"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已用每周配额"
-          }
-        }
-      }
-    },
     "%lld of %lld usage records": {
       "comment": "Price coverage detail: priced usage record count followed by total usage record count.",
       "localizations": {
@@ -27956,54 +27843,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld / %lld 条用量记录"
-          }
-        }
-      }
-    },
-    "Estimated, observed window only": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Estimated, observed window only"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "估算值，仅限已观测窗口"
-          }
-        }
-      }
-    },
-    "First-to-last observed activity": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "First-to-last observed activity"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "从首次到最后一次观测活动"
-          }
-        }
-      }
-    },
-    "No compatible quota window": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No compatible quota window"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有兼容的配额窗口"
           }
         }
       }
@@ -28052,6 +27891,265 @@
           "stringUnit": {
             "state": "translated",
             "value": "未指定思考强度"
+          }
+        }
+      }
+    },
+    "$ / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$ / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$ / 计时小时"
+          }
+        }
+      }
+    },
+    "%@ local estimate, observed window only": {
+      "comment": "Quota summary detail. The placeholder is the provider display name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ local estimate, observed window only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 本地估算，仅限已观测窗口"
+          }
+        }
+      }
+    },
+    "%lld sessions · %@ timed": {
+      "comment": "Configuration row detail. The first placeholder is the session count and the second is the formatted timed duration.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld sessions · %@ timed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个会话 · 计时 %@"
+          }
+        }
+      }
+    },
+    "API $ / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API $ / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API $ / 计时小时"
+          }
+        }
+      }
+    },
+    "API timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 计时活动"
+          }
+        }
+      }
+    },
+    "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Estimated quota uses Quota Meter's provider-wide local calibration, not a direct per-model quota measurement. Provider allowances are never added together, and work on other devices may affect the estimate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Estimated quota uses Quota Meter's provider-wide local calibration, not a direct per-model quota measurement. Provider allowances are never added together, and work on other devices may affect the estimate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 等值使用已发布的模型价格。小时费率会优先汇总精确的请求时段；若无精确时段，则只采用所选筛选范围内、不超过 30 分钟且配置相同的相邻用量间隔。每项指标都需要至少 15 分钟的独立覆盖时间；未计时的费用仍计入总价值，但不计入费率。估算配额使用配额仪表的提供商级本地校准，并非直接测量每个模型的配额。不同提供商的配额绝不相加，其他设备上的工作也可能影响估算。"
+          }
+        }
+      }
+    },
+    "Each hourly rate needs its own 15-minute covered sample. Total value is still included above.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each hourly rate needs its own 15-minute covered sample. Total value is still included above."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每项小时费率都需要各自至少 15 分钟的覆盖样本。总价值仍计入上方。"
+          }
+        }
+      }
+    },
+    "Est. quota / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Est. quota / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "估算配额 / 计时小时"
+          }
+        }
+      }
+    },
+    "Estimated weekly quota": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated weekly quota"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "估算每周配额"
+          }
+        }
+      }
+    },
+    "No calibrated provider window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No calibrated provider window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已校准的提供商窗口"
+          }
+        }
+      }
+    },
+    "Quota timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配额计时活动"
+          }
+        }
+      }
+    },
+    "Separate provider allowances; no combined percentage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Separate provider allowances; no combined percentage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各提供商配额独立；不合并百分比"
+          }
+        }
+      }
+    },
+    "Timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计时活动"
+          }
+        }
+      }
+    },
+    "Timed price coverage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed price coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计时价格覆盖率"
+          }
+        }
+      }
+    },
+    "Timestamped usage inside this filter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timestamped usage inside this filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此筛选范围内带时间戳的用量"
+          }
+        }
+      }
+    },
+    "est. % / timed hour": {
+      "comment": "Chart unit label. The percent sign denotes estimated percentage points of a weekly quota used per timed hour.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "est. % / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "估算 % / 计时小时"
           }
         }
       }

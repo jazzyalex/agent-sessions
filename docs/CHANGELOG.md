@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Analytics has a new Economics view for API-equivalent value, estimated weekly quota use, and session-span-normalized comparisons by agent, model and thinking effort. Normal session ingestion populates a persistent event index so repeat views and filter changes avoid transcript rereads; missing rows backfill with bounded concurrency, current model prices reprice stored token evidence, and quota/hour uses Quota Meter's local calibration only inside the observed provider window.
+- Analytics has a new Economics view for API-equivalent value, estimated weekly quota use, and timestamped comparisons by agent, model and thinking effort. Normal session ingestion populates a persistent event index so repeat views and filter changes avoid transcript rereads; missing rows backfill with bounded concurrency, current model prices reprice stored token evidence, and estimated quota/hour uses Quota Meter's provider-wide local calibration only inside the observed provider window. Hourly rates use exact request timing or nearby same-configuration usage intervals up to 30 minutes, exclude untimed spend, and require 15 minutes of separately covered API or quota time. Different providers' weekly allowances remain separate.
 - Quota Meter picks up new model prices in the open app. The $ and Wk views recalculate from existing usage, and failed price checks retry automatically.
 
 ## [6.6] - 2026-11-18

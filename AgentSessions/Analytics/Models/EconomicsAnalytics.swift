@@ -22,8 +22,8 @@ enum EconomicsMetric: String, CaseIterable, Identifiable {
 
     var displayName: LocalizedStringResource {
         switch self {
-        case .quotaPerHour: return "Quota / hour"
-        case .apiCostPerHour: return "API $ / hour"
+        case .quotaPerHour: return "Est. quota / timed hour"
+        case .apiCostPerHour: return "API $ / timed hour"
         }
     }
 }
@@ -54,10 +54,15 @@ struct EconomicsConfigurationKey: Hashable, Identifiable, Sendable {
 struct EconomicsObservation: Equatable, Sendable {
     let sessionID: String
     let configuration: EconomicsConfigurationKey
-    let observedAt: Date
+    /// nil is valid only for lifetime totals. Undated evidence is never used for
+    /// quota attribution, trends, or timed rates.
+    let observedAt: Date?
     let apiEquivalentUSD: Double?
     let weeklyQuotaPercentPoints: Double?
-    let activeSeconds: TimeInterval
+    /// Nearby timestamp evidence covered by each metric. nil means the transcript
+    /// proves spend but cannot put that spend in the corresponding hourly rate.
+    let apiTimedSeconds: TimeInterval?
+    let quotaTimedSeconds: TimeInterval?
 }
 
 struct EconomicsPeriod: Equatable, Sendable {
@@ -68,17 +73,111 @@ struct EconomicsPeriod: Equatable, Sendable {
         if let start, date < start { return false }
         return date < end
     }
+
+    func containsForTotals(_ date: Date?) -> Bool {
+        guard let date else { return start == nil }
+        return contains(date)
+    }
+
+    func contains(start intervalStart: Date, end intervalEnd: Date) -> Bool {
+        intervalEnd > intervalStart && contains(intervalStart) && intervalEnd <= end
+    }
+}
+
+enum EconomicsTiming {
+    struct Interval: Equatable, Sendable {
+        let start: Date
+        let end: Date
+
+        var seconds: TimeInterval { end.timeIntervalSince(start) }
+    }
+
+    /// The existing Runway activity parsers use the same 30-minute continuity
+    /// boundary. Longer gaps are human idle/unknown time, not model work.
+    static let maximumNearbyGap: TimeInterval = 30 * 60
+
+    /// Returns timing evidence keyed by the event's original array index. Exact
+    /// request start/completion wins. Otherwise, a later usage event receives the
+    /// gap from the preceding event only when both are nearby. The first event and
+    /// events after an idle gap remain untimed instead of inventing a duration.
+    static func intervals(for events: [TelemetryUsageEvent]) -> [Int: Interval] {
+        let ordered = events.enumerated().compactMap { index, event -> (Int, TelemetryUsageEvent, Date)? in
+            guard let end = event.completedAt ?? event.observedAt else { return nil }
+            return (index, event, end)
+        }.sorted { $0.2 < $1.2 }
+
+        var result: [Int: Interval] = [:]
+        var previousEnd: Date?
+        var previousEvent: TelemetryUsageEvent?
+        for (index, event, end) in ordered {
+            if exactIntervalIsMeasured(event),
+               let start = event.observedAt,
+               let completed = event.completedAt,
+               completed > start {
+                result[index] = Interval(start: start, end: completed)
+                previousEnd = completed
+                previousEvent = event
+                continue
+            }
+            if let previousEnd, let previousEvent,
+               previousEvent.model == event.model,
+               previousEvent.reasoningEffort == event.reasoningEffort {
+                let gap = end.timeIntervalSince(previousEnd)
+                if gap > 0, gap <= maximumNearbyGap {
+                    result[index] = Interval(start: previousEnd, end: end)
+                }
+            }
+            previousEnd = end
+            previousEvent = event
+        }
+        return result
+    }
+
+    /// OpenCode v1 creates a step-finish row when the request is already done;
+    /// its create-to-update delta is database-write time, not execution time.
+    /// Synthetic v2 step-finish rows use the adapter's documented `-step-finish`
+    /// record ID and carry a real request-start/completion pair.
+    private static func exactIntervalIsMeasured(_ event: TelemetryUsageEvent) -> Bool {
+        guard event.usageFamily == "opencode.step-finish.tokens" else { return true }
+        return event.recordID?.hasSuffix("-step-finish") == true
+    }
+}
+
+struct EconomicsEventSelection: Sendable {
+    let allEvents: [TelemetryUsageEvent]
+    let eventsInPeriod: [TelemetryUsageEvent]
+
+    /// A lifetime aggregate may stand in only when the source emitted no request
+    /// events. Otherwise dated and undated evidence must not be moved to a filter
+    /// merely because its individual events did not land there.
+    var canUseAggregateFallback: Bool { allEvents.isEmpty }
+
+    static func select(
+        from telemetry: SessionTelemetry,
+        period: EconomicsPeriod
+    ) -> EconomicsEventSelection {
+        let allEvents = telemetry.usageEvents.filter {
+            $0.ownership == .session && $0.topLineTokens > 0
+        }
+        let eventsInPeriod = allEvents.filter {
+            period.containsForTotals($0.completedAt ?? $0.observedAt)
+        }
+        return EconomicsEventSelection(allEvents: allEvents, eventsInPeriod: eventsInPeriod)
+    }
 }
 
 struct EconomicsConfigurationRow: Identifiable, Equatable, Sendable {
     let configuration: EconomicsConfigurationKey
     let sessions: Int
-    let activeSeconds: TimeInterval
+    let apiTimedSeconds: TimeInterval
+    let quotaTimedSeconds: TimeInterval
     let apiEquivalentUSD: Double
     let weeklyQuotaPercentPoints: Double?
     let pricedObservationCount: Int
     let observationCount: Int
     let quotaObservationCount: Int
+    let timedPricedObservationCount: Int
+    let timedQuotaObservationCount: Int
     let apiCostPerHour: Double?
     let weeklyQuotaPercentPointsPerHour: Double?
     let previousAPICostPerHour: Double?
@@ -94,6 +193,22 @@ struct EconomicsConfigurationRow: Identifiable, Equatable, Sendable {
     var quotaCoverage: Double {
         guard pricedObservationCount > 0 else { return 0 }
         return Double(quotaObservationCount) / Double(pricedObservationCount)
+    }
+
+    var timedPriceCoverage: Double {
+        guard pricedObservationCount > 0 else { return 0 }
+        return Double(timedPricedObservationCount) / Double(pricedObservationCount)
+    }
+
+    func timedSeconds(for metric: EconomicsMetric) -> TimeInterval {
+        switch metric {
+        case .quotaPerHour: return quotaTimedSeconds
+        case .apiCostPerHour: return apiTimedSeconds
+        }
+    }
+
+    func hasSufficientTimedSample(for metric: EconomicsMetric) -> Bool {
+        timedSeconds(for: metric) >= EconomicsSnapshotBuilder.minimumTimedSecondsForRate
     }
 
     func currentValue(for metric: EconomicsMetric) -> Double? {
@@ -126,6 +241,26 @@ struct EconomicsTrendPoint: Identifiable, Equatable, Sendable {
     }
 }
 
+enum EconomicsRowOrdering {
+    static func sorted(
+        _ rows: [EconomicsConfigurationRow],
+        by metric: EconomicsMetric
+    ) -> [EconomicsConfigurationRow] {
+        rows.sorted { lhs, rhs in
+            switch (lhs.currentValue(for: metric), rhs.currentValue(for: metric)) {
+            case let (left?, right?) where left != right:
+                return left > right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.configuration.id < rhs.configuration.id
+            }
+        }
+    }
+}
+
 struct EconomicsCoverage: Equatable, Sendable {
     let analyzedSessions: Int
     let eligibleSessions: Int
@@ -148,8 +283,8 @@ struct EconomicsSnapshot: Equatable, Sendable {
     let rows: [EconomicsConfigurationRow]
     let trendByConfiguration: [String: [EconomicsTrendPoint]]
     let totalAPIEquivalentUSD: Double
-    let totalWeeklyQuotaPercentPoints: Double?
-    let totalActiveSeconds: TimeInterval
+    let quotaPercentPointsBySource: [SessionSource: Double]
+    let totalTimedSeconds: TimeInterval
     let coverage: EconomicsCoverage
     let lastUpdated: Date
 
@@ -157,8 +292,8 @@ struct EconomicsSnapshot: Equatable, Sendable {
         rows: [],
         trendByConfiguration: [:],
         totalAPIEquivalentUSD: 0,
-        totalWeeklyQuotaPercentPoints: nil,
-        totalActiveSeconds: 0,
+        quotaPercentPointsBySource: [:],
+        totalTimedSeconds: 0,
         coverage: EconomicsCoverage(
             analyzedSessions: 0,
             eligibleSessions: 0,
@@ -232,19 +367,28 @@ struct EconomicsTelemetryIndexLookup: Sendable {
 }
 
 enum EconomicsSnapshotBuilder {
+    /// Smaller samples turn a few seconds of spend into a misleading hourly
+    /// headline. Keep the value and coverage visible, but do not extrapolate a
+    /// rate until the configuration has a useful timestamped sample.
+    static let minimumTimedSecondsForRate: TimeInterval = 15 * 60
+
     private struct Aggregate {
         var sessions = Set<String>()
-        var activeSeconds: TimeInterval = 0
+        var apiTimedSeconds: TimeInterval = 0
+        var quotaTimedSeconds: TimeInterval = 0
         var apiEquivalentUSD = 0.0
+        var timedAPIEquivalentUSD = 0.0
         var weeklyQuotaPercentPoints = 0.0
+        var timedWeeklyQuotaPercentPoints = 0.0
         var hasQuota = false
         var pricedObservations = 0
         var totalObservations = 0
         var quotaObservations = 0
+        var timedPricedObservations = 0
+        var timedQuotaObservations = 0
 
         mutating func add(_ observation: EconomicsObservation) {
             sessions.insert(observation.sessionID)
-            activeSeconds += max(0, observation.activeSeconds)
             totalObservations += 1
             if let api = observation.apiEquivalentUSD, api.isFinite, api >= 0 {
                 apiEquivalentUSD += api
@@ -256,16 +400,62 @@ enum EconomicsSnapshotBuilder {
                 quotaObservations += 1
                 hasQuota = true
             }
+            if let seconds = observation.apiTimedSeconds,
+               seconds.isFinite, seconds > 0,
+               let api = observation.apiEquivalentUSD, api.isFinite, api >= 0 {
+                apiTimedSeconds += seconds
+                timedAPIEquivalentUSD += api
+                timedPricedObservations += 1
+            }
+            if let seconds = observation.quotaTimedSeconds,
+               seconds.isFinite, seconds > 0,
+               let quota = observation.weeklyQuotaPercentPoints,
+               quota.isFinite, quota >= 0 {
+                quotaTimedSeconds += seconds
+                timedWeeklyQuotaPercentPoints += quota
+                timedQuotaObservations += 1
+            }
+        }
+
+        /// Weekly trend rates use only intervals wholly contained by that week.
+        /// Full-period rates still use every interval contained by the selected
+        /// Analytics filter.
+        mutating func addTimed(
+            _ observation: EconomicsObservation,
+            intervalStart: Date,
+            intervalEnd: Date
+        ) {
+            guard let observedAt = observation.observedAt,
+                  observedAt >= intervalStart, observedAt < intervalEnd else { return }
+            if let seconds = observation.apiTimedSeconds,
+               seconds.isFinite, seconds > 0,
+               observedAt.addingTimeInterval(-seconds) >= intervalStart,
+               let api = observation.apiEquivalentUSD, api.isFinite, api >= 0 {
+                apiTimedSeconds += seconds
+                timedAPIEquivalentUSD += api
+                timedPricedObservations += 1
+            }
+            if let seconds = observation.quotaTimedSeconds,
+               seconds.isFinite, seconds > 0,
+               observedAt.addingTimeInterval(-seconds) >= intervalStart,
+               let quota = observation.weeklyQuotaPercentPoints,
+               quota.isFinite, quota >= 0 {
+                quotaTimedSeconds += seconds
+                timedWeeklyQuotaPercentPoints += quota
+                timedQuotaObservations += 1
+            }
         }
 
         var apiCostPerHour: Double? {
-            guard activeSeconds > 0, pricedObservations > 0 else { return nil }
-            return apiEquivalentUSD / (activeSeconds / 3600)
+            guard apiTimedSeconds >= EconomicsSnapshotBuilder.minimumTimedSecondsForRate,
+                  timedPricedObservations > 0 else { return nil }
+            return timedAPIEquivalentUSD / (apiTimedSeconds / 3600)
         }
 
         var quotaPerHour: Double? {
-            guard activeSeconds > 0, hasQuota else { return nil }
-            return weeklyQuotaPercentPoints / (activeSeconds / 3600)
+            guard quotaTimedSeconds >= EconomicsSnapshotBuilder.minimumTimedSecondsForRate,
+                  timedQuotaObservations > 0 else { return nil }
+            return timedWeeklyQuotaPercentPoints / (quotaTimedSeconds / 3600)
         }
     }
 
@@ -278,9 +468,9 @@ enum EconomicsSnapshotBuilder {
         eligibleSessions: Int,
         analyzedSessions: Int
     ) -> EconomicsSnapshot {
-        let currentObservations = observations.filter { current.contains($0.observedAt) }
+        let currentObservations = observations.filter { current.containsForTotals($0.observedAt) }
         let previousObservations = previous.map { period in
-            observations.filter { period.contains($0.observedAt) }
+            observations.filter { period.containsForTotals($0.observedAt) }
         } ?? []
 
         let currentByKey = aggregate(currentObservations)
@@ -291,37 +481,39 @@ enum EconomicsSnapshotBuilder {
             return EconomicsConfigurationRow(
                 configuration: key,
                 sessions: aggregate.sessions.count,
-                activeSeconds: aggregate.activeSeconds,
+                apiTimedSeconds: aggregate.apiTimedSeconds,
+                quotaTimedSeconds: aggregate.quotaTimedSeconds,
                 apiEquivalentUSD: aggregate.apiEquivalentUSD,
                 weeklyQuotaPercentPoints: aggregate.hasQuota ? aggregate.weeklyQuotaPercentPoints : nil,
                 pricedObservationCount: aggregate.pricedObservations,
                 observationCount: aggregate.totalObservations,
                 quotaObservationCount: aggregate.quotaObservations,
+                timedPricedObservationCount: aggregate.timedPricedObservations,
+                timedQuotaObservationCount: aggregate.timedQuotaObservations,
                 apiCostPerHour: aggregate.apiCostPerHour,
                 weeklyQuotaPercentPointsPerHour: aggregate.quotaPerHour,
                 previousAPICostPerHour: previousAggregate?.apiCostPerHour,
                 previousWeeklyQuotaPercentPointsPerHour: previousAggregate?.quotaPerHour
             )
         }
-        .sorted { lhs, rhs in
-            let lq = lhs.weeklyQuotaPercentPointsPerHour ?? -1
-            let rq = rhs.weeklyQuotaPercentPointsPerHour ?? -1
-            if lq != rq { return lq > rq }
-            let la = lhs.apiCostPerHour ?? -1
-            let ra = rhs.apiCostPerHour ?? -1
-            if la != ra { return la > ra }
-            return lhs.configuration.id < rhs.configuration.id
-        }
+        .sorted { $0.configuration.id < $1.configuration.id }
 
         let currentWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? now
         let trendStart = calendar.date(byAdding: .weekOfYear, value: -7, to: currentWeek) ?? currentWeek
         let trend = trendByConfiguration(
-            observations: currentObservations.filter { $0.observedAt >= trendStart && $0.observedAt < now },
+            observations: currentObservations.filter {
+                guard let observedAt = $0.observedAt else { return false }
+                return observedAt >= trendStart && observedAt < now
+            },
             now: now,
             calendar: calendar
         )
 
         let total = currentObservations.reduce(into: Aggregate()) { $0.add($1) }
+        let quotaPercentPointsBySource = currentObservations.reduce(into: [SessionSource: Double]()) {
+            guard let quota = $1.weeklyQuotaPercentPoints, quota.isFinite, quota >= 0 else { return }
+            $0[$1.configuration.source, default: 0] += quota
+        }
         let coverage = EconomicsCoverage(
             analyzedSessions: analyzedSessions,
             eligibleSessions: eligibleSessions,
@@ -334,8 +526,8 @@ enum EconomicsSnapshotBuilder {
             rows: rows,
             trendByConfiguration: trend,
             totalAPIEquivalentUSD: total.apiEquivalentUSD,
-            totalWeeklyQuotaPercentPoints: total.hasQuota ? total.weeklyQuotaPercentPoints : nil,
-            totalActiveSeconds: total.activeSeconds,
+            quotaPercentPointsBySource: quotaPercentPointsBySource,
+            totalTimedSeconds: total.apiTimedSeconds,
             coverage: coverage,
             lastUpdated: now
         )
@@ -366,8 +558,8 @@ enum EconomicsSnapshotBuilder {
             result[configuration.id] = weeks.map { weekStart in
                 let weekEnd = calendar.date(byAdding: .weekOfYear, value: 1, to: weekStart) ?? now
                 var aggregate = Aggregate()
-                for value in values where value.observedAt >= weekStart && value.observedAt < weekEnd {
-                    aggregate.add(value)
+                for value in values {
+                    aggregate.addTimed(value, intervalStart: weekStart, intervalEnd: weekEnd)
                 }
                 return EconomicsTrendPoint(
                     weekStart: weekStart,

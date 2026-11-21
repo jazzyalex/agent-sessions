@@ -195,9 +195,9 @@ final class AnalyticsService: ObservableObject {
                 observations.append(contentsOf: economicsObservations(
                     for: session,
                     telemetry: telemetry,
-                    quotaContext: quotaContextBySource[session.source]
-                )
-                    .filter { current.contains($0.observedAt) })
+                    quotaContext: quotaContextBySource[session.source],
+                    period: current
+                ))
                 analyzedSessions += 1
             } else {
                 missing.append(session)
@@ -250,8 +250,9 @@ final class AnalyticsService: ObservableObject {
                             observations.append(contentsOf: economicsObservations(
                                 for: result.session,
                                 telemetry: telemetry,
-                                quotaContext: quotaContextBySource[result.session.source]
-                            ).filter { current.contains($0.observedAt) })
+                                quotaContext: quotaContextBySource[result.session.source],
+                                period: current
+                            ))
                             analyzedSessions += 1
                         }
                     }
@@ -348,35 +349,42 @@ final class AnalyticsService: ObservableObject {
     private func economicsObservations(
         for session: Session,
         telemetry: SessionTelemetry,
-        quotaContext: WeeklyQuotaEconomicsContext?
+        quotaContext: WeeklyQuotaEconomicsContext?,
+        period: EconomicsPeriod
     ) -> [EconomicsObservation] {
-        let events = telemetry.usageEvents.filter {
-            $0.ownership == .session && $0.topLineTokens > 0
-        }
+        let eventSelection = EconomicsEventSelection.select(from: telemetry, period: period)
+        let events = eventSelection.eventsInPeriod
         let fallbackDate = session.endTime ?? session.startTime ?? session.modifiedAt
         let fallbackConfiguration = telemetry.currentConfiguration
             ?? telemetry.initialConfiguration
         let fallbackModel = fallbackConfiguration?.model ?? session.model ?? ""
         let fallbackEffort = fallbackConfiguration?.reasoningEffort ?? session.reasoningEffort ?? ""
-        let totalDuration = economicsDuration(for: session, events: events)
-        let totalWeight = events.reduce(0.0) { $0 + Double(max(1, $1.topLineTokens)) }
+        let timedIntervals = EconomicsTiming.intervals(for: events)
         let quotaRatio = quotaContext?.percentPointsPerDollar
         let quotaWindowEnd = quotaContext?.resetAt
         let quotaWindowStart = quotaContext?.windowStart
 
         if !events.isEmpty {
-            return events.map { event in
-                let observedAt = event.completedAt ?? event.observedAt ?? fallbackDate
+            return events.enumerated().map { index, event in
+                let observedAt = event.completedAt ?? event.observedAt
                 let model = event.model ?? fallbackModel
                 let effort = event.reasoningEffort ?? fallbackEffort
-                let eventWeight = Double(max(1, event.topLineTokens))
-                let durationShare = totalWeight > 0 ? totalDuration * eventWeight / totalWeight : 0
                 let api = event.apiEquivalentUSD
+                let interval = timedIntervals[index].flatMap {
+                    period.contains(start: $0.start, end: $0.end) ? $0 : nil
+                }
                 let belongsToQuotaWindow: Bool
-                if let start = quotaWindowStart, let end = quotaWindowEnd {
-                    belongsToQuotaWindow = observedAt >= start && observedAt <= end
+                if let observedAt, let start = quotaWindowStart, let end = quotaWindowEnd {
+                    belongsToQuotaWindow = observedAt >= start && observedAt < end
                 } else {
                     belongsToQuotaWindow = false
+                }
+                let quotaTimedSeconds: TimeInterval?
+                if let interval, let start = quotaWindowStart, let end = quotaWindowEnd,
+                   interval.start >= start, interval.end <= end {
+                    quotaTimedSeconds = interval.seconds
+                } else {
+                    quotaTimedSeconds = nil
                 }
                 let quotaPercentPoints = belongsToQuotaWindow
                     ? api.flatMap { cost in quotaRatio.map { cost * $0 } }
@@ -391,15 +399,22 @@ final class AnalyticsService: ObservableObject {
                     observedAt: observedAt,
                     apiEquivalentUSD: api,
                     weeklyQuotaPercentPoints: quotaPercentPoints,
-                    activeSeconds: durationShare
+                    apiTimedSeconds: interval?.seconds,
+                    quotaTimedSeconds: quotaTimedSeconds
                 )
             }
         }
 
-        guard let api = telemetry.costEstimate?.apiEquivalentUSD else { return [] }
+        // Aggregate fallback evidence is valid only when this source emitted no
+        // request events at all. If dated events exist outside the filter, using
+        // the lifetime total here would move old spend into the current period and
+        // disagree with the warm date index.
+        guard eventSelection.canUseAggregateFallback,
+              period.contains(fallbackDate),
+              let api = telemetry.costEstimate?.apiEquivalentUSD else { return [] }
         let belongsToQuotaWindow: Bool
         if let start = quotaWindowStart, let end = quotaWindowEnd {
-            belongsToQuotaWindow = fallbackDate >= start && fallbackDate <= end
+            belongsToQuotaWindow = fallbackDate >= start && fallbackDate < end
         } else {
             belongsToQuotaWindow = false
         }
@@ -417,21 +432,10 @@ final class AnalyticsService: ObservableObject {
                 observedAt: fallbackDate,
                 apiEquivalentUSD: api,
                 weeklyQuotaPercentPoints: quotaPercentPoints,
-                activeSeconds: totalDuration
+                apiTimedSeconds: nil,
+                quotaTimedSeconds: nil
             )
         ]
-    }
-
-    private func economicsDuration(
-        for session: Session,
-        events: [TelemetryUsageEvent]
-    ) -> TimeInterval {
-        if let start = session.startTime, let end = session.endTime, end > start {
-            return end.timeIntervalSince(start)
-        }
-        let dates = events.compactMap { $0.completedAt ?? $0.observedAt }.sorted()
-        guard let first = dates.first, let last = dates.last, last > first else { return 0 }
-        return last.timeIntervalSince(first)
     }
 
     /// Every enabled source's sessions, in registry order — which is the order the twelve
