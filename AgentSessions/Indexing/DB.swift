@@ -1952,6 +1952,18 @@ actor IndexDB {
     }
 #endif
 
+    /// Removes the rows of sessions whose file is gone, such as a Codex chat moved to
+    /// archived_sessions (new path, new id). A path counts as gone only while its folder
+    /// exists, so an unmounted drive never empties the index.
+    func deleteSessionsForMissingFiles(source: String, paths: [String]) throws {
+        let fm = FileManager.default
+        let gone = paths.filter {
+            !CodexRolloutStorage.exists(atPath: $0)  // a compressed rollout keeps its plain path
+                && fm.fileExists(atPath: URL(fileURLWithPath: $0).deletingLastPathComponent().path)
+        }
+        _ = try deleteSessionsForPaths(source: source, paths: gone)
+    }
+
     /// Delete DB rows for sessions whose file paths were removed.
     /// Returns the distinct days affected (so callers can recompute rollups).
     func deleteSessionsForPaths(source: String, paths: [String]) throws -> [String] {

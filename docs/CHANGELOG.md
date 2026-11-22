@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Moved and deleted sessions leave the index database.** When Codex moved a session to `archived_sessions`, or a session file was deleted, the list dropped it but its rows stayed in the index database for good. A refresh now removes the rows of files that are gone, unless their folder is missing too (an unmounted drive).
+
 ## [6.6] - 2026-11-18
 
 ### Highlights

@@ -73,6 +73,30 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertFalse(hasData, "search rows for deleted files must be removed")
     }
 
+    // A Codex chat moved to archived_sessions gets a new path; the old path's rows must go,
+    // but never because the drive holding the folder is unmounted.
+    func testRowsOfMissingFilesAreDeletedOnlyWhenTheirFolderExists() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("missing-rows-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let moved = folder.appendingPathComponent("rollout-moved.jsonl").path
+        let unmounted = "/Volumes/not-mounted-\(UUID().uuidString)/rollout-x.jsonl"
+
+        try await db.begin()
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "moved", source: "codex", path: moved, mtime: 1))
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "unmounted", source: "codex", path: unmounted, mtime: 1))
+        try await db.upsertSessionSearch(sessionID: "moved", source: "codex", mtime: 1, size: 10, text: "needle")
+        try await db.deleteSessionsForMissingFiles(source: "codex", paths: [moved, unmounted])
+        try await db.commit()
+
+        let paths = try await db.fetchSessionMetaPaths(for: "codex")
+        XCTAssertEqual(paths, [unmounted])
+        let hasSearchRows = try await db.hasSearchData(sources: ["codex"])
+        XCTAssertFalse(hasSearchRows, "the moved session's search row goes with its meta row")
+    }
+
     // MARK: - purgeOrphanedSessionMeta (the actual production reconciliation path)
 
     func testPurgeOrphanedSessionMetaAlsoRemovesSearchRows() async throws {

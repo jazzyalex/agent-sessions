@@ -1192,6 +1192,8 @@ final class SessionIndexer: ObservableObject {
                 CodexRolloutStorage.exists(atPath: s.filePath)
             }
             var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
+            // Index rows of files that are gone (deleted, or moved to archived_sessions) go with the meta write below.
+            let missingPaths = removedPaths + Set(mergedByPath.keys).subtracting(allParsedSessions.map(\.filePath))
 
             // Reuse Codex state/thread_name lookups loaded earlier in this refresh cycle.
             Self.applyCodexStateMetadata(&allParsedSessions, from: stateThreads)
@@ -1215,6 +1217,7 @@ final class SessionIndexer: ObservableObject {
                     for session in sessionsForMeta {
                         try? await db.upsertSessionMetaCore(Self.sessionMetaRow(from: session))
                     }
+                    try? await db.deleteSessionsForMissingFiles(source: SessionSource.codex.rawValue, paths: missingPaths)
                     try await db.commit()
                     os_log("Codex: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
                 } catch {

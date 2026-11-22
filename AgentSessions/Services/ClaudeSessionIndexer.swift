@@ -437,6 +437,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let merged = Array(mergedByPath.values).filter(exists)
+            // Index rows of files that are gone go with the meta write below.
+            let missingPaths = delta.removedPaths + Set(mergedByPath.keys).subtracting(merged.map(\.filePath))
             let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
@@ -453,6 +455,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     for session in sessionsForMeta {
                         try? await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
                     }
+                    try? await db.deleteSessionsForMissingFiles(source: SessionSource.claude.rawValue, paths: missingPaths)
                     try await db.commit()
                     os_log("Claude: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
                 } catch {
