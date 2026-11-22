@@ -63,6 +63,7 @@ extension SearchSourceScanner {
                 if let tools = reader.text(statement, 4), !tools.isEmpty {
                     let data = Data(tools.utf8)
                     _ = try validateJSON(data)
+                    guard try reader.isStrictJSON(tools) else { throw Failure.malformed }
                     guard (try? JSONSerialization.jsonObject(with: data)) is [[String: Any]] else {
                         throw Failure.malformed
                     }

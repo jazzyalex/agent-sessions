@@ -3867,7 +3867,8 @@ enum HUDRunwayRequestBuilder {
                 .runwayCalibration(provider: "codex", now: now),
             weeklyWindowAvailable: weekResetAt != nil,
             weeklyCalibrationAbandoned: WeeklyQuotaCalibrationStore.shared
-                .calibrationAbandoned(provider: "codex", now: now)
+                .calibrationAbandoned(provider: "codex", now: now,
+                                      matchingPriceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "codex"))
         )
     }
 
@@ -3967,11 +3968,12 @@ enum HUDRunwayRequestBuilder {
             now: now,
             maxRows: maxRows,
             recentSessionsRoot: ClaudeRunwayRecentSessionScanner.defaultRoot(),
-            weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
-                .percentPointsPerDollar(provider: "claude", now: now),
+            weeklyCalibration: WeeklyQuotaCalibrationStore.shared
+                .runwayCalibration(provider: "claude", now: now),
             weeklyWindowAvailable: weekResetAt != nil,
             weeklyCalibrationAbandoned: WeeklyQuotaCalibrationStore.shared
-                .calibrationAbandoned(provider: "claude", now: now)
+                .calibrationAbandoned(provider: "claude", now: now,
+                                      matchingPriceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "claude"))
         )
     }
 }
@@ -4602,6 +4604,15 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     private func refreshRunwaySnapshot() async {
+        if RunwayPresentation.current(raw: runwayPresentationRaw) == .weekly {
+            let now = Date()
+            if codexAgentEnabled, codexUsageEnabled, providerShown(.codex) {
+                codexUsageModel.refreshWeeklyCalibrationForNewPrices(now: now)
+            }
+            if claudeAgentEnabled, claudeUsageEnabled, providerShown(.claude) {
+                claudeUsageModel.refreshWeeklyCalibrationForNewPrices(now: now)
+            }
+        }
         let nextCodexRequest = codexRunwayRequest
         let nextClaudeRequest = claudeRunwayRequest
 

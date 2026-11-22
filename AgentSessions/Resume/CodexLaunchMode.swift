@@ -7,6 +7,7 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
     case warp
     case warpPreview
     case ghostty
+    case macterm
 
     var id: String { rawValue }
 
@@ -35,6 +36,8 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "WarpPreview"
         case .ghostty:
             return "Ghostty"
+        case .macterm:
+            return "Macterm"
         }
     }
 
@@ -52,6 +55,8 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "Open in WarpPreview and continue the session there."
         case .ghostty:
             return "Open in Ghostty and continue the session there."
+        case .macterm:
+            return "Open in Macterm and continue the session there."
         }
     }
 }

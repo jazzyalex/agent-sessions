@@ -540,13 +540,10 @@ struct SessionTranscriptBuilder {
     /// Memo cache for coalesced blocks. Transcript opens re-derive the same
     /// coalesced stream from several call sites (rebuild, inline-image mapper,
     /// event-ID lookups) — at ~4.4 s per pass on a 49k-event session that
-    /// redundancy dominated opens. Keyed by (session id, event count, file size,
-    /// includeMeta). Event count alone isn't a sufficient freshness token: a
-    /// JSONL file rewritten in place to the same event count (external edit,
-    /// crash-recovery re-parse) would otherwise serve stale cached blocks under
-    /// the same key. `fileSizeBytes` is a free freshness signal that guards that
-    /// same-count-rewrite edge case; a false-positive mismatch is harmless and
-    /// only conservative — worst case it costs one extra recompute.
+    /// redundancy dominated opens. Keyed by the immutable session content
+    /// revision plus presentation inputs. Shape alone is not a sufficient
+    /// freshness token: a JSONL file rewritten in place to the same event count
+    /// and byte size must not serve stale timestamps, text, or tool pairing.
     /// countLimit 2 keeps at most one monster session's blocks resident.
     private static let coalesceCache = NSCacheMemo<[LogicalBlock]>(countLimit: 2)
 
@@ -564,7 +561,7 @@ struct SessionTranscriptBuilder {
                                 includeMessageContext: Bool = false) -> [LogicalBlock] {
         // JSON encoding keeps arbitrary metadata strings from colliding at separators.
         let classifierIdentity = String(data: try! JSONEncoder().encode([session.source.rawValue, session.parentSessionID, session.subagentType]), encoding: .utf8)!
-        let key = "\(classifierIdentity)|\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)|\(includeMessageContext ? 1 : 0)" as NSString
+        let key = "\(classifierIdentity)|\(session.id)|\(session.contentRevision.uuidString)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)|\(includeMessageContext ? 1 : 0)" as NSString
         if let hit = coalesceCache.object(forKey: key) {
             return hit
         }

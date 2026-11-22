@@ -6,6 +6,27 @@ actor AnalyticsRepository {
 
     init(db: IndexDB) { self.db = db }
 
+    func economicsTelemetryLookups(
+        keys: [EconomicsTelemetryIndexKey],
+        period: EconomicsPeriod
+    ) async -> [EconomicsTelemetryIndexLookup] {
+        (try? await db.economicsTelemetryLookups(
+            keys: keys,
+            periodStart: period.start,
+            periodEnd: period.end
+        )) ?? []
+    }
+
+    @discardableResult
+    func storeEconomicsTelemetry(_ entry: EconomicsTelemetryIndexEntry) async -> Bool {
+        do {
+            try await db.upsertEconomicsTelemetry(entry)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Returns true when all requested sources have a backfill-complete marker for the given version.
     func isReady(for sources: Set<String>, version: Int) async -> Bool {
         guard !sources.isEmpty else { return true }

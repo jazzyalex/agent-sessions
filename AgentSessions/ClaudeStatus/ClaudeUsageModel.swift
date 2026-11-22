@@ -89,6 +89,7 @@ final class ClaudeUsageModel: ObservableObject {
     private var sourceManagerGeneration: UInt64 = 0
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
+    private var weeklyCalibrationInput: (snapshot: ClaudeLimitSnapshot, priceRevision: Int?)?
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var weeklyBurnRateTracker = UsageLimitBurnRateTracker()
@@ -314,6 +315,7 @@ final class ClaudeUsageModel: ObservableObject {
         }
         sourceManager = nil
         service = nil
+        weeklyCalibrationInput = nil
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
@@ -673,6 +675,30 @@ final class ClaudeUsageModel: ObservableObject {
             freshness: freshness,
             observedAt: s.fetchedAt
         ), now: now)
+        updateWeeklyCalibration(from: s, now: now)
+        limitNotifier.handle(snapshot: usageLimitSnapshot(
+            fiveHourRemainingPercent: s.fiveHourRemainingPercent,
+            fiveHourRemainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },
+            fiveHourResetText: s.fiveHourResetText,
+            weeklyRemainingPercent: s.weeklyRemainingPercent,
+            weeklyRemainingPercentExact: s.weeklyUsedRatio.map { 100 - ($0 * 100) },
+            weeklyResetText: s.weeklyResetText,
+            freshness: freshness,
+            observedAt: s.fetchedAt,
+            sourceDescription: s.source.description
+        ))
+        if isUpdating { isUpdating = false }
+        if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
+    }
+
+    func refreshWeeklyCalibrationForNewPrices(now: Date) {
+        guard let input = weeklyCalibrationInput,
+              RunwayPriceTable.shared.rateRevision(forProvider: "claude") != input.priceRevision else { return }
+        updateWeeklyCalibration(from: input.snapshot, now: now)
+    }
+
+    private func updateWeeklyCalibration(from s: ClaudeLimitSnapshot, now: Date) {
+        let priceRevision = RunwayPriceTable.shared.rateRevision(forProvider: "claude")
         // Weekly %/h calibration — see the Codex counterpart. Claude's weekly
         // percent is integer-quantized exactly like Codex's: the OAuth payload
         // returns `utilization` as 27.0 / 11.0 and `limits[].percent` as a literal
@@ -680,7 +706,7 @@ final class ClaudeUsageModel: ObservableObject {
         // divides by 100 — it does NOT imply sub-point resolution, so this reports
         // itself as inexact and takes the 1pp acceptance floor.
         if let weeklyRatio = s.weeklyUsedRatio,
-           freshness.allowsProjectedDisplay,
+           Self.alertFreshness(for: s, now: now).allowsProjectedDisplay,
            // Anchor, not display: the weekly reset identifies the window for both
            // the bootstrap cache key and the tracker's interval matching. The tmux
            // fallback supplies a relative countdown, which resolves against `now`
@@ -695,11 +721,11 @@ final class ClaudeUsageModel: ObservableObject {
                                                             source: .claude,
                                                             raw: weeklyResetAnchorText,
                                                             now: s.fetchedAt),
-           weekResetAt > s.fetchedAt {
+           weekResetAt > max(now, s.fetchedAt) {
             // Historical bootstrap, same as Codex: without this the Claude rows
             // wait out the 60s budget and fall to "n/a" permanently, because a
             // weekly tick is far too rare to be a first reading.
-            WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
+            let bootstrapScopeIsCurrent = WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
                 provider: "claude",
                 root: ClaudeWeeklyQuotaBootstrapScanner.defaultProjectsRoot,
                 resetsAt: weekResetAt,
@@ -707,6 +733,8 @@ final class ClaudeUsageModel: ObservableObject {
                 usedPercentPoints: weeklyRatio * 100,
                 limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
                 sourceFamily: calibrationSourceFamily,
+                matchingPriceRevision: priceRevision,
+                quotaObservedAt: s.fetchedAt,
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(
@@ -726,24 +754,14 @@ final class ClaudeUsageModel: ObservableObject {
                     accountHash: nil,
                     sourceFamily: calibrationSourceFamily,
                     limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
-                    priceRevision: RunwayPriceTable.shared.rateRevision(forProvider: "claude")
+                    priceRevision: priceRevision
                 ),
                 now: now
             )
+            weeklyCalibrationInput = (s, bootstrapScopeIsCurrent ? priceRevision : nil)
+        } else {
+            weeklyCalibrationInput = nil
         }
-        limitNotifier.handle(snapshot: usageLimitSnapshot(
-            fiveHourRemainingPercent: s.fiveHourRemainingPercent,
-            fiveHourRemainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },
-            fiveHourResetText: s.fiveHourResetText,
-            weeklyRemainingPercent: s.weeklyRemainingPercent,
-            weeklyRemainingPercentExact: s.weeklyUsedRatio.map { 100 - ($0 * 100) },
-            weeklyResetText: s.weeklyResetText,
-            freshness: freshness,
-            observedAt: s.fetchedAt,
-            sourceDescription: s.source.description
-        ))
-        if isUpdating { isUpdating = false }
-        if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
     }
 
 #if DEBUG
@@ -776,6 +794,7 @@ final class ClaudeUsageModel: ObservableObject {
 
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
+        weeklyCalibrationInput = nil
         let now = Date()
         if transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: .tmuxUsage)

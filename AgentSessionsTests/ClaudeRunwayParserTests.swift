@@ -1352,7 +1352,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
             return nil
         }
         return CodexRunwayCalculator.dollarsPerHour(for: activity,
-                                                    priceTable: RunwayPriceTable.makeForTesting(),
+                                                    prices: RunwayPriceTable.makeForTesting().snapshot(),
                                                     source: .claude)
     }
 

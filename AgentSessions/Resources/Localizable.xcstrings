@@ -673,6 +673,169 @@
         }
       }
     },
+    "A Claude session is already opening in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Claude session is already opening in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已有一个 Claude 会话正在 VS Code 中打开。"
+          }
+        }
+      }
+    },
+    "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@": {
+      "comment": "The placeholder is the folder that could not be verified in VS Code.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not verify the Claude Code workspace in VS Code. Open and trust this folder, enable the Claude Code extension, then try again. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法验证 VS Code 中的 Claude Code 工作区。请打开并信任此文件夹，启用 Claude Code 扩展后重试。%@"
+          }
+        }
+      }
+    },
+    "Install VS Code and the Claude Code extension to open this session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install VS Code and the Claude Code extension to open this session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请安装 VS Code 和 Claude Code 扩展以打开此会话。"
+          }
+        }
+      }
+    },
+    "Open in VS Code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in VS Code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开"
+          }
+        }
+      }
+    },
+    "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the session’s folder in VS Code and verify the Claude Code workspace before sending the resume link."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 VS Code 中打开会话文件夹，验证 Claude Code 工作区后发送恢复链接。"
+          }
+        }
+      }
+    },
+    "The session’s folder doesn’t exist on this Mac. %@": {
+      "comment": "The placeholder is the original Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The session’s folder doesn’t exist on this Mac. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话的文件夹在这台 Mac 上不存在。%@"
+          }
+        }
+      }
+    },
+    "This session has no Claude session ID.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no Claude session ID."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有 Claude 会话 ID。"
+          }
+        }
+      }
+    },
+    "This session has no working directory to open in VS Code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This session has no working directory to open in VS Code."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有可在 VS Code 中打开的工作目录。"
+          }
+        }
+      }
+    },
+    "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not accept the Claude session link. Check that the Claude Code extension is installed and enabled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法接收 Claude 会话链接。请确认已安装并启用 Claude Code 扩展。"
+          }
+        }
+      }
+    },
+    "VS Code could not open the session’s folder. %@": {
+      "comment": "The placeholder is the Claude session folder path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code could not open the session’s folder. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 无法打开此会话的文件夹。%@"
+          }
+        }
+      }
+    },
     "selected page": {
       "comment": "Context kind: the part of a page the person selected.",
       "localizations": {
@@ -28422,6 +28585,667 @@
           "stringUnit": {
             "state": "translated",
             "value": "⌥⌘F"
+          }
+        }
+      }
+    },
+    "%lld of %lld sessions": {
+      "comment": "Progress label: analyzed session count followed by total session count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld 个会话"
+          }
+        }
+      }
+    },
+    "%lld transcripts analyzed": {
+      "comment": "Count of transcript files included in the economics analysis.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld transcripts analyzed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已分析 %lld 个转录记录"
+          }
+        }
+      }
+    },
+    "API-equivalent value": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent value"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 等值"
+          }
+        }
+      }
+    },
+    "Only the selected date range is analyzed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the selected date range is analyzed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅分析所选日期范围。"
+          }
+        }
+      }
+    },
+    "Analyzing transcript economics…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analyzing transcript economics…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在分析转录记录的经济数据…"
+          }
+        }
+      }
+    },
+    "Model Economics": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model Economics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型经济性"
+          }
+        }
+      }
+    },
+    "Economics": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Economics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "经济性"
+          }
+        }
+      }
+    },
+    "Economics analysis is unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Economics analysis is unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "经济性分析不可用"
+          }
+        }
+      }
+    },
+    "Selected-period trend": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected-period trend"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选周期趋势"
+          }
+        }
+      }
+    },
+    "Finding sessions with price and quota evidence": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding sessions with price and quota evidence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在查找具有价格和配额证据的会话"
+          }
+        }
+      }
+    },
+    "How to read these numbers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How to read these numbers"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如何解读这些数字"
+          }
+        }
+      }
+    },
+    "Metric": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metric"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指标"
+          }
+        }
+      }
+    },
+    "No economics data for these filters": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No economics data for these filters"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些筛选条件下没有经济性数据"
+          }
+        }
+      }
+    },
+    "No priced history for this configuration.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No priced history for this configuration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此配置没有定价历史记录。"
+          }
+        }
+      }
+    },
+    "Overview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "概览"
+          }
+        }
+      }
+    },
+    "Price coverage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Price coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "价格覆盖率"
+          }
+        }
+      }
+    },
+    "Quota coverage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配额覆盖率"
+          }
+        }
+      }
+    },
+    "Quota history begins with observed provider windows.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota history begins with observed provider windows."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配额历史从已观测到的提供商窗口开始。"
+          }
+        }
+      }
+    },
+    "Refresh Analytics after the session index is ready.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Analytics after the session index is ready."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话索引就绪后刷新“分析”。"
+          }
+        }
+      }
+    },
+    "The selected sessions have no priceable transcript usage yet.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected sessions have no priceable transcript usage yet."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选会话尚无可定价的转录用量。"
+          }
+        }
+      }
+    },
+    "Value": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Value"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数值"
+          }
+        }
+      }
+    },
+    "Week": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Week"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周"
+          }
+        }
+      }
+    },
+    "%lld of %lld usage records": {
+      "comment": "Price coverage detail: priced usage record count followed by total usage record count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld usage records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld 条用量记录"
+          }
+        }
+      }
+    },
+    "Published API rates": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published API rates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发布的 API 价格"
+          }
+        }
+      }
+    },
+    "Unknown model": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown model"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知模型"
+          }
+        }
+      }
+    },
+    "Unspecified effort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unspecified effort"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未指定思考强度"
+          }
+        }
+      }
+    },
+    "$ / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$ / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "$ / 计时小时"
+          }
+        }
+      }
+    },
+    "%lld sessions · %@ timed": {
+      "comment": "Configuration row detail. The first placeholder is the session count and the second is the formatted timed duration.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld sessions · %@ timed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个会话 · 计时 %@"
+          }
+        }
+      }
+    },
+    "API $ / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API $ / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API $ / 计时小时"
+          }
+        }
+      }
+    },
+    "API timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 计时活动"
+          }
+        }
+      }
+    },
+    "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-equivalent value uses published model prices. Hourly rates sum exact request intervals when available and otherwise only nearby same-configuration usage gaps up to 30 minutes, all inside the selected filter. Each metric needs 15 minutes of its own covered time; untimed spend remains in total value but is excluded from rates. Attributed quota converts local model usage with Quota Meter's provider-wide calibration; it is not the provider-reported account total. Work on other devices may affect the estimate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API 等值使用已发布的模型价格。小时费率会优先汇总精确的请求时段；若无精确时段，则只采用所选筛选范围内、不超过 30 分钟且配置相同的相邻用量间隔。每项指标都需要至少 15 分钟的独立覆盖时间；未计时的费用仍计入总价值，但不计入费率。归因配额使用配额仪表的提供商级校准来换算本地模型用量；它不是提供商报告的账户总量。其他设备上的工作也可能影响估算。"
+          }
+        }
+      }
+    },
+    "Each hourly rate needs its own 15-minute covered sample. Total value is still included above.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each hourly rate needs its own 15-minute covered sample. Total value is still included above."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每项小时费率都需要各自至少 15 分钟的覆盖样本。总价值仍计入上方。"
+          }
+        }
+      }
+    },
+    "Attributed quota / timed hour": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attributed quota / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归因配额 / 计时小时"
+          }
+        }
+      }
+    },
+    "Attributed quota spent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attributed quota spent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归因配额消耗"
+          }
+        }
+      }
+    },
+    "Quota timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配额计时活动"
+          }
+        }
+      }
+    },
+    "Selected filter · observed windows": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected filter · observed windows"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选筛选 · 已观测窗口"
+          }
+        }
+      }
+    },
+    "Timed activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计时活动"
+          }
+        }
+      }
+    },
+    "Timed price coverage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed price coverage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "计时价格覆盖率"
+          }
+        }
+      }
+    },
+    "Timestamped usage inside this filter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timestamped usage inside this filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此筛选范围内带时间戳的用量"
+          }
+        }
+      }
+    },
+    "attributed % / timed hour": {
+      "comment": "Chart unit label. The percent sign denotes attributed percentage points of a weekly quota used per timed hour.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "attributed % / timed hour"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归因 % / 计时小时"
+          }
+        }
+      }
+    },
+    "Analytics section": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics section"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分析部分"
           }
         }
       }

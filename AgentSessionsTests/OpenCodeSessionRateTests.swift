@@ -419,6 +419,41 @@ final class OpenCodeSessionRateTests: XCTestCase {
     }
 
     @MainActor
+    func testDollarRateRepricesWhenDatabaseTailStaysUnchanged() async throws {
+        let harness = SamplerHarness(presentation: .dollar)
+        let transport = RunwayManifestTestTransport()
+        let initial = harness.prices.sequence
+        let model = "gpt-6.2-sol"
+        XCTAssertTrue(harness.prices.loadForTesting(json: try transport.manifest(sequence: initial + 1, excluding: model)))
+        let burst = [event(start: 0, end: 60, fresh: 1_000, model: model),
+                     event(start: 70, end: 130, fresh: 1_000, model: model)]
+        harness.clock.set(t0.addingTimeInterval(140))
+        harness.reader.respond = { requests in
+            Dictionary(uniqueKeysWithValues: requests.map { request in
+                (request.sessionID, request.previousTail == nil
+                    ? OpenCodeRecentUsageResult.loaded(tail: "t1", window: .usage(burst))
+                    : .unchanged(tail: "t1"))
+            })
+        }
+        harness.start()
+        harness.store.setDemand(UUID(), demand(["ses_a"]))
+        try await waitUntil {
+            harness.store.snapshot.values["ses_a"] == .unpriced(unknownModels: [model], missingComponents: [])
+        }
+        let cycles = harness.reader.callCount
+        XCTAssertTrue(harness.prices.loadForTesting(json: try transport.manifest(sequence: initial + 2)))
+        try await waitUntil {
+            if case .rate(let rate, .dollarsPerHour) = harness.store.snapshot.values["ses_a"] {
+                return rate > 0
+            }
+            return false
+        }
+        XCTAssertTrue(harness.reader.requestLog.dropFirst(cycles).allSatisfy { requests in
+            requests.allSatisfy { $0.previousTail == "t1" && !$0.forceReload }
+        })
+    }
+
+    @MainActor
     func testPeriodicForceReloadAfterSixtySeconds() async throws {
         let harness = SamplerHarness()
         harness.clock.set(t0)
@@ -566,6 +601,7 @@ private final class SamplerHarness {
     let store = OpenCodeRateStore()
     let reader = FakeRecentReader()
     let clock = TestClock()
+    let prices = RunwayPriceTable.makeForTesting()
     private let path = LockedValue("/tmp/first/opencode.db")
     private let presentation: RunwayPresentation
     private let refreshes = LockedCounter()
@@ -585,7 +621,7 @@ private final class SamplerHarness {
             clock: { [clock] in clock.now },
             databaseURL: { [path] in URL(fileURLWithPath: path.value) },
             presentation: { presentation },
-            prices: { RunwayPriceTable.makeForTesting().snapshot() },
+            prices: { [prices] in prices.snapshot() },
             refreshPrices: { refreshes.increment() },
             cadence: 0.002)
         store.onPublishForTesting = { [weak self] snapshot in self?.published.append(snapshot) }

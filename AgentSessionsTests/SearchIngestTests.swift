@@ -25,6 +25,14 @@ private final class SearchIngestLifecycleTestOwner {
     }
 }
 
+private actor SearchIngestEconomicsRecorder {
+    private(set) var sessionIDs: [String] = []
+
+    func record(_ sessionID: String) {
+        sessionIDs.append(sessionID)
+    }
+}
+
 /// Hosts all W2 (search-ingest) tests.
 final class SearchIngestTests: XCTestCase {
 
@@ -470,6 +478,33 @@ final class SearchIngestTests: XCTestCase {
         let expectedID = SessionIndexer().parseFileFull(at: urlA)?.id
         XCTAssertNotNil(expectedID)
         XCTAssertEqual(matches.first, expectedID)
+    }
+
+    func testSuccessfulIngestPublishesSessionToEconomicsIndexer() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(
+            named: "economics.jsonl",
+            userText: "measure this session",
+            assistantText: "measurement complete",
+            in: ingestTempDir
+        )
+        let recorder = SearchIngestEconomicsRecorder()
+        let service = SearchIngestService(db: db, economicsIndexer: { session in
+            await recorder.record(session.id)
+        })
+
+        let progress = try await service.ingest(
+            source: .codex,
+            files: [try fileRef(for: url)],
+            toolIOEnabled: false
+        )
+
+        XCTAssertEqual(progress.processed, 1)
+        let expectedID = try XCTUnwrap(SessionIndexer().parseFileFull(at: url)?.id)
+        let recorded = await recorder.sessionIDs
+        XCTAssertEqual(recorded, [expectedID])
     }
 
     /// Regression (C2): the SQL `LIMIT` must reach SQLite even when the caller passes a

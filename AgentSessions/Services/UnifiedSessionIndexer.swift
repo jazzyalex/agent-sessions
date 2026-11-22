@@ -897,7 +897,28 @@ final class UnifiedSessionIndexer: ObservableObject {
                      "UnifiedSessionIndexer needs a handle for every SessionSource; missing \(Set(SessionSource.allCases).subtracting(handles.keys))")
         self.handles = handles
         self.providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
-        self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
+        self.searchIngestService = (try? IndexDB()).map { db in
+            SearchIngestService(db: db, economicsIndexer: { session in
+                guard SessionTelemetryEngine.dispatchableSources.contains(session.source),
+                      !session.isHousekeeping,
+                      let evidence = await SessionTelemetryEngine.shared.economicsIndexEvidence(for: session) else {
+                    return
+                }
+                let referenceDate = [session.modifiedAt, session.startTime, session.endTime]
+                    .compactMap { $0 }
+                    .max() ?? session.modifiedAt
+                let entry = EconomicsTelemetryIndexEntry(
+                    source: session.source,
+                    sessionID: session.id,
+                    revisionKey: evidence.revisionKey,
+                    parserVersion: evidence.telemetry.parserVersion,
+                    durableAccountHash: evidence.durableAccountHash,
+                    referenceDate: referenceDate,
+                    telemetry: evidence.telemetry
+                )
+                try? await db.upsertEconomicsTelemetry(entry)
+            })
+        }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
         syncAgentEnablementFromDefaults()

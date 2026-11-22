@@ -98,6 +98,25 @@ final class SearchSQLiteReader {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw SearchSourceScanner.Failure.malformed }
         return object
     }
+    /// Foundation's JSON parser accepts some JSON5 extensions, including trailing commas.
+    /// Provider database payloads use strict JSON; SQLite's one-argument `json_valid`
+    /// checks canonical RFC-8259 syntax without mutating the scan summary or digest.
+    func isStrictJSON(_ text: String) throws -> Bool {
+        try Task.checkCancellation()
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT json_valid(?1);", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw SearchSourceScanner.Failure.unsupported
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, text, -1, Self.transient)
+        let step = sqlite3_step(statement)
+        guard step == SQLITE_ROW else {
+            if step == SQLITE_TOOBIG { throw SearchSourceScanner.Failure.resourceLimit }
+            throw SearchSourceScanner.Failure.unsupported
+        }
+        return sqlite3_column_int(statement, 0) == 1
+    }
     func finish() -> SearchScanSummary {
         if sourceURL.resolvingSymlinksInPath().path != resolvedPath
             || SessionFileStat.precise(from: sourceURL)?.fingerprint != physicalIdentity {

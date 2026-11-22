@@ -210,6 +210,7 @@ actor SearchIngestService {
 
     private let db: IndexDB
     private let claudeImageIndexCache: ImageBrowserIndexCache
+    private let economicsIndexer: (@Sendable (Session) async -> Void)?
 
     /// The migration scan is complete only after its marker commits. Image Browser
     /// invalidations are a separate retry obligation, including after that marker.
@@ -238,9 +239,12 @@ actor SearchIngestService {
     /// was actually taken rather than inferring it indirectly from `Progress` alone.
     private(set) var earlyOutHitCountForTesting = 0
 
-    init(db: IndexDB, claudeImageIndexCache: ImageBrowserIndexCache = ImageBrowserIndexCache()) {
+    init(db: IndexDB,
+         claudeImageIndexCache: ImageBrowserIndexCache = ImageBrowserIndexCache(),
+         economicsIndexer: (@Sendable (Session) async -> Void)? = nil) {
         self.db = db
         self.claudeImageIndexCache = claudeImageIndexCache
+        self.economicsIndexer = economicsIndexer
     }
 
     /// Re-ingest cooldown tiers: a changed-but-quiet file is re-ingested at most
@@ -901,6 +905,14 @@ actor SearchIngestService {
                                                  text: toolIOText)
             }
             try await db.commit()
+            // Search ingest already established the authoritative session revision.
+            // Populate compact Economics evidence now so opening Analytics does not
+            // have to discover and reread every historical transcript. This is
+            // intentionally outside the search transaction: telemetry failure must
+            // not roll back a valid search row, and Economics can repair the miss.
+            if let economicsIndexer {
+                await economicsIndexer(session)
+            }
             return .ingested(selectedPath: session.filePath)
         } catch {
             await db.rollbackSilently()

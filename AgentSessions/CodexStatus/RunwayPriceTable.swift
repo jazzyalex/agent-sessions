@@ -473,7 +473,7 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     /// Called by the existing priced-view refresh loops. One request is shared
     /// across views, including when they become visible again after sleep.
-    func refreshInBackground(now _: Date? = nil) {
+    func refreshInBackground() {
         guard refreshEnabled else { return }
         lock.lock()
         if fetchInFlight || nextFetchAt.map({ refreshClock() < $0 }) == true {

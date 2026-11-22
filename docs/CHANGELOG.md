@@ -32,6 +32,20 @@ All notable changes to this project will be documented in this file.
 - Blame highlighting stays plain for unproven multiline commands or reads of different files, preventing wrong-language colors and comment state leaking across files.
 - Claude sub-sessions show their task name and recorded thinking effort. Session info counts the sub-session's own usage separately from work it delegates.
 
+- Analytics has a new Economics view for API-equivalent value and timestamped comparisons by agent, model and thinking effort. Normal session ingestion populates a persistent event index so repeat views and filter changes avoid transcript rereads; missing rows backfill with bounded concurrency, current model prices reprice stored token evidence, and attributed quota/hour uses Quota Meter's provider-wide local calibration only inside the observed provider window. Hourly rates use exact request timing or nearby same-configuration usage intervals up to 30 minutes, exclude untimed spend, and require 15 minutes of separately covered API or quota time. Quota Meter keeps the provider-reported account quota left, while Economics shows the quota spent that can be attributed to the selected sessions, separately by provider.
+- Quota Meter picks up new model prices in the open app. The $ and Wk views recalculate from existing usage, and failed price checks retry automatically.
+
+## [6.6] - 2026-11-18
+
+### Highlights
+
+- **Open Claude Code sessions in VS Code.** Right-click a Claude Code session to open its local folder and resume in the verified VS Code or Insiders window. Install the Claude Code extension and trust the project folder. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.
+- **Resume supported CLI sessions in Macterm.** Select Macterm under Settings → General → Terminal App. Resume reuses the nearest local project and opens a new tab in the session folder. Contributed by @kian1991 in #94.
+
+### Improvements
+
+- **Updated model pricing.** Session cost estimates and Quota Meter now use GPT-6.2 pricing and refreshed rates for other models.
+
 ## [6.5] - 2026-11-09
 
 ### Highlights

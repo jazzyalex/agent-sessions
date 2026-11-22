@@ -568,6 +568,21 @@ enum CodexWeeklyQuotaBootstrapScanner {
 ///    (`ClaudeLimitSnapshot` exposes no account scope).
 /// 2. `message.usage` is already per-call, so entries are summed directly with no
 ///    cumulative diffing, deduped by message id exactly as the runway parser does.
+private final class WeeklyQuotaCancellationLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func markCancelled() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true
+    }
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+}
+
 enum ClaudeWeeklyQuotaBootstrapScanner {
 
     private static let usageKey = Data("\"usage\"".utf8)
@@ -584,7 +599,14 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                      fileManager: FileManager = .default) -> WeeklyQuotaBootstrapResult? {
         CodexWeeklyQuotaBootstrapScanner.debugLog(
             "claude scan start used=\(usedPercentPoints)pp resetsAt=\(resetsAt.timeIntervalSince1970)")
-        guard usedPercentPoints >= CodexWeeklyQuotaBootstrapScanner.minimumUsedPercentPoints else {
+        let cancellation = WeeklyQuotaCancellationLatch()
+        func cancellationRequested() -> Bool {
+            if cancellation.isCancelled { return true }
+            if shouldCancel() { cancellation.markCancelled() }
+            return cancellation.isCancelled
+        }
+        guard !cancellationRequested(),
+              usedPercentPoints >= CodexWeeklyQuotaBootstrapScanner.minimumUsedPercentPoints else {
             CodexWeeklyQuotaBootstrapScanner.debugLog("claude scan REJECT: used too small")
             return nil
         }
@@ -596,8 +618,9 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
         let priceSnapshot = priceTable.snapshot()
 
         let urls = CodexWeeklyQuotaBootstrapScanner.candidateFiles(
-            root: root, modifiedAfter: windowStart, shouldCancel: shouldCancel, fileManager: fileManager)
-        guard !shouldCancel() else { return nil }
+            root: root, modifiedAfter: windowStart,
+            shouldCancel: cancellationRequested, fileManager: fileManager)
+        guard !cancellationRequested() else { return nil }
 
         // Claude's week is an order of magnitude larger than Codex's (~680 MB vs
         // ~44 MB here), enough that a serial walk blew straight through the 60s
@@ -619,14 +642,16 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
             let timestampParser = ClaudeRunwayLog.TimestampParser()
             var index = worker
             while index < urls.count {
-                guard !shouldCancel() else { return }
                 defer { index += workers }
+                guard !cancellationRequested() else { return }
                 let url = urls[index]
+                guard !cancellationRequested() else { return }
                 guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+                guard !cancellationRequested() else { return }
                 var localEntries: [(id: Int?, dollars: Double, volume: Double, priced: Bool)] = []
 
                 for (lineIndex, line) in WeeklyQuotaJSONLLines(data).enumerated() {
-                    if lineIndex.isMultiple(of: 1024), shouldCancel() { return }
+                    if lineIndex.isMultiple(of: 1024), cancellationRequested() { return }
                     guard line.range(of: usageKey) != nil else { continue }
                     autoreleasepool {
                         guard let object = WeeklyQuotaJSONLLines.object(in: line),
@@ -687,7 +712,7 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                 accumulator.unlock()
             }
         }
-        guard !shouldCancel() else { return nil }
+        guard !cancellationRequested() else { return nil }
         let files = urls.count
 
         let totalVolume = pricedVolume + unpricedVolume

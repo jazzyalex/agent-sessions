@@ -5,6 +5,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
     case warp
     case warpPreview
     case ghostty
+    case macterm
     case terminalApp
     case unknown
 
@@ -16,6 +17,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
             case "dev.warp.Warp-Preview": return .warpPreview
             case "dev.warp.Warp-Stable":  return .warp
             case "dev.warp.Warp":         return .warp
+            case "com.thdxg.macterm": return .macterm
             case "com.mitchellh.ghostty": return .ghostty
             default: break
             }
@@ -35,6 +37,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .warp:        return "Warp"
         case .warpPreview: return "WarpPreview"
         case .ghostty:     return "Ghostty"
+        case .macterm:     return "Macterm"
         case .terminalApp: return "Terminal"
         case .unknown:     return "Unknown"
         }
@@ -46,6 +49,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .warp:        return "dev.warp.Warp-Stable"
         case .warpPreview: return "dev.warp.Warp-Preview"
         case .ghostty:     return "com.mitchellh.ghostty"
+        case .macterm:     return "com.thdxg.macterm"
         case .terminalApp: return "com.apple.Terminal"
         case .unknown:     return nil
         }

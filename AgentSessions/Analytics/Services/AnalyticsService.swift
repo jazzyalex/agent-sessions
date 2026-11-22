@@ -11,6 +11,9 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var buildProgress: AnalyticsBuildProgress = .empty
     @Published private(set) var lastBuiltAt: Date? = nil
     @Published private(set) var isStaleSinceLastBuild: Bool = false
+    @Published private(set) var economicsSnapshot: EconomicsSnapshot = .empty
+    @Published private(set) var economicsPhase: EconomicsAnalysisPhase = .idle
+    @Published private(set) var economicsProgress: EconomicsAnalysisProgress = .empty
 
     private let catalog: SessionProviderCatalog
 
@@ -23,6 +26,13 @@ final class AnalyticsService: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private let repository: AnalyticsRepository?
+    private var economicsGeneration = UUID()
+    private static let economicsWorkerLimit = 3
+
+    private struct EconomicsBackfillResult: Sendable {
+        let session: Session
+        let evidence: SessionTelemetryIndexEvidence?
+    }
 
     private static let analyticsSupportedSources = AnalyticsSourceSupport.sources
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
@@ -64,6 +74,14 @@ final class AnalyticsService: ObservableObject {
         NotificationCenter.default.post(name: .cancelAnalyticsBuild, object: nil)
     }
 
+    func cancelEconomicsAnalysis() {
+        economicsGeneration = UUID()
+        if economicsPhase == .analyzing {
+            economicsPhase = .idle
+            economicsProgress = .empty
+        }
+    }
+
     /// Calculate analytics for given filters
     func calculate(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter) async {
         isLoading = true
@@ -89,6 +107,335 @@ final class AnalyticsService: ObservableObject {
             mostActiveTimeRange: mostActive,
             lastUpdated: Date()
         )
+    }
+
+    /// Builds Economics from a durable, repricable telemetry index. Warm sessions
+    /// never reopen transcripts; only missing or revision-stale rows are scanned,
+    /// using a small bounded worker pool that is canceled when filters change.
+    func calculateEconomics(
+        dateRange: AnalyticsDateRange,
+        agentFilter: AnalyticsAgentFilter,
+        projectFilter: AnalyticsProjectFilter
+    ) async {
+        let generation = UUID()
+        economicsGeneration = generation
+        economicsPhase = .analyzing
+        economicsSnapshot = .empty
+
+        let now = Date()
+        let currentBounds = dateBounds(for: dateRange, now: now)
+        let current = EconomicsPeriod(start: currentBounds.start, end: now.addingTimeInterval(1))
+
+        let allSessions = gatherEnabledSessions()
+        let candidates = economicsEligibleSessions(
+            allSessions,
+            agentFilter: agentFilter,
+            projectFilter: projectFilter,
+            notBefore: current.start
+        )
+
+        economicsProgress = EconomicsAnalysisProgress(completed: 0, total: candidates.count)
+        guard !candidates.isEmpty else {
+            economicsSnapshot = .empty
+            economicsPhase = .ready
+            return
+        }
+        guard let repository else {
+            economicsPhase = .unavailable
+            return
+        }
+
+        let engine = SessionTelemetryEngine.shared
+        let quotaContextBySource = Dictionary(uniqueKeysWithValues:
+            Set(candidates.map(\.source)).compactMap { source in
+                engine.economicsQuotaContext(for: source, now: now).map { (source, $0) }
+            }
+        )
+        let keys = candidates.map {
+            EconomicsTelemetryIndexKey(source: $0.source, sessionID: $0.id)
+        }
+        let lookups = await repository.economicsTelemetryLookups(keys: keys, period: current)
+        guard !Task.isCancelled, economicsGeneration == generation else { return }
+        var lookupByKey: [String: EconomicsTelemetryIndexLookup] = [:]
+        lookupByKey.reserveCapacity(lookups.count)
+        for lookup in lookups {
+            lookupByKey[lookup.key] = lookup
+        }
+
+        var observations: [EconomicsObservation] = []
+        observations.reserveCapacity(candidates.count * 2)
+        var analyzedSessions = 0
+        var missing: [Session] = []
+        missing.reserveCapacity(candidates.count)
+
+        for session in candidates {
+            let storageKey = EconomicsTelemetryIndexLookup.key(
+                source: session.source,
+                sessionID: session.id
+            )
+            guard let expectedRevision = engine.economicsRevisionKey(for: session),
+                  let lookup = lookupByKey[storageKey],
+                  lookup.parserVersion == SessionTelemetry.parserVersion,
+                  lookup.revisionKey == expectedRevision else {
+                missing.append(session)
+                continue
+            }
+
+            // nil is an indexed session with no event in this selected period.
+            guard let indexedTelemetry = lookup.telemetry else {
+                analyzedSessions += 1
+                continue
+            }
+            let evidence = SessionTelemetryIndexEvidence(
+                telemetry: indexedTelemetry,
+                durableAccountHash: lookup.durableAccountHash,
+                revisionKey: lookup.revisionKey
+            )
+            if let telemetry = engine.telemetry(fromIndexed: evidence, for: session) {
+                observations.append(contentsOf: economicsObservations(
+                    for: session,
+                    telemetry: telemetry,
+                    quotaContext: quotaContextBySource[session.source],
+                    period: current
+                ))
+                analyzedSessions += 1
+            } else {
+                missing.append(session)
+            }
+        }
+
+        var completed = candidates.count - missing.count
+        economicsProgress = EconomicsAnalysisProgress(completed: completed, total: candidates.count)
+        publishEconomicsSnapshot(
+            observations: observations,
+            current: current,
+            now: now,
+            eligibleSessions: candidates.count,
+            analyzedSessions: analyzedSessions
+        )
+
+        if !missing.isEmpty {
+            await withTaskGroup(of: EconomicsBackfillResult.self) { group in
+                var nextIndex = 0
+                let initialCount = min(Self.economicsWorkerLimit, missing.count)
+                for _ in 0..<initialCount {
+                    let session = missing[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        EconomicsBackfillResult(
+                            session: session,
+                            evidence: await engine.economicsIndexEvidence(for: session)
+                        )
+                    }
+                }
+
+                while let result = await group.next() {
+                    guard !Task.isCancelled, economicsGeneration == generation else {
+                        group.cancelAll()
+                        return
+                    }
+                    completed += 1
+                    if let evidence = result.evidence {
+                        let entry = EconomicsTelemetryIndexEntry(
+                            source: result.session.source,
+                            sessionID: result.session.id,
+                            revisionKey: evidence.revisionKey,
+                            parserVersion: evidence.telemetry.parserVersion,
+                            durableAccountHash: evidence.durableAccountHash,
+                            referenceDate: economicsReferenceDate(for: result.session),
+                            telemetry: evidence.telemetry
+                        )
+                        _ = await repository.storeEconomicsTelemetry(entry)
+                        if let telemetry = engine.telemetry(fromIndexed: evidence, for: result.session) {
+                            observations.append(contentsOf: economicsObservations(
+                                for: result.session,
+                                telemetry: telemetry,
+                                quotaContext: quotaContextBySource[result.session.source],
+                                period: current
+                            ))
+                            analyzedSessions += 1
+                        }
+                    }
+                    economicsProgress = EconomicsAnalysisProgress(
+                        completed: completed,
+                        total: candidates.count
+                    )
+                    if completed % 4 == 0 || completed == candidates.count {
+                        publishEconomicsSnapshot(
+                            observations: observations,
+                            current: current,
+                            now: now,
+                            eligibleSessions: candidates.count,
+                            analyzedSessions: analyzedSessions
+                        )
+                    }
+
+                    if nextIndex < missing.count {
+                        let session = missing[nextIndex]
+                        nextIndex += 1
+                        group.addTask {
+                            EconomicsBackfillResult(
+                                session: session,
+                                evidence: await engine.economicsIndexEvidence(for: session)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        guard !Task.isCancelled, economicsGeneration == generation else { return }
+        publishEconomicsSnapshot(
+            observations: observations,
+            current: current,
+            now: now,
+            eligibleSessions: candidates.count,
+            analyzedSessions: analyzedSessions
+        )
+        economicsPhase = .ready
+    }
+
+    private func publishEconomicsSnapshot(
+        observations: [EconomicsObservation],
+        current: EconomicsPeriod,
+        now: Date,
+        eligibleSessions: Int,
+        analyzedSessions: Int
+    ) {
+        economicsSnapshot = EconomicsSnapshotBuilder.build(
+            observations: observations,
+            current: current,
+            previous: nil,
+            now: now,
+            eligibleSessions: eligibleSessions,
+            analyzedSessions: analyzedSessions
+        )
+    }
+
+    private func economicsEligibleSessions(
+        _ sessions: [Session],
+        agentFilter: AnalyticsAgentFilter,
+        projectFilter: AnalyticsProjectFilter,
+        notBefore: Date?
+    ) -> [Session] {
+        let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
+
+        return sessions.filter { session in
+            guard agentFilter.matches(session.source),
+                  projectFilter.matches(session.repoName),
+                  SessionTelemetryEngine.dispatchableSources.contains(session.source),
+                  !session.isHousekeeping else { return false }
+            if hideZero, session.messageCount == 0 { return false }
+            if hideLow, session.messageCount <= 2 { return false }
+            if let notBefore {
+                let reference = economicsReferenceDate(for: session)
+                guard reference >= notBefore else { return false }
+            }
+            return true
+        }
+    }
+
+    /// Use the freshest coarse timestamp available before opening a transcript.
+    /// Ongoing sessions can have an old start time while their file modification
+    /// date records activity inside the selected Analytics range.
+    private func economicsReferenceDate(for session: Session) -> Date {
+        var dates = [session.modifiedAt]
+        if let startTime = session.startTime { dates.append(startTime) }
+        if let endTime = session.endTime { dates.append(endTime) }
+        return dates.max() ?? session.modifiedAt
+    }
+
+    private func economicsObservations(
+        for session: Session,
+        telemetry: SessionTelemetry,
+        quotaContext: WeeklyQuotaEconomicsContext?,
+        period: EconomicsPeriod
+    ) -> [EconomicsObservation] {
+        let eventSelection = EconomicsEventSelection.select(from: telemetry, period: period)
+        let events = eventSelection.eventsInPeriod
+        let fallbackDate = session.endTime ?? session.startTime ?? session.modifiedAt
+        let fallbackConfiguration = telemetry.currentConfiguration
+            ?? telemetry.initialConfiguration
+        let fallbackModel = fallbackConfiguration?.model ?? session.model ?? ""
+        let fallbackEffort = fallbackConfiguration?.reasoningEffort ?? session.reasoningEffort ?? ""
+        let timedIntervals = EconomicsTiming.intervals(for: events)
+        let quotaRatio = quotaContext?.percentPointsPerDollar
+        let quotaWindowEnd = quotaContext?.resetAt
+        let quotaWindowStart = quotaContext?.windowStart
+
+        if !events.isEmpty {
+            return events.enumerated().map { index, event in
+                let observedAt = event.completedAt ?? event.observedAt
+                let model = event.model ?? fallbackModel
+                let effort = event.reasoningEffort ?? fallbackEffort
+                let api = event.apiEquivalentUSD
+                let interval = timedIntervals[index].flatMap {
+                    period.contains(start: $0.start, end: $0.end) ? $0 : nil
+                }
+                let belongsToQuotaWindow: Bool
+                if let observedAt, let start = quotaWindowStart, let end = quotaWindowEnd {
+                    belongsToQuotaWindow = observedAt >= start && observedAt < end
+                } else {
+                    belongsToQuotaWindow = false
+                }
+                let quotaTimedSeconds: TimeInterval?
+                if let interval, let start = quotaWindowStart, let end = quotaWindowEnd,
+                   interval.start >= start, interval.end <= end {
+                    quotaTimedSeconds = interval.seconds
+                } else {
+                    quotaTimedSeconds = nil
+                }
+                let quotaPercentPoints = belongsToQuotaWindow
+                    ? api.flatMap { cost in quotaRatio.map { cost * $0 } }
+                    : nil
+                return EconomicsObservation(
+                    sessionID: session.id,
+                    configuration: EconomicsConfigurationKey(
+                        source: session.source,
+                        model: model,
+                        effort: effort
+                    ),
+                    observedAt: observedAt,
+                    apiEquivalentUSD: api,
+                    weeklyQuotaPercentPoints: quotaPercentPoints,
+                    apiTimedSeconds: interval?.seconds,
+                    quotaTimedSeconds: quotaTimedSeconds
+                )
+            }
+        }
+
+        // Aggregate fallback evidence is valid only when this source emitted no
+        // request events at all. If dated events exist outside the filter, using
+        // the lifetime total here would move old spend into the current period and
+        // disagree with the warm date index.
+        guard eventSelection.canUseAggregateFallback,
+              period.contains(fallbackDate),
+              let api = telemetry.costEstimate?.apiEquivalentUSD else { return [] }
+        let belongsToQuotaWindow: Bool
+        if let start = quotaWindowStart, let end = quotaWindowEnd {
+            belongsToQuotaWindow = fallbackDate >= start && fallbackDate < end
+        } else {
+            belongsToQuotaWindow = false
+        }
+        let quotaPercentPoints = belongsToQuotaWindow
+            ? quotaRatio.map { api * $0 }
+            : nil
+        return [
+            EconomicsObservation(
+                sessionID: session.id,
+                configuration: EconomicsConfigurationKey(
+                    source: session.source,
+                    model: fallbackModel,
+                    effort: fallbackEffort
+                ),
+                observedAt: fallbackDate,
+                apiEquivalentUSD: api,
+                weeklyQuotaPercentPoints: quotaPercentPoints,
+                apiTimedSeconds: nil,
+                quotaTimedSeconds: nil
+            )
+        ]
     }
 
     /// Every enabled source's sessions, in registry order — which is the order the twelve

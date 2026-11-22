@@ -11,6 +11,8 @@ final class DBSmokeTests: XCTestCase {
         try await db.exec("SELECT name FROM sqlite_master WHERE name='session_days';")
         try await db.exec("SELECT name FROM sqlite_master WHERE name='rollups_daily';")
         try await db.exec("SELECT name FROM sqlite_master WHERE name='session_tool_io';")
+        try await db.exec("SELECT name FROM sqlite_master WHERE name='economics_telemetry_sessions';")
+        try await db.exec("SELECT name FROM sqlite_master WHERE name='economics_telemetry_events';")
     }
 
 #if DEBUG

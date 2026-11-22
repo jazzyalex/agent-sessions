@@ -487,6 +487,39 @@ actor IndexDB {
             """
         )
 
+        // Durable, lossless token evidence for Analytics > Economics. The
+        // session row is the repricable payload; the narrow event table lets a
+        // selected date range reject out-of-range sessions without decoding the
+        // payload or reopening transcripts.
+        try exec(db,
+            """
+            CREATE TABLE IF NOT EXISTS economics_telemetry_sessions (
+              source TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              revision_key TEXT NOT NULL,
+              parser_version INTEGER NOT NULL,
+              durable_account_hash TEXT,
+              reference_ts REAL NOT NULL,
+              event_count INTEGER NOT NULL,
+              telemetry_json BLOB NOT NULL,
+              extracted_at INTEGER NOT NULL,
+              PRIMARY KEY(source, session_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_economics_telemetry_revision
+              ON economics_telemetry_sessions(source, parser_version, revision_key);
+
+            CREATE TABLE IF NOT EXISTS economics_telemetry_events (
+              source TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              event_index INTEGER NOT NULL,
+              observed_ts REAL NOT NULL,
+              PRIMARY KEY(source, session_id, event_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_economics_telemetry_event_time
+              ON economics_telemetry_events(source, observed_ts, session_id);
+            """
+        )
+
         // Tool IO full-text search (FTS5). Optional, same rationale as session_search_fts.
         do {
             try exec(db,
@@ -782,6 +815,192 @@ actor IndexDB {
     }
 
     func rollbackSilently() { try? exec("ROLLBACK;") }
+
+    // MARK: - Economics telemetry index
+
+    /// Atomically replaces one session's repricable telemetry payload and its
+    /// narrow timestamp index. The payload contains no transcript text.
+    func upsertEconomicsTelemetry(_ entry: EconomicsTelemetryIndexEntry) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let payload = try JSONEncoder().encode(entry.telemetry)
+        let indexedEvents = entry.telemetry.usageEvents.filter {
+            $0.ownership == .session && $0.topLineTokens > 0
+        }
+        let deleteSQL = "DELETE FROM economics_telemetry_events WHERE source = ? AND session_id = ?;"
+        let sessionSQL =
+            """
+            INSERT OR REPLACE INTO economics_telemetry_sessions(
+              source, session_id, revision_key, parser_version,
+              durable_account_hash, reference_ts, event_count,
+              telemetry_json, extracted_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """
+        let eventSQL =
+            """
+            INSERT INTO economics_telemetry_events(
+              source, session_id, event_index, observed_ts
+            ) VALUES(?, ?, ?, ?);
+            """
+
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            var deleteStatement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, deleteSQL, -1, &deleteStatement, nil) == SQLITE_OK else {
+                throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(deleteStatement) }
+            sqlite3_bind_text(deleteStatement, 1, entry.source.rawValue, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(deleteStatement, 2, entry.sessionID, -1, SQLITE_TRANSIENT)
+            guard sqlite3_step(deleteStatement) == SQLITE_DONE else {
+                throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+            }
+
+            var sessionStatement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sessionSQL, -1, &sessionStatement, nil) == SQLITE_OK else {
+                throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(sessionStatement) }
+            sqlite3_bind_text(sessionStatement, 1, entry.source.rawValue, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(sessionStatement, 2, entry.sessionID, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(sessionStatement, 3, entry.revisionKey, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(sessionStatement, 4, Int32(entry.parserVersion))
+            if let durableAccountHash = entry.durableAccountHash {
+                sqlite3_bind_text(sessionStatement, 5, durableAccountHash, -1, SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(sessionStatement, 5)
+            }
+            sqlite3_bind_double(sessionStatement, 6, entry.referenceDate.timeIntervalSince1970)
+            sqlite3_bind_int64(sessionStatement, 7, Int64(indexedEvents.count))
+            _ = payload.withUnsafeBytes { bytes in
+                sqlite3_bind_blob(sessionStatement, 8, bytes.baseAddress, Int32(bytes.count), SQLITE_TRANSIENT)
+            }
+            sqlite3_bind_int64(sessionStatement, 9, Int64(Date().timeIntervalSince1970))
+            guard sqlite3_step(sessionStatement) == SQLITE_DONE else {
+                throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+            }
+
+            if !indexedEvents.isEmpty {
+                var eventStatement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, eventSQL, -1, &eventStatement, nil) == SQLITE_OK else {
+                    throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+                }
+                defer { sqlite3_finalize(eventStatement) }
+                for (index, event) in indexedEvents.enumerated() {
+                    sqlite3_reset(eventStatement)
+                    sqlite3_clear_bindings(eventStatement)
+                    sqlite3_bind_text(eventStatement, 1, entry.source.rawValue, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(eventStatement, 2, entry.sessionID, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int64(eventStatement, 3, Int64(index))
+                    let observedAt = event.completedAt ?? event.observedAt ?? entry.referenceDate
+                    sqlite3_bind_double(eventStatement, 4, observedAt.timeIntervalSince1970)
+                    guard sqlite3_step(eventStatement) == SQLITE_DONE else {
+                        throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+                    }
+                }
+            }
+            try exec("COMMIT;")
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
+    }
+
+    /// Loads revision metadata for every candidate and decodes a payload only
+    /// when its event index intersects the selected period. A current row with a
+    /// nil payload is a warm, in-range-empty result, not a cache miss.
+    func economicsTelemetryLookups(
+        keys: [EconomicsTelemetryIndexKey],
+        periodStart: Date?,
+        periodEnd: Date
+    ) throws -> [EconomicsTelemetryIndexLookup] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        guard !keys.isEmpty else { return [] }
+        let sessionSQL =
+            """
+            SELECT revision_key, parser_version, durable_account_hash,
+                   reference_ts, event_count, telemetry_json
+            FROM economics_telemetry_sessions
+            WHERE source = ? AND session_id = ?;
+            """
+        let eventSQL =
+            """
+            SELECT EXISTS(
+              SELECT 1 FROM economics_telemetry_events
+              WHERE source = ? AND session_id = ?
+                AND observed_ts >= ? AND observed_ts < ?
+              LIMIT 1
+            );
+            """
+        var sessionStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sessionSQL, -1, &sessionStatement, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(sessionStatement) }
+        var eventStatement: OpaquePointer?
+        if periodStart != nil {
+            guard sqlite3_prepare_v2(db, eventSQL, -1, &eventStatement, nil) == SQLITE_OK else {
+                throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+        }
+        defer { sqlite3_finalize(eventStatement) }
+
+        var lookups: [EconomicsTelemetryIndexLookup] = []
+        lookups.reserveCapacity(keys.count)
+        for key in keys {
+            sqlite3_reset(sessionStatement)
+            sqlite3_clear_bindings(sessionStatement)
+            sqlite3_bind_text(sessionStatement, 1, key.source.rawValue, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(sessionStatement, 2, key.sessionID, -1, SQLITE_TRANSIENT)
+            guard sqlite3_step(sessionStatement) == SQLITE_ROW else { continue }
+
+            let revisionKey = sqlite3_column_text(sessionStatement, 0).map { String(cString: $0) } ?? ""
+            let parserVersion = Int(sqlite3_column_int64(sessionStatement, 1))
+            let durableHash = sqlite3_column_text(sessionStatement, 2).map { String(cString: $0) }
+            let referenceDate = Date(timeIntervalSince1970: sqlite3_column_double(sessionStatement, 3))
+            let eventCount = Int(sqlite3_column_int64(sessionStatement, 4))
+            let hasEvidenceInPeriod: Bool
+            if let periodStart {
+                if eventCount == 0 {
+                    hasEvidenceInPeriod = referenceDate >= periodStart && referenceDate < periodEnd
+                } else if let eventStatement {
+                    sqlite3_reset(eventStatement)
+                    sqlite3_clear_bindings(eventStatement)
+                    sqlite3_bind_text(eventStatement, 1, key.source.rawValue, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(eventStatement, 2, key.sessionID, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_double(eventStatement, 3, periodStart.timeIntervalSince1970)
+                    sqlite3_bind_double(eventStatement, 4, periodEnd.timeIntervalSince1970)
+                    hasEvidenceInPeriod = sqlite3_step(eventStatement) == SQLITE_ROW
+                        && sqlite3_column_int(eventStatement, 0) == 1
+                } else {
+                    hasEvidenceInPeriod = false
+                }
+            } else {
+                hasEvidenceInPeriod = true
+            }
+
+            var telemetry: SessionTelemetry?
+            if hasEvidenceInPeriod,
+               let blob = sqlite3_column_blob(sessionStatement, 5) {
+                let count = Int(sqlite3_column_bytes(sessionStatement, 5))
+                telemetry = try? JSONDecoder().decode(
+                    SessionTelemetry.self,
+                    from: Data(bytes: blob, count: count)
+                )
+                // A corrupt payload is a miss. Do not preserve its metadata as a
+                // warm empty row because that would suppress a repair backfill.
+                if telemetry == nil { continue }
+            }
+            lookups.append(EconomicsTelemetryIndexLookup(
+                source: key.source,
+                sessionID: key.sessionID,
+                revisionKey: revisionKey,
+                parserVersion: parserVersion,
+                durableAccountHash: durableHash,
+                telemetry: telemetry
+            ))
+        }
+        return lookups
+    }
 
     // MARK: - Simple query helpers
     private func queryOneInt64(_ sql: String) throws -> Int64 {

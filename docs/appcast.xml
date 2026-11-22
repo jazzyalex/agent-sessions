@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>6.5</title>
-            <pubDate>Mon, 09 Nov 2026 18:31:37 -0800</pubDate>
+            <title>6.6</title>
+            <pubDate>Wed, 18 Nov 2026 13:01:23 -0800</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,28 +27,23 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 6.5</h2>
+<h2>What&#x27;s New in 6.6</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Prompts and answers first.</strong> Each turn in the Session view shows the prompt and the agent&#x27;s answer. Tool calls and working notes now sit behind the Tools chip, off by default; Find still searches them.</li>
-<li><strong>Only typed text is “User.”</strong> The label was “You”, since you may be reading someone else&#x27;s sessions. Notifications, peer messages, commands and scheduled prompts get their own labels; injected instructions and skill files stay hidden unless you turn on &quot;Show harness context in Session view&quot; in Settings.</li>
+<li><strong>Open Claude Code sessions in VS Code.</strong> Right-click a Claude Code session to open its local folder and resume in the verified VS Code or Insiders window. Install the Claude Code extension and trust the project folder. Resuming a removed worktree from its repository root requires Claude Code extension 2.1.300 or later. Contributed by @dobernhardt in #91.</li>
+<li><strong>Resume supported CLI sessions in Macterm.</strong> Select Macterm under Settings → General → Terminal App. Resume reuses the nearest local project and opens a new tab in the session folder. Contributed by @kian1991 in #94.</li>
 </ul>
-<h3>Bug Fixes</h3>
+<h3>Improvements</h3>
 <ul>
-<li>Codex sessions with long prompts or instruction wrappers now show a readable, shortened title instead of &quot;Untitled session&quot;.</li>
-<li><strong>Codex prompts logged with environment context show again.</strong> When Codex wrote the environment block and the prompt as one message, the prompt was hidden from the Text view, export and the session title.</li>
-<li><strong>Copilot sessions on MAI-Code 1.1 Flash show a cost.</strong> They had no estimated cost because the model had no price.</li>
-<li><strong>Injected context no longer impersonates your messages.</strong> First-prompt navigation also respects explicitly typed instructions instead of treating their wording as a harness preamble.</li>
-<li><strong>Message envelopes read as messages.</strong> Known XML wrappers and question replies are decoded; guardian requests show commands and verdicts, and Codex memory citations have a readable footer.</li>
-<li><strong>No more empty agent rows.</strong> Empty reasoning placeholders disappear, and consecutive identical messages share one row with a repeat count.</li>
+<li><strong>Updated model pricing.</strong> Session cost estimates and Quota Meter now use GPT-6.2 pricing and refreshed rates for other models.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.5</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v6.6</a></p>
 </div>
             ]]></description>
-            <sparkle:version>90</sparkle:version>
-            <sparkle:shortVersionString>6.5</sparkle:shortVersionString>
+            <sparkle:version>91</sparkle:version>
+            <sparkle:shortVersionString>6.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.5/AgentSessions-6.5.dmg" length="31945522" type="application/octet-stream" sparkle:edSignature="F8ji0ch1NiQBK7BUWgKrftSfkXwE763A1NhW5wJLrrc3sj0TOtTqtGhH4jaSqk/V6CMqlbUY3R2zVX8PqxM8BA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v6.6/AgentSessions-6.6.dmg" length="31935166" type="application/octet-stream" sparkle:edSignature="1YyrR1pEvkzXJTMypER7/lzQYlkOU9IHuZ3ot2gdf1ai2gjCD06brTJrSj6tWco8p2WtVRVW+yYF+NogRFPlAw=="/>
         </item>
     </channel>
 </rss>

@@ -51,7 +51,8 @@ enum ClaudeRunwaySnapshotLoader {
     }
 
     static func snapshot(for request: CodexRunwaySnapshotRequest,
-                         desktopTitlesRoot: URL? = nil) async -> CodexRunwaySnapshot? {
+                         desktopTitlesRoot: URL? = nil,
+                         priceTable: RunwayPriceTable = .shared) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let identities = effectiveIdentities(
@@ -98,7 +99,7 @@ enum ClaudeRunwaySnapshotLoader {
                 WeeklyQuotaCalibrationStore.shared.ledger(provider: "claude").recordIncremental(
                     events: ClaudeRunwayTokenActivityParser.ledgerEvents(
                         identities: identities, now: request.now),
-                    priceTable: RunwayPriceTable.shared,
+                    priceTable: priceTable,
                     now: request.now
                 )
                 let core: CodexRunwaySnapshot?
@@ -109,20 +110,21 @@ enum ClaudeRunwaySnapshotLoader {
                 // Weekly-only: sessions that can never be estimated in this unit.
                 var weeklyUnavailableIDs: Set<String> = []
                 // See the Codex loader: calibrated + no current burn == "flat".
+                let prices = priceTable.snapshot()
+                let weeklyCalibration = request.weeklyCalibration(matching: prices)
+                let weeklyRatio = weeklyCalibration.state.canDisplayRate ? weeklyCalibration.ratio : nil
                 let weeklyPendingConfidence: RunwayAttributionConfidence =
                     (request.baseline.rateUnit == .weeklyPercentPerHour
-                     && request.weeklyPercentPointsPerDollar != nil) ? .direct : .waiting
+                     && weeklyRatio != nil) ? .direct : .waiting
                 switch request.baseline.rateUnit {
                 case .tokensPerHour:
                     core = CodexRunwayCalculator.tokenSnapshot(
                         baseline: request.baseline, activities: activities, maxRows: request.maxRows)
                 case .dollarsPerHour:
-                    // Lazy, self-throttling (<=1/day): only fetch the price manifest
-                    // once someone actually uses the $ presentation.
-                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
+                    priceTable.refreshInBackground()
                     if let dollars = CodexRunwayCalculator.dollarSnapshot(
                         baseline: request.baseline, activities: activities,
-                        priceTable: RunwayPriceTable.shared, maxRows: request.maxRows) {
+                        prices: prices, at: request.now, maxRows: request.maxRows) {
                         core = dollars.snapshot
                         pendingIdentities = identities.filter { !dollars.unpriceableIDs.contains($0.id) }
                     } else {
@@ -135,20 +137,21 @@ enum ClaudeRunwaySnapshotLoader {
                     // Estimated weekly %/h from the learned calibration; never a
                     // token fallback — `Wk` must not render tk/h. Uncalibrated rows
                     // wait on the clock, unestimable ones read "n/a".
-                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
-                    if !request.weeklyWindowAvailable || request.weeklyCalibrationAbandoned {
+                    priceTable.refreshInBackground()
+                    if !request.weeklyWindowAvailable || request.weeklyCalibrationAbandoned
+                        || weeklyCalibration.state.isUnavailable {
                         // No weekly window, or calibration is evidently not coming.
                         core = nil
                         weeklyUnavailableIDs = Set(identities.map(\.id))
-                    } else if let calibration = request.weeklyPercentPointsPerDollar,
+                    } else if let calibration = weeklyRatio,
                               let weekly = CodexRunwayCalculator.weeklyEstimatedSnapshot(
                                   baseline: request.baseline, activities: weeklyProfile.activities,
-                                  priceTable: RunwayPriceTable.shared,
+                                  prices: prices, at: request.now,
                                   percentPointsPerDollar: calibration, maxRows: request.maxRows) {
                         core = weekly.snapshot
                         weeklyUnavailableIDs = weekly.unpriceableIDs
                         pendingIdentities = identities.filter { !weekly.unpriceableIDs.contains($0.id) }
-                    } else if request.weeklyPercentPointsPerDollar != nil {
+                    } else if weeklyRatio != nil {
                         core = nil
                         weeklyUnavailableIDs = Set(weeklyProfile.activities.map(\.identity.id))
                     } else {
@@ -170,7 +173,7 @@ enum ClaudeRunwaySnapshotLoader {
                     unavailableIDs: weeklyUnavailableIDs,
                     maxRows: request.maxRows
                 )
-                let snapshot = RunwaySnapshotAssembly.withPendingRows(
+                var snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: effectiveBaseline,
                     snapshot: withUnavailable,
                     activeIdentities: pendingIdentities,
@@ -178,6 +181,10 @@ enum ClaudeRunwaySnapshotLoader {
                     pendingConfidence: weeklyPendingConfidence,
                     waitingIDs: weeklyProfile.measuringIDs
                 )
+                if request.baseline.rateUnit == .weeklyPercentPerHour {
+                    snapshot?.weeklyCalibrationState = weeklyCalibration.state
+                    snapshot?.weeklyCalibrationRatio = weeklyRatio
+                }
                 continuation.resume(returning: snapshot)
             }
         }
